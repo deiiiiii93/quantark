@@ -12,7 +12,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ROOT / "example" / "mo_volmodels"
+EXAMPLE = ROOT / "example" / "case_studies" / "mo_volmodels"
 sys.path.insert(0, str(EXAMPLE))
 
 import _heston_diagnostics as diagnostics  # noqa: E402

@@ -24,7 +24,7 @@ approximation against direct repricing, and path batching over a spawn
 pool.  Plan 4 turns a run into answers: a per-path summary in the
 historical study's own hedge measures, distributions with expected
 shortfall, paired comparisons on matched paths, persistence, and the worked
-study in `example/snowball_simulated_paths`.
+study in `example/case_studies/snowball_simulated_paths`.
 
 ## `MarketPath`
 
@@ -399,7 +399,7 @@ a later `price` is byte-identical to a fresh one.
 
 ## The worked study
 
-`example/snowball_simulated_paths/README.md` runs the q term-structure
+`example/case_studies/snowball_simulated_paths/README.md` runs the q term-structure
 study's snowball, carry models and hedge contracts over 2,000 bootstrapped
 paths and five designed stresses, checks the life surface against QUAD, and
 locates the historical study's realised runs inside the simulated

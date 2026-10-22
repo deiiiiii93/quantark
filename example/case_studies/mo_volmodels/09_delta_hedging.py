@@ -1,6 +1,6 @@
 """Stage 09 - Delta-neutral hedge behavior under BSM / LV / Heston / SLV.
 
-Run: .venv/bin/python example/mo_volmodels/09_delta_hedging.py [--tag latest|sample]
+Run: .venv/bin/python example/case_studies/mo_volmodels/09_delta_hedging.py [--tag latest|sample]
 
 This stage keeps the calibrated model surfaces fixed and walks a deterministic
 spot scenario for one ATM European call. At each rebalance date it reprices the

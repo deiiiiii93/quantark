@@ -24,7 +24,7 @@
 # Both artifacts are COMMITTED under test/golden/modelvalidation/data/ (the `surface:` strings below keep
 # the legacy example/modelvalidation/data/ prefix: they enter the banked identity hashes, so they are
 # frozen logical ids that the builder maps to this folder). They are not
-# read from example/mo_volmodels/data/history, which is excluded per-clone and
+# read from example/case_studies/mo_volmodels/data/history, which is excluded per-clone and
 # would not exist in CI -- and assert_anchors re-runs the deterministic arm on
 # every commit.
 #

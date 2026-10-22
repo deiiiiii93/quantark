@@ -12,7 +12,7 @@
 # control-variate telescope on independent seed families, with exact conditional
 # integration of the spot factor, a pilot-frozen cost-weighted Neyman allocation
 # and a substep-refinement bias envelope -- machinery that lives in
-# example/mo_volmodels/16_adi_greek_certification.py and cost 28.6 hours of
+# example/case_studies/mo_volmodels/16_adi_greek_certification.py and cost 28.6 hours of
 # held-out production sampling.  The reference builder named below DECLARES that
 # benchmark and refuses to run, because a simplified stand-in would certify
 # against something the banked evidence does not describe.

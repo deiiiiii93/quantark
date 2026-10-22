@@ -205,7 +205,7 @@ identity regression still reproduces 0.548283.
 ### Synthetic validation
 
 ```sh
-.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/05_bucket_hedge_validation.py \
   --synthetic --out-dir OUT
 ```
 
@@ -216,9 +216,9 @@ inconclusive, exit 0.**
 ### Historical validation
 
 ```sh
-.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/05_bucket_hedge_validation.py \
   --historical-dates 2025-03-03 \
-  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/validation
+  --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/validation
 ```
 
 **Result: 7/7 required cases passed on the real chain.** Re-run under the
@@ -249,10 +249,10 @@ Artifacts: `validation_manifest.json`, `input_snapshots.json`,
 ### Subset benchmark
 
 ```sh
-.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py \
   --study-grid buckets --max-inceptions 1 --workers 2 \
   --carry-audit-mode daily --record-carry-exposure \
-  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
+  --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
 ```
 
 **Result: 14 cells ran, 14 ok, 0 failed, 6059 s wall clock on 2 workers.**
@@ -599,10 +599,10 @@ cache and reproduces the original 0.548283-hand residual under both readouts.
 ### The subset, re-run
 
 ```sh
-.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py \
   --study-grid buckets --max-inceptions 1 --workers 6 \
   --carry-audit-mode daily --record-carry-exposure \
-  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset_matched \
+  --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset_matched \
   --resume
 ```
 
@@ -1345,11 +1345,11 @@ closely in every cell, which is the readout being irrelevant again.
 ## Gate E — the full paired study
 
 ```sh
-.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py \
   --study-grid buckets --workers 6 \
   --carry-audit-mode daily --record-carry-exposure \
   --hedge-resolution-rel 0.0025 \
-  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e --resume
+  --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e --resume
 ```
 
 **406 cells ran, 406 ok, 0 failed, 57828 s.** 29 inceptions from 2023-05-04
@@ -1666,7 +1666,7 @@ is a separate defect already on this record and is unchanged in character.
 
 ### Confirmed independently — and the branch gap is a symptom, not the mechanism
 
-The simulated-path study (`example/snowball_simulated_paths`, a separate
+The simulated-path study (`example/case_studies/snowball_simulated_paths`, a separate
 session, same product constants, simulated rather than historical paths)
 reached the same defect from the other side and then measured something this
 record could not: what happens when the two candidate surfaces AGREE.

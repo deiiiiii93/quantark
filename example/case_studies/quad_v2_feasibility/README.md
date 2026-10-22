@@ -10,7 +10,7 @@ It checks nine operator shapes, five full Snowball pricing cases and 27 analytic
 
 ```sh
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
-  .venv/bin/python example/quad_v2_feasibility/backend_probe.py
+  .venv/bin/python example/case_studies/quad_v2_feasibility/backend_probe.py
 ```
 
 The checked results are in [results.json](results.json). The measured daily-KI price-plus-delta call fell from approximately 88 ms to 57 ms; small-case timings were essentially unchanged. Both backends still share the source reference's contract coverage and numerical domain assumptions. Equality between them is an algebraic correctness check, not independent validation of those assumptions.

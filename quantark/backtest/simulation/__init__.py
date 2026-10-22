@@ -10,7 +10,7 @@ on-disk cache tier, the sampling accuracy gate and path batching over a
 spawn pool.  Plan 4: the results -- the per-path summary in the historical
 study's measures, distributions with expected shortfall, paired comparisons
 on matched paths, persistence -- and the worked study in
-``example/snowball_simulated_paths``.  See README.md in this package.
+``example/case_studies/snowball_simulated_paths``.  See README.md in this package.
 """
 from __future__ import annotations
 

@@ -8,7 +8,7 @@ local-vol slope.
 
 Two things differ from the flat-BSM study, and both are deliberate.
 
-**The surfaces are committed data, not generated.** ``example/mo_volmodels/data/
+**The surfaces are committed data, not generated.** ``example/case_studies/mo_volmodels/data/
 history`` is excluded through ``.git/info/exclude``, a per-clone file that is
 never pushed, so a study reading from it would bank a certificate whose CI
 anchors fail everywhere but one machine. The artifacts live under
@@ -124,7 +124,7 @@ def _resolve_path(surface: str) -> Path:
         raise ValidationError(
             f"equity.snowball.localvol_market surface artifact not found: {path}. "
             "Study surfaces live under test/golden/modelvalidation/data/ and are "
-            "committed; they are NOT read from example/mo_volmodels/data/history, "
+            "committed; they are NOT read from example/case_studies/mo_volmodels/data/history, "
             "which is excluded per-clone and would not exist in CI."
         )
     return path

@@ -2,7 +2,7 @@
 
 ## What it asks
 
-The q term-structure study (`example/snowball_q_term_structure`) answered
+The q term-structure study (`example/case_studies/snowball_q_term_structure`) answered
 on 29 realised inceptions of one product: does pricing a CSI 1000 snowball
 off the IM chain's carry term structure hedge better than pricing off one
 flat yield implied from the hedge contract?  Twenty-nine overlapping
@@ -16,7 +16,7 @@ distribution.
 ## Data
 
 The same local, untracked caches as the q study, under
-`example/mo_volmodels/data/history`: the CSI 1000 spot, the IM chain and
+`example/case_studies/mo_volmodels/data/history`: the CSI 1000 spot, the IM chain and
 the admitted IV surfaces (the vol channel is the ATM implied vol at the
 product tenor).  The history's fingerprint is recorded in
 `paths/manifest.json`, so a batch can always be traced to the days it was
@@ -256,21 +256,21 @@ check paired each surface cell's first 200 paths with the QUAD spot ladder.
 
 ```bash
 # stage 1: the banked 40-path batch of 2026-09-09, all six cells, in its own directory
-.venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
+.venv/bin/python example/case_studies/snowball_simulated_paths/02_ensemble_fleet.py \
     --out-dir output/snowball_simulated_paths/per_date_40 \
     --paths-dir output/snowball_simulated_paths/paths --workers 6 --batch-paths 7 --resume
-.venv/bin/python example/snowball_simulated_paths/03_report.py \
+.venv/bin/python example/case_studies/snowball_simulated_paths/03_report.py \
     --out-dir output/snowball_simulated_paths/per_date_40 \
     --data-dir output/snowball_simulated_paths/per_date_40/data
 
 # stage 2: 2,000 paths from the same history cut
-.venv/bin/python example/snowball_simulated_paths/01_build_paths.py \
+.venv/bin/python example/case_studies/snowball_simulated_paths/01_build_paths.py \
     --history-end 2026-09-09 --out-dir output/snowball_simulated_paths/per_date_2000
-nohup caffeinate -i -m -s .venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
+nohup caffeinate -i -m -s .venv/bin/python example/case_studies/snowball_simulated_paths/02_ensemble_fleet.py \
     --out-dir output/snowball_simulated_paths/per_date_2000 \
     --workers 12 --batch-paths 50 --resume \
     > output/snowball_simulated_paths/per_date_2000/fleet.log 2>&1 &
-.venv/bin/python example/snowball_simulated_paths/03_report.py \
+.venv/bin/python example/case_studies/snowball_simulated_paths/03_report.py \
     --out-dir output/snowball_simulated_paths/per_date_2000
 ```
 

@@ -102,7 +102,7 @@ def test_monthly_reference_and_component_reconciliation(backend):
     engine = SnowballQuadEngineV2(QuadV2Params(backend=backend))
     got = engine.calculate_point_greeks(p, environment())
     # Independent frozen Gaussian panel/reference audit, with an 8-scramble
-    # exact-GBM QMC interval in example/gaussian_quad_comparison.
+    # exact-GBM QMC interval in example/case_studies/gaussian_quad_comparison.
     assert got["price"] == pytest.approx(1.9103640029206575, abs=1e-8)
     assert got["delta"] == pytest.approx(0.007568552357756336, abs=1e-8)
     components = engine.price_components(p, environment())

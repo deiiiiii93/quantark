@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-STUDY = REPO / "example" / "snowball_q_term_structure"
+STUDY = REPO / "example" / "case_studies" / "snowball_q_term_structure"
 
 
 def _load(name: str, filename: str):

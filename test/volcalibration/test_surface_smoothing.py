@@ -16,7 +16,7 @@ from quantark.volcalibration.surface import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-LIVE = ROOT / "example/mo_volmodels/data/mo_snapshot_sample.json"
+LIVE = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
 
 
 def _raw():
@@ -28,7 +28,7 @@ def _raw():
 
 def test_smoothing_matches_the_legacy_helper_bit_for_bit():
     """The promoted function must be numerically identical to the suite's."""
-    sys.path.insert(0, str(ROOT / "example/mo_volmodels"))
+    sys.path.insert(0, str(ROOT / "example/case_studies/mo_volmodels"))
     import _mo_common as mc
 
     raw = _raw()

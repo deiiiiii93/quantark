@@ -1,6 +1,6 @@
 """Stage 03 — Dupire local vol: build sigma_LV(K,T) from the market surface, reprice, RMSE.
 
-Run: .venv/bin/python example/mo_volmodels/03_dupire_localvol.py [--tag latest|sample]
+Run: .venv/bin/python example/case_studies/mo_volmodels/03_dupire_localvol.py [--tag latest|sample]
 
 The Dupire local-vol surface is the unique deterministic sigma(S,t) that, fed to a
 one-factor diffusion, reproduces the entire market IV surface. We build it and then
@@ -62,7 +62,7 @@ def main() -> None:
                 sys.exit(
                     "\nThe raw market surface is not arbitrage-free. Re-run with the default "
                     "SABR smoother, or explicitly opt into the diagnostic floor, e.g.:\n"
-                    f"  .venv/bin/python example/mo_volmodels/03_dupire_localvol.py --tag {args.tag} "
+                    f"  .venv/bin/python example/case_studies/mo_volmodels/03_dupire_localvol.py --tag {args.tag} "
                     "--iv-smoothing none --vol-floor 0.05"
                 )
             sys.exit(f"SABR-smoothed surface failed Dupire validation: {e}")

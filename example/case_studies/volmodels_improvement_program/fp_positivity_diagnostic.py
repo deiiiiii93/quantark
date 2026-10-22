@@ -12,7 +12,7 @@ This script reproduces the 2026-07 finding that motivated *not* shipping Chang-C
   4. The residual negativity is small (< 0.03 of unit mass on the worst realistic fixture) and bounded
      under refinement, which is why tol_neg is tightened to 0.05 as an empirical operating tripwire.
 
-Run: python example/fp_positivity_diagnostic.py
+Run: python example/case_studies/volmodels_improvement_program/fp_positivity_diagnostic.py
 """
 import numpy as np
 

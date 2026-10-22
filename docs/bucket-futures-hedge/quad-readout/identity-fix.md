@@ -84,8 +84,8 @@ Run the archived-state validation from the worktree:
 PYTHONPATH=. MPLCONFIGDIR=/private/tmp/gate-d-mpl \
   /Users/fuxinyao/quant-ark/.venv/bin/python \
   docs/bucket-futures-hedge/quad-readout/verify_identity_fix.py \
-  --run-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset/runs/20230504/term_flat_q__front \
-  --history-dir /Users/fuxinyao/quant-ark/example/mo_volmodels/data/history \
+  --run-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset/runs/20230504/term_flat_q__front \
+  --history-dir /Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history \
   --output /private/tmp/identity_fix_flat_q.csv --workers 4
 ```
 

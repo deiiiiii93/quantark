@@ -114,7 +114,7 @@ factory during these spot bumps.
 
 ## Greek certification
 
-`example/mo_volmodels/16_adi_greek_certification.py` is the admission harness for
+`example/case_studies/mo_volmodels/16_adi_greek_certification.py` is the admission harness for
 the central-bump Heston/Heston-SLV Snowball Greeks. It is independent of calibration
 history and emits JSON, Markdown, and a small decision artifact. Its evidence stack
 is:

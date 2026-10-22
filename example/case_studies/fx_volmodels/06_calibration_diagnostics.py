@@ -8,7 +8,7 @@ to ``exclusions`` with concrete missing/extra nodes or configuration differences
 
 Example::
 
-    .venv/bin/python example/fx_volmodels/06_calibration_diagnostics.py \
+    .venv/bin/python example/case_studies/fx_volmodels/06_calibration_diagnostics.py \
         --tags 20260430 20260515 20260630 20260720 --output-tag study
 """
 

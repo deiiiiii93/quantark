@@ -2,7 +2,7 @@
 Per-day IV-surface history channel for OTC autocallable backtests.
 
 Wraps the SABR-smoothed IV-surface artifacts built by the mo_volmodels
-history pipeline (``example/mo_volmodels/data/history``) so the backtest
+history pipeline (``example/case_studies/mo_volmodels/data/history``) so the backtest
 engine can reprice daily against flat-ATM / term-structure / full-surface
 vol instead of one scalar vol.
 

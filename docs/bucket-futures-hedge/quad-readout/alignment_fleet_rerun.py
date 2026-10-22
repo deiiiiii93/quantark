@@ -26,9 +26,9 @@ from datetime import date as date_cls
 from pathlib import Path
 
 REPO = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge")
-STUDY = REPO / "example/snowball_q_term_structure"
+STUDY = REPO / "example/case_studies/snowball_q_term_structure"
 RUNS = STUDY / "data/bucket_hedge_v2/gate_e/runs"
-HIST = Path("/Users/fuxinyao/quant-ark/example/mo_volmodels/data/history")
+HIST = Path("/Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history")
 
 
 def _bootstrap():

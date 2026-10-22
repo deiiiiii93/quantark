@@ -1533,11 +1533,11 @@
     "A displayed zero spread must not be interpreted as an executable zero-spread market.",
     "Official turnover evidence supports the <=1Y core much more strongly than 18M-3Y."
   ],
-  "input_snapshot": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/cfets_usdcny_snapshot_20260630.json",
+  "input_snapshot": "/Users/fuxinyao/quant-ark/example/case_studies/fx_volmodels/data/cfets_usdcny_snapshot_20260630.json",
   "artifacts": {
-    "residual_csv": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/cfets_usdcny_heston_residuals_20260630.csv",
+    "residual_csv": "/Users/fuxinyao/quant-ark/example/case_studies/fx_volmodels/data/cfets_usdcny_heston_residuals_20260630.csv",
     "plots": {
-      "core": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/plots/04_heston_fit_20260630_core.png"
+      "core": "/Users/fuxinyao/quant-ark/example/case_studies/fx_volmodels/data/plots/04_heston_fit_20260630_core.png"
     }
   }
 }

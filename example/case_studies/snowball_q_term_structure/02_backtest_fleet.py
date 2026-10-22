@@ -55,9 +55,9 @@ Each cell writes its summary as it finishes; ``--resume`` keeps completed
 cells whose fingerprint (grid, cost, rate, coupon) matches.
 
 Run:
-    .venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py --quick
+    .venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py --quick
     nohup caffeinate -i -m -s .venv/bin/python \\
-        example/snowball_q_term_structure/02_backtest_fleet.py --workers 4 > fleet.log 2>&1 &
+        example/case_studies/snowball_q_term_structure/02_backtest_fleet.py --workers 4 > fleet.log 2>&1 &
 """
 
 from __future__ import annotations

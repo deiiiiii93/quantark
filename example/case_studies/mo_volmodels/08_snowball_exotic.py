@@ -1,6 +1,6 @@
 """Stage 08 - Snowball priced under BSM / LV / Heston QE / SLV / SLV QE.
 
-Run: .venv/bin/python example/mo_volmodels/08_snowball_exotic.py [--tag latest|sample]
+Run: .venv/bin/python example/case_studies/mo_volmodels/08_snowball_exotic.py [--tag latest|sample]
 
 The product is a 2Y standard autocallable Snowball with principal excluded:
 monthly discrete KO, continuous KI, and an annualized KO coupon. MC is available

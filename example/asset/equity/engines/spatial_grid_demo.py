@@ -13,8 +13,8 @@ It produces plots comparing:
   - Spacing in log-space (dx) and in spot-space (dS)
 
 Usage:
-  python example/spatial_grid_demo.py --show
-  python example/spatial_grid_demo.py --save-dir example/output
+  python example/asset/equity/engines/spatial_grid_demo.py --show
+  python example/asset/equity/engines/spatial_grid_demo.py --save-dir example/output
 """
 
 from __future__ import annotations

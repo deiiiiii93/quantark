@@ -8,8 +8,8 @@ replacement calibration.
 
 Examples::
 
-    .venv/bin/python example/fx_volmodels/04_heston_calibration.py --tag sample
-    .venv/bin/python example/fx_volmodels/04_heston_calibration.py \
+    .venv/bin/python example/case_studies/fx_volmodels/04_heston_calibration.py --tag sample
+    .venv/bin/python example/case_studies/fx_volmodels/04_heston_calibration.py \
         --tag latest --universe core --weight-mode spread
 """
 

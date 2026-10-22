@@ -206,14 +206,14 @@ print(f"Price: {engine.price(option, fx_env):,.2f} USD")
 print(f"Delta: {engine.calculate_greeks(option, fx_env)['delta']:,.2f} EUR")
 ```
 
-See `example/fx_vanilla_option_demo.py`, `example/fx_digital_option_demo.py`,
-`example/fx_quanto_option_demo.py`, and `example/fx_deltaone_demo.py` for
+See `example/asset/fx/fx_vanilla_option_demo.py`, `example/asset/fx/fx_digital_option_demo.py`,
+`example/asset/fx/fx_quanto_option_demo.py`, and `example/asset/fx/fx_deltaone_demo.py` for
 digitals, quantos, and delta-one products.
 
 For portfolio Value-at-Risk (parametric, historical, and Monte Carlo engines
 with risk-factor attribution), see the runnable demos:
-`example/parametric_var_demo.py`, `example/portfolio_var_demo.py`, and
-`example/var_backtest_demo.py`.
+`example/var/parametric_var_demo.py`, `example/var/portfolio_var_demo.py`, and
+`example/var/var_backtest_demo.py`.
 
 ## Batch-Friendly Engine Params
 
@@ -499,7 +499,7 @@ risk.total                    # trade greeks; DRILLDOWN adds risk.product, risk.
 
 - `None` (default) keeps the event route exactly; a position without legs ignores the flag.
 - `TOTAL` reports trade totals only — 1.75–4× faster than the event route on QUAD and PDE
-  (`example/cash_leg_folding_benchmark.py`), about even on MC (one simulation either way).
+  (`example/case_studies/engine_benchmarks/cash_leg_folding_benchmark.py`), about even on MC (one simulation either way).
 - `DRILLDOWN` also reports the product and each leg: per bump one plain solve, one folded
   solve with all legs and one per event-dependent leg — slower than the event route, which
   values every leg from one solve. It is refused where two solves may not share a
@@ -535,7 +535,7 @@ mc_params = MCParams(
 A comprehensive demonstration is provided:
 
 ```bash
-python example/european_option_demo.py
+python example/asset/equity/options/european_option_demo.py
 ```
 
 The demo showcases:
@@ -547,11 +547,11 @@ The demo showcases:
 ### FX portfolio across the full risk stack
 
 ```bash
-python example/fx_portfolio_risk_demo.py   # one FX book through all four risk modules
-python example/fx_stress_test_demo.py      # FX stress testing (spot/vol/two-rate shocks)
-python example/fx_var_demo.py              # FX VaR (parametric / historical / Monte Carlo)
-python example/fx_dynamic_scenario_demo.py # multi-day FX path simulation
-python example/fx_backtest_demo.py         # FX delta-neutral hedging backtest
+python example/asset/fx/fx_portfolio_risk_demo.py   # one FX book through all four risk modules
+python example/asset/fx/fx_stress_test_demo.py      # FX stress testing (spot/vol/two-rate shocks)
+python example/asset/fx/fx_var_demo.py              # FX VaR (parametric / historical / Monte Carlo)
+python example/asset/fx/fx_dynamic_scenario_demo.py # multi-day FX path simulation
+python example/asset/fx/fx_backtest_demo.py         # FX delta-neutral hedging backtest
 ```
 
 ## Project Structure

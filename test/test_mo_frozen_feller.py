@@ -27,8 +27,7 @@ from quantark.volcalibration.calibrate import VolModelCalibrator
 
 REAL_ARTIFACT = (
     Path(__file__).resolve().parents[1]
-    / "example"
-    / "mo_volmodels"
+    / "example" / "case_studies" / "mo_volmodels"
     / "data"
     / "history"
     / "iv_surface"

@@ -20,7 +20,7 @@ SCRATCH = Path("/private/tmp/claude-501/-Users-fuxinyao-quant-ark--claude-worktr
                "-hedge")
 HERE = Path(__file__).parent
 RUNS = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge"
-            "/example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
+            "/example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
 BUDGET = 0.01
 CELLS_PER_STATE = 7
 #: the contract shape: KI at 75% and KO at 103% of the inception spot, so the

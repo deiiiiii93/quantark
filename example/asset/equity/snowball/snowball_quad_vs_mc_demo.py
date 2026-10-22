@@ -5,8 +5,8 @@ This script compares the SnowballQuadEngine against the SnowballMCEngine on
 several snowball configurations to provide a quick reasonableness check.
 
 Usage:
-    python example/snowball_quad_vs_mc_demo.py
-    python example/snowball_quad_vs_mc_demo.py --paths 20000 --grid 801 --method quasi
+    python example/asset/equity/snowball/snowball_quad_vs_mc_demo.py
+    python example/asset/equity/snowball/snowball_quad_vs_mc_demo.py --paths 20000 --grid 801 --method quasi
 """
 
 import argparse

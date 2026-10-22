@@ -1,4 +1,4 @@
-"""Tests for example/mo_volmodels/13_aggregate_and_report.py (Phase 5).
+"""Tests for example/case_studies/mo_volmodels/13_aggregate_and_report.py (Phase 5).
 
 Builds a synthetic fleet on disk (manifest + per-run CSV/JSON artifacts) and
 checks that the aggregator computes the metrics it claims, that the paired
@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/13_aggregate_and_report.py"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/13_aggregate_and_report.py"
 
 spec = importlib.util.spec_from_file_location("aggregate_and_report_13", MODULE_PATH)
 s13 = importlib.util.module_from_spec(spec)
@@ -905,7 +905,7 @@ def test_stage13_agrees_with_stage11_on_the_feller_cut_points():
     it is not refactored to share this constant; this test is what makes the
     duplication safe.
     """
-    gate_path = ROOT / "example/mo_volmodels/11_pde_convergence_gate.py"
+    gate_path = ROOT / "example/case_studies/mo_volmodels/11_pde_convergence_gate.py"
     gate_spec = importlib.util.spec_from_file_location("gate_11_cuts", gate_path)
     gate = importlib.util.module_from_spec(gate_spec)
     sys.modules[gate_spec.name] = gate

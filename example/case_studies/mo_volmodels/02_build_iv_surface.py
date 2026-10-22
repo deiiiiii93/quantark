@@ -1,6 +1,6 @@
 """Stage 02 — put-call parity + OTM filter + Black-IV inversion -> GridVolSurface.
 
-Run: .venv/bin/python example/mo_volmodels/02_build_iv_surface.py [--snapshot sample|latest|YYYYMMDD]
+Run: .venv/bin/python example/case_studies/mo_volmodels/02_build_iv_surface.py [--snapshot sample|latest|YYYYMMDD]
 
 Recovers r(T), forward F(T), carry q(T) per expiry from parity, selects OTM quotes,
 inverts them to Black implied vols, and assembles a rectangular strike x maturity grid.

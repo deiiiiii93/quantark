@@ -1,7 +1,7 @@
 """Intraday latency and memory: single trade, 101-point spot curve, 100-item batch.
 
     OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \\
-        python example/intraday_benchmark/run_benchmark.py --engine quad_v2 --workload single --repeats 5
+        python example/case_studies/intraday_benchmark/run_benchmark.py --engine quad_v2 --workload single --repeats 5
 
 There is no SLA: the deliverable is the measured table, with each Greek's status. Accuracy is certified offline by
 the modelvalidation studies, not here. Run every engine x workload back-to-back in one window; never compare arms

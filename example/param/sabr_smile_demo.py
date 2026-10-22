@@ -7,7 +7,7 @@ the ``SABRVolSurface`` adapter that plugs into the quant-ark vol-surface
 interface.
 
 Run:
-    python example/sabr_smile_demo.py
+    python example/param/sabr_smile_demo.py
 """
 
 from __future__ import annotations

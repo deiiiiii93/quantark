@@ -8,8 +8,8 @@ This compares the fair KO rate implied by the same RFQ convention used in
 - affine solve between KO rate 0% and 200%
 
 Usage:
-    python example/snowball_rfq_ko_rate_engine_compare_demo.py
-    python example/snowball_rfq_ko_rate_engine_compare_demo.py --paths 50000 --quad-grid 1001 --pde-grid 400 --pde-steps 400
+    python example/case_studies/snowball_rfq_ko_rate/snowball_rfq_ko_rate_engine_compare_demo.py
+    python example/case_studies/snowball_rfq_ko_rate/snowball_rfq_ko_rate_engine_compare_demo.py --paths 50000 --quad-grid 1001 --pde-grid 400 --pde-steps 400
 """
 
 from __future__ import annotations

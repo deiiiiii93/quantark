@@ -18,7 +18,7 @@ Everything the three stages share lives here:
 - trading calendar, term sheet, inception scheduler, fair-coupon solver;
 - run I/O and the paired hedge measures the aggregator reports.
 
-Data: ``example/mo_volmodels/data/history`` (CSI 1000 spot, IM chain, admitted
+Data: ``example/case_studies/mo_volmodels/data/history`` (CSI 1000 spot, IM chain, admitted
 IV-surface artifacts).  It is a local cache written by the mo_volmodels fetch
 stages and is not tracked; every loader here raises ``StudyDataError`` with
 the stage to run when it is missing.
@@ -70,7 +70,7 @@ from quantark.util.numerical import is_close, is_zero
 STUDY_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = STUDY_DIR.parents[2]
 DATA_DIR = STUDY_DIR / "data"
-DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example" / "mo_volmodels" / "data" / "history"
+DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example" / "case_studies" / "mo_volmodels" / "data" / "history"
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output" / "snowball_q_term_structure"
 
 SCHEMA_VERSION = 1
@@ -649,7 +649,7 @@ def load_history(history_dir: Path | str = DEFAULT_HISTORY_DIR) -> HistoryFrames
         if not path.exists():
             raise StudyDataError(
                 f"missing {path}; refresh the caches with "
-                "`/opt/anaconda3/bin/python example/mo_volmodels/01_refresh_market_cache.py`"
+                "`/opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_refresh_market_cache.py`"
             )
     spot = pd.read_csv(spot_path, parse_dates=["date"])
     if "spot" not in spot.columns:
@@ -676,7 +676,7 @@ def surface_history(history_dir: Path | str = DEFAULT_HISTORY_DIR) -> VolSurface
         if not manifest.exists():
             raise StudyDataError(
                 f"missing {manifest}; build it with "
-                "`.venv/bin/python example/mo_volmodels/03_build_iv_surface_history.py`"
+                "`.venv/bin/python example/case_studies/mo_volmodels/03_build_iv_surface_history.py`"
             )
         cached = VolSurfaceHistory(key)
         _HISTORY_CACHE[key] = cached

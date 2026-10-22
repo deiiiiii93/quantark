@@ -7,7 +7,7 @@ This script isolates which component causes pricing discrepancies by:
 3. Moving KO far away
 4. Testing Quad domain/padding/filter variations
 
-Run: python example/phoenix_diagnostic.py
+Run: python example/case_studies/phoenix_engine_diagnostics/phoenix_diagnostic.py
 """
 
 import sys

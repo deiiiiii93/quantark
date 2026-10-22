@@ -44,27 +44,27 @@ STUDY_SPEC = (
 
 DEPS: Dict[str, Tuple[str, ...]] = {
     "G1": (
-        "example/mo_volmodels/13_gate_g1_surface_admission.py",
-        "example/mo_volmodels/cohort.py",
-        "example/mo_volmodels/data/history/surface_manifest.json",
+        "example/case_studies/mo_volmodels/13_gate_g1_surface_admission.py",
+        "example/case_studies/mo_volmodels/cohort.py",
+        "example/case_studies/mo_volmodels/data/history/surface_manifest.json",
     ),
     "G4": (
-        "example/mo_volmodels/12_snowball_volmodel_backtest.py",
+        "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py",
         "quantark/asset/equity/product/option/snowball_option.py",
         *ENGINE_PATHS,
         STUDY_SPEC,
     ),
     "G2": (
-        "example/mo_volmodels/11_pde_convergence_gate.py",
+        "example/case_studies/mo_volmodels/11_pde_convergence_gate.py",
         *ENGINE_PATHS,
         STUDY_SPEC,
     ),
     "G5": (
-        "example/mo_volmodels/11_pde_convergence_gate.py",
+        "example/case_studies/mo_volmodels/11_pde_convergence_gate.py",
         *ENGINE_PATHS,
     ),
     "FLEET": (
-        "example/mo_volmodels/12_snowball_volmodel_backtest.py",
+        "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py",
         *ENGINE_PATHS,
         STUDY_SPEC,
     ),
@@ -170,7 +170,7 @@ def dep_touched_by(reported: str, dep: str) -> bool:
     """Does a path reported by ``git status`` bear on declared dep ``dep``?
 
     Containment in BOTH directions.  git collapses untracked trees to a
-    parent -- it reports ``?? example/mo_volmodels/data/history/`` and never
+    parent -- it reports ``?? example/case_studies/mo_volmodels/data/history/`` and never
     the ``surface_manifest.json`` inside it (verified against this repo) --
     so a one-way test misses every change to a declared untracked dependency.
     """

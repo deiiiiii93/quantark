@@ -14,7 +14,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(ROOT), str(ROOT / "example/snowball_q_term_structure")]
+sys.path[:0] = [str(ROOT), str(ROOT / "example/case_studies/snowball_q_term_structure")]
 import pandas as pd
 import _common as C
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine

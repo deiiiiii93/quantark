@@ -1,7 +1,7 @@
 """Stage 02: the cells over the simulated batches.
 
-    .venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py --quick
-    nohup caffeinate -i -m -s .venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \\
+    .venv/bin/python example/case_studies/snowball_simulated_paths/02_ensemble_fleet.py --quick
+    nohup caffeinate -i -m -s .venv/bin/python example/case_studies/snowball_simulated_paths/02_ensemble_fleet.py \\
         --workers 4 --batch-paths 250 --disk-cache > output/snowball_simulated_paths/fleet.log 2>&1 &
 
 Cells are {baseline flat q, term_flat_q, term_opt_tail} x {front, far}.  Each

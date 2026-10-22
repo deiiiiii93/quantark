@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16 = ROOT / "example" / "mo_volmodels" / "16_adi_greek_certification.py"
+STAGE16 = ROOT / "example" / "case_studies" / "mo_volmodels" / "16_adi_greek_certification.py"
 OUTPUT_DIR = ROOT / "output" / "hash_reattribution"
 
 BANKED_IMPLEMENTATION = "0a93c4940b1edb98"
@@ -108,7 +108,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         import hashlib
         import subprocess
 
-        harness = "example/mo_volmodels/16_adi_greek_certification.py"
+        harness = "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
         blob = subprocess.run(
             ["git", "-C", str(ROOT), "show", f"350d323:{harness}"],
             capture_output=True,

@@ -30,7 +30,7 @@ from quantark.volcalibration.surface import build_artifact
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "quantark" / "volcalibration"
-CFETS = ROOT / "example/fx_volmodels/data/cfets_usdcny_snapshot_20260720.json"
+CFETS = ROOT / "example/case_studies/fx_volmodels/data/cfets_usdcny_snapshot_20260720.json"
 
 
 def _unresolved_names(path: Path) -> list:

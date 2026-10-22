@@ -6,7 +6,7 @@ and a DCN fixed-batch run is bit-identical between the serial and threads
 batch backends. Also prints the reproducibility manifest every outcome
 carries.
 
-Run:  python example/execution_session_demo.py     (finishes in seconds)
+Run:  python example/execution/execution_session_demo.py     (finishes in seconds)
 Docs: docs/execution/README.md
 """
 import dataclasses

@@ -26,9 +26,9 @@ from quantark.volcalibration.store import serialize_artifact
 from quantark.volcalibration.surface import build_artifact
 
 ROOT = Path(__file__).resolve().parents[2]
-SAMPLE_DIR = ROOT / "example/mo_volmodels/data"
+SAMPLE_DIR = ROOT / "example/case_studies/mo_volmodels/data"
 DEFAULT_HISTORY = Path(
-    "/Users/fuxinyao/quant-ark/example/mo_volmodels/data/history"
+    "/Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history"
 )
 HISTORY = Path(os.environ.get("QUANTARK_MO_HISTORY", DEFAULT_HISTORY))
 IV_TOL = 5e-9

@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 REPO = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge")
-sys.path[:0] = [str(REPO), str(REPO / "example/snowball_q_term_structure")]
+sys.path[:0] = [str(REPO), str(REPO / "example/case_studies/snowball_q_term_structure")]
 import pandas as pd
 import _common as C
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
@@ -24,9 +24,9 @@ from quantark.backtest.replay.carry_risk import (
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 
-RUN = REPO / ("example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e"
+RUN = REPO / ("example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e"
               "/runs/20230703/term_flat_q__front")
-HIST = Path("/Users/fuxinyao/quant-ark/example/mo_volmodels/data/history")
+HIST = Path("/Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history")
 M, BUMP = 200.0, 0.00025
 
 summary = json.loads((RUN / "run_summary.json").read_text())

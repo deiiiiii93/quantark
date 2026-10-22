@@ -11,7 +11,7 @@ is not a plain paired-RQMC average: it is a multilevel control-variate telescope
 on independent seed families, with exact conditional integration of the spot
 factor, a pilot-frozen Neyman allocation and a substep-refinement bias envelope.
 That machinery lives in the certification harness
-(``example/mo_volmodels/16_adi_greek_certification.py`` and its stage-17
+(``example/case_studies/mo_volmodels/16_adi_greek_certification.py`` and its stage-17
 aggregate amendment), took 28.6 hours of held-out production sampling, and is
 banked as evidence rather than reproduced here.  The reference builder below
 therefore *declares* the benchmark and refuses to run it, which is the honest
@@ -385,7 +385,7 @@ class VolSnowballExternalReference(_VolSnowballArm):
             ),
             "allocation": "pilot-frozen cost-weighted Neyman, no optional stopping",
             "greeks": "paired central difference (common random numbers)",
-            "harness": "example/mo_volmodels/16_adi_greek_certification.py",
+            "harness": "example/case_studies/mo_volmodels/16_adi_greek_certification.py",
             "external": True,
         }
 
@@ -406,7 +406,7 @@ class VolSnowballExternalReference(_VolSnowballArm):
             "equity.snowball.vol_multilevel_rqmc is an EXTERNAL benchmark: its "
             "evidence is banked under docs/modelvalidation/certificates/"
             "adi2d-snowball-greeks/, produced by "
-            "example/mo_volmodels/16_adi_greek_certification.py over 28.6 hours "
+            "example/case_studies/mo_volmodels/16_adi_greek_certification.py over 28.6 hours "
             "of held-out sampling. Running this study end to end would certify "
             "against a different reference than the evidence describes. Use "
             "`assert_anchors` to check the deterministic arm, or re-run the "

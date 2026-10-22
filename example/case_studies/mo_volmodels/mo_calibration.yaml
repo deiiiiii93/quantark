@@ -6,9 +6,9 @@
 # the frozen history, which is what protects the warm calibration cache and the
 # cohort pins (see quantark/volcalibration/README.md).
 #
-#   .venv/bin/python example/mo_volmodels/export_snapshots.py
-#   .venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml --plan --json
-#   .venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml
+#   .venv/bin/python example/case_studies/mo_volmodels/export_snapshots.py
+#   .venv/bin/python -m quantark.volcalibration run example/case_studies/mo_volmodels/mo_calibration.yaml --plan --json
+#   .venv/bin/python -m quantark.volcalibration run example/case_studies/mo_volmodels/mo_calibration.yaml
 schema_version: 1
 name: mo-daily
 underlying:

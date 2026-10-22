@@ -6,7 +6,7 @@ dates, or drops excluded surfaces from the evidence set.
 
 Example::
 
-    .venv/bin/python example/mo_volmodels/15_calibration_stability_report.py \
+    .venv/bin/python example/case_studies/mo_volmodels/15_calibration_stability_report.py \
       --start 2025-07-31 --end 2026-07-30
 """
 

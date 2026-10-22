@@ -670,7 +670,7 @@ def test_an_inconclusive_day_keeps_the_run_out_of_a_validity_pass():
     import importlib.util
     from pathlib import Path as _Path
 
-    study = _Path(__file__).resolve().parents[1] / "example" / "snowball_q_term_structure"
+    study = _Path(__file__).resolve().parents[1] / "example" / "case_studies" / "snowball_q_term_structure"
     if str(study) not in sys.path:
         sys.path.insert(0, str(study))
     if "_common" in sys.modules:

@@ -1,9 +1,9 @@
 """Comprehensive bucketed Greeks API demo.
 
 Run:
-    python example/bucketed_greeks_consolidated_api_demo.py
+    python example/asset/equity/greeks/bucketed_greeks_consolidated_api_demo.py
 
-This is a teaching example, similar in spirit to the ``example/mo_volmodels``
+This is a teaching example, similar in spirit to the ``example/case_studies/mo_volmodels``
 stages. It shows why bucketed Greeks matter and how the consolidated
 ``GreeksCalculator.calculate_bucketed_greeks()`` facade computes them.
 
@@ -80,7 +80,8 @@ from quantark.volmodels.risk import MarketVegaRequest, SurfaceBump  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent
-MO_VOLMODELS_DATA = HERE / "mo_volmodels" / "data"
+MO_VOLMODELS = HERE.parents[2] / "case_studies" / "mo_volmodels"
+MO_VOLMODELS_DATA = MO_VOLMODELS / "data"
 DEFAULT_HTML_OUTPUT = HERE / "data" / "bucketed_greeks_lecture_latest.html"
 DEFAULT_NOTIONAL = 10_000_000.0
 IM_FUTURES_MULTIPLIER = 200.0
@@ -138,7 +139,7 @@ def load_im_futures_snapshot(tag: str = "latest") -> dict:
 
 
 def prepare_mo_model_surface(surface: dict) -> dict:
-    mo_dir = HERE / "mo_volmodels"
+    mo_dir = MO_VOLMODELS
     mo_dir_text = str(mo_dir)
     if mo_dir_text not in sys.path:
         sys.path.insert(0, mo_dir_text)

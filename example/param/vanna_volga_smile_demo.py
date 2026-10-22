@@ -7,7 +7,7 @@ butterfly quotes and reads implied vols by strike through the
 ``VannaVolgaVolSurface`` adapter.
 
 Run:
-    python example/vanna_volga_smile_demo.py
+    python example/param/vanna_volga_smile_demo.py
 """
 
 from __future__ import annotations

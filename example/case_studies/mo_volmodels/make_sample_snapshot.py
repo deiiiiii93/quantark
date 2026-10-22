@@ -1,7 +1,7 @@
 """Generate a deterministic, arbitrage-free MO sample snapshot for offline runs/tests.
 
 Prices a chosen skewed smile with Black-Scholes (r=2%, q=1%, S0=6000) so downstream
-stages have a known ground truth. Run: python example/mo_volmodels/make_sample_snapshot.py
+stages have a known ground truth. Run: python example/case_studies/mo_volmodels/make_sample_snapshot.py
 
 This script is intentionally self-contained (its own BS implementation, no quantark
 import) so it can run under any interpreter, mirroring how the real stage-01 fetch

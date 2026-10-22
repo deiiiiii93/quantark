@@ -14,7 +14,7 @@ filename starts with digits).  The module is import-safe: no network call and
 no third-party import happens at module level, so tests can load it under any
 interpreter.  Run it under the stage-01 interpreter::
 
-    /opt/anaconda3/bin/python example/mo_volmodels/01_bulk_fetch_settlement_history.py \
+    /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_bulk_fetch_settlement_history.py \
         --max-dates 5
 
 Resume / fail-closed policy:

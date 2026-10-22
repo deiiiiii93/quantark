@@ -114,7 +114,7 @@ def normalizer_for(convention: str, price_field: str, limits: SurfaceLimits):
 def _reason_is_builder_owned(reason: Optional[str]) -> bool:
     """Was this exclusion written by the builder, or by something else?
 
-    ``example/mo_volmodels/exclude_thin_surfaces.py`` marks two dates excluded
+    ``example/case_studies/mo_volmodels/exclude_thin_surfaces.py`` marks two dates excluded
     for a study-level reason the builder has no vocabulary for, and keeps their
     artifacts on disk.  Rebuilding such a record would silently re-admit a
     surface a human decided to exclude, so the discriminator is the reason

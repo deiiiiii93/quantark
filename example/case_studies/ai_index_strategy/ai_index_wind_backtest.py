@@ -11,7 +11,7 @@ Requirements:
 - WindPy installed via Wind terminal's "Plugin Repair" feature
 
 Usage:
-    python example/ai_index_wind_backtest.py
+    python example/case_studies/ai_index_strategy/ai_index_wind_backtest.py
 """
 
 import sys

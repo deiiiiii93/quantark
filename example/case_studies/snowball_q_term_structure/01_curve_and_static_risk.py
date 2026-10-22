@@ -52,8 +52,8 @@ Outputs (persisted, small):
     data/static_summary.json        aggregate statistics for the report
 
 Run:
-    .venv/bin/python example/snowball_q_term_structure/01_curve_and_static_risk.py
-    .venv/bin/python example/snowball_q_term_structure/01_curve_and_static_risk.py --every-months 3
+    .venv/bin/python example/case_studies/snowball_q_term_structure/01_curve_and_static_risk.py
+    .venv/bin/python example/case_studies/snowball_q_term_structure/01_curve_and_static_risk.py --every-months 3
 """
 
 from __future__ import annotations

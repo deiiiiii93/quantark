@@ -12,7 +12,7 @@ from quantark.validation.cell_identity import project_source
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/16_adi_greek_certification.py"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 
 
 def _load():
@@ -1114,15 +1114,15 @@ def test_stage16_parent_controls_match_stage11_and_schema12_router():
 
     stage11 = load_path(
         "mo_pde_convergence_gate_11_controls",
-        ROOT / "example/mo_volmodels/11_pde_convergence_gate.py",
+        ROOT / "example/case_studies/mo_volmodels/11_pde_convergence_gate.py",
     )
     stage12 = load_path(
         "mo_snowball_volmodel_backtest_12_controls",
-        ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py",
+        ROOT / "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py",
     )
     stage17 = load_path(
         "mo_adi_slv_aggregate_certification_17_controls",
-        ROOT / "example/mo_volmodels/17_adi_slv_aggregate_certification.py",
+        ROOT / "example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py",
     )
 
     assert module.PRODUCTION_ENGINE_CONTROLS == (

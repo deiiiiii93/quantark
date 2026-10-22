@@ -8,7 +8,7 @@ that None into a hard error (0/27 fleet replays failed with "event-stats
 engine PDEEngine returned no stats").
 
 Fixture parameters mirror the study's own term sheet
-(example/mo_volmodels/11_pde_convergence_gate.py): 3Y maturity, KO at 103% of
+(example/case_studies/mo_volmodels/11_pde_convergence_gate.py): 3Y maturity, KO at 103% of
 spot with a 3-month lockout (monthly observations thereafter), KI at 75%.
 The PDE grid is deliberately coarse (GridConfig override) so the test runs
 in a couple of seconds rather than the ~45s a default-resolution snowball

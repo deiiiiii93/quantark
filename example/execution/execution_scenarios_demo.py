@@ -11,7 +11,7 @@ factory/transformer/runner by importing it via ``CallableRef``, so all
 registered callables are module-level and the executable part is guarded by
 ``__main__``.
 
-Run:  python example/execution_scenarios_demo.py    (finishes in seconds)
+Run:  python example/execution/execution_scenarios_demo.py    (finishes in seconds)
 Docs: docs/execution/README.md
 """
 import dataclasses
@@ -78,7 +78,7 @@ def price_european(cell, resolved, child_context):
 # Registration must happen ONLY under this module's importable identity:
 # spawn workers rebuild every callable by importing `execution_scenarios_demo`
 # and the framework fingerprints the rebuilt base against the parent's. Both
-# a `python example/execution_scenarios_demo.py` run (`__main__`) and the
+# a `python example/execution/execution_scenarios_demo.py` run (`__main__`) and the
 # spawn bootstrap's re-execution of the launching script (`__mp_main__`)
 # execute this file under NON-importable names — neither may register, or the
 # worker's canonical import would see the same ids bound to different

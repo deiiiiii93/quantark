@@ -5,7 +5,7 @@ reports EE / PFE. The profile is REAL_WORLD / not regulatory-eligible, so it can
 never feed SA-CVA capital (MAR50.34(1)).
 
 Run:
-    PYTHONPATH=$PWD .venv/bin/python example/sacva_historical_pfe_demo.py
+    PYTHONPATH=$PWD .venv/bin/python example/sacva/sacva_historical_pfe_demo.py
 """
 from datetime import datetime
 

@@ -132,7 +132,7 @@ Successfully implemented a comprehensive static scenario analysis module for por
 - Troubleshooting guide
 - Future enhancements roadmap
 
-#### Demo Example (`example/stress_test_demo.py`)
+#### Demo Example (`example/stresstest/stress_test_demo.py`)
 - Complete end-to-end demonstration
 - Portfolio creation with multiple underlyings
 - Custom scenario definition
@@ -328,7 +328,7 @@ The module successfully achieves the goal of providing fundamental static scenar
 **Status**: ✅ **COMPLETE AND READY FOR USE**
 
 **Next Steps**:
-1. Run the demo: `python example/stress_test_demo.py`
+1. Run the demo: `python example/stresstest/stress_test_demo.py`
 2. Review generated reports and visualizations
 3. Integrate into existing workflows
 4. Collect feedback for future enhancements

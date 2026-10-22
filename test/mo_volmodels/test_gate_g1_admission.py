@@ -10,7 +10,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def _load():
-    path = REPO / "example" / "mo_volmodels" / "13_gate_g1_surface_admission.py"
+    path = REPO / "example" / "case_studies" / "mo_volmodels" / "13_gate_g1_surface_admission.py"
     spec = importlib.util.spec_from_file_location("g1", path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["g1"] = mod          # @dataclass resolves cls.__module__ here

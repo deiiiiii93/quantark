@@ -1,7 +1,7 @@
 """SA-CCR demo: Exposure at Default for a Basel Annex 4a Example-1 netting set.
 
 Run:
-    python example/saccr_demo.py
+    python example/saccr/saccr_demo.py
 """
 
 from quantark.saccr import (

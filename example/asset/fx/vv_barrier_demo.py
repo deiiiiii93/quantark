@@ -7,7 +7,7 @@ Black-Scholes baseline (BSTV) against the VV-adjusted price under both the
 survival-probability and first-exit-time attenuation measures.
 
 Run:
-    python example/vv_barrier_demo.py
+    python example/asset/fx/vv_barrier_demo.py
 """
 
 from __future__ import annotations

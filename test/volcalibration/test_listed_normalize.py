@@ -16,7 +16,7 @@ from quantark.volcalibration.normalize.listed import (
 from quantark.volcalibration.snapshot import QuoteSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
-LIVE = ROOT / "example/mo_volmodels/data/mo_snapshot_sample.json"
+LIVE = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
 
 
 def _snapshot():

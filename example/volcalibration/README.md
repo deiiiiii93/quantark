@@ -36,11 +36,11 @@ needs `data/history/csi1000_spot.csv`. Once that history exists:
 
 ```bash
 # one-time: make the CSV history readable by the library
-.venv/bin/python example/mo_volmodels/export_snapshots.py
+.venv/bin/python example/case_studies/mo_volmodels/export_snapshots.py
 
-.venv/bin/python -m quantark.volcalibration run    example/mo_volmodels/mo_calibration.yaml --plan
-.venv/bin/python -m quantark.volcalibration run    example/mo_volmodels/mo_calibration.yaml
-.venv/bin/python -m quantark.volcalibration status example/mo_volmodels/mo_calibration.yaml --json
+.venv/bin/python -m quantark.volcalibration run    example/case_studies/mo_volmodels/mo_calibration.yaml --plan
+.venv/bin/python -m quantark.volcalibration run    example/case_studies/mo_volmodels/mo_calibration.yaml
+.venv/bin/python -m quantark.volcalibration status example/case_studies/mo_volmodels/mo_calibration.yaml --json
 ```
 
 Running the shipped MO config rebuilds nothing: its `surface` block
@@ -78,7 +78,7 @@ goes to stderr, on every exit path including failures.
 ```python
 from quantark.volcalibration import CalibrationSet
 
-cs = CalibrationSet.open("example/mo_volmodels/data/history",
+cs = CalibrationSet.open("example/case_studies/mo_volmodels/data/history",
                          runtime="output/mo_daily_calibration")
 
 cs.dates()                          # admitted trading dates

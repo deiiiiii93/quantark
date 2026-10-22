@@ -13,13 +13,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 #: tests are evidence wherever it exists and simply unrunnable everywhere
 #: else -- CI included. They skip rather than fail, which is the honest
 #: reading: absent data is not a broken engine.
-HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+HISTORY_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
 requires_real_history = pytest.mark.skipif(
     not (HISTORY_DIR / "surface_manifest.json").exists()
     or not (HISTORY_DIR / "csi1000_spot.csv").exists(),
     reason="needs the unversioned mo_volmodels history cache",
 )
-MODULE = PROJECT_ROOT / "example/mo_volmodels/cohort.py"
+MODULE = PROJECT_ROOT / "example/case_studies/mo_volmodels/cohort.py"
 
 
 def _load():
@@ -116,7 +116,7 @@ def test_real_history_matches_the_pinned_counts():
 
 import importlib.util as _ilu
 
-SEED_MODULE = PROJECT_ROOT / "example/mo_volmodels/seed_calibration_cache.py"
+SEED_MODULE = PROJECT_ROOT / "example/case_studies/mo_volmodels/seed_calibration_cache.py"
 
 
 def _load_seed():
@@ -171,7 +171,7 @@ def test_seed_dry_run_writes_nothing(tmp_path):
 
 
 def _load_stage12_for_cohort():
-    path = PROJECT_ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
+    path = PROJECT_ROOT / "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py"
     spec = importlib.util.spec_from_file_location("s12_cohort", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules["s12_cohort"] = module
@@ -189,7 +189,7 @@ def test_data_end_pin_governs_the_inception_count():
     """
     import pandas as pd
     s12 = _load_stage12_for_cohort()
-    history_dir = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    history_dir = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
     spot = pd.read_csv(history_dir / "csi1000_spot.csv")
     calendar = s12.stage11().TradingCalendar.from_spot_csv(
         history_dir / "csi1000_spot.csv"
@@ -221,7 +221,7 @@ def test_prepare_inceptions_forwards_the_data_end_pin(monkeypatch):
     the root-find over the coupon is replaced with a fixed answer.
     """
     s12 = _load_stage12_for_cohort()
-    history_dir = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    history_dir = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
     history = s12.surface_history(history_dir)
     spot = s12.load_spot_frame(history_dir)
     futures = s12.load_futures_frame(history_dir)

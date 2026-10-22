@@ -7,9 +7,9 @@ make repeated invocations safe and cheap.
 
 Examples::
 
-    .venv/bin/python example/mo_volmodels/install_daily_scheduler.py install
-    .venv/bin/python example/mo_volmodels/install_daily_scheduler.py status
-    .venv/bin/python example/mo_volmodels/install_daily_scheduler.py uninstall
+    .venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py install
+    .venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py status
+    .venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py uninstall
 """
 
 from __future__ import annotations

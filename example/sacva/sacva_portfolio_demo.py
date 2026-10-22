@@ -4,7 +4,7 @@ Builds a real equity-option counterparty portfolio, runs the SA-CVA engine
 (MC exposure -> regulatory CVA -> credit-spread sensitivities -> SBA capital),
 and prints the regulatory CVA and capital. Run:
 
-    PYTHONPATH=. python example/sacva_portfolio_demo.py
+    PYTHONPATH=. python example/sacva/sacva_portfolio_demo.py
 """
 
 from datetime import datetime

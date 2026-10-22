@@ -5,19 +5,19 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "example/mo_volmodels/data/mo_calib_heston_sample.json"
+OUT = ROOT / "example/case_studies/mo_volmodels/data/mo_calib_heston_sample.json"
 
 
 def test_stage04_heston_calibrates():
     subprocess.run(
-        [sys.executable, str(ROOT / "example/mo_volmodels/02_build_iv_surface.py"),
+        [sys.executable, str(ROOT / "example/case_studies/mo_volmodels/02_build_iv_surface.py"),
          "--snapshot", "sample"],
         check=True, cwd=ROOT,
     )
     subprocess.run(
         [
             sys.executable,
-            str(ROOT / "example/mo_volmodels/04_heston_calibration.py"),
+            str(ROOT / "example/case_studies/mo_volmodels/04_heston_calibration.py"),
             "--tag",
             "sample",
             "--bootstrap-reps",

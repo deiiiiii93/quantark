@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "example/mo_volmodels/install_daily_scheduler.py"
+SCRIPT = ROOT / "example/case_studies/mo_volmodels/install_daily_scheduler.py"
 SPEC = importlib.util.spec_from_file_location("mo_daily_scheduler", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 scheduler = importlib.util.module_from_spec(SPEC)

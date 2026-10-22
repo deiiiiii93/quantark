@@ -1,5 +1,5 @@
 """
-Tests for the shared helpers of ``example/snowball_q_term_structure``.
+Tests for the shared helpers of ``example/case_studies/snowball_q_term_structure``.
 
 The study compares a snowball hedged under a flat dividend yield (one active
 futures contract) with the same snowball hedged under the IM chain's implied
@@ -27,7 +27,7 @@ from quantark.backtest.replay.product_replay import ProductReplay
 from quantark.util.exceptions import ValidationError
 
 REPO = Path(__file__).resolve().parents[1]
-STUDY_DIR = REPO / "example" / "snowball_q_term_structure"
+STUDY_DIR = REPO / "example" / "case_studies" / "snowball_q_term_structure"
 
 
 def _load_common():

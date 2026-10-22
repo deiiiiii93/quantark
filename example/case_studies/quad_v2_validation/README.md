@@ -223,10 +223,10 @@ Run from the repository root:
 
 ```sh
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
-  .venv/bin/python example/quad_v2_validation/validate.py --phase all --repeats 3
+  .venv/bin/python example/case_studies/quad_v2_validation/validate.py --phase all --repeats 3
 
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
-  .venv/bin/python example/quad_v2_validation/families.py
+  .venv/bin/python example/case_studies/quad_v2_validation/families.py
 
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
   .venv/bin/python -m pytest -n0 \

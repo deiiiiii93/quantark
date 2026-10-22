@@ -2,7 +2,7 @@
 
 Run::
 
-    .venv/bin/python example/mo_volmodels/04_heston_calibration.py \
+    .venv/bin/python example/case_studies/mo_volmodels/04_heston_calibration.py \
         [--tag latest|sample] [--bootstrap-reps 16]
 
 Heston is an arbitrage-free stochastic-volatility model: variance follows a CIR process

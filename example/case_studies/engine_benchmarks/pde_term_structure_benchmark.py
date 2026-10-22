@@ -5,7 +5,7 @@ environment whose curves have 4 pillars (far fewer than the solver's time
 steps — the worst case for operator-cache reuse, since forward parameters
 then differ on every step). Budget: term/flat median ratio <= 1.20.
 
-Run: PYTHONPATH=. .venv/bin/python example/pde_term_structure_benchmark.py
+Run: PYTHONPATH=. .venv/bin/python example/case_studies/engine_benchmarks/pde_term_structure_benchmark.py
 (from the repo root; the test/ directory must be importable for the shared
 benchmark environments).
 """

@@ -13,7 +13,7 @@ from quantark.volcalibration.snapshot import QuoteSnapshot
 from quantark.volcalibration.surface import build_raw_surface
 
 ROOT = Path(__file__).resolve().parents[2]
-LIVE = ROOT / "example/mo_volmodels/data/mo_snapshot_sample.json"
+LIVE = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
 
 
 def _quotes():

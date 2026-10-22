@@ -8,7 +8,7 @@ used by the CFETS USD/CNY explainer.  Optional futures, barrier, Snowball, and
 hedging artifacts enrich the report when present.
 
 Run:
-    .venv/bin/python example/mo_volmodels/10_explainer.py --tag latest
+    .venv/bin/python example/case_studies/mo_volmodels/10_explainer.py --tag latest
 """
 
 from __future__ import annotations
@@ -1221,7 +1221,7 @@ def render_html(artifacts: Mapping[str, Mapping[str, Any]], tag: str) -> str:
 {''.join(f'<li><a href="{_escape(item["url"])}">{_escape(item["fact"])}</a></li>' for item in MARKET_EVIDENCE)}
 <li>Snapshot provenance carried by the suite: AKShare functions backed by Sina option and index endpoints.</li>
 </ul><p>These links document product and aggregate-market context. The HTML does not access them at runtime.</p></div></details>
-<details><summary>Exact command and fail-closed behavior</summary><div class="body"><pre><code>.venv/bin/python example/mo_volmodels/10_explainer.py --tag {_escape(tag)}</code></pre><p>The command fails before writing if a core artifact is missing or malformed; snapshot and surface disagree on spot or timestamp; model maturities drift; Heston Feller does not recompute from its parameters; persisted calibration/Jacobian/bootstrap evidence is inconsistent; cross-date source hashes or configurations drift; or model smoothing fingerprints disagree. Optional artifacts are ignored only when absent—if present and inconsistent, they fail validation.</p></div></details>
+<details><summary>Exact command and fail-closed behavior</summary><div class="body"><pre><code>.venv/bin/python example/case_studies/mo_volmodels/10_explainer.py --tag {_escape(tag)}</code></pre><p>The command fails before writing if a core artifact is missing or malformed; snapshot and surface disagree on spot or timestamp; model maturities drift; Heston Feller does not recompute from its parameters; persisted calibration/Jacobian/bootstrap evidence is inconsistent; cross-date source hashes or configurations drift; or model smoothing fingerprints disagree. Optional artifacts are ignored only when absent—if present and inconsistent, they fail validation.</p></div></details>
 <details><summary>What would be needed for production promotion</summary><div class="body"><ul><li>Exchange-native quote/trade history with timestamps, sizes, spreads and source identity.</li><li>A longer comparable regime panel plus next-day holdout errors.</li><li>Raw-node objective with spread-aware weights and transparent exclusions.</li><li>Multi-start and free-vs-Feller/bound stress alongside the existing Jacobian/SVD/bootstrap evidence.</li><li>Synchronized rates and forwards plus an arbitrage-controlled surface with explicit interpolation/extrapolation limits.</li><li>Independent exotic and hedge validation over the intended maturity domain.</li></ul></div></details>
 <p>Related local report: <a href="../../fx_volmodels/data/fx_calibration_explainer_latest.html">CFETS USD/CNY calibration explainer</a>.</p></section>
 </main>

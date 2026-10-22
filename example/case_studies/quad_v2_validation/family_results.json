@@ -4,7 +4,7 @@
     "python": "3.11.8 (main, Feb 26 2024, 15:36:12) [Clang 14.0.6 ]",
     "numpy": "2.4.6",
     "source_sha256": {
-      "example/quad_v2_validation/families.py": "095cc717ca55652874ecbad158073fae1ff782b0b5cbba2ff8301f9586d188c4",
+      "example/case_studies/quad_v2_validation/families.py": "095cc717ca55652874ecbad158073fae1ff782b0b5cbba2ff8301f9586d188c4",
       "quantark/asset/equity/engine/quad/v2/__init__.py": "9c7f58227244cc5efc705cd75db5c9a51a751710589cd5c2fe7b898bff5ba3ee",
       "quantark/asset/equity/engine/quad/v2/adapters.py": "e66cc8fcf5e73664594221ba879213952eea47d8f84523fccda4222c6a85a8d0",
       "quantark/asset/equity/engine/quad/v2/basis.py": "8f62a0363916d7b122ad089987acaecae0743765abeaec52fe27e363c8516fb4",

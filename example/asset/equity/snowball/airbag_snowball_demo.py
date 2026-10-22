@@ -17,7 +17,7 @@ Airbag Snowball Structure:
 - This provides additional protection in extreme market downturns
 
 Usage:
-    python example/airbag_snowball_demo.py
+    python example/asset/equity/snowball/airbag_snowball_demo.py
 """
 
 from datetime import datetime

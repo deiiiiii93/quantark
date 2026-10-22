@@ -39,7 +39,7 @@ from quantark.volmodels.slv.leverage import LeverageSurface
 S0, R, VOL, T = 100.0, 0.03, 0.2, 2.0
 HP = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)          # W3's Heston
 BSM_LIMIT = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=1e-4, rho=-0.5)
-# ADI_2D_PRODUCTION_ENGINE_CONTROLS (example/mo_volmodels/11_pde_convergence_gate.py) on the medium PV grid
+# ADI_2D_PRODUCTION_ENGINE_CONTROLS (example/case_studies/mo_volmodels/11_pde_convergence_gate.py) on the medium PV grid
 PRODUCTION = dict(
     grid_style="concentrated", v0_boundary="degenerate_pde", variance_grid_mode="auto", v_drift_scheme="auto",
     barrier_greek_steps_per_tick=HestonSnowballPDESolver.PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK,

@@ -1,4 +1,4 @@
-"""Tests for example/mo_volmodels/11_pde_convergence_gate.py.
+"""Tests for example/case_studies/mo_volmodels/11_pde_convergence_gate.py.
 
 Harness unit tests (date substitution, term-sheet builder, tolerance/gate
 logic on synthetic numbers incl. bias detection, JSON schemas, deterministic
@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/11_pde_convergence_gate.py"
-HISTORY_DIR = ROOT / "example/mo_volmodels/data/history"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/11_pde_convergence_gate.py"
+HISTORY_DIR = ROOT / "example/case_studies/mo_volmodels/data/history"
 
 spec = importlib.util.spec_from_file_location("pde_convergence_gate_11", MODULE_PATH)
 gate11 = importlib.util.module_from_spec(spec)

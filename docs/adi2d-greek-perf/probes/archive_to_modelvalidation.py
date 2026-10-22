@@ -324,8 +324,8 @@ def _imported_block(stage16: dict, stage17: dict, s16_dec: dict, s17_dec: dict) 
             "and re-running it would break the evidence chain it is banked on."
         ),
         "harness": [
-            "example/mo_volmodels/16_adi_greek_certification.py",
-            "example/mo_volmodels/17_adi_slv_aggregate_certification.py",
+            "example/case_studies/mo_volmodels/16_adi_greek_certification.py",
+            "example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py",
         ],
         "evidence_files": {
             "stage16_certification": "evidence/stage16_greek_certification.json",

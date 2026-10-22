@@ -6,7 +6,7 @@ does not silently substitute sample values.  The public CFETS curve is always
 labelled as a composite benchmark, never as executable bid/ask history.
 
 Run:
-    .venv/bin/python example/fx_volmodels/07_explainer.py --tag latest
+    .venv/bin/python example/case_studies/fx_volmodels/07_explainer.py --tag latest
 """
 
 from __future__ import annotations
@@ -700,7 +700,7 @@ def render_html(artifacts: Mapping[str, Mapping[str, Any]], tag: str) -> str:
 <p>This document has no runtime stylesheet, font, image, script, library, or network dependency. CSS, JavaScript, evidence tables and chart data are inline. Re-running the renderer requires all five named JSON artifacts.</p>
 <div class="tbl-wrap"><table><thead><tr><th>Artifact</th><th class="n">Schema</th><th>Trade date</th><th>Role</th></tr></thead><tbody>{_artifact_table(tag,artifacts)}</tbody></table></div>
 <details><summary>Official CFETS source registry</summary><div class="body"><ul>{source_links_html}</ul><p>These links identify the public benchmark and convention sources. The HTML does not fetch them at runtime.</p></div></details>
-<details><summary>Exact command and fail-closed behavior</summary><div class="body"><pre><code>.venv/bin/python example/fx_volmodels/07_explainer.py --tag {_escape(tag)}</code></pre><p>The command fails if any required artifact is absent, malformed, not a JSON object, lacks <code>schema_version</code>, reports a non-USD/CNY pair, or conflicts on trade date. It never downgrades missing model evidence to an empty section.</p></div></details>
+<details><summary>Exact command and fail-closed behavior</summary><div class="body"><pre><code>.venv/bin/python example/case_studies/fx_volmodels/07_explainer.py --tag {_escape(tag)}</code></pre><p>The command fails if any required artifact is absent, malformed, not a JSON object, lacks <code>schema_version</code>, reports a non-USD/CNY pair, or conflicts on trade date. It never downgrades missing model evidence to an empty section.</p></div></details>
 <details><summary>What would be needed for production promotion</summary><div class="body"><ul><li>Licensed node-level executable bid/ask and transaction history.</li><li>Quote age, contributor/sample counts and size metadata.</li><li>Spread-relative fit and next-day holdout tests.</li><li>Multi-start/Jacobian/bootstrap identification evidence.</li><li>Stress-window and CNY/CNH basis diagnostics for the intended product.</li></ul></div></details></section>
 </main>
 <div class="footer">QuantArk · CFETS USD/CNY volatility-model study · artifact tag {_escape(tag)} · public composite clearly separated from executable evidence</div>

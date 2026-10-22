@@ -76,7 +76,7 @@ n_td/D for the pillar's expiry date).
 
 For desk replication where engine times are remaining-trading-days/D
 (date-based products + `day_count_convention=BUSINESS_DAYS` + calendar —
-see `example/phoenix_external_case_compare.py`), the vol surface is native
+see `example/case_studies/phoenix_engine_diagnostics/phoenix_external_case_compare.py`), the vol surface is native
 and the **cash curves** are wrapped instead:
 
 ```python

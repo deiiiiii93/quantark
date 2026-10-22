@@ -21,7 +21,7 @@ keeps its sha, it simply stops being admitted.
 
 Idempotent: re-running changes nothing once the records are excluded.
 
-Run:  .venv/bin/python example/mo_volmodels/exclude_thin_surfaces.py [--check]
+Run:  .venv/bin/python example/case_studies/mo_volmodels/exclude_thin_surfaces.py [--check]
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
 
 # Dupire's dC/dT needs an interior maturity node.
 MIN_EXPIRIES_FOR_DUPIRE = 3

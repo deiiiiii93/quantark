@@ -2,7 +2,7 @@
 
 Prints the error-vs-fine-reference ladder and the observed temporal order (log2 of successive error
 ratios). TR-BDF2 (gamma=2-sqrt2, L-stable, backward-Euler start-up) should show order ~2; backward
-Euler ~1. Run: python example/fp_trbdf2_convergence.py
+Euler ~1. Run: python example/case_studies/volmodels_improvement_program/fp_trbdf2_convergence.py
 """
 import numpy as np
 

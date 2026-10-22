@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16 = ROOT / "example" / "mo_volmodels" / "16_adi_greek_certification.py"
+STAGE16 = ROOT / "example" / "case_studies" / "mo_volmodels" / "16_adi_greek_certification.py"
 BANKED = ROOT / "output" / "p14_sequential"
 # Named so nobody can mistake its contents for the certification of record.
 SCRATCH = ROOT / "output" / "validator_rehearsal_NOT_OF_RECORD"

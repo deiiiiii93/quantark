@@ -52,7 +52,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16_RELATIVE = "example/mo_volmodels/16_adi_greek_certification.py"
+STAGE16_RELATIVE = "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 DEFAULT_EVIDENCE = ROOT / "output" / "p18_strided" / "adi_greek_certification.json"
 
 

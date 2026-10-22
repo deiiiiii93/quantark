@@ -7,10 +7,10 @@ path) or from CFFEX, preserves both close and settlement prices, and writes one
 
 Examples::
 
-    /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_settlement_history.py \
+    /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_settlement_history.py \
         --dates 20260430 20260515 --input-dir /tmp/cffex-mo-history
 
-    /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_settlement_history.py \
+    /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_settlement_history.py \
         --dates 20260720
 
 The saved source is an exchange settlement cross section, not executable bid/ask

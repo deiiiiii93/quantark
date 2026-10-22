@@ -32,8 +32,8 @@ Spec of record:
 - [Reproducibility schemas](schemas/) — JSON Schemas for the WorkerSpec,
   scenario-cell, manifest, and normalized-economics payloads, validated
   against live payloads in CI.
-- Migration examples — `example/execution_session_demo.py` and
-  `example/execution_scenarios_demo.py` (runnable; exercised by
+- Migration examples — `example/execution/execution_session_demo.py` and
+  `example/execution/execution_scenarios_demo.py` (runnable; exercised by
   `test/execution/test_examples.py`).
 
 ## Performance snapshots

@@ -1,6 +1,6 @@
 """Stage 05 — calibrate the Heston-SLV leverage surface and reprice.
 
-Run: .venv/bin/python example/mo_volmodels/05_slv_calibration.py [--tag latest|sample]
+Run: .venv/bin/python example/case_studies/mo_volmodels/05_slv_calibration.py [--tag latest|sample]
 
 Stochastic-Local Volatility grafts a deterministic leverage function L(S,t) onto the
 calibrated Heston process: the SLV instantaneous vol is L(S,t) * sqrt(v_t). L is solved

@@ -21,9 +21,9 @@ Runs the same product setup with:
 and prints / writes a comparison table.
 
 Usage:
-    python example/phoenix_external_case_compare.py
-    python example/phoenix_external_case_compare.py --output external/ki_variant_phx/my_results.md
-    python example/phoenix_external_case_compare.py --mc-paths 2000 --qmc-paths 2000 --rqmc-total-paths 2000
+    python example/case_studies/phoenix_engine_diagnostics/phoenix_external_case_compare.py
+    python example/case_studies/phoenix_engine_diagnostics/phoenix_external_case_compare.py --output external/ki_variant_phx/my_results.md
+    python example/case_studies/phoenix_engine_diagnostics/phoenix_external_case_compare.py --mc-paths 2000 --qmc-paths 2000 --rqmc-total-paths 2000
 """
 
 from __future__ import annotations

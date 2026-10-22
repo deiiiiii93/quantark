@@ -22,9 +22,9 @@ STAGES = [
 def test_full_offline_pipeline():
     for stage, extra in STAGES:
         r = subprocess.run(
-            [sys.executable, str(ROOT / "example/mo_volmodels" / stage), *extra],
+            [sys.executable, str(ROOT / "example/case_studies/mo_volmodels" / stage), *extra],
             cwd=ROOT, capture_output=True, text=True,
         )
         assert r.returncode == 0, f"{stage} failed:\n{r.stdout}\n{r.stderr}"
-    assert (ROOT / "example/mo_volmodels/data/mo_volmodels_lecture_sample.html").exists()
-    assert (ROOT / "example/mo_volmodels/data/mo_calibration_explainer_sample.html").exists()
+    assert (ROOT / "example/case_studies/mo_volmodels/data/mo_volmodels_lecture_sample.html").exists()
+    assert (ROOT / "example/case_studies/mo_volmodels/data/mo_calibration_explainer_sample.html").exists()

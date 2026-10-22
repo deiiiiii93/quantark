@@ -17,7 +17,7 @@ Six acts:
   6. Consume it                         (CalibrationSet -> surface, model, env)
 
 The equity-index workflow this module was built for is the same six acts
-against example/mo_volmodels/mo_calibration.yaml; see the README.
+against example/case_studies/mo_volmodels/mo_calibration.yaml; see the README.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from quantark.volcalibration.store import (  # noqa: E402
 from quantark.volcalibration.yaml_loader import load_run_config  # noqa: E402
 
 CONFIG = HERE / "usdcny_calibration.yaml"
-CFETS_DIR = PROJECT_ROOT / "example" / "fx_volmodels" / "data"
+CFETS_DIR = PROJECT_ROOT / "example" / "case_studies" / "fx_volmodels" / "data"
 AS_OF = "2026-07-20"  # the newest committed snapshot
 
 
@@ -55,7 +55,7 @@ def stage_snapshots(layout: StoreLayout) -> list[str]:
     D1 keeps vendor formats in example/: the library reads canonical
     ``QuoteSnapshot`` envelopes from ``<root>/snapshots/{YYYYMMDD}.json`` and
     never parses a vendor file.  This is that bridge for CFETS -- the FX
-    analogue of example/mo_volmodels/export_snapshots.py.
+    analogue of example/case_studies/mo_volmodels/export_snapshots.py.
     """
     tags = []
     for path in sorted(CFETS_DIR.glob("cfets_usdcny_snapshot_2*.json")):

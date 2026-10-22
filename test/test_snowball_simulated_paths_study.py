@@ -1,4 +1,4 @@
-"""Tests for ``example/snowball_simulated_paths``: every stage on synthetic frames.
+"""Tests for ``example/case_studies/snowball_simulated_paths``: every stage on synthetic frames.
 
 The study's real inputs are local, untracked caches; these tests build a
 synthetic history and a one-month snowball so the whole pipeline -- paths,
@@ -20,7 +20,7 @@ from quantark.backtest.simulation.paths.market_path import DEFAULT_TENOR_GRID, M
 from quantark.util.enum.engine_enums import EngineType
 
 REPO = Path(__file__).resolve().parents[1]
-STUDY_DIR = REPO / "example" / "snowball_simulated_paths"
+STUDY_DIR = REPO / "example" / "case_studies" / "snowball_simulated_paths"
 RATE = 0.02
 
 

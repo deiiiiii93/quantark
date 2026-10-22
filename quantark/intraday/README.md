@@ -65,7 +65,7 @@ checkpoint).
 ## Provisional state: the 15:00 walkthrough
 
 A monthly snowball fixes at 15:00 against KO barrier 103; the first five fixings are
-confirmed. `example/intraday_snowball_fixing_demo.py` prints:
+confirmed. `example/intraday/intraday_snowball_fixing_demo.py` prints:
 
 | Valuation | Phase | Fixing supplied | Spot 103.5 | Provisional |
 |---|---|---|---|---|
@@ -173,7 +173,7 @@ derivative: every event crossed needs a `Fixing` outcome, and the contract is va
 | theta | PnL per `theta_unit`, the time derivative (stencil) | PnL per `theta_unit` over the declared forward roll |
 
 Every `GreekValue` carries `status` (`ok`, `undefined`, `failed`) and, when not `ok`, a
-`reason` and no value. `example/intraday_greeks_demo.py` prints both conventions
+`reason` and no value. `example/intraday/intraday_greeks_demo.py` prints both conventions
 side by side one hour and one second before a fixing, the undefined point Greeks at the
 fixing, the zero delta and non-zero rho of an assumed knock-out paid later, and a
 roll-through-events row.

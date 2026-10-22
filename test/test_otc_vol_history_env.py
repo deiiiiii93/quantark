@@ -61,8 +61,7 @@ DATE_B = date(2024, 1, 4)
 
 REAL_HISTORY_DIR = (
     Path(__file__).resolve().parents[1]
-    / "example"
-    / "mo_volmodels"
+    / "example" / "case_studies" / "mo_volmodels"
     / "data"
     / "history"
 )

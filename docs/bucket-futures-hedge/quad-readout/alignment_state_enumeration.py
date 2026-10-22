@@ -15,7 +15,7 @@ from collections import defaultdict
 import pandas as pd
 
 RUNS = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge"
-            "/example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
+            "/example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
 
 cells = []
 for inc in sorted(p for p in RUNS.iterdir() if p.is_dir()):

@@ -20,8 +20,8 @@ import pathlib
 import sys
 
 DEFAULT_ROOTS = (
-    "example/snowball_q_term_structure/data/bucket_hedge_v2/subset",
-    "example/snowball_q_term_structure/data/bucket_hedge_v2/subset_transition",
+    "example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset",
+    "example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset_transition",
 )
 DELTA_TOL_HANDS = 0.01
 RHOQ_TOL_BP = 0.01

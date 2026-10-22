@@ -23,7 +23,7 @@ output/modelvalidation/
 # itself untracked; they are reproducible from the recorded manifest and
 # fingerprint, so they are run output rather than source. The original
 # study's data/ files stay tracked exactly as they are.
-example/snowball_q_term_structure/data/bucket_hedge_v2/
+example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/
 
 # Raw certification payloads. An imported certificate names its producing
 # harness's payloads and publishes their digests, but the payloads themselves

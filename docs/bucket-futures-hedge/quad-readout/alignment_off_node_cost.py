@@ -15,7 +15,7 @@ import time
 REPO = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge")
 for _k in [k for k in sys.modules if k == "quantark" or k.startswith("quantark.")]:
     del sys.modules[_k]
-sys.path[:0] = [str(REPO), str(REPO / "example/snowball_q_term_structure")]
+sys.path[:0] = [str(REPO), str(REPO / "example/case_studies/snowball_q_term_structure")]
 
 import numpy as np
 import pandas as pd
@@ -31,9 +31,9 @@ from quantark.backtest.replay.carry_context import CarryCurveContext
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 
-RUN = REPO / ("example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e"
+RUN = REPO / ("example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e"
               "/runs/20230703/term_flat_q__front")
-HIST = Path("/Users/fuxinyao/quant-ark/example/mo_volmodels/data/history")
+HIST = Path("/Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history")
 DAY = "2023-10-26"
 
 summary = json.loads((RUN / "run_summary.json").read_text())

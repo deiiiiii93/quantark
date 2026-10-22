@@ -15,18 +15,18 @@ quotes  →  QuoteSnapshot  →  normalizer  →  QuoteSet  →  surface  →  a
 
 ```bash
 # one-time: make the CFFEX CSV history readable by the library
-.venv/bin/python example/mo_volmodels/export_snapshots.py
+.venv/bin/python example/case_studies/mo_volmodels/export_snapshots.py
 
 # what would happen, writing nothing
-.venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml --plan --json
+.venv/bin/python -m quantark.volcalibration run example/case_studies/mo_volmodels/mo_calibration.yaml --plan --json
 
 # do it
-.venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml
+.venv/bin/python -m quantark.volcalibration run example/case_studies/mo_volmodels/mo_calibration.yaml
 
 # where are we
-.venv/bin/python -m quantark.volcalibration status example/mo_volmodels/mo_calibration.yaml --json
-.venv/bin/python -m quantark.volcalibration show   example/mo_volmodels/mo_calibration.yaml --date 2026-07-20 --json
-.venv/bin/python -m quantark.volcalibration list   --config example/mo_volmodels/mo_calibration.yaml
+.venv/bin/python -m quantark.volcalibration status example/case_studies/mo_volmodels/mo_calibration.yaml --json
+.venv/bin/python -m quantark.volcalibration show   example/case_studies/mo_volmodels/mo_calibration.yaml --date 2026-07-20 --json
+.venv/bin/python -m quantark.volcalibration list   --config example/case_studies/mo_volmodels/mo_calibration.yaml
 ```
 
 ## The agent contract
@@ -99,7 +99,7 @@ knob still enters the payload, so nothing is silently ignored.
   bytes are the pinned object; rebuilding would destroy them to prove a
   property nobody doubts. The count appears in `status --json`.
 - A record whose `reason` is **outside** `AdmissionReason` was written by
-  something other than the builder — `example/mo_volmodels/exclude_thin_surfaces.py`
+  something other than the builder — `example/case_studies/mo_volmodels/exclude_thin_surfaces.py`
   writes `insufficient_expiries_for_dupire` and keeps the artifact on disk.
   Rebuilding it would silently re-admit a surface a human decided to exclude.
 

@@ -61,7 +61,7 @@ from quantark.volcalibration.store import (
 from quantark.volcalibration.yaml_loader import load_run_config
 
 MODULE = "quantark.volcalibration"
-CONFIG_SEARCH_DIRS = (Path("example/mo_volmodels"), Path("example/fx_volmodels"))
+CONFIG_SEARCH_DIRS = (Path("example/case_studies/mo_volmodels"), Path("example/case_studies/fx_volmodels"))
 
 
 # ------------------------------------------------------------------- output

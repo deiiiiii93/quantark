@@ -43,7 +43,7 @@ Determinism: identical input CSV → byte-identical artifact (``sort_keys``,
 
 Example::
 
-    .venv/bin/python example/mo_volmodels/03_build_iv_surface_history.py \
+    .venv/bin/python example/case_studies/mo_volmodels/03_build_iv_surface_history.py \
         --max-dates 5 --workers 1
 """
 

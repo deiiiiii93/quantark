@@ -1,10 +1,10 @@
 """Stage 01 — freeze the public CFETS USD/CNY five-delta composite curve.
 
 Live example:
-    .venv/bin/python example/fx_volmodels/01_fetch_cfets_snapshot.py --tag latest
+    .venv/bin/python example/case_studies/fx_volmodels/01_fetch_cfets_snapshot.py --tag latest
 
 Offline conversion of previously downloaded raw replies:
-    .venv/bin/python example/fx_volmodels/01_fetch_cfets_snapshot.py \
+    .venv/bin/python example/case_studies/fx_volmodels/01_fetch_cfets_snapshot.py \
         --date 2026-07-20 --time 16:00 --raw-dir /tmp --tag sample
 
 Only this stage accesses the network.  Downstream stages replay the stable JSON

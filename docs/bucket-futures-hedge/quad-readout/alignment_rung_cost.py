@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 REPO = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge")
-STUDY = REPO / "example/snowball_q_term_structure"
+STUDY = REPO / "example/case_studies/snowball_q_term_structure"
 os.environ["PYTHONPATH"] = str(REPO)
 for _k in [k for k in list(sys.modules) if k == "quantark" or k.startswith("quantark.")]:
     del sys.modules[_k]
@@ -35,7 +35,7 @@ from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 
 RUNS = STUDY / "data/bucket_hedge_v2/gate_e/runs"
-HIST = Path("/Users/fuxinyao/quant-ark/example/mo_volmodels/data/history")
+HIST = Path("/Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history")
 INCEPTION, MODEL, DAY = "20250401", "term_flat_q", "2025-06-30"
 LADDERS = {
     "three rungs (production)": (0.001, 0.0005, 0.00025),

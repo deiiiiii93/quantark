@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 RUNS = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge"
-            "/example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
+            "/example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
 NOTIONAL = 50_000_000.0
 
 rows = []

@@ -242,10 +242,10 @@ fi_exporter.export_all(output_dir, formats=['csv', 'json'])
 
 ## Example
 
-See `example/dynamic_scenario_fi_demo.py` for a complete FI example:
+See `example/dynamicscenario/dynamic_scenario_fi_demo.py` for a complete FI example:
 
 ```bash
-python example/dynamic_scenario_fi_demo.py
+python example/dynamicscenario/dynamic_scenario_fi_demo.py
 ```
 
 ## Module Structure

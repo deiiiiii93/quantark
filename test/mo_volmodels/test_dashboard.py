@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MO_DIR = PROJECT_ROOT / "example/mo_volmodels"
+MO_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels"
 if str(MO_DIR) not in sys.path:
     sys.path.insert(0, str(MO_DIR))
 
@@ -294,8 +294,8 @@ def test_every_gate_scope_depends_on_the_study_spec_where_it_can_be_invalidated(
 def test_a_collapsed_untracked_parent_still_marks_its_declared_child_dirty():
     """git status reports '?? example/.../data/history/', never the
     surface_manifest.json inside it (verified against this repo)."""
-    dep = "example/mo_volmodels/data/history/surface_manifest.json"
-    reported = "example/mo_volmodels/data/history/"
+    dep = "example/case_studies/mo_volmodels/data/history/surface_manifest.json"
+    reported = "example/case_studies/mo_volmodels/data/history/"
     assert provenance.dep_touched_by(reported, dep), (
         "the reverse containment test is what catches the collapsed parent"
     )
@@ -611,7 +611,7 @@ def test_collect_fleet_accepts_a_relative_project_root(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(
-    not (PROJECT_ROOT / "example/mo_volmodels/data/history").is_dir(),
+    not (PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history").is_dir(),
     reason="needs the uncommitted history cache",
 )
 def test_the_artifact_matches_stage12s_schedule():
@@ -620,7 +620,7 @@ def test_the_artifact_matches_stage12s_schedule():
     import pandas as pd
     s12 = fleet._stage12()
     cohort = fleet._cohort()
-    history = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    history = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
     spot_csv = history / "csi1000_spot.csv"
     spot = pd.read_csv(spot_csv)
     scheduled = s12.schedule_inceptions(
@@ -944,7 +944,7 @@ def test_serve_mode_adds_a_live_block(tmp_path):
 
 
 REAL_OUTPUT = PROJECT_ROOT / "output"
-REAL_HISTORY = PROJECT_ROOT / "example/mo_volmodels/data/history"
+REAL_HISTORY = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
 
 pytestmark_real = pytest.mark.skipif(
     not (REAL_OUTPUT.is_dir() and REAL_HISTORY.is_dir()),

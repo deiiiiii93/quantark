@@ -241,7 +241,7 @@ def test_heston_pde_cumulative_convention_is_term_exact_for_europeans():
 
 def test_term_pde_not_pathologically_slower_than_flat():
     """Loose CI smoke guard (2x) — the formal 20% budget is measured by
-    example/pde_term_structure_benchmark.py (see Phase 2 commit messages)."""
+    example/case_studies/engine_benchmarks/pde_term_structure_benchmark.py (see Phase 2 commit messages)."""
     import time
 
     from quantark.asset.equity.engine.pde import SnowballPDESolver

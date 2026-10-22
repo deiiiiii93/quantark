@@ -8,10 +8,10 @@ It prints per-observation KO probabilities, survival, expected discounted KO cas
 and a PV decomposition summary.
 
 Usage:
-    python example/snowball_event_stats_demo.py
-    python example/snowball_event_stats_demo.py --engine quad
-    python example/snowball_event_stats_demo.py --engine pde --pde-grid 120 --pde-steps 120
-    python example/snowball_event_stats_demo.py --engine mc --paths 50000 --steps 252
+    python example/asset/equity/snowball/snowball_event_stats_demo.py
+    python example/asset/equity/snowball/snowball_event_stats_demo.py --engine quad
+    python example/asset/equity/snowball/snowball_event_stats_demo.py --engine pde --pde-grid 120 --pde-steps 120
+    python example/asset/equity/snowball/snowball_event_stats_demo.py --engine mc --paths 50000 --steps 252
 """
 
 import argparse

@@ -11,7 +11,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "example/mo_volmodels/14_daily_calibration_pipeline.py"
+SCRIPT = ROOT / "example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py"
 SPEC = importlib.util.spec_from_file_location("mo_daily_calibration_pipeline", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 daily = importlib.util.module_from_spec(SPEC)

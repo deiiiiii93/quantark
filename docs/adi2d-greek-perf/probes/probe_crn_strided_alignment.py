@@ -61,7 +61,7 @@ import numpy as np
 from scipy.stats import t as student_t
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16_RELATIVE = "example/mo_volmodels/16_adi_greek_certification.py"
+STAGE16_RELATIVE = "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 DEFAULT_EVIDENCE = ROOT / "output" / "p17_fixed" / "adi_greek_certification.json"
 
 VARIANTS = ("heston", "heston_slv")

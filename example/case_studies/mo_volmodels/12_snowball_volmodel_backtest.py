@@ -64,9 +64,9 @@ only for cells whose provenance fingerprint matches the fleet being run; see
 "Resume checkpointing" below.
 
 Run:
-    .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --gate-g3
-    .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --workers 8
-    .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --workers 2 --resume
+    .venv/bin/python example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py --gate-g3
+    .venv/bin/python example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py --workers 8
+    .venv/bin/python example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py --workers 2 --resume
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ STAGE17_PATH = Path(__file__).resolve().parent / "17_adi_slv_aggregate_certifica
 # Fleet configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
 DEFAULT_GATE_DECISION = PROJECT_ROOT / "output/pde_convergence_gate/gate_decision.json"
 DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
@@ -1458,9 +1458,9 @@ _FINGERPRINT_TASK_KEYS: Tuple[str, ...] = (
 )
 
 # Roots whose .py files decide what a cell computes.  Only sources: data/ under
-# example/mo_volmodels is rewritten daily by the calibration pipeline and has
+# example/case_studies/mo_volmodels is rewritten daily by the calibration pipeline and has
 # its own window-clipped fingerprint.
-_FINGERPRINT_CODE_PATHS: Tuple[str, ...] = ("quantark", "example/mo_volmodels")
+_FINGERPRINT_CODE_PATHS: Tuple[str, ...] = ("quantark", "example/case_studies/mo_volmodels")
 
 
 def _sha256_json(payload: Any) -> str:

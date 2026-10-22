@@ -17,7 +17,7 @@ import sys
 import pandas as pd
 
 RUNS = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge"
-            "/example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
+            "/example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
 TOLERANCE = 0.01
 
 frames = []

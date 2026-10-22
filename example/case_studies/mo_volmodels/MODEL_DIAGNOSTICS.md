@@ -249,16 +249,16 @@ the model family.
 
 ```bash
 # Freeze already-downloaded official CSV files (offline/reproducible path).
-/opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_settlement_history.py \
+/opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_settlement_history.py \
   --dates 20260430 20260515 20260615 20260630 20260706 20260715 20260720 \
   --input-dir /path/to/cffex-daily-csv
 
 # Current intraday prepared-target fit plus Jacobian/SVD/bootstrap evidence.
-.venv/bin/python example/mo_volmodels/04_heston_calibration.py \
+.venv/bin/python example/case_studies/mo_volmodels/04_heston_calibration.py \
   --tag latest --bootstrap-reps 32 --bootstrap-seed 20260721
 
 # Separate official-settlement cross-date panel.
-.venv/bin/python example/mo_volmodels/10_calibration_diagnostics.py \
+.venv/bin/python example/case_studies/mo_volmodels/10_calibration_diagnostics.py \
   --tags 20260430 20260515 20260615 20260630 20260706 20260715 20260720 \
   --output-tag latest
 ```

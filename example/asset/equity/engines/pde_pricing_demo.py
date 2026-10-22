@@ -10,7 +10,7 @@ This script demonstrates the PDE pricing engine for various equity derivatives:
 6. Double one-touch options - range digital
 
 Usage:
-    python example/pde_pricing_demo.py
+    python example/asset/equity/engines/pde_pricing_demo.py
 """
 
 import numpy as np

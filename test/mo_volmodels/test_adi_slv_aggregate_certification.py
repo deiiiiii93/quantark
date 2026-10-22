@@ -9,7 +9,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/17_adi_slv_aggregate_certification.py"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py"
 # The stage-16 parent this amendment was built on, and the amendment itself.
 #
 # These are the raw payloads: 14.4 MB of Monte-Carlo row dumps. They are
@@ -933,7 +933,7 @@ def test_schema12_full_payload_recomposes_publishes_and_routes(tmp_path, monkeyp
     assert decision["added_work"]["near_ki_reruns"] == 0
     assert (tmp_path / "adi_greek_certification.md").exists()
 
-    stage12_path = ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
+    stage12_path = ROOT / "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py"
     spec = importlib.util.spec_from_file_location(
         "mo_stage12_schema12_integration", stage12_path
     )

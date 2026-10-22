@@ -39,7 +39,7 @@ from typing import Optional, Sequence
 from quantark.validation.cell_identity import project_source, source_projection_sha256
 
 ROOT = Path(__file__).resolve().parents[3]
-HARNESS = "example/mo_volmodels/16_adi_greek_certification.py"
+HARNESS = "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 OUTPUT_DIR = ROOT / "output" / "projection_equivalence"
 
 

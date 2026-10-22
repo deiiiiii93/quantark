@@ -13,7 +13,7 @@ Note: This demo focuses on the product features. Engine pricing implementation
 is not included in the current scope.
 
 Usage:
-    python example/phoenix_option_demo.py
+    python example/asset/equity/phoenix/phoenix_option_demo.py
 """
 
 import sys

@@ -1,6 +1,6 @@
 """End-to-end demo: snowball with premium, accrual interest, and KO bonus.
 
-Run: python example/cash_legs_demo.py
+Run: python example/cashleg/cash_legs_demo.py
 """
 
 from __future__ import annotations

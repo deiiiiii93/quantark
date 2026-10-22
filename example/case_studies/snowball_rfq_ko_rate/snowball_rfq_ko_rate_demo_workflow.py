@@ -55,7 +55,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
 
 
-TEMPLATE_PATH = ROOT / "example" / "templates" / "snowball_rfq_ko_rate_dashboard.html"
+TEMPLATE_PATH = ROOT / "example" / "case_studies" / "snowball_rfq_ko_rate" / "templates" / "snowball_rfq_ko_rate_dashboard.html"
 
 PDE_HTML_OUTPUT_PATH = ROOT / "output" / "snowball_rfq_ko_rate_demo.html"
 PDE_DATA_OUTPUT_PATH = ROOT / "output" / "snowball_rfq_ko_rate_demo_data.json"

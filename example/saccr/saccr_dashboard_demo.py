@@ -4,7 +4,7 @@ Builds a small multi-asset-class netting set, runs the SA-CCR calculation, and
 writes an interactive Plotly dashboard alongside this script.
 
 Run:
-    python example/saccr_dashboard_demo.py
+    python example/saccr/saccr_dashboard_demo.py
 """
 
 from pathlib import Path

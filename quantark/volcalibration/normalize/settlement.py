@@ -12,7 +12,7 @@ path is stricter and fully auditable:
 * every quote that does not become a node is counted under a named reason, and
   every expiry that drops out is recorded -- nothing disappears silently.
 
-Ported from ``example/mo_volmodels/10_calibration_diagnostics.py``
+Ported from ``example/case_studies/mo_volmodels/10_calibration_diagnostics.py``
 (``build_calibration_nodes``), which built the admitted MO surface history.
 """
 

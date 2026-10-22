@@ -2,7 +2,7 @@
 Input module for `autocallable_risk_report`.
 
 Usage:
-  python -m asset.equity.report.autocallable_risk_report --input example/snowball_risk_report_input.py --out /tmp/snowball_report
+  python -m asset.equity.report.autocallable_risk_report --input example/asset/equity/snowball/snowball_risk_report_input.py --out /tmp/snowball_report
 """
 
 from datetime import datetime

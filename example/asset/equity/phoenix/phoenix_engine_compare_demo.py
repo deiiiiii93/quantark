@@ -5,8 +5,8 @@ This script compares Phoenix pricing engines across several product
 configurations and market scenarios.
 
 Usage:
-    python example/phoenix_engine_compare_demo.py
-    python example/phoenix_engine_compare_demo.py --paths 30000 --quad-grid 601 --pde-grid 240 --method quasi
+    python example/asset/equity/phoenix/phoenix_engine_compare_demo.py
+    python example/asset/equity/phoenix/phoenix_engine_compare_demo.py --paths 30000 --quad-grid 601 --pde-grid 240 --method quasi
 """
 
 import argparse

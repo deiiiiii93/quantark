@@ -13,7 +13,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 def _load(stem):
     """Import a numbered stage script (the stages are not a package)."""
-    path = REPO / "example" / "mo_volmodels" / f"{stem}.py"
+    path = REPO / "example" / "case_studies" / "mo_volmodels" / f"{stem}.py"
     spec = importlib.util.spec_from_file_location(stem.split("_")[0], path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod        # @dataclass resolves cls.__module__ here
@@ -328,7 +328,7 @@ def _one_task(s12, **kw):
             "initial_spot": 6733.97, "coupon": 0.15,
         }],
         variants=["heston"], routing=routing,
-        history_dir=REPO / "example" / "mo_volmodels" / "data" / "history",
+        history_dir=REPO / "example" / "case_studies" / "mo_volmodels" / "data" / "history",
         out_dir=REPO / "output", data_end=__import__("datetime").date(2026, 7, 31),
         rate=0.02, notional=50_000_000.0, costs_enabled=True,
         calculate_surfaces=False, calculate_event_probabilities=True,
@@ -369,7 +369,7 @@ def test_no_window_cap_by_default():
 def _an_artifact(gate):
     """A real admitted surface; these tests are about market data, so a
     hand-built stub would not exercise the artifact accessors."""
-    hist = REPO / "example" / "mo_volmodels" / "data" / "history"
+    hist = REPO / "example" / "case_studies" / "mo_volmodels" / "data" / "history"
     if not (hist / "iv_surface").is_dir():
         pytest.skip("IV surface history not present in this checkout")
     history = gate.VolSurfaceHistory(str(hist))

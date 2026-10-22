@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
-HARNESS_RELATIVE = "example/mo_volmodels/16_adi_greek_certification.py"
+HARNESS_RELATIVE = "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 BANKED = ROOT / "output" / "p14_sequential" / "checkpoints"
 OUTPUT_DIR = ROOT / "output" / "cell_identity_migration"
 

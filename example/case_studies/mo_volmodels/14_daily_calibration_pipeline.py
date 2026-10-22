@@ -20,8 +20,8 @@ optionally bounded by ``--calibration-start`` and ``--calibration-end``.
 
 Examples::
 
-    .venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run
-    .venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py status
+    .venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run
+    .venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py status
 
 Exit codes for ``run`` and ``status``:
 

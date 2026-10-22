@@ -192,7 +192,7 @@ From the named worktree (Python environment is in the main checkout):
 PYTHONPATH=. MPLCONFIGDIR=/private/tmp/gate-d-mpl \
   /Users/fuxinyao/quant-ark/.venv/bin/python \
   docs/bucket-futures-hedge/quad-readout/identity_review.py \
-  --history-dir /Users/fuxinyao/quant-ark/example/mo_volmodels/data/history \
+  --history-dir /Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history \
   --grids 683 1365 2729
 ```
 
@@ -206,7 +206,7 @@ For the all-date legacy experiment:
 PYTHONPATH=. MPLCONFIGDIR=/private/tmp/gate-d-mpl \
   /Users/fuxinyao/quant-ark/.venv/bin/python \
   docs/bucket-futures-hedge/quad-readout/identity_review.py \
-  --history-dir /Users/fuxinyao/quant-ark/example/mo_volmodels/data/history \
+  --history-dir /Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history \
   --readouts legacy_linear --reuse-recorded-buckets --all-live-dates \
   --spot-bumps .001 .00025
 ```

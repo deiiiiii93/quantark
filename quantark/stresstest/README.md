@@ -433,7 +433,7 @@ results = engine.run_dynamic_scenarios(
 
 ## Examples
 
-See `example/stress_test_demo.py` for a comprehensive demonstration including:
+See `example/stresstest/stress_test_demo.py` for a comprehensive demonstration including:
 - Portfolio creation
 - Custom scenario definition
 - Scenario storage and loading
@@ -443,13 +443,13 @@ See `example/stress_test_demo.py` for a comprehensive demonstration including:
 
 Run the demo:
 ```bash
-python example/stress_test_demo.py
+python example/stresstest/stress_test_demo.py
 ```
 
 ### Fixed Income Quick Start
 
 ```bash
-python example/stresstest_fi_rate_shocks.py
+python example/stresstest/stresstest_fi_rate_shocks.py
 ```
 
 The FI example builds a small bond portfolio, applies the predefined FI scenarios

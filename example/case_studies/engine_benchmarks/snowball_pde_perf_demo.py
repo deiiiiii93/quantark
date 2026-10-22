@@ -2,8 +2,8 @@
 Snowball PDE performance benchmark.
 
 Usage:
-    python example/snowball_pde_perf_demo.py
-    python example/snowball_pde_perf_demo.py --compare
+    python example/case_studies/engine_benchmarks/snowball_pde_perf_demo.py
+    python example/case_studies/engine_benchmarks/snowball_pde_perf_demo.py --compare
 """
 
 import argparse

@@ -15,7 +15,7 @@ from quantark.volcalibration.snapshot import QuoteSnapshot
 from quantark.volmodels.black_scholes import implied_vol_call
 
 # Parity quality gates, promoted from
-# example/mo_volmodels/10_calibration_diagnostics.py.
+# example/case_studies/mo_volmodels/10_calibration_diagnostics.py.
 MAX_ABS_PARITY_IMPLIED_RATE = 0.10
 MAX_PARITY_RMSE_FORWARD_RATIO = 0.01
 

@@ -1,7 +1,7 @@
 # Request: certify the 1-D local-vol snowball PDE engine
 
 **Raised** 2026-08-26, from the snowball vol-model backtest study
-(`example/mo_volmodels/`).
+(`example/case_studies/mo_volmodels/`).
 **Engine** `LocalVolSnowballPDESolver`
 (`quantark/asset/equity/engine/pde/snowball_vol_pde_solvers.py:69`).
 **Procedure** `docs/modelvalidation/RELEASE_PROCEDURE.md`.
@@ -199,7 +199,7 @@ enumerated.
   -> `variants.localvol`
 - Full cells and delta rows: `output/pde_convergence_gate/pde_convergence_gate.json`
   -> `dates[].cases.full.{cells,deltas}`, filter `variant == "localvol"`
-- Admission rule and bounds: `example/mo_volmodels/11_pde_convergence_gate.py`
+- Admission rule and bounds: `example/case_studies/mo_volmodels/11_pde_convergence_gate.py`
   -> `DELTA_CELL_CONTRACTS`, `DELTA_BIAS_CONTRACTS`, `delta_cell_passed`,
   `detect_delta_bias`
 - Engine pair under test: same file, `GATE_PAIRS["localvol"]` (line ~726)

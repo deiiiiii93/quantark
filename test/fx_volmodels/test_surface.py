@@ -12,7 +12,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ROOT / "example" / "fx_volmodels"
+EXAMPLE = ROOT / "example" / "case_studies" / "fx_volmodels"
 sys.path.insert(0, str(EXAMPLE))
 
 import _fx_common as fx  # noqa: E402

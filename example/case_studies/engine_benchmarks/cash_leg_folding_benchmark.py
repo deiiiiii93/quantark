@@ -12,8 +12,8 @@ a knock-out fee) is risked with the full greek set on each engine, three ways:
 The three arms of one engine run back to back in this process, best of ``--repeat``
 wall-clock runs each, so a shared machine's load moves them together.
 
-    python example/cash_leg_folding_benchmark.py            # default grids
-    python example/cash_leg_folding_benchmark.py --quick    # tiny grids (smoke)
+    python example/case_studies/engine_benchmarks/cash_leg_folding_benchmark.py            # default grids
+    python example/case_studies/engine_benchmarks/cash_leg_folding_benchmark.py --quick    # tiny grids (smoke)
 """
 from __future__ import annotations
 

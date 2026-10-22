@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 B = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge"
-         "/example/snowball_q_term_structure/data/bucket_hedge_v2")
+         "/example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2")
 RUNS = B / "subset_matched/runs/20230504"
 M_REF, NOTIONAL = 200.0, 50_000_000.0
 # Measured at 2024-01-19 by Richardson on +/-1 and +/-0.5 point quote bumps.

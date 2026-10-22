@@ -12,7 +12,7 @@ from quantark.volcalibration.store import (
     surface_record,
 )
 
-SAMPLE = Path("example/mo_volmodels/data/mo_settlement_snapshot_20260430.json")
+SAMPLE = Path("example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json")
 
 CONFIG_YAML = """
 schema_version: 1
@@ -216,7 +216,7 @@ def test_the_shipped_mo_config_loads_with_the_frozen_fingerprint():
     from quantark.volcalibration.store import builder_fingerprint
     from quantark.volcalibration.yaml_loader import load_run_config
 
-    config = load_run_config("example/mo_volmodels/mo_calibration.yaml")
+    config = load_run_config("example/case_studies/mo_volmodels/mo_calibration.yaml")
     assert config.name == "mo-daily"
     assert config.underlying.price_field == "settlement"
     assert builder_fingerprint(

@@ -1,10 +1,10 @@
 """Stage 01: the realised history into simulated batches.
 
-    .venv/bin/python example/snowball_simulated_paths/01_build_paths.py            # 2,000 x 275
-    .venv/bin/python example/snowball_simulated_paths/01_build_paths.py --quick    # 40 paths
+    .venv/bin/python example/case_studies/snowball_simulated_paths/01_build_paths.py            # 2,000 x 275
+    .venv/bin/python example/case_studies/snowball_simulated_paths/01_build_paths.py --quick    # 40 paths
 
 Reads the CSI 1000 spot, the IM chain and the admitted IV surfaces from
-``example/mo_volmodels/data/history`` (local, untracked), builds the joint
+``example/case_studies/mo_volmodels/data/history`` (local, untracked), builds the joint
 daily history, bootstraps forward paths from its last day, adds the stress
 set, and writes ``<out>/paths/{bootstrap,stress}.npz`` with a manifest.
 """

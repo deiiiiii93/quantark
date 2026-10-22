@@ -15,8 +15,8 @@ attributable to the q model / hedge contract alone.  Pooled distributions
 would be dominated by which inceptions happened to knock out.
 
 Run:
-    .venv/bin/python example/snowball_q_term_structure/03_aggregate_and_report.py
-    .venv/bin/python example/snowball_q_term_structure/03_aggregate_and_report.py --run-dir output/snowball_q_term_structure
+    .venv/bin/python example/case_studies/snowball_q_term_structure/03_aggregate_and_report.py
+    .venv/bin/python example/case_studies/snowball_q_term_structure/03_aggregate_and_report.py --run-dir output/snowball_q_term_structure
 """
 
 from __future__ import annotations
@@ -982,7 +982,7 @@ def build_report(agg: Dict[str, Any], run_dir: Path, data_dir: Path) -> str:
     caveats = (
         "<h2>5. Caveats</h2><ul>"
         "<li>One product, one underlying, one 3.3-year window; the fleet's inceptions overlap, so the paired samples are not independent and the t-statistics overstate significance.</li>"
-        "<li>The vol channel is a single ATM 1Y IV for every model; the study isolates carry, it does not test vol models (see <code>example/mo_volmodels</code> for that).</li>"
+        "<li>The vol channel is a single ATM 1Y IV for every model; the study isolates carry, it does not test vol models (see <code>example/case_studies/mo_volmodels</code> for that).</li>"
         "<li>Beyond the last listed IM tenor no market quotes carry; both tail conventions are assumptions, and the difference between them is the honest width of that uncertainty.</li>"
         "<li>The hedge is one contract sized off the spot delta. The carry buckets of section 2 are a diagnostic, not a hedge; a multi-contract hedge across them is a further step this study does not take.</li>"
         "<li>Transaction costs are a flat proportional rate; roll costs, margin funding and the spot-futures basis on unwind are not modelled.</li>"

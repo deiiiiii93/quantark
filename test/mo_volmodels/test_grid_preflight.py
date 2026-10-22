@@ -1,4 +1,4 @@
-"""Tests for example/mo_volmodels/11c_grid_preflight.py (Gate G5).
+"""Tests for example/case_studies/mo_volmodels/11c_grid_preflight.py (Gate G5).
 
 The sweep itself needs the uncommitted surface history, so the tests that
 touch it skip without one. Everything about the ARTIFACT CONTRACT -- the
@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/11c_grid_preflight.py"
-HISTORY_DIR = ROOT / "example/mo_volmodels/data/history"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/11c_grid_preflight.py"
+HISTORY_DIR = ROOT / "example/case_studies/mo_volmodels/data/history"
 
 spec = importlib.util.spec_from_file_location("grid_preflight_11c", MODULE_PATH)
 g5 = importlib.util.module_from_spec(spec)

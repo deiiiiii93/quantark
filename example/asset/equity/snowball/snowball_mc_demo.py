@@ -10,7 +10,7 @@ snowball (autocallable) options with different configurations:
 - disable_ko_after_ki behavior
 
 Usage:
-    python example/snowball_mc_demo.py
+    python example/asset/equity/snowball/snowball_mc_demo.py
 """
 
 import sys

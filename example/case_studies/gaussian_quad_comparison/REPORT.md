@@ -213,16 +213,16 @@ The highest-priority QuantArk improvements are complete-event adaptive sizing, c
 
 ```sh
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
-.venv/bin/python example/gaussian_quad_comparison/study.py --phase controls
-.venv/bin/python example/gaussian_quad_comparison/study.py --phase matrix
-.venv/bin/python example/gaussian_quad_comparison/study.py --phase mc --only monthly,daily,daily_high_carry,near_ki_above,aged_five_days,high_vol,step_down,ki_ko_close,ko_disabled_after_ki --power 19 --replicates 8
-.venv/bin/python example/gaussian_quad_comparison/study.py --phase diagnostics --only monthly,near_ki_above,aged_five_days,high_vol,ki_ko_close
-.venv/bin/python example/gaussian_quad_comparison/supplement.py --phase edges
-.venv/bin/python example/gaussian_quad_comparison/supplement.py --phase greeks --only monthly,near_ki_above,aged_five_days,ki_ko_close
-.venv/bin/python example/gaussian_quad_comparison/supplement.py --phase events --only monthly,near_ki_above,aged_five_days
-.venv/bin/python example/gaussian_quad_comparison/study.py --phase benchmark --only monthly,daily,aged_five_days,three_years
-.venv/bin/python example/gaussian_quad_comparison/extra_checks.py
-.venv/bin/python example/gaussian_quad_comparison/build_report.py
+.venv/bin/python example/case_studies/gaussian_quad_comparison/study.py --phase controls
+.venv/bin/python example/case_studies/gaussian_quad_comparison/study.py --phase matrix
+.venv/bin/python example/case_studies/gaussian_quad_comparison/study.py --phase mc --only monthly,daily,daily_high_carry,near_ki_above,aged_five_days,high_vol,step_down,ki_ko_close,ko_disabled_after_ki --power 19 --replicates 8
+.venv/bin/python example/case_studies/gaussian_quad_comparison/study.py --phase diagnostics --only monthly,near_ki_above,aged_five_days,high_vol,ki_ko_close
+.venv/bin/python example/case_studies/gaussian_quad_comparison/supplement.py --phase edges
+.venv/bin/python example/case_studies/gaussian_quad_comparison/supplement.py --phase greeks --only monthly,near_ki_above,aged_five_days,ki_ko_close
+.venv/bin/python example/case_studies/gaussian_quad_comparison/supplement.py --phase events --only monthly,near_ki_above,aged_five_days
+.venv/bin/python example/case_studies/gaussian_quad_comparison/study.py --phase benchmark --only monthly,daily,aged_five_days,three_years
+.venv/bin/python example/case_studies/gaussian_quad_comparison/extra_checks.py
+.venv/bin/python example/case_studies/gaussian_quad_comparison/build_report.py
 .venv/bin/python -m pytest -n0 -q test/test_snowball_quad_engine.py test/test_quad_readout.py test/test_quad_term_structure_engines.py test/test_snowball_lifecycle_ki.py test/test_quad_event_stats_smoothing.py
 ```
 

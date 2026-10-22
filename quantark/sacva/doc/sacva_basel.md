@@ -190,7 +190,7 @@ spot under deterministic rates, single reporting currency, uncollateralized; it 
 counterparty credit-spread delta, equity/FX spot delta+vega, and eligible-hedge MV
 sensitivities (every trade must declare its market factor for the market legs —
 all-or-none). IR market sensitivities need a key-rate-bumpable term curve and are a
-scoped extension. See `example/sacva_portfolio_demo.py`.
+scoped extension. See `example/sacva/sacva_portfolio_demo.py`.
 
 ### Stateful (autocallable) exposure (MAR50.32, snowball)
 

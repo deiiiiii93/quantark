@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Stage 11c -- Gate G5, the pre-flight grid-resolution sweep.
 
-    .venv/bin/python example/mo_volmodels/11c_grid_preflight.py
+    .venv/bin/python example/case_studies/mo_volmodels/11c_grid_preflight.py
 
 `fdf3a70` promoted the spatial-grid resolution check from a warning to a
 fail-closed ValidationError.  That is correct, and it converts a silent
@@ -50,7 +50,7 @@ HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 
-DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
 DEFAULT_INCEPTIONS = PROJECT_ROOT / "output/volmodel_backtest/inceptions.json"
 DEFAULT_OUT = PROJECT_ROOT / "output/pde_convergence_gate/grid_preflight.json"
 

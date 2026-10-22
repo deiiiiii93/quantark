@@ -16,7 +16,7 @@ import statistics
 
 ROOT = pathlib.Path(
     "/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge/"
-    "example/snowball_q_term_structure/data/bucket_hedge_v2/subset_transition/"
+    "example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset_transition/"
     "runs/20230504/term_flat_q__front"
 )
 

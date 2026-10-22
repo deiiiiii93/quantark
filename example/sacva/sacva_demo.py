@@ -1,7 +1,7 @@
 """SA-CVA demo: multi-class CVA portfolio -> capital + dashboard.
 
 Run:
-    python example/sacva_demo.py
+    python example/sacva/sacva_demo.py
 """
 
 from quantark.sacva import (SACVACalculator, CVAPortfolio, CVASensitivity,

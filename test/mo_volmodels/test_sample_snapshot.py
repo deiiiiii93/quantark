@@ -4,13 +4,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SNAP = ROOT / "example/mo_volmodels/data/mo_snapshot_sample.json"
+SNAP = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
 
 
 def test_sample_snapshot_schema():
     if not SNAP.exists():
         subprocess.run(
-            [sys.executable, str(ROOT / "example/mo_volmodels/make_sample_snapshot.py")],
+            [sys.executable, str(ROOT / "example/case_studies/mo_volmodels/make_sample_snapshot.py")],
             check=True,
         )
     snap = json.loads(SNAP.read_text())

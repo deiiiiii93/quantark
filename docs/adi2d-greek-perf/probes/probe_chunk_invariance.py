@@ -32,7 +32,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16 = ROOT / "example" / "mo_volmodels" / "16_adi_greek_certification.py"
+STAGE16 = ROOT / "example" / "case_studies" / "mo_volmodels" / "16_adi_greek_certification.py"
 OUTPUT_DIR = ROOT / "output" / "chunk_invariance"
 
 LADDER = (4, 8, 16)

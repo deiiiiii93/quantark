@@ -1,6 +1,6 @@
 """Demo: Local Volatility, Heston, and Heston-SLV pricing for equity and FX.
 
-Run: python example/vol_models_demo.py
+Run: python example/volmodels/vol_models_demo.py
 
 Shows the new quantark.volmodels engines:
   - Local Volatility (Dupire) via Monte Carlo and PDE

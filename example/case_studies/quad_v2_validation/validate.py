@@ -20,7 +20,7 @@ import numpy as np
 import scipy
 
 ROOT = Path(__file__).resolve().parents[3]
-AUDIT = ROOT / "example/gaussian_quad_comparison"
+AUDIT = ROOT / "example/case_studies/gaussian_quad_comparison"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(AUDIT))
 from contracts import cases

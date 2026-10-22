@@ -5,7 +5,7 @@ own threshold is ``min_expiries = 2``.  Dupire local volatility needs at least
 three maturity pillars to form dC/dT, so two admitted dates (2024-09-30,
 2025-04-08) were arbitrage-free yet unpriceable - they killed 20 of 27
 ``localvol`` runs partway through a fleet replay.  They are now excluded via
-``example/mo_volmodels/exclude_thin_surfaces.py`` and covered by the manifest's
+``example/case_studies/mo_volmodels/exclude_thin_surfaces.py`` and covered by the manifest's
 carry-forward policy.
 """
 
@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-HISTORY_DIR = ROOT / "example/mo_volmodels/data/history"
-MODULE_PATH = ROOT / "example/mo_volmodels/exclude_thin_surfaces.py"
+HISTORY_DIR = ROOT / "example/case_studies/mo_volmodels/data/history"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/exclude_thin_surfaces.py"
 
 spec = importlib.util.spec_from_file_location("exclude_thin_surfaces", MODULE_PATH)
 mod = importlib.util.module_from_spec(spec)

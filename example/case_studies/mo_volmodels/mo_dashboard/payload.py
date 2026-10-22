@@ -23,7 +23,7 @@ SCHEMA_VERSION = 1
 # operating point first, and fdf3a70 made under-resolution fail closed.
 CHAIN: Tuple[str, ...] = ("G1", "G4", "G2", "G5", "fleet", "aggregate")
 
-DEFAULT_REGISTRY = "example/mo_volmodels/mo_dashboard.yaml"
+DEFAULT_REGISTRY = "example/case_studies/mo_volmodels/mo_dashboard.yaml"
 AGGREGATE_ARTIFACT = "output/volmodel_backtest/aggregate.json"
 
 
@@ -57,7 +57,7 @@ def cohort_block(project_root: Path) -> Dict[str, Any]:
     """Cohort pin.  cohort.py is a pure JSON reader -- no pricing imports."""
     try:
         cohort = fleet_mod._cohort()
-        history = Path(project_root) / "example/mo_volmodels/data/history"
+        history = Path(project_root) / "example/case_studies/mo_volmodels/data/history"
         admitted = cohort.admitted_dates(history)
         excluded = cohort.excluded_records(history)
         return {

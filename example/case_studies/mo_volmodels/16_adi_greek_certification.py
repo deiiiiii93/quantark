@@ -15,7 +15,7 @@ never converted into an MC route: the decision is
 
 Production incremental amendment::
 
-    .venv/bin/python example/mo_volmodels/16_adi_greek_certification.py \
+    .venv/bin/python example/case_studies/mo_volmodels/16_adi_greek_certification.py \
       --amend-parent-evidence output/adi_greek_certification_schema9/adi_greek_certification.json \
       --amend-parent-decision output/adi_greek_certification_schema9/adi_greek_certification_decision.json
 
@@ -24,7 +24,7 @@ A fresh 14-cell production recertification requires the explicit
 
 Fast plumbing run (explicitly non-admissive)::
 
-    .venv/bin/python example/mo_volmodels/16_adi_greek_certification.py --quick
+    .venv/bin/python example/case_studies/mo_volmodels/16_adi_greek_certification.py --quick
 """
 
 from __future__ import annotations
@@ -416,9 +416,9 @@ REQUIRED_ANCHOR_NAMES = frozenset(
 # change its numerical evidence.  Checkpoints from a different source state or
 # run configuration are rejected rather than silently mixed into one report.
 IMPLEMENTATION_INPUTS = (
-    "example/mo_volmodels/11_pde_convergence_gate.py",
-    "example/mo_volmodels/12_snowball_volmodel_backtest.py",
-    "example/mo_volmodels/16_adi_greek_certification.py",
+    "example/case_studies/mo_volmodels/11_pde_convergence_gate.py",
+    "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py",
+    "example/case_studies/mo_volmodels/16_adi_greek_certification.py",
     "quantark/validation/__init__.py",
     "quantark/validation/greek_certification.py",
     # The rest of the certification package, which the file-by-file list had

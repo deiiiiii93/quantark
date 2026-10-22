@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-HTML = ROOT / "example/mo_volmodels/data/mo_volmodels_lecture_sample.html"
+HTML = ROOT / "example/case_studies/mo_volmodels/data/mo_volmodels_lecture_sample.html"
 
 
 def test_stage06_lecture_builds():
@@ -14,10 +14,10 @@ def test_stage06_lecture_builds():
         ("04_heston_calibration.py", ["--tag", "sample"]),
         ("05_slv_calibration.py", ["--tag", "sample"]),
     ]:
-        subprocess.run([sys.executable, str(ROOT / "example/mo_volmodels" / stage), *extra],
+        subprocess.run([sys.executable, str(ROOT / "example/case_studies/mo_volmodels" / stage), *extra],
                        check=True, cwd=ROOT)
     subprocess.run(
-        [sys.executable, str(ROOT / "example/mo_volmodels/06_lecture.py"), "--tag", "sample"],
+        [sys.executable, str(ROOT / "example/case_studies/mo_volmodels/06_lecture.py"), "--tag", "sample"],
         check=True, cwd=ROOT,
     )
     html = HTML.read_text()
@@ -25,4 +25,4 @@ def test_stage06_lecture_builds():
     for token in ("Local Vol", "Heston", "SLV", "put-call parity", "Dupire", "Feller"):
         assert token in html, f"missing lecture content: {token}"
     assert "data:image/png;base64," in html  # self-contained figures
-    assert (ROOT / "example/mo_volmodels/data/comparison_summary_sample.csv").exists()
+    assert (ROOT / "example/case_studies/mo_volmodels/data/comparison_summary_sample.csv").exists()

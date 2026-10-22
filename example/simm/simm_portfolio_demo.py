@@ -9,7 +9,7 @@ Demonstrates the full quant-ark portfolio-to-SIMM workflow:
   5. Render an interactive dashboard
 
 Usage:
-    python example/simm_portfolio_demo.py
+    python example/simm/simm_portfolio_demo.py
     # Generates simm_portfolio_dashboard.html in example/
 """
 from __future__ import annotations

@@ -7,9 +7,9 @@ history, generate deterministic stress paths, solve per-product fair coupons,
 run daily OTC backtests, and export CSV/XLSX/DOCX/HTML/chart artifacts.
 
 Usage:
-    python example/ppp_dki_snowball_backtest_case_study.py
-    python example/ppp_dki_snowball_backtest_case_study.py --refresh-data
-    python example/ppp_dki_snowball_backtest_case_study.py --synthetic-only --scenario-days 60
+    python example/case_studies/ppp_dki_snowball_backtest/ppp_dki_snowball_backtest_case_study.py
+    python example/case_studies/ppp_dki_snowball_backtest/ppp_dki_snowball_backtest_case_study.py --refresh-data
+    python example/case_studies/ppp_dki_snowball_backtest/ppp_dki_snowball_backtest_case_study.py --synthetic-only --scenario-days 60
 """
 
 from __future__ import annotations
@@ -247,7 +247,7 @@ def load_akshare():
 # The fetch/normalize helpers below (_pick_column, normalize_index_spot,
 # fetch_csi1000_spot, third_friday, add_months, contract_expiry,
 # futures_contract_symbols, normalize_im_futures, fetch_im_futures) are
-# mirrored in example/mo_volmodels/01_refresh_market_cache.py — that script
+# mirrored in example/case_studies/mo_volmodels/01_refresh_market_cache.py — that script
 # runs under the AKShare interpreter, which cannot import quantark. Keep the
 # two copies in sync.
 def _pick_column(df: pd.DataFrame, candidates: list[str], label: str) -> str:

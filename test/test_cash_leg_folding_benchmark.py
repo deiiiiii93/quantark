@@ -1,8 +1,8 @@
-"""Smoke test of example/cash_leg_folding_benchmark.py on tiny grids (ship spec 2026-10-21 AC13)."""
+"""Smoke test of example/case_studies/engine_benchmarks/cash_leg_folding_benchmark.py on tiny grids (ship spec 2026-10-21 AC13)."""
 import importlib.util
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "example" / "cash_leg_folding_benchmark.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "example" / "case_studies" / "engine_benchmarks" / "cash_leg_folding_benchmark.py"
 
 
 def _load():

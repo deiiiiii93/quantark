@@ -23,14 +23,14 @@ surface or calibration failure, and an excluded current surface is reported as
 
 ```bash
 # Run through the current Shanghai date.
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run
 
 # Deterministic historical/as-of operation.
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run \
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run \
   --as-of 2026-07-31
 
 # Read-only health check.
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py status --json
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py status --json
 ```
 
 Surface construction defaults to one worker. This is intentional: the earlier
@@ -42,7 +42,7 @@ policy. It does not launch an accidental multi-year Heston-SLV backfill. To
 request such a backfill explicitly:
 
 ```bash
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run \
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run \
   --backfill-calibrations \
   --calibration-start 2025-07-31 \
   --calibration-end 2026-07-30 \
@@ -58,7 +58,7 @@ Independent daily calibration remains the default. Enable the stability scheme
 explicitly with:
 
 ```bash
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run \
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run \
   --temporal-smoothing
 ```
 
@@ -105,7 +105,7 @@ excluded by the existing admission gates.
 Create a stability artifact from a completed bounded backfill:
 
 ```bash
-.venv/bin/python example/mo_volmodels/15_calibration_stability_report.py \
+.venv/bin/python example/case_studies/mo_volmodels/15_calibration_stability_report.py \
   --start 2025-07-31 \
   --end 2026-07-30
 ```
@@ -129,7 +129,7 @@ Default runtime root: `output/mo_daily_calibration/`
 | `logs/daily.stderr.log` | launchd stderr |
 
 Historical source and surface artifacts remain under
-`example/mo_volmodels/data/history/`.
+`example/case_studies/mo_volmodels/data/history/`.
 
 ## Status and exit codes
 
@@ -153,14 +153,14 @@ the last exception when present.
 Install the per-user launchd service:
 
 ```bash
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py install
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py status
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py install
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py status
 ```
 
 Install the same schedule with temporal calibration enabled:
 
 ```bash
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py install \
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py install \
   --temporal-smoothing
 ```
 
@@ -171,13 +171,13 @@ pipeline has a non-blocking lock, atomic manifests, and persistent caches.
 Force an immediate run after installation:
 
 ```bash
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py install --kickstart
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py install --kickstart
 ```
 
 Uninstall only when intentionally retiring the service:
 
 ```bash
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py uninstall
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py uninstall
 ```
 
 ## Recovery

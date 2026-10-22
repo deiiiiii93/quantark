@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Stage 16 -- the study progress dashboard.
 
-    .venv/bin/python example/mo_volmodels/16_dashboard.py            # snapshot
-    .venv/bin/python example/mo_volmodels/16_dashboard.py --serve    # live
+    .venv/bin/python example/case_studies/mo_volmodels/16_dashboard.py            # snapshot
+    .venv/bin/python example/case_studies/mo_volmodels/16_dashboard.py --serve    # live
 
 Read-only.  The only thing this writes is the HTML file named by --out.
 """
@@ -22,7 +22,7 @@ from mo_dashboard.serve import serve  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT = PROJECT_ROOT / "output/snowball_dashboard_latest.html"
-DEFAULT_REGISTRY = PROJECT_ROOT / "example/mo_volmodels/mo_dashboard.yaml"
+DEFAULT_REGISTRY = PROJECT_ROOT / "example/case_studies/mo_volmodels/mo_dashboard.yaml"
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -45,7 +45,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     registry = (
         args.registry
         if args.registry is not None
-        else project_root / "example/mo_volmodels/mo_dashboard.yaml"
+        else project_root / "example/case_studies/mo_volmodels/mo_dashboard.yaml"
     )
 
     if args.serve:

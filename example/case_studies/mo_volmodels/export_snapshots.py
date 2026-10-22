@@ -12,8 +12,8 @@ manifest record and a resumed run rebuilds nothing.
 
 Idempotent: a date whose snapshot already exists is skipped unless ``--force``.
 
-Run:  .venv/bin/python example/mo_volmodels/export_snapshots.py
-      .venv/bin/python example/mo_volmodels/export_snapshots.py --start 20260701
+Run:  .venv/bin/python example/case_studies/mo_volmodels/export_snapshots.py
+      .venv/bin/python example/case_studies/mo_volmodels/export_snapshots.py --start 20260701
 """
 
 from __future__ import annotations

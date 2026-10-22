@@ -10,13 +10,13 @@ from __future__ import annotations
 import sys
 import time
 
-sys.path.insert(0, "/private/tmp/quant-ark-adi-greek-certification/example/mo_volmodels")
+sys.path.insert(0, "/private/tmp/quant-ark-adi-greek-certification/example/case_studies/mo_volmodels")
 
 import importlib.util
 
 spec = importlib.util.spec_from_file_location(
     "cert16",
-    "/private/tmp/quant-ark-adi-greek-certification/example/mo_volmodels/16_adi_greek_certification.py",
+    "/private/tmp/quant-ark-adi-greek-certification/example/case_studies/mo_volmodels/16_adi_greek_certification.py",
 )
 cert = importlib.util.module_from_spec(spec)
 sys.modules["cert16"] = cert  # dataclass() resolves annotations via sys.modules

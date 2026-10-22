@@ -4,11 +4,11 @@ This is the market-data network boundary for the multi-year snowball backtest
 data build.  It seeds from the frozen case-study caches
 (``output/case_study/ppp_dki_snowball_backtest_20260430/cache``), extends them
 via AKShare to the latest available trading day, and writes the refreshed
-caches to ``example/mo_volmodels/data/history`` without touching the
+caches to ``example/case_studies/mo_volmodels/data/history`` without touching the
 case-study output directory.
 
 The fetch/normalize logic mirrors
-``example/ppp_dki_snowball_backtest_case_study.py`` (same schemas, column
+``example/case_studies/ppp_dki_snowball_backtest/ppp_dki_snowball_backtest_case_study.py`` (same schemas, column
 names, and date formats as the seeded CSVs: ``date,spot`` and
 ``date,contract,futures_price,expiry_date,multiplier``).  That module cannot
 be imported here because it imports ``quantark`` at module level and the
@@ -43,8 +43,8 @@ Fail-closed policy:
 
 Must run under the AKShare interpreter::
 
-    /opt/anaconda3/bin/python example/mo_volmodels/01_refresh_market_cache.py
-    /opt/anaconda3/bin/python example/mo_volmodels/01_refresh_market_cache.py \
+    /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_refresh_market_cache.py
+    /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_refresh_market_cache.py \
         --end 2026-07-22
 """
 
@@ -73,7 +73,7 @@ DEFAULT_OUTPUT_DIR = HERE / "data" / "history"
 SPOT_FILENAME = "csi1000_spot.csv"
 FUTURES_FILENAME = "im_futures.csv"
 
-# Mirrored from example/ppp_dki_snowball_backtest_case_study.py.
+# Mirrored from example/case_studies/ppp_dki_snowball_backtest/ppp_dki_snowball_backtest_case_study.py.
 UNDERLYING_SYMBOL = "000852"
 FUTURES_PREFIX = "IM"
 FUTURES_MULTIPLIER = 200.0

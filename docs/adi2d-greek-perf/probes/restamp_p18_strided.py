@@ -52,7 +52,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
-HARNESS_RELATIVE = "example/mo_volmodels/16_adi_greek_certification.py"
+HARNESS_RELATIVE = "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 SOURCE_DIR = ROOT / "output" / "p17_fixed"
 TARGET_DIR = ROOT / "output" / "p18_strided"
 

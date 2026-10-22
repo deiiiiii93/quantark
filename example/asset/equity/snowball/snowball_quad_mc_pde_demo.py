@@ -5,19 +5,19 @@ This script compares SnowballQuadEngine, SnowballMCEngine, and SnowballPDESolver
 across several snowball configurations. Results are printed in a table.
 
 Usage:
-    python example/snowball_quad_mc_pde_demo.py
-    python example/snowball_quad_mc_pde_demo.py --paths 30000 --grid 801 --pde-grid 200 --pde-steps 200
-    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --rqmc-paths-mode total --rqmc-max-batches 4
+    python example/asset/equity/snowball/snowball_quad_mc_pde_demo.py
+    python example/asset/equity/snowball/snowball_quad_mc_pde_demo.py --paths 30000 --grid 801 --pde-grid 200 --pde-steps 200
+    python example/asset/equity/snowball/snowball_quad_mc_pde_demo.py --method randomized_quasi --rqmc-paths-mode total --rqmc-max-batches 4
 
 RQMC examples:
     # Total paths across batches (Sobol-ideal per batch)
-    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --paths 100000 --rqmc-paths-mode total --rqmc-min-batches 4 --rqmc-max-batches 4
+    python example/asset/equity/snowball/snowball_quad_mc_pde_demo.py --method randomized_quasi --paths 100000 --rqmc-paths-mode total --rqmc-min-batches 4 --rqmc-max-batches 4
 
     # Per-batch paths (legacy behavior)
-    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --paths 25000 --rqmc-paths-mode per_batch --rqmc-min-batches 4 --rqmc-max-batches 4
+    python example/asset/equity/snowball/snowball_quad_mc_pde_demo.py --method randomized_quasi --paths 25000 --rqmc-paths-mode per_batch --rqmc-min-batches 4 --rqmc-max-batches 4
 
     # Absolute target std (price units)
-    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --rqmc-target-std 0.5 --rqmc-target-std-mode absolute
+    python example/asset/equity/snowball/snowball_quad_mc_pde_demo.py --method randomized_quasi --rqmc-target-std 0.5 --rqmc-target-std-mode absolute
 """
 
 import argparse

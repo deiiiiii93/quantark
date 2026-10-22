@@ -43,7 +43,7 @@ study reproduces identical JSON modulo ``"timings"`` fields (excluded from the
 evidence hash).  This script never modifies engine/kernel files; it only reads
 data and writes its own output artifacts (atomically).
 
-Run:  .venv/bin/python example/mo_volmodels/11_pde_convergence_gate.py [--quick]
+Run:  .venv/bin/python example/case_studies/mo_volmodels/11_pde_convergence_gate.py [--quick]
 """
 
 from __future__ import annotations
@@ -2678,7 +2678,7 @@ def _default_cfg(args: argparse.Namespace) -> Dict[str, Any]:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--history-dir", default="example/mo_volmodels/data/history")
+    parser.add_argument("--history-dir", default="example/case_studies/mo_volmodels/data/history")
     parser.add_argument("--out-dir", default="output/pde_convergence_gate")
     parser.add_argument("--dates", default=None, help="comma-separated YYYYMMDD list")
     parser.add_argument(

@@ -5,7 +5,7 @@ their own ``_common`` by that bare name, and one pytest process running
 both studies' tests would otherwise hand one study the other's module.
 
 The product, the fair-coupon solver, the carry models and the hedge
-policies are the q term-structure study's (``example/snowball_q_term_structure/_common.py``),
+policies are the q term-structure study's (``example/case_studies/snowball_q_term_structure/_common.py``),
 loaded here under a fixed module name so the two studies cannot drift.
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ from quantark.util.exceptions import ValidationError
 
 STUDY_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = STUDY_DIR.parents[2]
-Q_STUDY_DIR = PROJECT_ROOT / "example" / "snowball_q_term_structure"
+Q_STUDY_DIR = PROJECT_ROOT / "example" / "case_studies" / "snowball_q_term_structure"
 DATA_DIR = STUDY_DIR / "data"
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output" / "snowball_simulated_paths"
 DEFAULT_HISTORICAL_DIR = PROJECT_ROOT / "output" / "snowball_q_term_structure"

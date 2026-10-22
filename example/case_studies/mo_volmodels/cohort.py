@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history"
 
 # Frozen 2026-08-01 (spec §7A.12).  Raising this is a deliberate re-baseline:
 # it changes the G1 count, and past 2026-08-01 it changes the inception fleet

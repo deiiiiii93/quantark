@@ -1,4 +1,4 @@
-"""Tests for example/mo_volmodels/12_snowball_volmodel_backtest.py (Phase 4).
+"""Tests for example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py (Phase 4).
 
 Covers the pieces that decide what the fleet actually runs: term-sheet parity
 with the gate-certified stage 11 product, the inception scheduler, Gate G2
@@ -23,8 +23,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
-HISTORY_DIR = ROOT / "example/mo_volmodels/data/history"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py"
+HISTORY_DIR = ROOT / "example/case_studies/mo_volmodels/data/history"
 
 spec = importlib.util.spec_from_file_location(
     "snowball_volmodel_backtest_12", MODULE_PATH
@@ -1552,11 +1552,11 @@ def code_repo(tmp_path):
     """A miniature repo shaped like this one: pricing code, data, docs."""
     repo = tmp_path / "repo"
     (repo / "quantark").mkdir(parents=True)
-    (repo / "example/mo_volmodels/data").mkdir(parents=True)
+    (repo / "example/case_studies/mo_volmodels/data").mkdir(parents=True)
     (repo / "docs").mkdir(parents=True)
     (repo / "quantark" / "engine.py").write_text("VERSION = 1\n", encoding="utf-8")
-    (repo / "example/mo_volmodels/12_fleet.py").write_text("X = 1\n", encoding="utf-8")
-    (repo / "example/mo_volmodels/data/spot.csv").write_text("d,s\n", encoding="utf-8")
+    (repo / "example/case_studies/mo_volmodels/12_fleet.py").write_text("X = 1\n", encoding="utf-8")
+    (repo / "example/case_studies/mo_volmodels/data/spot.csv").write_text("d,s\n", encoding="utf-8")
     (repo / "docs" / "note.md").write_text("hello\n", encoding="utf-8")
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "t@example.com")
@@ -1570,7 +1570,7 @@ def test_code_fingerprint_sees_an_uncommitted_edit(code_repo):
     """Stage 11/12 are routinely run dirty; committed content alone is blind."""
     before = s12.compute_code_fingerprint(code_repo)
     assert before is not None and len(before) == 64
-    (code_repo / "example/mo_volmodels/12_fleet.py").write_text(
+    (code_repo / "example/case_studies/mo_volmodels/12_fleet.py").write_text(
         "X = 2\n", encoding="utf-8"
     )
     assert s12.compute_code_fingerprint(code_repo) != before
@@ -1601,7 +1601,7 @@ def test_an_unrelated_commit_does_not_move_the_fingerprint(code_repo):
 def test_market_data_does_not_move_the_code_fingerprint(code_repo):
     """data/ is rewritten daily and has its own window-clipped fingerprint."""
     before = s12.compute_code_fingerprint(code_repo)
-    (code_repo / "example/mo_volmodels/data/spot.csv").write_text(
+    (code_repo / "example/case_studies/mo_volmodels/data/spot.csv").write_text(
         "d,s\n2026-08-28,1.0\n", encoding="utf-8"
     )
     assert s12.compute_code_fingerprint(code_repo) == before

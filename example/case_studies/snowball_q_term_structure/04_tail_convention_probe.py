@@ -14,8 +14,8 @@ under a pinned-futures spot bump, and writes the numbers to
 entirely the flat-q tail: with the forward-carry tail it vanishes.
 
 Usage:
-    .venv/bin/python example/snowball_q_term_structure/04_tail_convention_probe.py
-    .venv/bin/python example/snowball_q_term_structure/04_tail_convention_probe.py --date 2024-07-01
+    .venv/bin/python example/case_studies/snowball_q_term_structure/04_tail_convention_probe.py
+    .venv/bin/python example/case_studies/snowball_q_term_structure/04_tail_convention_probe.py --date 2024-07-01
 """
 
 from __future__ import annotations

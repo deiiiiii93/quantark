@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "example/mo_volmodels/data/mo_hedging_sample.json"
-PLOT = ROOT / "example/mo_volmodels/data/plots/09_delta_hedging_sample.png"
+OUT = ROOT / "example/case_studies/mo_volmodels/data/mo_hedging_sample.json"
+PLOT = ROOT / "example/case_studies/mo_volmodels/data/plots/09_delta_hedging_sample.png"
 
 
 def test_stage09_delta_hedging_runs():
@@ -15,7 +15,7 @@ def test_stage09_delta_hedging_runs():
         ("04_heston_calibration.py", ["--tag", "sample"]),
     ]:
         subprocess.run(
-            [sys.executable, str(ROOT / "example/mo_volmodels" / stage), *extra],
+            [sys.executable, str(ROOT / "example/case_studies/mo_volmodels" / stage), *extra],
             check=True,
             cwd=ROOT,
         )
@@ -23,7 +23,7 @@ def test_stage09_delta_hedging_runs():
     subprocess.run(
         [
             sys.executable,
-            str(ROOT / "example/mo_volmodels/09_delta_hedging.py"),
+            str(ROOT / "example/case_studies/mo_volmodels/09_delta_hedging.py"),
             "--tag",
             "sample",
             "--fast",

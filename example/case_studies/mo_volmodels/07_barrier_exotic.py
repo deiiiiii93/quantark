@@ -1,6 +1,6 @@
 """Stage 07 — an up-and-out call exotic priced MC AND PDE under BSM / LV / Heston / SLV.
 
-Run: .venv/bin/python example/mo_volmodels/07_barrier_exotic.py [--tag latest|sample]
+Run: .venv/bin/python example/case_studies/mo_volmodels/07_barrier_exotic.py [--tag latest|sample]
 
 All four models are calibrated to the SAME vanilla smile (stages 02-05), yet a barrier
 option — which depends on forward-vol DYNAMICS, not just the terminal smile — prices

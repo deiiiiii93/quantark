@@ -15,7 +15,7 @@ The production term sheet is the locked 3Y snowball on 000852.SH
 - r = 0.02 flat (fleet config, not data).
 
 The product construction mirrors the PDE convergence gate
-(``example/mo_volmodels/11_pde_convergence_gate.py``) exactly: same calendar
+(``example/case_studies/mo_volmodels/11_pde_convergence_gate.py``) exactly: same calendar
 rules, same ACT/365 time fractions, same ``create_standard_snowball`` call.
 Barriers/strike/notional are fixed off the INCEPTION spot from the spot CSV
 (the contractual index fixing — the same series the lifecycle tracker

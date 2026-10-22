@@ -106,9 +106,9 @@ program just delivered.
 
 Three constants, which the pinned invariant requires be changed together:
 
-- `example/mo_volmodels/11_pde_convergence_gate.py:178`
-- `example/mo_volmodels/12_snowball_volmodel_backtest.py:122`
-- `example/mo_volmodels/16_adi_greek_certification.py:355`
+- `example/case_studies/mo_volmodels/11_pde_convergence_gate.py:178`
+- `example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py:122`
+- `example/case_studies/mo_volmodels/16_adi_greek_certification.py:355`
 
 Tests reference the dicts symbolically and follow automatically; no replay golden
 references `ADI_2D_PRODUCTION_ENGINE_CONTROLS`. Stage-11 gate and stage-12

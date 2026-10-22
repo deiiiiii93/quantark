@@ -1,7 +1,7 @@
 """Stage 01 — fetch a CSI 1000 (MO / 中证1000股指期权) option snapshot via AKShare.
 
 RUN WITH THE AKSHARE INTERPRETER (quantark's .venv has no akshare):
-    /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py
+    /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_snapshot.py
 
 Writes data/mo_snapshot_YYYYMMDD.json and data/mo_snapshot_latest.json.
 Stages 02-06 replay that snapshot offline under .venv/bin/python.
@@ -21,7 +21,7 @@ try:
 except ImportError:
     sys.exit(
         "akshare not found in this interpreter. Run stage 01 with the anaconda python:\n"
-        "  /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py"
+        "  /opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_snapshot.py"
     )
 
 DATA = Path(__file__).resolve().parent / "data"

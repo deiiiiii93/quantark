@@ -23,7 +23,7 @@ the product coordinate: the strike and the alive-at-t1 tenor) and share one
 
 ## Quick start
 
-`example/pnl_explain_demo.py` runs one risk day at desk notionals on a delta-hedged
+`example/pnlexplain/pnl_explain_demo.py` runs one risk day at desk notionals on a delta-hedged
 index book: a vanilla, an American put whose engine changes pricing method, a barrier
 put near its barrier, a snowball and a front-future hedge, plus a snowball knock-out
 day. The move is driven by the rate and the futures basis, with the dividend yield

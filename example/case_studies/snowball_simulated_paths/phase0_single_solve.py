@@ -1,7 +1,7 @@
 """Phase 0: one PDE solve per state instead of two -- a standalone, runtime-patched demo.
 
-    .venv/bin/python example/snowball_simulated_paths/phase0_single_solve.py
-    .venv/bin/python example/snowball_simulated_paths/phase0_single_solve.py --skip-suites
+    .venv/bin/python example/case_studies/snowball_simulated_paths/phase0_single_solve.py
+    .venv/bin/python example/case_studies/snowball_simulated_paths/phase0_single_solve.py --skip-suites
 
 Exact repricing on the PDE engine calls ``engine.price`` and then
 ``engine.calculate_greeks`` per state, and each runs ``_solve``.  Two

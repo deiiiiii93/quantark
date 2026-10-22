@@ -11,7 +11,7 @@
       "power": 17,
       "replicates": 8,
       "only": "",
-      "out": "example/quad_reference_comparison/results"
+      "out": "example/case_studies/quad_reference_comparison/results"
     },
     "sha256": {
       "docs/quad/ref_scripts/option_quad.py": "386ff09408c919756c57254ca07b540e8641790d157b0de5fbfd1a1ed8dd0eb8",

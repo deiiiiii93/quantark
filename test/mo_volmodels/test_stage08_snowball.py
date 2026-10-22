@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "example/mo_volmodels/data/mo_snowball_sample.json"
-PLOT = ROOT / "example/mo_volmodels/data/plots/08_snowball_sample.png"
+OUT = ROOT / "example/case_studies/mo_volmodels/data/mo_snowball_sample.json"
+PLOT = ROOT / "example/case_studies/mo_volmodels/data/plots/08_snowball_sample.png"
 
 
 def test_stage08_snowball_exotic_runs():
@@ -15,7 +15,7 @@ def test_stage08_snowball_exotic_runs():
         ("04_heston_calibration.py", ["--tag", "sample"]),
     ]:
         subprocess.run(
-            [sys.executable, str(ROOT / "example/mo_volmodels" / stage), *extra],
+            [sys.executable, str(ROOT / "example/case_studies/mo_volmodels" / stage), *extra],
             check=True,
             cwd=ROOT,
         )
@@ -23,7 +23,7 @@ def test_stage08_snowball_exotic_runs():
     subprocess.run(
         [
             sys.executable,
-            str(ROOT / "example/mo_volmodels/08_snowball_exotic.py"),
+            str(ROOT / "example/case_studies/mo_volmodels/08_snowball_exotic.py"),
             "--tag",
             "sample",
             "--fast",

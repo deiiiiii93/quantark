@@ -5,7 +5,7 @@ is the measured table next to the Gate C status of each state.
 
 ```bash
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
-python example/intraday_benchmark/run_benchmark.py --engine quad_v2 --workload single --repeats 5 --out quad_single.json
+python example/case_studies/intraday_benchmark/run_benchmark.py --engine quad_v2 --workload single --repeats 5 --out quad_single.json
 ```
 
 | Workload | What is timed |

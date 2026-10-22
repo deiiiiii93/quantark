@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16 = ROOT / "example" / "mo_volmodels" / "16_adi_greek_certification.py"
+STAGE16 = ROOT / "example" / "case_studies" / "mo_volmodels" / "16_adi_greek_certification.py"
 OUTPUT_DIR = ROOT / "output" / "gate_driven_rehearsal"
 
 # Matches the production matrix the real run will declare.

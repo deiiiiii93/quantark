@@ -18,14 +18,14 @@ Two details are deliberate:
 
 The development-only control pilot is intentionally non-admissive::
 
-    .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
+    .venv/bin/python example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py \
       --development-pilot --output-dir output/adi_slv_aggregate_pilot
 
 The allocation is frozen from the complete development family and its
 projection hashes before either held-out seed is opened.  Run the production
 amendment with the exact schema-11 parent::
 
-    .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
+    .venv/bin/python example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py \
       --parent-evidence output/adi_greek_certification_schema13/adi_greek_certification.json \
       --parent-decision output/adi_greek_certification_schema13/adi_greek_certification_decision.json \
       --resume --output-dir output/adi_greek_certification
@@ -241,9 +241,9 @@ PRODUCTION_PRIMARY_CELL_WORKERS = 3
 PRODUCTION_MIDDLE_CELL_WORKERS = 2
 
 IMPLEMENTATION_INPUTS = (
-    "example/mo_volmodels/12_snowball_volmodel_backtest.py",
-    "example/mo_volmodels/16_adi_greek_certification.py",
-    "example/mo_volmodels/17_adi_slv_aggregate_certification.py",
+    "example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py",
+    "example/case_studies/mo_volmodels/16_adi_greek_certification.py",
+    "example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py",
     "quantark/validation/greek_certification.py",
     "quantark/asset/equity/engine/mc/snowball_mc_engine.py",
     "quantark/asset/equity/engine/mc/snowball_vol_mc_engines.py",

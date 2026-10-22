@@ -23,7 +23,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[2]
 
 _spec = importlib.util.spec_from_file_location(
-    "cert16", REPO / "example" / "mo_volmodels" / "16_adi_greek_certification.py"
+    "cert16", REPO / "example" / "case_studies" / "mo_volmodels" / "16_adi_greek_certification.py"
 )
 assert _spec is not None and _spec.loader is not None
 cert = importlib.util.module_from_spec(_spec)

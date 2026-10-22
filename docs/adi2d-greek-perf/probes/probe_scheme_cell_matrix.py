@@ -40,7 +40,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-STAGE16 = ROOT / "example" / "mo_volmodels" / "16_adi_greek_certification.py"
+STAGE16 = ROOT / "example" / "case_studies" / "mo_volmodels" / "16_adi_greek_certification.py"
 # Long-lived artifacts live under /Users in the repo output tree, never
 # /private/tmp -- see RECOVERY.md for what the 2026-08-10 crash cost.
 OUTPUT_DIR = ROOT / "output" / "scheme_cell_matrix"

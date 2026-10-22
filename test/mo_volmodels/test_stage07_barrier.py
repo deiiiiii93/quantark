@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "example/mo_volmodels/data/mo_barrier_sample.json"
+OUT = ROOT / "example/case_studies/mo_volmodels/data/mo_barrier_sample.json"
 
 
 def test_stage07_barrier_divergence():
@@ -12,9 +12,9 @@ def test_stage07_barrier_divergence():
         ("02_build_iv_surface.py", ["--snapshot", "sample"]),
         ("04_heston_calibration.py", ["--tag", "sample"]),
     ]:
-        subprocess.run([sys.executable, str(ROOT / "example/mo_volmodels" / stage), *extra],
+        subprocess.run([sys.executable, str(ROOT / "example/case_studies/mo_volmodels" / stage), *extra],
                        check=True, cwd=ROOT)
-    subprocess.run([sys.executable, str(ROOT / "example/mo_volmodels/07_barrier_exotic.py"),
+    subprocess.run([sys.executable, str(ROOT / "example/case_studies/mo_volmodels/07_barrier_exotic.py"),
                     "--tag", "sample"], check=True, cwd=ROOT)
     res = json.loads(OUT.read_text())
     models = res["models"]

@@ -14,7 +14,7 @@ midpoints.
 
 Example::
 
-    .venv/bin/python example/mo_volmodels/10_calibration_diagnostics.py \
+    .venv/bin/python example/case_studies/mo_volmodels/10_calibration_diagnostics.py \
       --tags 20260430 20260515 20260615 20260630 20260706 20260715 20260720
 """
 

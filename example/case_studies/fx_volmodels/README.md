@@ -69,30 +69,30 @@ QuantArk's existing runtime.
 
 ```bash
 # 01a) Live CFETS fetch (the only command that accesses the network)
-.venv/bin/python example/fx_volmodels/01_fetch_cfets_snapshot.py \
+.venv/bin/python example/case_studies/fx_volmodels/01_fetch_cfets_snapshot.py \
   --date 2026-07-20 --time 16:00 --tag latest
 
 # 01b) Or replay previously archived raw CFETS replies without network access
-.venv/bin/python example/fx_volmodels/01_fetch_cfets_snapshot.py \
+.venv/bin/python example/case_studies/fx_volmodels/01_fetch_cfets_snapshot.py \
   --date 2026-07-20 --time 16:00 --raw-dir /tmp --tag latest
 
 # 02-07) Offline modeling and report generation
-.venv/bin/python example/fx_volmodels/02_build_fx_surface.py \
+.venv/bin/python example/case_studies/fx_volmodels/02_build_fx_surface.py \
   --tag latest --tenor-set core
-.venv/bin/python example/fx_volmodels/03_dupire_localvol.py --tag latest
-.venv/bin/python example/fx_volmodels/04_heston_calibration.py \
+.venv/bin/python example/case_studies/fx_volmodels/03_dupire_localvol.py --tag latest
+.venv/bin/python example/case_studies/fx_volmodels/04_heston_calibration.py \
   --tag latest --universe core --weight-mode equal
-.venv/bin/python example/fx_volmodels/05_slv_calibration.py --tag latest
-.venv/bin/python example/fx_volmodels/06_calibration_diagnostics.py \
+.venv/bin/python example/case_studies/fx_volmodels/05_slv_calibration.py --tag latest
+.venv/bin/python example/case_studies/fx_volmodels/06_calibration_diagnostics.py \
   --tags 20260430 20260515 20260615 20260630 20260715 latest \
   --output-tag latest --universe core
-.venv/bin/python example/fx_volmodels/07_explainer.py --tag latest
+.venv/bin/python example/case_studies/fx_volmodels/07_explainer.py --tag latest
 ```
 
 Or rerun stages 02–07 from an already frozen snapshot:
 
 ```bash
-.venv/bin/python example/fx_volmodels/run_suite.py \
+.venv/bin/python example/case_studies/fx_volmodels/run_suite.py \
   --tag latest \
   --history-tags 20260430 20260515 20260615 20260630 20260715
 ```
@@ -182,4 +182,4 @@ the promotion gate.
 ```
 
 The contract tests use tiny in-memory fixtures and `tmp_path`; they do not call
-CFETS and do not write into the shared `example/fx_volmodels/data` directory.
+CFETS and do not write into the shared `example/case_studies/fx_volmodels/data` directory.

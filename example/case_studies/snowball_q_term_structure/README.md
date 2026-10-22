@@ -13,7 +13,7 @@ backtest fleet, and an aggregator that writes a self-contained HTML report.
 
 ## Data (local, untracked)
 
-`example/mo_volmodels/data/history/` — CSI 1000 spot, the IM futures chain
+`example/case_studies/mo_volmodels/data/history/` — CSI 1000 spot, the IM futures chain
 (2–4 listed contracts a day), and the admitted MO IV-surface artifacts,
 2023-05-04 to 2026-09-03. The caches are written by the `mo_volmodels` fetch
 stages and are not tracked; every loader here fails closed with the stage to
@@ -152,21 +152,21 @@ terminated identically (the lifecycle depends on the spot path only).
 
 ```bash
 # 1) curve anatomy + static risk (≈ 6 min; --every-months 3 for a glance)
-.venv/bin/python example/snowball_q_term_structure/01_curve_and_static_risk.py
+.venv/bin/python example/case_studies/snowball_q_term_structure/01_curve_and_static_risk.py
 
 # 2) the fleet — quick look first (4 inceptions x 3 cells, ≈ 8 min on 3 workers)
-.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py --quick --workers 3
+.venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py --quick --workers 3
 
 #    full study grid (29 inceptions x 6 cells = 174 cells; 60–110 s per cell,
 #    49 min on 4 workers; keep the Mac awake)
 nohup caffeinate -i -m -s .venv/bin/python \
-    example/snowball_q_term_structure/02_backtest_fleet.py --workers 4 --resume > fleet.log 2>&1 &
+    example/case_studies/snowball_q_term_structure/02_backtest_fleet.py --workers 4 --resume > fleet.log 2>&1 &
 
 # 3) aggregate + report
-.venv/bin/python example/snowball_q_term_structure/03_aggregate_and_report.py
+.venv/bin/python example/case_studies/snowball_q_term_structure/03_aggregate_and_report.py
 
 # 4) the delta identity on one grid date under both tail conventions (≈ 10 s)
-.venv/bin/python example/snowball_q_term_structure/04_tail_convention_probe.py [--date 2025-03-03]
+.venv/bin/python example/case_studies/snowball_q_term_structure/04_tail_convention_probe.py [--date 2025-03-03]
 ```
 
 Persisted outputs (small) live in `data/`: `curve_anatomy.csv`,
@@ -213,32 +213,32 @@ option-forward models have no nodes to hedge and are refused at config time.
 
 ```bash
 # 0) numerical validation, offline, no vendor history needed (≈ 2 s)
-.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/05_bucket_hedge_validation.py \
     --synthetic --out-dir output/bucket_hedge_v2/validation
 
 # 1) one historical date, serialised so it can be replayed exactly
-.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/05_bucket_hedge_validation.py \
     --historical-dates 2025-03-03 \
-    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/validation
+    --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/validation
 
 # 2) a one-inception subset of the primary grid, with daily audits
-.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+.venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py \
     --study-grid buckets --max-inceptions 1 --workers 2 \
     --carry-audit-mode daily --record-carry-exposure \
-    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
+    --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
 
 # 3) the full primary grid (14 cells per eligible inception)
 nohup caffeinate -i -m -s .venv/bin/python \
-    example/snowball_q_term_structure/02_backtest_fleet.py \
+    example/case_studies/snowball_q_term_structure/02_backtest_fleet.py \
     --study-grid buckets --workers 4 --record-carry-exposure \
     --carry-audit-mode daily \
-    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full \
+    --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/full \
     --resume > bucket_fleet.log 2>&1 &
 
 # 4) aggregate — stage 06, NOT stage 03
-.venv/bin/python example/snowball_q_term_structure/06_bucket_hedge_report.py \
-    --run-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full/runs \
-    --out-dir example/snowball_q_term_structure/data
+.venv/bin/python example/case_studies/snowball_q_term_structure/06_bucket_hedge_report.py \
+    --run-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/full/runs \
+    --out-dir example/case_studies/snowball_q_term_structure/data
 ```
 
 Two things that are easy to get wrong here. Stage 03 aggregates the SIX-MODEL
@@ -728,7 +728,7 @@ obvious in advance.
   discount would see smaller coupons and a smaller flat-vs-term gap in
   levels, but the same roll-day and churn mechanics.
 - The vol channel is one ATM 1Y IV for every model; this study isolates
-  carry and says nothing about vol models (see `example/mo_volmodels`).
+  carry and says nothing about vol models (see `example/case_studies/mo_volmodels`).
 - Beyond the last listed tenor nobody quotes carry; the two tail conventions
   bracket that uncertainty and, for the spot-delta hedge, agree. They do
   not agree on the futures-tenor buckets (section 5): the far bucket and

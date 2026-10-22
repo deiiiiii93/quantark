@@ -16,7 +16,7 @@ attributable to the pricing/hedging model.  Comparing pooled distributions
 instead would be dominated by which inceptions happened to knock out.
 
 Run:
-    .venv/bin/python example/mo_volmodels/13_aggregate_and_report.py \
+    .venv/bin/python example/case_studies/mo_volmodels/13_aggregate_and_report.py \
         --run-dir output/volmodel_backtest
 """
 
@@ -2350,7 +2350,7 @@ def build_report(agg: Dict[str, Any], *, standalone: bool = True) -> str:
 <th>&sigma;-collapse</th><th>max Feller ratio</th></tr></thead>
 <tbody>{calib_rows}</tbody></table>
 <div class="callout"><b>Read the bound hits honestly.</b> The repo's own diagnostics
-(<code>example/mo_volmodels/MODEL_DIAGNOSTICS.md</code>) already showed Heston to be
+(<code>example/case_studies/mo_volmodels/MODEL_DIAGNOSTICS.md</code>) already showed Heston to be
 <em>weakly identified</em> on public CFFEX settlement data &mdash; &kappa; and &sigma; hit their
 frozen bounds on roughly half the sampled dates. A low IV RMSE therefore does <em>not</em>
 mean the parameters are well determined; it means several very different parameter sets
@@ -2640,8 +2640,8 @@ but it is not zero, and it does not shrink the way a PDE delta's discretization 
 
 <footer>
 Generated {generated} &middot; source
-<code>example/mo_volmodels/12_snowball_volmodel_backtest.py</code> (fleet) and
-<code>example/mo_volmodels/13_aggregate_and_report.py</code> (this report) &middot;
+<code>example/case_studies/mo_volmodels/12_snowball_volmodel_backtest.py</code> (fleet) and
+<code>example/case_studies/mo_volmodels/13_aggregate_and_report.py</code> (this report) &middot;
 engines from <code>quantark.volmodels</code> / <code>quantark.asset.equity.engine</code> &middot;
 market data: official CFFEX MO settlement files via AKShare.
 </footer>"""

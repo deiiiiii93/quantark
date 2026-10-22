@@ -150,7 +150,7 @@ pytest test/test_portfolio.py -v
 
 Run the demo:
 ```bash
-python example/portfolio_demo.py
+python example/portfolio/portfolio_demo.py
 ```
 
 ## Integration with Backtest Module

@@ -31,10 +31,10 @@ HESTON_PARAMETER_NAMES = ("v0", "kappa", "theta", "sigma", "rho")
 
 # Frozen Heston calibration preset "mo_frozen".
 # Provenance: values copied from the mo_volmodels suite —
-# example/mo_volmodels/04_heston_calibration.py (HESTON_BOUNDS,
+# example/case_studies/mo_volmodels/04_heston_calibration.py (HESTON_BOUNDS,
 # REGULARIZE_FELLER, SOLVER_TOLERANCES, target="iv", method="lewis", single
 # deterministic shortest-expiry ATM-variance start) and
-# example/mo_volmodels/10_calibration_diagnostics.py (same bounds, frozen
+# example/case_studies/mo_volmodels/10_calibration_diagnostics.py (same bounds, frozen
 # 2026-07 for the CFFEX MO cohort).  example/ scripts are NOT importable
 # from quantark (canonical-import rule), so the frozen configuration is
 # re-declared here; keep it in sync with the suite.

@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 REPO = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge")
-STUDY = REPO / "example/snowball_q_term_structure"
+STUDY = REPO / "example/case_studies/snowball_q_term_structure"
 os.environ["PYTHONPATH"] = str(REPO)
 for _k in [k for k in list(sys.modules) if k == "quantark" or k.startswith("quantark.")]:
     del sys.modules[_k]

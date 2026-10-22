@@ -2557,7 +2557,7 @@ The import shims deprecated in 0.4.x are removed, as announced:
   life-surface repricing providers with in-memory and on-disk state caches; a sampling
   accuracy gate; spawn-pool path batching; a conformance oracle against the replay
   engine; distributions with expected shortfall, paired comparisons on matched paths and
-  run persistence. Worked study: `example/snowball_simulated_paths`.
+  run persistence. Worked study: `example/case_studies/snowball_simulated_paths`.
 - Replay engine, futures carry buckets: immutable carry scenarios, signed bucket
   aggregation, joint delta and parallel carry hedge strategies, a multi-leg futures ledger
   with atomic execution, carry audits by independent repricing, stress of unquoted carry,

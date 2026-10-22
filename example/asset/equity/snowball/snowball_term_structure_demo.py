@@ -2,7 +2,7 @@
 Snowball demo with term-structure volatility and dividend yield.
 
 Usage:
-    python example/snowball_term_structure_demo.py
+    python example/asset/equity/snowball/snowball_term_structure_demo.py
 """
 
 import sys

@@ -6,12 +6,12 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "example/mo_volmodels/data/mo_iv_surface_sample.json"
+OUT = ROOT / "example/case_studies/mo_volmodels/data/mo_iv_surface_sample.json"
 
 
 def test_stage02_builds_surface():
     subprocess.run(
-        [sys.executable, str(ROOT / "example/mo_volmodels/02_build_iv_surface.py"),
+        [sys.executable, str(ROOT / "example/case_studies/mo_volmodels/02_build_iv_surface.py"),
          "--snapshot", "sample"],
         check=True, cwd=ROOT,
     )

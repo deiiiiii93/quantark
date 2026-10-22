@@ -14,7 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[0]
 REPO = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge")
-sys.path[:0] = [str(REPO), str(REPO / "example/snowball_q_term_structure")]
+sys.path[:0] = [str(REPO), str(REPO / "example/case_studies/snowball_q_term_structure")]
 import pandas as pd
 import _common as C
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
@@ -26,9 +26,9 @@ from quantark.backtest.replay.carry_risk import direct_frozen_curve_book_delta
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 
-RUN = REPO / ("example/snowball_q_term_structure/data/bucket_hedge_v2/subset_matched"
+RUN = REPO / ("example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/subset_matched"
               "/runs/20230504/term_flat_q__front")
-HIST = Path("/Users/fuxinyao/quant-ark/example/mo_volmodels/data/history")
+HIST = Path("/Users/fuxinyao/quant-ark/example/case_studies/mo_volmodels/data/history")
 M = 200.0
 HEDGE_BUMP = 0.0025     # the desk's rebalance resolution
 PRICING_BUMP = 0.01     # the engine default

@@ -25,7 +25,7 @@ Key concepts demonstrated:
    - Humped
 
 Usage:
-    python example/convertible_bond_term_structure_demo.py
+    python example/asset/bond/convertible_bond_term_structure_demo.py
 
 Note:
     Run from the project root or set PYTHONPATH=. to resolve local imports.

@@ -12,7 +12,7 @@ from quantark.volcalibration.normalize.fxdelta import (
 from quantark.volcalibration.quotes import QuoteSet
 from quantark.volcalibration.snapshot import QuoteSnapshot
 
-SAMPLE = Path("example/fx_volmodels/data/cfets_usdcny_snapshot_20260430.json")
+SAMPLE = Path("example/case_studies/fx_volmodels/data/cfets_usdcny_snapshot_20260430.json")
 
 
 def _snapshot():
@@ -147,7 +147,7 @@ def test_a_listed_snapshot_is_refused():
     listed = QuoteSnapshot.from_legacy_settlement(
         json.loads(
             Path(
-                "example/mo_volmodels/data/mo_settlement_snapshot_20260430.json"
+                "example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json"
             ).read_text(encoding="utf-8")
         ),
         trade_date=date(2026, 4, 30),

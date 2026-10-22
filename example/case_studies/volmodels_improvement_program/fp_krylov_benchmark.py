@@ -3,7 +3,7 @@
 The krylov_lagged mode reuses a stale splu factorization as a BiCGStab preconditioner, refreshed every
 refactor_every steps. With refactor_every=1 the preconditioner is exact (parity ~ machine precision, no
 speedup); with refactor_every>1 it trades a small, calibration-negligible parity gap for fewer
-factorizations. direct stays the default. Run: python example/fp_krylov_benchmark.py
+factorizations. direct stays the default. Run: python example/case_studies/volmodels_improvement_program/fp_krylov_benchmark.py
 """
 import time
 import numpy as np

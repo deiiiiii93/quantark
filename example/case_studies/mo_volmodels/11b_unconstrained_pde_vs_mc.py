@@ -12,10 +12,10 @@ from datetime import date as _date
 from pathlib import Path
 
 REPO = Path("/Users/fuxinyao/quant-ark")
-sys.path.insert(0, str(REPO / "example" / "mo_volmodels"))
+sys.path.insert(0, str(REPO / "example" / "case_studies" / "mo_volmodels"))
 
 spec = importlib.util.spec_from_file_location(
-    "gate", REPO / "example" / "mo_volmodels" / "11_pde_convergence_gate.py")
+    "gate", REPO / "example" / "case_studies" / "mo_volmodels" / "11_pde_convergence_gate.py")
 gate = importlib.util.module_from_spec(spec)
 sys.modules["gate"] = gate  # @dataclass resolves cls.__module__ via sys.modules
 spec.loader.exec_module(gate)
@@ -26,7 +26,7 @@ from quantark.volcalibration.config import HESTON_PRESETS
 from quantark.volcalibration.calibrate import VolModelCalibrator
 from quantark.volcalibration.config import VolModelCalibrationConfig
 
-HIST = REPO / "example" / "mo_volmodels" / "data" / "history"
+HIST = REPO / "example" / "case_studies" / "mo_volmodels" / "data" / "history"
 IV = HIST / "iv_surface"
 
 

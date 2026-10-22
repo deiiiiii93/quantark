@@ -1,4 +1,4 @@
-"""Tests for example/mo_volmodels/certificate_transfer.py.
+"""Tests for example/case_studies/mo_volmodels/certificate_transfer.py.
 
 The module answers ONE question: do the states this study's replay visits
 fall inside the regime span the banked ADI 2-D Greek certificate was designed
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "example/mo_volmodels/certificate_transfer.py"
+MODULE_PATH = ROOT / "example/case_studies/mo_volmodels/certificate_transfer.py"
 
 spec = importlib.util.spec_from_file_location("certificate_transfer", MODULE_PATH)
 ct = importlib.util.module_from_spec(spec)
@@ -41,7 +41,7 @@ def test_the_certified_envelope_matches_stage_16s_own_case_definitions():
     itself an implementation input to its own certification hash), so this
     test is what stops the transcription from going stale.
     """
-    gate_path = ROOT / "example/mo_volmodels/16_adi_greek_certification.py"
+    gate_path = ROOT / "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
     gate_spec = importlib.util.spec_from_file_location("adi_cert_16", gate_path)
     gate = importlib.util.module_from_spec(gate_spec)
     sys.modules[gate_spec.name] = gate

@@ -6,7 +6,7 @@ risk stack that the credit migration wired up:
 
     stress test  ->  VaR  ->  dynamic scenario  ->  backtest  ->  SIMM margin
 
-Run:  python example/credit_portfolio_risk_demo.py
+Run:  python example/asset/credit/credit_portfolio_risk_demo.py
 """
 from __future__ import annotations
 

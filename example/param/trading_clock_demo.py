@@ -18,7 +18,7 @@ Sections:
   E  the snowball: model error vs discretization vs coupon-basis
 
 Run:
-  python example/trading_clock_demo.py
+  python example/param/trading_clock_demo.py
 """
 from datetime import datetime, timedelta
 

@@ -28,22 +28,22 @@ the automated tests and lets 02–10 run with no network at all.
 
 ```bash
 # 1) live fetch — AKShare interpreter (optional; the sample snapshot works offline)
-/opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py
+/opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_snapshot.py
 
 # 2-17) replay and certify — quantark .venv
-.venv/bin/python example/mo_volmodels/02_build_iv_surface.py  --snapshot latest
-.venv/bin/python example/mo_volmodels/03_dupire_localvol.py   --tag latest
-.venv/bin/python example/mo_volmodels/04_heston_calibration.py --tag latest \
+.venv/bin/python example/case_studies/mo_volmodels/02_build_iv_surface.py  --snapshot latest
+.venv/bin/python example/case_studies/mo_volmodels/03_dupire_localvol.py   --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/04_heston_calibration.py --tag latest \
   --bootstrap-reps 32 --bootstrap-seed 20260721
-.venv/bin/python example/mo_volmodels/05_slv_calibration.py    --tag latest
-.venv/bin/python example/mo_volmodels/07_barrier_exotic.py     --tag latest
-.venv/bin/python example/mo_volmodels/08_snowball_exotic.py    --tag latest
-.venv/bin/python example/mo_volmodels/09_delta_hedging.py      --tag latest
-.venv/bin/python example/mo_volmodels/06_lecture.py           --tag latest
-.venv/bin/python example/mo_volmodels/10_explainer.py         --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/05_slv_calibration.py    --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/07_barrier_exotic.py     --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/08_snowball_exotic.py    --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/09_delta_hedging.py      --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/06_lecture.py           --tag latest
+.venv/bin/python example/case_studies/mo_volmodels/10_explainer.py         --tag latest
 
 # Aggregate-only amendment of the immutable schema-11 ADI Greek certificate.
-.venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
+.venv/bin/python example/case_studies/mo_volmodels/17_adi_slv_aggregate_certification.py \
   --parent-evidence output/adi_greek_certification_schema13/adi_greek_certification.json \
   --parent-decision output/adi_greek_certification_schema13/adi_greek_certification_decision.json \
   --resume \
@@ -60,17 +60,17 @@ The genuine cross-date study is a separate official-settlement cohort:
 
 ```bash
 # Freeze CFFEX EOD settlement cross sections (or use --input-dir with downloaded CSVs).
-/opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_settlement_history.py \
+/opt/anaconda3/bin/python example/case_studies/mo_volmodels/01_fetch_mo_settlement_history.py \
   --dates 20260430 20260515 20260615 20260630 20260706 20260715 20260720
 
 # Fit every admitted date under one frozen configuration and aggregate stability evidence.
-.venv/bin/python example/mo_volmodels/10_calibration_diagnostics.py \
+.venv/bin/python example/case_studies/mo_volmodels/10_calibration_diagnostics.py \
   --tags 20260430 20260515 20260615 20260630 20260706 20260715 20260720 \
   --output-tag latest
 
 # Replay the frozen CSVs into a per-date SABR-smoothed IV-surface history
 # (vol history for multi-year backtests; resumable, fail-closed, offline).
-.venv/bin/python example/mo_volmodels/03_build_iv_surface_history.py --workers 4
+.venv/bin/python example/case_studies/mo_volmodels/03_build_iv_surface_history.py --workers 4
 ```
 
 For ongoing EOD operation, use the incremental daily orchestrator rather than
@@ -79,19 +79,19 @@ running those stages individually:
 ```bash
 # Refresh market caches, fetch new official settlements, build new surfaces,
 # and calibrate Local Vol + hard-Feller Heston + Heston-SLV.
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run
 
 # Opt in to daily v0 + five-date structural EWMA for SLV, with a
 # structural temporal penalty for pure Heston.
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run \
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py run \
   --temporal-smoothing
 
 # Read-only freshness/health check.
-.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py status
+.venv/bin/python example/case_studies/mo_volmodels/14_daily_calibration_pipeline.py status
 
 # Install the macOS launchd job (18:30 and 20:30 Asia/Shanghai, weekdays).
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py install
-.venv/bin/python example/mo_volmodels/install_daily_scheduler.py status
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py install
+.venv/bin/python example/case_studies/mo_volmodels/install_daily_scheduler.py status
 ```
 
 The first operational run calibrates only the latest admitted surface; later
@@ -141,19 +141,19 @@ Stage 07 exercises the standalone barrier engines added to `quantark`
 (`quantark/volmodels/barrier.py` + the `*BarrierMCEngine` / `*BarrierPDESolver` classes under
 `quantark/asset/equity/engine/`), which price a single-barrier option under Local Vol, Heston,
 and SLV by both Monte Carlo and 2-D ADI PDE. Run it after stage 05:
-`.venv/bin/python example/mo_volmodels/07_barrier_exotic.py --tag latest`.
+`.venv/bin/python example/case_studies/mo_volmodels/07_barrier_exotic.py --tag latest`.
 
 Stage 08 exercises the Snowball vol-model engines under the same MO surface with a 2Y,
 principal-excluded standard Snowball. It reports BSM, Local Vol, Heston QE, and SLV with
 MC/PDE cross-checks where available, plus the standalone SLV QE MC engine for the
 QE-specific stochastic-local-vol path scheme:
-`.venv/bin/python example/mo_volmodels/08_snowball_exotic.py --tag latest`.
+`.venv/bin/python example/case_studies/mo_volmodels/08_snowball_exotic.py --tag latest`.
 
 Stage 09 isolates hedging behavior. It adds a BSM flat-vol baseline, then holds the
 calibrated LV surface, Heston parameters, and SLV leverage surface fixed while walking
 the same deterministic spot path for an ATM European call and rebalancing to delta
 neutral under each model:
-`.venv/bin/python example/mo_volmodels/09_delta_hedging.py --tag latest`.
+`.venv/bin/python example/case_studies/mo_volmodels/09_delta_hedging.py --tag latest`.
 
 Stage 16 answers a different question: whether the deterministic 2-D ADI
 central-bump delta and gamma are accurate enough to drive the study's daily hedge.

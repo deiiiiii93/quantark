@@ -7,9 +7,9 @@ spot/futures data is cached so the demo can be rerun without another network
 fetch.
 
 Usage:
-    python example/otc_autocallable_backtest_demo.py
-    python example/otc_autocallable_backtest_demo.py --engine pde --refresh-data
-    python example/otc_autocallable_backtest_demo.py --engine mc --mc-paths 2000
+    python example/backtest/otc_autocallable_backtest_demo.py
+    python example/backtest/otc_autocallable_backtest_demo.py --engine pde --refresh-data
+    python example/backtest/otc_autocallable_backtest_demo.py --engine mc --mc-paths 2000
 """
 
 from __future__ import annotations

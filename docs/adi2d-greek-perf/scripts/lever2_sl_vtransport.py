@@ -30,7 +30,7 @@ sys.path.insert(0, SCRATCH)
 sys.path.insert(0, WORKTREE)
 
 spec = importlib.util.spec_from_file_location(
-    "cert16", f"{WORKTREE}/example/mo_volmodels/16_adi_greek_certification.py"
+    "cert16", f"{WORKTREE}/example/case_studies/mo_volmodels/16_adi_greek_certification.py"
 )
 cert = importlib.util.module_from_spec(spec)
 sys.modules["cert16"] = cert

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_IV_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history/iv_surface"
+DEFAULT_IV_DIR = PROJECT_ROOT / "example/case_studies/mo_volmodels/data/history/iv_surface"
 
 # Dupire local vol needs at least three expiries to form dw/dT; the Phase-1
 # builder admits two, so G1 re-checks rather than trusting the manifest alone.

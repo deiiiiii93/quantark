@@ -10,7 +10,7 @@ Demonstrates the pricing/stress-result workflow for ISDA SIMM v2.6:
    sensitivities are simply s = ShiftedPV - BasePV.
 
 Run:
-    python example/simm_xlsx_template_demo.py
+    python example/simm/simm_xlsx_template_demo.py
 """
 
 from pathlib import Path

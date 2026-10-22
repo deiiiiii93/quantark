@@ -19,7 +19,7 @@ distributions would be dominated by which inceptions happened to knock out.
 Follows the report pattern of stage 03 (``03_aggregate_and_report.py``).
 
 Run:
-    .venv/bin/python example/snowball_q_term_structure/06_bucket_hedge_report.py
+    .venv/bin/python example/case_studies/snowball_q_term_structure/06_bucket_hedge_report.py
 """
 
 from __future__ import annotations
@@ -1042,13 +1042,13 @@ def build_report(
 
     appendix = (
         "<h2>Appendix — reproduce</h2>"
-        "<pre>PYTHONPATH=. .venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \\\n"
+        "<pre>PYTHONPATH=. .venv/bin/python example/case_studies/snowball_q_term_structure/02_backtest_fleet.py \\\n"
         "  --study-grid buckets --workers 6 \\\n"
         "  --align-cell-stretch 0.02 \\\n"
         "  --carry-audit-mode daily --record-carry-exposure \\\n"
         "  --hedge-resolution-rel 0.0025 \\\n"
-        "  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e --resume\n"
-        "PYTHONPATH=. .venv/bin/python example/snowball_q_term_structure/06_bucket_hedge_report.py</pre>"
+        "  --out-dir example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e --resume\n"
+        "PYTHONPATH=. .venv/bin/python example/case_studies/snowball_q_term_structure/06_bucket_hedge_report.py</pre>"
         "<p>Artifacts next to this report: <code>bucket_per_run.csv</code> (one row per cell), "
         "<code>bucket_paired.csv</code> (the paired differences), "
         "<code>bucket_carry_reconciliation.csv</code> (the carry / delta-path / cost attribution), "

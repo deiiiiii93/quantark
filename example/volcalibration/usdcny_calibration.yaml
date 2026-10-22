@@ -1,9 +1,9 @@
 # A complete run config for `quantark.volcalibration`, USD/CNY.
 #
 # This one is self-contained: the six committed CFETS snapshots under
-# example/fx_volmodels/data/ carry their own spot, so 01_end_to_end.py runs
+# example/case_studies/fx_volmodels/data/ carry their own spot, so 01_end_to_end.py runs
 # from a clean clone with no network and no private history.  Compare with
-# example/mo_volmodels/mo_calibration.yaml, which is the real daily
+# example/case_studies/mo_volmodels/mo_calibration.yaml, which is the real daily
 # equity-index workflow and needs the (git-excluded) settlement history.
 #
 # Every key below is optional except schema_version, name, underlying and

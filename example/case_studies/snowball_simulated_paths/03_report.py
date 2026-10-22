@@ -1,6 +1,6 @@
 """Stage 03: distributions, paired differences, stress, the engine check, and the report.
 
-    .venv/bin/python example/snowball_simulated_paths/03_report.py
+    .venv/bin/python example/case_studies/snowball_simulated_paths/03_report.py
 
 Reads every cell under ``<out>/cells``, writes the tables to the study's
 ``data/`` directory and the self-contained ``simulated_paths_report.html``.

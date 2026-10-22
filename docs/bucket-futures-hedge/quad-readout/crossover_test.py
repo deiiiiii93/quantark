@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 RUNS = Path("/Users/fuxinyao/quant-ark/.claude/worktrees/bucket-futures-hedge"
-            "/example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
+            "/example/case_studies/snowball_q_term_structure/data/bucket_hedge_v2/gate_e/runs")
 CROSS = (0.75 * 1.03) ** 0.5
 
 frames = []
