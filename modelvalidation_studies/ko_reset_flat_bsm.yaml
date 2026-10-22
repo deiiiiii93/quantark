@@ -27,7 +27,7 @@
 # certification, whose barriers were all flat scalars.
 #
 # Offline study (minutes, not seconds). Run it with:
-#   python -m quantark.modelvalidation run example/modelvalidation/ko_reset_flat_bsm.yaml
+#   python -m quantark.modelvalidation run modelvalidation_studies/ko_reset_flat_bsm.yaml
 # Add --quick for a wiring check that is explicitly not bankable evidence.
 
 study: ko-reset-flat-bsm

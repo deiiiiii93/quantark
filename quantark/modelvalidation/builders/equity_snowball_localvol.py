@@ -12,7 +12,7 @@ Two things differ from the flat-BSM study, and both are deliberate.
 history`` is excluded through ``.git/info/exclude``, a per-clone file that is
 never pushed, so a study reading from it would bank a certificate whose CI
 anchors fail everywhere but one machine. The artifacts live under
-``example/modelvalidation/data/`` and their sha256 enters the identity hash, so
+``modelvalidation_studies/data/`` (the YAML ids keep the legacy ``example/modelvalidation/data/`` prefix, resolved by ``_resolve_path``) and their sha256 enters the identity hash, so
 the certificate pins the exact surface bytes it was certified against.
 
 **Levels are declared as moneyness and resolved against each artifact's own

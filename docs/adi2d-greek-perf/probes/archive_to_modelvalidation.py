@@ -44,7 +44,7 @@ from quantark.modelvalidation.html_report import render_html
 from quantark.modelvalidation.report import render_markdown
 
 ROOT = Path(__file__).resolve().parents[3]
-STUDY_YAML = ROOT / "example/modelvalidation/adi2d_snowball_greeks.yaml"
+STUDY_YAML = ROOT / "modelvalidation_studies/adi2d_snowball_greeks.yaml"
 
 STAGE16 = ROOT / "output/p18_strided"
 STAGE17 = ROOT / "output/p18_slv_amendment"

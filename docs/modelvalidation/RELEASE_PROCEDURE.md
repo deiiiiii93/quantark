@@ -28,14 +28,14 @@ banking evidence for a configuration you never actually tested.
 
 ```bash
 # Wiring check first -- seconds, and explicitly not bankable evidence.
-python -m quantark.modelvalidation run example/modelvalidation/<study>.yaml --quick
+python -m quantark.modelvalidation run modelvalidation_studies/<study>.yaml --quick
 
 # The real run. Hours-scale for a realistic study.
-python -m quantark.modelvalidation run example/modelvalidation/<study>.yaml \
+python -m quantark.modelvalidation run modelvalidation_studies/<study>.yaml \
     --out output/modelvalidation
 
 # Interrupted? Resume reuses every checkpoint whose configuration still matches.
-python -m quantark.modelvalidation run example/modelvalidation/<study>.yaml \
+python -m quantark.modelvalidation run modelvalidation_studies/<study>.yaml \
     --out output/modelvalidation --resume
 ```
 
@@ -236,7 +236,7 @@ Run the full certification for a code-level numerics change.
 ## 6. Amendments
 
 ```bash
-python -m quantark.modelvalidation amend example/modelvalidation/<study>.yaml \
+python -m quantark.modelvalidation amend modelvalidation_studies/<study>.yaml \
     --parent docs/modelvalidation/certificates/<study>/<date>/certificate.json \
     --reason "TR-BDF2 replaces Craig-Sneyd for the variance sweep" \
     --out output/modelvalidation
@@ -274,7 +274,7 @@ Rules the tool enforces:
    `equity_snowball.py`; it shows both a solver that returns Greeks directly and
    one that needs central differences.
 2. **Register them** by importing the module in `builders/__init__.py`.
-3. **Write the study YAML** in `example/modelvalidation/`. Choose cases that
+3. **Write the study YAML** in `modelvalidation_studies/`. Choose cases that
    stress the payoff (barriers, short maturity, low vol), not just the easy
    middle.
 4. **Calibrate the bounds honestly.** Measure the achievable standard error at

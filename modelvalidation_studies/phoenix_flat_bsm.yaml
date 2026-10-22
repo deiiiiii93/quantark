@@ -19,7 +19,7 @@
 # resolution are compatible, so the bound is not one the sampling cannot cash.
 #
 # Offline study (minutes, not seconds). Run it with:
-#   python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml
+#   python -m quantark.modelvalidation run modelvalidation_studies/phoenix_flat_bsm.yaml
 # Add --quick for a wiring check that is explicitly not bankable evidence.
 
 study: phoenix-flat-bsm
