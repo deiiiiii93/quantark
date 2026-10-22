@@ -84,7 +84,7 @@ def test_snowball_identity_fast(case):
 def test_local_vol_snowball_identity():
     """Review Focus 5: the local-vol route marches the same value-mode statistics."""
     from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
-    from pde_bitwise.capture_book import env_grid_vol, snowball
+    from golden.pde_bitwise.capture_book import env_grid_vol, snowball
 
     stats = LocalVolSnowballPDESolver(params=PDEParams()).calculate_event_stats(snowball("continuous"), env_grid_vol())
     assert stats.provenance.statistics_model == "local_vol_1d"
@@ -180,7 +180,7 @@ def test_expiry_phoenix_identity(memory, projection):
 def test_dated_memory_phoenix_on_its_first_observation_date(spot, projection, pay_type):
     """F16: a memory coupon decided at valuation -- the miss reads the one-missed state, the pay adds today's
     coupon (EXPIRY: through the termination value at the spot)."""
-    from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
+    from golden.pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
 
     # a fixed coupon fraction: 0.8.0 accrues the floating first period to zero at its own date, and a
     # zero missed coupon would leave the one-missed state equal to state 0

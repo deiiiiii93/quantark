@@ -2,9 +2,9 @@
 
 Run the same file against two source trees back to back, in one window:
 
-    PYTHONPATH=<base tree> python test/pde_bitwise/timing.py --out base.json --reps 5
-    PYTHONPATH=<branch tree> python test/pde_bitwise/timing.py --out branch.json --reps 5
-    python test/pde_bitwise/timing.py --compare base.json branch.json
+    PYTHONPATH=<base tree> python test/golden/pde_bitwise/timing.py --out base.json --reps 5
+    PYTHONPATH=<branch tree> python test/golden/pde_bitwise/timing.py --out branch.json --reps 5
+    python test/golden/pde_bitwise/timing.py --compare base.json branch.json
 
 cold = a new solver and ``price`` after clearing the module-level market memos;
 warm = the same solver, a second ``price``. One warm-up, then ``--reps`` repetitions;

@@ -597,7 +597,7 @@ def load_adi_greek_routing_from_certificate(path: Path | str) -> ADIGreekRouting
     deliberately NOT committed -- the repository publishes their identity
     instead -- so routing from them only ever worked on a machine that happened
     to hold them.  The certificate is committed, recomputes its own digest, and
-    ``test/modelvalidation/test_banked_certificates.py`` re-runs both ADI
+    ``test/golden/modelvalidation/test_banked_certificates.py`` re-runs both ADI
     solvers over all fourteen banked cells on every commit, so the claim that
     the engines still produce the certified numbers is continuously checked
     rather than asserted once.

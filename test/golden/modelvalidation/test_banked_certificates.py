@@ -20,7 +20,7 @@ import pytest
 from quantark.modelvalidation import assert_anchors, resolve_supersession
 from quantark.util.exceptions import ValidationError
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CERTIFICATES = REPO_ROOT / "docs" / "modelvalidation" / "certificates"
 
 BANKED = sorted(CERTIFICATES.glob("*/*/anchors.json"))

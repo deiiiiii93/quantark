@@ -6,7 +6,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option import BarrierOption, EuropeanVanillaOption
 from quantark.util.enum import BarrierType, ObservationType, OptionType
 
-from pde_bitwise.capture_book import env_flat, expired_barrier
+from golden.pde_bitwise.capture_book import env_flat, expired_barrier
 
 
 def replace_barrier_type(p, barrier_type):
@@ -59,7 +59,7 @@ from quantark.execution import PricingRequest, PricingSession
 from quantark.modelvalidation.builders.equity_snowball import make_snowball
 from quantark.util.exceptions import PricingError, ValidationError
 
-from pde_bitwise.capture_book import (env_after_maturity, expired_snowball, immediate_ko_env,
+from golden.pde_bitwise.capture_book import (env_after_maturity, expired_snowball, immediate_ko_env,
                                       immediate_ko_snowball)
 
 SB = dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0, ko_rate=0.15,

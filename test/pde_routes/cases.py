@@ -44,7 +44,7 @@ def surface_const(vol=CONST["vol"]):
 
 
 def env_book(spot=100.0):
-    """The byte book's ``env_grid_vol`` (test/pde_bitwise/capture_book.py), verbatim."""
+    """The byte book's ``env_grid_vol`` (test/golden/pde_bitwise/capture_book.py), verbatim."""
     strikes = list(100.0 * np.exp(np.linspace(-0.6, 0.6, 9)))
     smile = [0.22 + 0.02 * abs(k - 4) / 4 for k in range(9)]
     surf = GridVolSurface(strikes, list(np.linspace(0.1, 2.0, 6)), np.array([smile] * 6))

@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from replay_golden import fixtures  # noqa: E402
+from golden.replay_golden import fixtures  # noqa: E402
 
 from quantark.asset.equity.lifecycle.autocallable import (  # noqa: E402
     AutocallableLifecycleTracker,

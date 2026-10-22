@@ -8,7 +8,7 @@ from copy import deepcopy
 
 import pytest
 
-import pde_bitwise.capture_book as book
+import golden.pde_bitwise.capture_book as book
 from quantark.asset.equity.engine import PDEEngine
 from quantark.asset.equity.engine.analytical.barrier_analytical_engine import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.analytical.double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine

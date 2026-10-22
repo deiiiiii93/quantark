@@ -518,7 +518,7 @@ def test_the_replay_callback_shares_one_fixed_state():
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parents[1]))
-    from replay_golden import fixtures
+    from golden.replay_golden import fixtures
 
     from quantark.backtest.replay import AutocallableEngineConfig
     from quantark.backtest.replay.product_replay import ProductReplay

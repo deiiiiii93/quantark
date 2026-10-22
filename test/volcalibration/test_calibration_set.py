@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # replay_golden/fixtures.py already writes a minimal admitted history.
-from replay_golden.fixtures import (  # noqa: E402
+from golden.replay_golden.fixtures import (  # noqa: E402
     DATE_A,
     DATE_EXCLUDED,
     write_localvol_history,

@@ -107,7 +107,7 @@ class TestReplayFactoryDispatch:
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).parents[1]))
-        from replay_golden import fixtures
+        from golden.replay_golden import fixtures
 
         from quantark.backtest import get_backtest_engine
         from quantark.backtest.replay import ReplayBacktestEngine
@@ -120,7 +120,7 @@ class TestReplayFactoryDispatch:
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).parents[1]))
-        from replay_golden import fixtures
+        from golden.replay_golden import fixtures
 
         from quantark.backtest import get_backtest_engine
         from quantark.backtest.replay.single import AutocallableBacktestEngine

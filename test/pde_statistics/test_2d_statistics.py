@@ -9,7 +9,7 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import HestonSnow
 from quantark.asset.equity.param import PDEParams
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
-from pde_bitwise.capture_book import env_flat, phoenix_plain, snowball
+from golden.pde_bitwise.capture_book import env_flat, phoenix_plain, snowball
 
 HP = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.6)
 SMALL = dict(n_x=48, n_v=18, n_t=16)

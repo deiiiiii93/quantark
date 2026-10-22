@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-TEST_DIR = Path(__file__).resolve().parents[1]
+TEST_DIR = Path(__file__).resolve().parents[2]
 if str(TEST_DIR) not in sys.path:
     sys.path.insert(0, str(TEST_DIR))  # test/ helpers (term_structure_benchmarks, dcn_fixtures)
 
@@ -287,7 +287,7 @@ def session_row():
 
 
 def intraday_row():
-    from pde_bitwise.intraday_fixture import intraday_price
+    from golden.pde_bitwise.intraday_fixture import intraday_price
     return {"price": _hex(intraday_price())}
 
 

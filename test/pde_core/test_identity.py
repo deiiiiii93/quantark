@@ -10,7 +10,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.modelvalidation.builders.equity_snowball import make_snowball
 from quantark.util.calendar import CalendarType, create_calendar
 
-from pde_bitwise.capture_book import env_flat, env_grid_vol, env_with_spot
+from golden.pde_bitwise.capture_book import env_flat, env_grid_vol, env_with_spot
 
 SB = dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0, ko_rate=0.15,
           rebate_rate=0.15, months=12, maturity=1.0, contract_multiplier=1.0)

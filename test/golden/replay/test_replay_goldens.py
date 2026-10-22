@@ -87,8 +87,8 @@ def assert_frame_matches(actual, expected, label: str) -> None:
             err_msg=f"{label} column {column!r}",
         )
 
-sys.path.insert(0, str(Path(__file__).parents[1]))
-from replay_golden import fixtures  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parents[2]))
+from golden.replay_golden import fixtures  # noqa: E402
 
 GOLDEN_DIR = fixtures.GOLDEN_DIR
 
@@ -143,7 +143,7 @@ def test_frame_matches_golden(all_results, case, frame_name, tmp_path):
 def test_summary_matches_golden(all_results, case):
     golden_path = GOLDEN_DIR / f"{case}_summary.json"
     expected = json.loads(golden_path.read_text())
-    from replay_golden.capture import _json_safe
+    from golden.replay_golden.capture import _json_safe
 
     actual = json.loads(
         json.dumps(
@@ -158,7 +158,7 @@ def test_summary_matches_golden(all_results, case):
 def test_localvol_calibration_records_match_golden(all_results):
     golden_path = GOLDEN_DIR / "localvol_calibration_records.json"
     expected = json.loads(golden_path.read_text())
-    from replay_golden.capture import _json_safe
+    from golden.replay_golden.capture import _json_safe
 
     actual = json.loads(
         json.dumps(

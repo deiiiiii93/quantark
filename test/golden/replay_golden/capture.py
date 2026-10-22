@@ -3,7 +3,7 @@
 Run from the repo root (spec §9.1, plan Task 1):
 
     PYTHONPATH=$PWD <venv>/bin/python -c \\
-        "from pathlib import Path; from test.replay_golden.capture import write_goldens; \\
+        "from pathlib import Path; from test.golden.replay_golden.capture import write_goldens; \\
          write_goldens()"
 """
 from __future__ import annotations

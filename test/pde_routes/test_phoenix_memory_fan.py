@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL, close
-from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
+from golden.pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
 from pde_routes.phoenix_memory_fan_capture import CASES, phoenix, stats_fields
 from quantark.asset.equity.engine.pde import PhoenixPDESolver
 from quantark.asset.equity.engine.pde.core.groups import VALUE, Backend

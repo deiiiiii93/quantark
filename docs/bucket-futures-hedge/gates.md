@@ -60,7 +60,7 @@ close.
 
 ```sh
 .venv/bin/python -m pytest -n0 -q test/test_backtest/test_replay_futures_buckets.py \
-  test/test_backtest/test_futures_hedge_book.py test/test_backtest/test_replay_goldens.py \
+  test/test_backtest/test_futures_hedge_book.py test/golden/replay/test_replay_goldens.py \
   test/test_backtest/test_replay_engine_unified.py test/test_backtest/test_replay_termination.py \
   test/pnlexplain/test_pnlexplain_backtest_replay.py test/test_backtest/test_replay_greeks_failclosed.py
 ```
@@ -95,7 +95,7 @@ Both result APIs, genuine direct audits, finite stress residuals.
 .venv/bin/python -m pytest -n0 -q test/test_backtest/test_futures_carry_recorder.py \
   test/test_backtest/test_replay_futures_buckets.py test/test_backtest/test_futures_bucket_results.py \
   test/test_backtest/test_replay_schema.py test/test_backtest/test_replay_termination.py \
-  test/test_backtest/test_replay_goldens.py
+  test/golden/replay/test_replay_goldens.py
 ```
 
 **Result: 123 passed, 4 skipped.**
@@ -143,7 +143,7 @@ Two findings:
   test/test_bucket_hedge_validation_cli.py test/test_backtest/test_futures_ledger.py \
   test/test_backtest/test_futures_delta_strategy.py test/test_backtest/test_replay_dividend_source.py \
   test/test_backtest/test_replay_env_helpers.py test/test_backtest/test_replay_greeks_failclosed.py \
-  test/test_backtest/test_replay_schema.py test/test_backtest/test_replay_goldens.py \
+  test/test_backtest/test_replay_schema.py test/golden/replay/test_replay_goldens.py \
   test/test_backtest/test_replay_engine_unified.py test/test_backtest/test_replay_termination.py \
   test/pnlexplain/test_pnlexplain_backtest_replay.py \
   test/test_snowball_q_term_structure_study.py test/simulation/test_config.py
@@ -969,7 +969,7 @@ golden was simply stale.
 
 **A fourth confirmation was sitting in this repository the whole time, and I
 missed it with a case-sensitive grep.** The `book` replay golden is a QUAD
-control: `test/replay_golden/fixtures.py:269` pins
+control: `test/golden/replay_golden/fixtures.py:269` pins
 `EngineType.QUADRATURE` for it while the other two pin PDE. It stayed
 bitwise identical while both PDE frames moved on delta and gamma. The
 failing three are `scalar_bsm` twice and `localvol` once, with `book`

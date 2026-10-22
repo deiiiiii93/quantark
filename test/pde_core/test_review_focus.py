@@ -32,7 +32,7 @@ from quantark.util.calendar import Calendar
 from quantark.util.enum import ObservationType, OptionType
 
 from intraday.conftest import flat_env
-from pde_bitwise.capture_book import american_tenor, barrier, env_flat, european
+from golden.pde_bitwise.capture_book import american_tenor, barrier, env_flat, european
 
 
 @pytest.mark.parametrize("cls,make", [(EuropeanPDESolver, european), (AmericanPDESolver, american_tenor),
@@ -63,7 +63,7 @@ def test_american_greeks_on_a_fresh_solver_equal_greeks_after_price():
 from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
 
-from pde_bitwise.capture_book import env_grid_vol, snowball
+from golden.pde_bitwise.capture_book import env_grid_vol, snowball
 
 
 @pytest.mark.parametrize("cls,make,env", [(SnowballPDESolver, lambda: snowball("continuous"), env_flat),
@@ -80,7 +80,7 @@ from quantark.asset.equity.engine.pde import PhoenixPDESolver
 from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import LocalVolPhoenixPDESolver
 from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
 
-from pde_bitwise.capture_book import PHOENIX
+from golden.pde_bitwise.capture_book import PHOENIX
 
 
 @pytest.mark.parametrize("cls,env", [(PhoenixPDESolver, env_flat), (LocalVolPhoenixPDESolver, env_grid_vol)])

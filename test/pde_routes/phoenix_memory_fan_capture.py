@@ -68,7 +68,7 @@ def env_term():
 
 
 def env_local_vol():
-    from pde_bitwise.capture_book import env_grid_vol
+    from golden.pde_bitwise.capture_book import env_grid_vol
     return env_grid_vol()
 
 
@@ -132,7 +132,7 @@ def dated_first_observation(spot, pay_type, coupon_rate=None, arrears=0.0):
 
     Its coupon is 0.12 * 100 / 12 = 1.0, so a miss at valuation owes exactly one unit; ``coupon_rate`` and
     ``arrears`` (carried from before the pricing date) make it owe something else."""
-    from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
+    from golden.pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
     p, _ = _dated("phoenix", fixed_fraction=1.0 / 12.0)
     if coupon_rate is not None or arrears:
         p.coupon_config = dataclasses.replace(

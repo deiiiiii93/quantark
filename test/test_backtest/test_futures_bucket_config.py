@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from replay_golden import fixtures  # noqa: E402
+from golden.replay_golden import fixtures  # noqa: E402
 
 from quantark.backtest.futures_risk import CarryRiskSettings  # noqa: E402
 from quantark.backtest.replay import (  # noqa: E402

@@ -13,7 +13,7 @@ from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical.comparison import is_close
 from quantark.util.numerical.constants import Tolerance
 
-from pde_bitwise.capture_book import env_flat
+from golden.pde_bitwise.capture_book import env_flat
 from pde_core.components_fixtures import (BackwardEuler, InPlaceStepper, NaNStepper, NearestNodeReadout,
                                           PlainStepper, ShiftedOperator, WrongShapeStepper)
 

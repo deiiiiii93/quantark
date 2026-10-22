@@ -15,7 +15,7 @@ from quantark.modelvalidation.builders.equity_snowball import make_snowball
 from quantark.util.enum import BarrierType, ObservationType, OptionType
 from quantark.util.enum.option_enums import DoubleBarrierType
 
-from pde_bitwise.capture_book import env_flat
+from golden.pde_bitwise.capture_book import env_flat
 from term_structure_benchmarks import make_term_env
 
 

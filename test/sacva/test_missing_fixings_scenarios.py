@@ -528,7 +528,7 @@ def test_sacva_hedge_sensitivities_keep_the_base_fill():
 
 def test_replay_book_fills_once_at_the_first_valuation():
     """The replay book (an Asian on the analytical route) fills once, at the first day's spot (100.0)."""
-    from replay_golden import fixtures
+    from golden.replay_golden import fixtures
 
     from quantark.backtest.replay.config import AutocallableEngineConfig
     from quantark.backtest.replay.engine import ReplayBacktestEngine

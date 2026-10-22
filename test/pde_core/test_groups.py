@@ -8,7 +8,7 @@ from quantark.asset.equity.engine.pde.core.groups import VALUE, Backend
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
 from quantark.asset.equity.param import PDEParams
 
-from pde_bitwise.capture_book import (american_tenor, barrier, double_barrier, double_one_touch,
+from golden.pde_bitwise.capture_book import (american_tenor, barrier, double_barrier, double_one_touch,
                                       env_flat, european, one_touch)
 from quantark.util.enum import ObservationType
 
@@ -34,7 +34,7 @@ from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.engine.pde.grid import GridConfig
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
 
-from pde_bitwise.capture_book import env_grid_vol, snowball
+from golden.pde_bitwise.capture_book import env_grid_vol, snowball
 
 SNOWBALL_ROWS = [
     (SnowballPDESolver, lambda: snowball("continuous"), env_flat,
@@ -62,7 +62,7 @@ def test_snowball_with_two_interior_nodes_falls_back_to_two_lu_groups():
 def test_ko_reset_group_declaration_equals_the_historical_solve_calls():
     from quantark.asset.equity.engine.pde.core.adapters.ko_reset import KOResetAdapter
     from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
-    from pde_bitwise.capture_book import KO_RESET, make_ko_reset
+    from golden.pde_bitwise.capture_book import KO_RESET, make_ko_reset
 
     p = prepare(KOResetSnowballPDESolver(PDEParams()), make_ko_reset(KO_RESET), env_flat(),
                 OutputRequest(Operation.PRICE))
@@ -75,7 +75,7 @@ def test_ko_reset_group_declaration_equals_the_historical_solve_calls():
 from quantark.asset.equity.engine.pde import PhoenixPDESolver
 from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
 
-from pde_bitwise.capture_book import PHOENIX, phoenix_plain
+from golden.pde_bitwise.capture_book import PHOENIX, phoenix_plain
 
 
 def _phoenix_groups(max_k, termination, banded=True):

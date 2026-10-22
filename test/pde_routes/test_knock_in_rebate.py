@@ -112,6 +112,6 @@ def test_knock_in_decided_by_record_level():
 
 def test_rebate_free_knock_in_is_bit_identical():
     """With R = 0 the composite is today's, bit for bit (spec §5.2 (a))."""
-    from pde_bitwise.capture_book import knock_in_products
+    from golden.pde_bitwise.capture_book import knock_in_products
     for name, (product, _) in knock_in_products().items():
         assert product.rebate == 0.0, name

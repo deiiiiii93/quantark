@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from replay_golden import fixtures  # noqa: E402
+from golden.replay_golden import fixtures  # noqa: E402
 
 from quantark.asset.equity.engine.base_engine import BaseEngine  # noqa: E402
 from quantark.asset.equity.param import BumpConfig, EngineParams  # noqa: E402

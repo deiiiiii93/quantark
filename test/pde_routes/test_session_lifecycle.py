@@ -55,7 +55,7 @@ def test_european_session_pv_and_rows_follow_the_state(terminal, engine):
 
 @pytest.mark.parametrize("engine,product", [(BarrierPDESolver, None), (SnowballPDESolver, "snowball")])
 def test_engines_without_lifecycle_support_refuse_rich_outputs(engine, product):
-    from pde_bitwise.capture_book import snowball
+    from golden.pde_bitwise.capture_book import snowball
     from pde_routes.cases import barrier
     p = snowball() if product else barrier("UO", True, 130.0)
     with pytest.raises(CapabilityError):
@@ -69,7 +69,7 @@ def test_stateless_request_is_unchanged():
 
 
 def test_snowball_event_stats_with_a_state_refuses():
-    from pde_bitwise.capture_book import snowball
+    from golden.pde_bitwise.capture_book import snowball
     from quantark.execution.contracts import OutputKind
     with pytest.raises(CapabilityError):
         session(SnowballPDESolver(), snowball(), env_const(100.0), {PV, OutputKind.EVENT_STATS},

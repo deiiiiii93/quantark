@@ -65,7 +65,7 @@ def test_session_parity():
 
 
 def test_maturity_prices():
-    from pde_bitwise.capture_book import _aged_to_maturity
+    from golden.pde_bitwise.capture_book import _aged_to_maturity
     p = _aged_to_maturity(vanilla(True, 100.0, 1.0))
     g = LocalVolPDESolver(local_vol_surface=surface_const()).calculate_greeks(p, env_const(125.0))
     assert set(g) == {"price", "delta", "gamma"} and abs(g["price"] - 25.0) <= 1e-12   # P9; the kernel raises

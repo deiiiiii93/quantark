@@ -70,7 +70,7 @@ def test_knock_in_grid_on_a_constant_surface():
 
 
 def test_maturity_and_session_parity():
-    from pde_bitwise.capture_book import _aged_to_maturity
+    from golden.pde_bitwise.capture_book import _aged_to_maturity
     p = _aged_to_maturity(barrier("UO", True, 130.0, rebate=5.0))
     assert abs(solver().price(p, env_const(135.0)) - 5.0) <= 1e-12                # the kernel raises at tau = 0
     q, env = barrier("UO", True, 130.0), env_const()

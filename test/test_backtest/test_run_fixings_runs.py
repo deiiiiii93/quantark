@@ -407,7 +407,7 @@ def test_fx_dynamic_x3f_a_path_before_the_env_date_refuses_a_participant():
 # ================================================================ replay (the Asian: no range-accrual route, drift 1)
 def _replay(product, n=F.DAYS, first=0, spot_of=F.spot_on, explain=None, skip=()):
     """Replay run days ``first .. first + n - 1`` except the days in ``skip`` (holidays of the run calendar)."""
-    from replay_golden import fixtures
+    from golden.replay_golden import fixtures
 
     from quantark.backtest.replay.config import AutocallableEngineConfig
     from quantark.backtest.replay.engine import ReplayBacktestEngine

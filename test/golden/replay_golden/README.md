@@ -1,6 +1,6 @@
 # Replay golden data — provenance notes
 
-Goldens are captured with `test/replay_golden/capture.py::write_goldens()`
+Goldens are captured with `test/golden/replay_golden/capture.py::write_goldens()`
 (spec §9.1). Regenerating them is a deliberate act — a diff in
 `test_replay_goldens.py` is a behavior change to investigate, never a
 tolerance to widen. This file records why the frames were re-baselined and
@@ -34,7 +34,7 @@ that changed:
 
 No other frame moved: `states`, `greeks`, `rebalances`, `trades`, `actions`,
 `surfaces`, and both `summary.json` files are byte-identical before and after
-(verified via `git diff --stat test/replay_golden/data/` after regeneration) —
+(verified via `git diff --stat test/golden/replay_golden/data/` after regeneration) —
 the fix changes event reporting, not pricing or hedging.
 
 **`book` did not move, and that is expected, not an oversight.**
@@ -126,7 +126,7 @@ the same futures quantity on every day, and `book` prices on QUAD.
 
 Spec: `docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`.
 Seven flips, one commit each, every one checked against the PDE byte book
-(`test/pde_bitwise/`) with its declared movers:
+(`test/golden/pde_bitwise/`) with its declared movers:
 
 - (a) the grid day is `PricingEnvironment.bus_days_in_year`; (b) `max_steps`
   is 12,000 and an over-cap grid raises; (c) the barrier/touch family projects
@@ -178,10 +178,10 @@ Per stage: (a) moved the probabilities before a knock-in (KI 2.6e-6 / 3.1e-6, KO
 (d) moved `ki_survive` / `ki_probability_to_maturity` after one. `pv` is unchanged to the byte.
 
 ```
- test/replay_golden/data/localvol_daily_event_summary.csv   |  4 ++--
- test/replay_golden/data/localvol_event_probabilities.csv   | 10 +++++-----
- test/replay_golden/data/scalar_bsm_daily_event_summary.csv |  4 ++--
- test/replay_golden/data/scalar_bsm_event_probabilities.csv | 10 +++++-----
+ test/golden/replay_golden/data/localvol_daily_event_summary.csv   |  4 ++--
+ test/golden/replay_golden/data/localvol_event_probabilities.csv   | 10 +++++-----
+ test/golden/replay_golden/data/scalar_bsm_daily_event_summary.csv |  4 ++--
+ test/golden/replay_golden/data/scalar_bsm_event_probabilities.csv | 10 +++++-----
  4 files changed, 14 insertions(+), 14 deletions(-)
 ```
 
@@ -206,15 +206,15 @@ rest are byte-identical, every `book_*` frame included.
 | `localvol_summary.json` | `initial_portfolio_value` +3.28e-5, `total_pnl` -3.28e-5 |
 
 ```
- test/replay_golden/data/localvol_daily_event_summary.csv   |  2 +-
- test/replay_golden/data/localvol_greeks.csv                |  2 +-
- test/replay_golden/data/localvol_states.csv                |  6 ++---
- test/replay_golden/data/localvol_summary.json              |  4 +--
- test/replay_golden/data/scalar_bsm_daily_event_summary.csv |  2 +-
- test/replay_golden/data/scalar_bsm_greeks.csv              |  2 +-
- test/replay_golden/data/scalar_bsm_states.csv              | 10 ++++----
- test/replay_golden/data/scalar_bsm_summary.json            |  4 +--
- test/replay_golden/data/scalar_bsm_surfaces.csv            | 30 +++++++++++-----------
+ test/golden/replay_golden/data/localvol_daily_event_summary.csv   |  2 +-
+ test/golden/replay_golden/data/localvol_greeks.csv                |  2 +-
+ test/golden/replay_golden/data/localvol_states.csv                |  6 ++---
+ test/golden/replay_golden/data/localvol_summary.json              |  4 +--
+ test/golden/replay_golden/data/scalar_bsm_daily_event_summary.csv |  2 +-
+ test/golden/replay_golden/data/scalar_bsm_greeks.csv              |  2 +-
+ test/golden/replay_golden/data/scalar_bsm_states.csv              | 10 ++++----
+ test/golden/replay_golden/data/scalar_bsm_summary.json            |  4 +--
+ test/golden/replay_golden/data/scalar_bsm_surfaces.csv            | 30 +++++++++++-----------
  9 files changed, 31 insertions(+), 31 deletions(-)
 ```
 

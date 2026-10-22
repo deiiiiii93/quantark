@@ -12,7 +12,7 @@ from quantark.intraday.engines import pde as route
 
 @pytest.fixture
 def ctx():
-    """The daily-knock-in context of ``test/pde_bitwise/intraday_fixture.py``: one day before the sixth KO date."""
+    """The daily-knock-in context of ``test/golden/pde_bitwise/intraday_fixture.py``: one day before the sixth KO date."""
     from datetime import datetime, time, timedelta
 
     from intraday.conftest import SHANGHAI, dated_snowball, flat_env
