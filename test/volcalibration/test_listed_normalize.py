@@ -10,6 +10,7 @@ from quantark.volcalibration.normalize.listed import (
     ExpirySlice,
     ListedNormalizer,
     OtmQuote,
+    iter_expiries,
     otm_implied_vol,
     select_otm,
 )
@@ -95,3 +96,16 @@ def test_normalizer_rejects_a_snapshot_with_too_few_usable_expiries():
     )
     with pytest.raises(ValidationError, match="usable expiries"):
         ListedNormalizer().normalize(snap)
+
+
+def test_otm_inversion_recovers_the_generating_smile_of_the_sample_snapshot():
+    # sample smile: iv = 0.22 - 0.35 m + 0.6 m^2 + 0.02 T ; r=0.02 q=0.01 S0=6000
+    s0, r, q_carry, T = 6000.0, 0.02, 0.01, 0.20
+    forward = s0 * math.exp((r - q_carry) * T)
+    discount_factor = math.exp(-r * T)
+    picked = select_otm(iter_expiries(_snapshot())[1], forward)
+    assert picked
+    for oq in picked:
+        iv = otm_implied_vol(oq, s0, r, q_carry, forward, discount_factor, T)
+        m = math.log(oq.strike / s0)
+        assert iv == pytest.approx(0.22 - 0.35 * m + 0.6 * m * m + 0.02 * T, abs=2e-3)

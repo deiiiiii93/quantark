@@ -605,3 +605,13 @@ gates.  Report: `data/simulated_paths_report.html`.
 - The stress paths are designed, not sampled.
 - The bootstrap's vol is a random walk of daily changes; its dispersion
   over a year exceeds the history's.
+
+## Tests
+
+This study's own tests live in `tests/` and are **not** part of the repository's default
+`pytest test` run. From the repository root:
+
+```bash
+PYTHONPATH=.:test python -m pytest example/case_studies/snowball_simulated_paths/tests
+```
+

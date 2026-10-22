@@ -263,3 +263,15 @@ prove global identification.
 All tests run on the deterministic `sample` snapshot (offline). See
 `docs/superpowers/specs/2026-07-06-mo-volmodels-calibration-suite-design.md` and the matching
 plan for the design rationale, and `quantark/volmodels/` for the model kernels.
+
+## Tests
+
+This study's own tests live in `tests/` and are **not** part of the repository's default
+`pytest test` run. From the repository root:
+
+```bash
+PYTHONPATH=.:test python -m pytest example/case_studies/mo_volmodels/tests
+```
+
+The repository's CI keeps one end-to-end guard for the pattern itself in
+`test/mo_volmodels/test_pattern_end_to_end.py`.

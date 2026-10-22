@@ -738,3 +738,13 @@ obvious in advance.
   hedge across the carry buckets are out of scope. The `/200` conversion
   also ignores `F_i/S`, a 5% under-hedge for a far contract at a 5%
   discount and negligible for the front month.
+
+## Tests
+
+This study's own tests live in `tests/` and are **not** part of the repository's default
+`pytest test` run. From the repository root:
+
+```bash
+PYTHONPATH=.:test python -m pytest example/case_studies/snowball_q_term_structure/tests
+```
+

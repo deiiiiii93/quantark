@@ -183,3 +183,13 @@ the promotion gate.
 
 The contract tests use tiny in-memory fixtures and `tmp_path`; they do not call
 CFETS and do not write into the shared `example/case_studies/fx_volmodels/data` directory.
+
+## Tests
+
+This study's own tests live in `tests/` and are **not** part of the repository's default
+`pytest test` run. From the repository root:
+
+```bash
+PYTHONPATH=.:test python -m pytest example/case_studies/fx_volmodels/tests
+```
+
