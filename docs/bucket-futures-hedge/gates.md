@@ -30,7 +30,7 @@ What it establishes:
 
 - both supported builders satisfy the two invariances of design section 2.2
   on the first interval, an interior interval, the nodes, the tail and the
-  one-node limit, checked against closed forms in `_bucket_oracles.py` that
+  one-node limit, checked against closed forms in `test/golden/oracles/bucket_oracles.py` that
   import nothing from `quantark`;
 - the three policies produce the design's exact holdings on the section 3.3
   fixture, and their residuals are confirmed by INDEPENDENT repricing rather

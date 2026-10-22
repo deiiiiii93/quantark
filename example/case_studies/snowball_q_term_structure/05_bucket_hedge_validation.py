@@ -61,12 +61,17 @@ from quantark.backtest.strategy import ideal_targets  # noqa: E402
 from quantark.param import FlatRateCurve  # noqa: E402
 
 
+# Independent oracles live with the tests that CI depends on; this CLI loads the
+# same file by path (stdlib only, never imported as a package).
+ORACLES_PATH = STUDY_DIR.parents[2] / "test" / "golden" / "oracles" / "bucket_oracles.py"
+
+
 def _load_oracles():
     name = "_bucket_oracles"
     if name in sys.modules:
         return sys.modules[name]
     spec = importlib.util.spec_from_file_location(
-        name, STUDY_DIR / "_bucket_oracles.py"
+        name, ORACLES_PATH
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module

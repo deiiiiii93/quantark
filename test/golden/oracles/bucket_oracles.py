@@ -7,9 +7,9 @@ bucket code can be compared against an independent derivation rather than
 against itself.  This module must never import ``quantark.backtest``: not
 the risk records, not the strategy, not the carry context, not the sampler.
 
-It lives beside the study rather than inside ``test/`` because the
-validation CLI uses the same oracles, and a shipped stage must not import
-the test package at runtime.
+It lives under ``test/golden/`` because CI's tests depend on it; the study's
+validation CLI (``05_bucket_hedge_validation.py``) loads it by file path, so
+both check production code against the SAME derivation.
 
 The two supported carry builders are re-derived here as closed forms:
 

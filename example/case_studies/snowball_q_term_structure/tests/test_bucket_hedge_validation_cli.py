@@ -32,7 +32,11 @@ def _load(name: str, filename: str):
 
 
 V = _load("validation_stage", "05_bucket_hedge_validation.py")
-ORACLES = _load("_bucket_oracles", "_bucket_oracles.py")
+ORACLES_PATH = REPO / "test" / "golden" / "oracles" / "bucket_oracles.py"
+_spec = importlib.util.spec_from_file_location("_bucket_oracles", ORACLES_PATH)
+ORACLES = importlib.util.module_from_spec(_spec)
+sys.modules["_bucket_oracles"] = ORACLES
+_spec.loader.exec_module(ORACLES)
 
 
 @pytest.fixture(scope="module")
@@ -287,8 +291,8 @@ def test_the_stage_never_imports_the_test_package():
     assert "bucket_hedge_fixtures" not in source
     assert "model-validation-output" not in source
     assert "import test" not in source
-    # It uses the shipped oracles, which import nothing from the library.
-    oracle_source = (STUDY / "_bucket_oracles.py").read_text()
+    # It uses the shared oracles, which import nothing from the library.
+    oracle_source = ORACLES_PATH.read_text()
     imports = [
         line.strip()
         for line in oracle_source.splitlines()
@@ -311,7 +315,7 @@ def test_the_oracles_and_the_test_fixtures_are_the_same_numbers():
     """
     import bucket_hedge_fixtures as fixtures
 
-    assert Path(fixtures._ORACLES.__file__) == STUDY / "_bucket_oracles.py"
+    assert Path(fixtures._ORACLES.__file__) == ORACLES_PATH
 
     def fields(quotes):
         return [(q.contract, q.tenor_years, q.price, q.multiplier) for q in quotes]

@@ -1,7 +1,7 @@
 """Test fixtures for the bucket futures hedge.
 
 The analytic oracles live in
-``example/case_studies/snowball_q_term_structure/_bucket_oracles.py`` and are re-exported
+``test/golden/oracles/bucket_oracles.py`` and are re-exported
 here unchanged, so the tests and the shipped validation CLI check production
 code against the SAME independent derivation.  That module imports nothing
 from ``quantark.backtest``.
@@ -19,7 +19,7 @@ import math
 import sys
 from pathlib import Path
 
-_STUDY = Path(__file__).resolve().parents[1] / "example" / "case_studies" / "snowball_q_term_structure"
+_ORACLES_PATH = Path(__file__).resolve().parent / "golden" / "oracles" / "bucket_oracles.py"
 
 
 def _load_oracles():
@@ -27,7 +27,7 @@ def _load_oracles():
     if name in sys.modules:
         return sys.modules[name]
     spec = importlib.util.spec_from_file_location(
-        name, _STUDY / "_bucket_oracles.py"
+        name, _ORACLES_PATH
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
