@@ -592,7 +592,7 @@ quantark/
 ├── rfq/                # Request-for-quote service & registry
 └── util/               # enum/, numerical/, calendar, market-data adapters, exceptions
 
-example/                # 90+ runnable example scripts
+example/                # how-to demos mirroring the package tree + case_studies/ (see example/README.md)
 test/                   # Unit-test suite
 ```
 
