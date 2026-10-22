@@ -26,3 +26,4 @@ Removed tests: test_parity.py(2), test_otm_filter.py(2), test_iv_inversion.py(1,
 Remaining CI dependency on a study (report to user): 8 library tests (test_futures_*, test_carry_curve_context, test_replay_futures_buckets, ...) use test/bucket_hedge_fixtures.py, which loads the independent oracles from example/case_studies/snowball_q_term_structure/_bucket_oracles.py.
 Also: the demo tests (VaR/FX/RFQ/PPP/OTC/cash-leg) intentionally still import example demos (how-to PATTERN guards).
 Added fixtures: test/volcalibration/data/ (4 JSONs, ~150 KB), test/data/mo_iv_surface_20230504.json (20 KB; revives 46 tests: test_otc_vol_calibrators 42 + test_mo_frozen_feller 4).
+Project 2 regression #2: 'from example import <demo>' form (4 test modules + 6 rfq study scripts), found by the clean full-suite baseline after main was migrated; fixed.
