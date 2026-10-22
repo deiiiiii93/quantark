@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "example/case_studies/mo_volmodels"))
 import _mo_common as mc  # noqa: E402
 
-SNAP = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
+SNAP = ROOT / "test/volcalibration/data/mo_snapshot_sample.json"
 
 
 def test_load_snapshot_still_returns_a_dict():

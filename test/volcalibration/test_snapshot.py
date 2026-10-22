@@ -12,8 +12,8 @@ from quantark.volcalibration.snapshot import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-LIVE = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
-SETTLE = ROOT / "example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json"
+LIVE = ROOT / "test/volcalibration/data/mo_snapshot_sample.json"
+SETTLE = ROOT / "test/volcalibration/data/mo_settlement_snapshot_20260430.json"
 
 
 def test_lift_live_snapshot():

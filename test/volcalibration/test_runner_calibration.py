@@ -26,7 +26,7 @@ from quantark.volcalibration.store import StoreLayout
 
 CONFIG = CalibrationRunConfig().manifest_payload()
 VARIANTS = ("localvol", "heston", "heston_slv")
-SAMPLE = Path("example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json")
+SAMPLE = Path("test/volcalibration/data/mo_settlement_snapshot_20260430.json")
 
 
 def _cal_record(tag, sha, status="ok", config=None, variants=VARIANTS):

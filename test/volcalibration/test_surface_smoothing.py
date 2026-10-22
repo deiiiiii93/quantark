@@ -16,7 +16,7 @@ from quantark.volcalibration.surface import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-LIVE = ROOT / "example/case_studies/mo_volmodels/data/mo_snapshot_sample.json"
+LIVE = ROOT / "test/volcalibration/data/mo_snapshot_sample.json"
 
 
 def _raw():

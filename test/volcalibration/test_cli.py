@@ -12,7 +12,7 @@ from quantark.volcalibration.store import (
     surface_record,
 )
 
-SAMPLE = Path("example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json")
+SAMPLE = Path("test/volcalibration/data/mo_settlement_snapshot_20260430.json")
 
 CONFIG_YAML = """
 schema_version: 1

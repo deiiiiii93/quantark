@@ -24,7 +24,7 @@ from quantark.volcalibration.store import (
     surface_record,
 )
 
-SAMPLE = Path("example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json")
+SAMPLE = Path("test/volcalibration/data/mo_settlement_snapshot_20260430.json")
 TAG = "20260430"
 SPOT = 8381.947  # the s0 the stored 20260430 artifact was built with
 

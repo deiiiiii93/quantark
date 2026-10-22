@@ -9,7 +9,7 @@ from quantark.volcalibration.normalize.settlement import SettlementNormalizer
 from quantark.volcalibration.snapshot import QuoteSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
-SETTLE = ROOT / "example/case_studies/mo_volmodels/data/mo_settlement_snapshot_20260430.json"
+SETTLE = ROOT / "test/volcalibration/data/mo_settlement_snapshot_20260430.json"
 
 
 def _snapshot(spot=6000.0):
