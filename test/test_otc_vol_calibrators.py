@@ -63,14 +63,7 @@ from quantark.volmodels.slv.leverage import LeverageSurface
 import quantark.volcalibration.calibrate as vol_calibrators
 
 
-REAL_ARTIFACT = (
-    Path(__file__).resolve().parents[1]
-    / "example" / "case_studies" / "mo_volmodels"
-    / "data"
-    / "history"
-    / "iv_surface"
-    / "mo_iv_surface_20230504.json"
-)
+REAL_ARTIFACT = Path(__file__).resolve().parent / "data" / "mo_iv_surface_20230504.json"
 ARTIFACT_DATE = date(2023, 5, 4)
 
 pytestmark = pytest.mark.skipif(
