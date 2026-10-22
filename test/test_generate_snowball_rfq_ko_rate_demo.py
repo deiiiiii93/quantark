@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from example import snowball_rfq_ko_rate_demo_workflow as demo
+from example.case_studies.snowball_rfq_ko_rate import snowball_rfq_ko_rate_demo_workflow as demo
 from quantark.util.enum import ProtectionType
 
 

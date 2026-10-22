@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 
 
-from example import snowball_rfq_ko_rate_demo_workflow as workflow
+from example.case_studies.snowball_rfq_ko_rate import snowball_rfq_ko_rate_demo_workflow as workflow
 
 
 def build_quad_ui_copy(grid_points: int) -> dict[str, str]:

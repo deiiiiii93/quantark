@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
-from example import otc_autocallable_backtest_demo as demo
+from example.backtest import otc_autocallable_backtest_demo as demo
 from quantark.util.enum.engine_enums import EngineType
 
 

@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 
-from example import snowball_rfq_ko_rate_demo_workflow as workflow
+from example.case_studies.snowball_rfq_ko_rate import snowball_rfq_ko_rate_demo_workflow as workflow
 
 
 def parse_args() -> argparse.Namespace:

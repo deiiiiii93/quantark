@@ -15,7 +15,7 @@ from quantark.backtest.replay import (
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
-from example import ppp_dki_snowball_backtest_case_study as case_study
+from example.case_studies.ppp_dki_snowball_backtest import ppp_dki_snowball_backtest_case_study as case_study
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, ProtectionType

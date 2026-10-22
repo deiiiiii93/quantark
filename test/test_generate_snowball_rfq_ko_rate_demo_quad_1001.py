@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from example import calculate_snowball_rfq_ko_rate_demo_quad_1001_data as calc
-from example import generate_snowball_rfq_ko_rate_demo_quad_1001 as demo
-from example import render_snowball_rfq_ko_rate_demo_quad_1001_html as render
+from example.case_studies.snowball_rfq_ko_rate import calculate_snowball_rfq_ko_rate_demo_quad_1001_data as calc
+from example.case_studies.snowball_rfq_ko_rate import generate_snowball_rfq_ko_rate_demo_quad_1001 as demo
+from example.case_studies.snowball_rfq_ko_rate import render_snowball_rfq_ko_rate_demo_quad_1001_html as render
 
 
 def test_wrapper_calculates_then_writes_all_artifacts(monkeypatch) -> None:
