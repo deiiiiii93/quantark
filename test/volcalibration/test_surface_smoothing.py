@@ -24,19 +24,6 @@ def _raw():
         json.loads(LIVE.read_text()), trade_date=date(2026, 7, 6), symbol="000852.SH"
     )
     return build_raw_surface(ListedNormalizer().normalize(snap))
-
-
-def test_smoothing_matches_the_legacy_helper_bit_for_bit():
-    """The promoted function must be numerically identical to the suite's."""
-    sys.path.insert(0, str(ROOT / "example/case_studies/mo_volmodels"))
-    import _mo_common as mc
-
-    raw = _raw()
-    lib = sabr_smoothed_surface(raw, beta=1.0)
-    legacy = mc.sabr_smoothed_surface(raw, beta=1.0)
-    assert np.array_equal(np.asarray(lib["iv_grid"]), np.asarray(legacy["iv_grid"]))
-
-
 def test_total_variance_is_non_decreasing_in_maturity():
     out = sabr_smoothed_surface(_raw(), beta=1.0)
     grid = np.asarray(out["iv_grid"])

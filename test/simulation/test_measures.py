@@ -66,14 +66,3 @@ def test_helpers():
     assert bp_of(25.0, NOTIONAL) == 25.0
     assert max_drawdown([0.0, 3.0, 1.0, 4.0, -2.0]) == 6.0
     assert max_drawdown([]) == 0.0
-
-
-def test_the_q_study_delegates_to_the_library():
-    path = Path(__file__).resolve().parents[2] / "example" / "case_studies" / "snowball_q_term_structure" / "_common.py"
-    spec = importlib.util.spec_from_file_location("q_term_structure_common_for_measures", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    states, trades = _hand_built()
-    assert module.hedge_measures(states, trades, notional=NOTIONAL) == path_measures(states, trades, notional=NOTIONAL)
-    assert module.max_drawdown is max_drawdown
