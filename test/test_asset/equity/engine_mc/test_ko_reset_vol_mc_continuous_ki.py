@@ -11,8 +11,8 @@ import math
 import numpy as np
 import pytest
 
-from test_dated_expiry_settles import HESTON, SLV_LEVERAGE
-from test_mc_time_node_merge import _price, env, ko_reset
+from test_asset.equity.engine_pde.test_dated_expiry_settles import HESTON, SLV_LEVERAGE
+from test_asset.equity.product_other.test_mc_time_node_merge import _price, env, ko_reset
 
 from quantark.asset.equity.engine.mc import SnowballMCEngine
 from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (

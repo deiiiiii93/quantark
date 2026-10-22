@@ -5,7 +5,7 @@ from golden_compare import GOLDEN_REL_TOL
 from quantark.asset.equity.engine.mc import SnowballMCEngine
 from quantark.asset.equity.param import MCParams
 from quantark.util.enum.engine_enums import MonteCarloMethod
-from test_snowball_mc_engine import create_basic_barrier_config, create_pricing_env, create_standard_snowball
+from test_asset.equity.product_snowball.test_snowball_mc_engine import create_basic_barrier_config, create_pricing_env, create_standard_snowball
 
 
 def _frozen(bits):

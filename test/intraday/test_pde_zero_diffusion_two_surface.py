@@ -10,7 +10,7 @@ from quantark.intraday import EventKind, Fixing, VarianceProfile, resolve_contex
 from quantark.intraday.request import IntradayValuationRequest
 from intraday.conftest import SHANGHAI, dated_snowball, flat_env
 
-from test_snowball_pde import create_pricing_env, create_reverse_snowball, create_standard_snowball
+from test_asset.equity.product_snowball.test_snowball_pde import create_pricing_env, create_reverse_snowball, create_standard_snowball
 
 
 def test_legacy_flat_surface_prices_are_unchanged():

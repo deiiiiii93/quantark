@@ -10,7 +10,7 @@ import pytest
 import numpy as np
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.product.option import AmericanOption, EuropeanVanillaOption
 from quantark.asset.equity.engine.analytical import AmericanOptionAnalyticalEngine, BlackScholesEngine

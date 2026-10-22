@@ -42,7 +42,7 @@ from quantark.volmodels.heston import HestonParams
 
 from dcn_fixtures import DCN_A, DCN_B, make_dcn
 from test_cashleg.test_folding import _leg_set
-from test_dcn_lifecycle_state import CASH, ROW, ROW_PAY, STRADDLE, env_on, flow, state_on
+from test_asset.equity.engine_pde.test_dcn_lifecycle_state import CASH, ROW, ROW_PAY, STRADDLE, env_on, flow, state_on
 
 HESTON = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.5)
 START = DCN_A["valuation_date"]

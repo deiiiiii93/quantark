@@ -28,7 +28,7 @@ from quantark.cashleg.base import LegDirection
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.util.enum import PostKOScheduleMode
-from test_structured_numerical_settlement import (
+from test_asset.equity.product_other.test_structured_numerical_settlement import (
     LAG,
     _convention,
     _env,

@@ -16,7 +16,7 @@ import pytest
 from quantark.asset.equity.lifecycle.ko_reset import tracker_for
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 
-from test_tracker_clock_parity import (
+from test_asset.equity.product_other.test_tracker_clock_parity import (
     BUILDERS, START, env, phoenix, walk,
 )
 

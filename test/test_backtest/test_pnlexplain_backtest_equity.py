@@ -7,11 +7,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-from test_backtest_lifecycle import (  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from test_asset.equity.engine_analytical.test_backtest_lifecycle import (  # noqa: E402
     RampAdapter, _down_out_put_position, UNDERLYING, START,
 )
-from test_multi_greek_backtest import make_config as make_multi_config  # noqa: E402
+from test_backtest.test_multi_greek_backtest import make_config as make_multi_config  # noqa: E402
 
 from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit  # noqa: E402
 from quantark.backtest import BacktestConfig, BacktestEngine, ZeroCostModel  # noqa: E402

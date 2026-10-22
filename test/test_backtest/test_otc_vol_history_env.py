@@ -60,7 +60,7 @@ DATE_EXCLUDED = date(2024, 1, 3)
 DATE_B = date(2024, 1, 4)
 
 REAL_HISTORY_DIR = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "example" / "case_studies" / "mo_volmodels"
     / "data"
     / "history"

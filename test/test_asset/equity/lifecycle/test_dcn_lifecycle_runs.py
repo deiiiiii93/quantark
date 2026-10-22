@@ -230,7 +230,7 @@ def test_tracker_aged_equals_booked(route, day, post):
 @pytest.mark.parametrize("make", [lambda: LocalVolDCNMCEngine(**MC), lambda: LocalVolDCNPDEEngine(),
                                   lambda: HestonDCNPDESolver(HESTON, n_x=101, n_v=31)])
 def test_tracker_aged_equals_booked_on_the_vol_routes(make):
-    from test_dcn_lifecycle_state import env_on as grid_env_on
+    from test_asset.equity.engine_pde.test_dcn_lifecycle_state import env_on as grid_env_on
 
     day = datetime(2023, 4, 4)
     t = tracker()

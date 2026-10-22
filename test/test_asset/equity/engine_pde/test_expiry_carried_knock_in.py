@@ -24,7 +24,7 @@ from typing import Callable
 import numpy as np
 import pytest
 
-from test_dated_expiry_settles import (
+from test_asset.equity.engine_pde.test_dated_expiry_settles import (
     _ADI,
     HESTON,
     INITIAL,
@@ -284,7 +284,7 @@ def _autocallable(kind):
     (schedule 1 KO 103 / discrete KI 75 to month 6, schedule 2 KO 95 (3%) to month 12). A carried knock-in is set on
     the product (schedule 1, contract day 152)."""
     import pandas as pd
-    from test_tracker_clock_parity import KINDS, phoenix
+    from test_asset.equity.product_other.test_tracker_clock_parity import KINDS, phoenix
 
     builder = phoenix(annualized=False, memory=False) if kind == "phoenix_plain" else KINDS[kind]
 

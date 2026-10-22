@@ -410,8 +410,8 @@ def _fx_tarn(n, a):
 
 
 def _ko_reset(model, n, a):
-    from test_dated_expiry_settles import HESTON, SLV_LEVERAGE
-    from test_mc_time_node_merge import env, ko_reset
+    from test_asset.equity.engine_pde.test_dated_expiry_settles import HESTON, SLV_LEVERAGE
+    from test_asset.equity.product_other.test_mc_time_node_merge import env, ko_reset
     from quantark.asset.equity.engine import mc as m
 
     params = _mc(n, a, steps=12)
@@ -426,7 +426,7 @@ def _ko_reset(model, n, a):
 
 
 def _autocall_more(kind, model, n, a):
-    from test_dated_expiry_settles import HESTON, SLV_LEVERAGE
+    from test_asset.equity.engine_pde.test_dated_expiry_settles import HESTON, SLV_LEVERAGE
     from quantark.asset.equity.engine import mc as m
 
     params = _mc(n, a, steps=12)

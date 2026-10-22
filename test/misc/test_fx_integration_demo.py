@@ -4,7 +4,7 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[2]))
 
 
 def test_fx_portfolio_risk_demo_runs():

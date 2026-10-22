@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm, qmc, t as student_t
 
-from test_quad_v2_engine import environment
+from test_asset.equity.product_other.test_quad_v2_engine import environment
 from quantark.asset.equity.engine.event_stats import PhoenixEventStats
 from quantark.asset.equity.engine.quad import PhoenixQuadEngineV2
 from quantark.asset.equity.param import QuadV2Params

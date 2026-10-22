@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine

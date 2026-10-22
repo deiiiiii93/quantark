@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 # Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 import pytest
 from datetime import datetime

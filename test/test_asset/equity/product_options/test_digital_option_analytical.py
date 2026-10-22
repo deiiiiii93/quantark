@@ -9,7 +9,7 @@ from datetime import datetime
 from scipy import stats
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.product.option import CashOrNothingDigitalOption, EuropeanVanillaOption  # noqa: E402
 from quantark.asset.equity.engine.analytical import DigitalOptionAnalyticalEngine  # noqa: E402

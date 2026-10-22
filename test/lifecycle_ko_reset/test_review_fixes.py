@@ -157,7 +157,7 @@ def test_an_equity_backtest_values_a_carried_knocked_in_rebased_position_from_da
     from quantark.backtest import BacktestConfig, BacktestEngine, ZeroCostModel
     from quantark.backtest.strategy import DeltaNeutralStrategy
     from quantark.portfolio import Position
-    from test_backtest_lifecycle import UNDERLYING, RampAdapter
+    from test_asset.equity.engine_analytical.test_backtest_lifecycle import UNDERLYING, RampAdapter
 
     adapter = RampAdapter(start_spot=90.0, end_spot=90.0, num_days=5)
     start = adapter.dates[0].to_pydatetime()

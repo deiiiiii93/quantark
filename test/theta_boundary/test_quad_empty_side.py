@@ -4,7 +4,7 @@ refused. No knock-in side means no knock-in monitoring; no knock-out side means 
 against the PDE solver within twice the two engines' gap on the same contract still alive."""
 import pytest
 
-from test_autocallable_observation_at_valuation import (COUPON_LEVEL, KI, KO, POST_KO, AccrualConfig, BarrierConfig,
+from test_asset.equity.product_autocallable.test_autocallable_observation_at_valuation import (COUPON_LEVEL, KI, KO, POST_KO, AccrualConfig, BarrierConfig,
                                                         CouponBarrierConfig, KnockOutResetSnowballOption,
                                                         ObservationType, PayoffConfig, PhoenixOption, SnowballOption,
                                                         _schedule, carrying_a_knock_in, env, price)

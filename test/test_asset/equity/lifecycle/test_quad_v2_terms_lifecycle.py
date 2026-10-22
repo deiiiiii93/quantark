@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.special import ndtr
 
-from test_quad_v2_engine import environment, snowball
+from test_asset.equity.product_other.test_quad_v2_engine import environment, snowball
 from quantark.asset.equity.engine.quad import SnowballQuadEngineV2, PhoenixQuadEngineV2
 from quantark.asset.equity.param import QuadV2Params
 from quantark.asset.equity.lifecycle import AutocallableLifecycleState

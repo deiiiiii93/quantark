@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.portfolio import Portfolio, Position, PortfolioSnapshot, PortfolioExporter
 from quantark.asset.equity.product.option import EuropeanVanillaOption

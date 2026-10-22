@@ -29,7 +29,7 @@ from quantark.util.enum import ObservationType
 
 @pytest.mark.parametrize("readout", ["legacy_linear", "transition"])
 def test_worst_historical_date_closes_local_identity_while_preserving_secant_gap(readout):
-    case = json.loads((Path(__file__).parent / "data/carry_identity_20240119.json").read_text())
+    case = json.loads((Path(__file__).parents[3] / "data/carry_identity_20240119.json").read_text())
     s0 = case["initial_price"]
     original = create_standard_snowball(
         initial_price=s0, strike=s0, maturity=case["maturity"],

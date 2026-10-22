@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.engine.event_stats import KOResetEventStats
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine

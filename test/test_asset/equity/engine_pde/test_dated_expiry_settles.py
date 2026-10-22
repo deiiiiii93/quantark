@@ -383,7 +383,7 @@ ACCUMULATOR = Family(
 # -- autocallables: the tracker-clock parity contracts (flat cash, so the two forms are the same contract) ----------
 
 def _autocallable(kind, knocked_in=False):
-    from test_tracker_clock_parity import KINDS, phoenix
+    from test_asset.equity.product_other.test_tracker_clock_parity import KINDS, phoenix
     import pandas as pd
 
     builder = phoenix(annualized=False, memory=False) if kind == "phoenix_plain" else KINDS[kind]

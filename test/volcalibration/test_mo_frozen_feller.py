@@ -25,7 +25,7 @@ from quantark.param.vol.surface_history import IvSurfaceArtifact
 from quantark.volcalibration.config import HESTON_PRESETS
 from quantark.volcalibration.calibrate import VolModelCalibrator
 
-REAL_ARTIFACT = Path(__file__).resolve().parent / "data" / "mo_iv_surface_20230504.json"
+REAL_ARTIFACT = Path(__file__).resolve().parents[1] / "data" / "mo_iv_surface_20230504.json"
 
 pytestmark = pytest.mark.skipif(
     not REAL_ARTIFACT.exists(), reason="real IV surface artifact not present"

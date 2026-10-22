@@ -17,7 +17,7 @@ import pytest
 from scipy import integrate
 from scipy.stats import norm
 
-import test_discrete_barrier_between_observations as T
+import test_asset.equity.engine_analytical.test_discrete_barrier_between_observations as T
 from quantark.asset.equity.engine.analytical.accumulator_analytical_engine import AccumulatorAnalyticalEngine
 from quantark.asset.equity.engine.analytical.barrier_analytical_engine import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.analytical.double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine

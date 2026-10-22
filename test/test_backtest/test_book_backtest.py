@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from quantark.asset.equity.product.option import EuropeanVanillaOption, create_standard_snowball
 from quantark.backtest.replay import (

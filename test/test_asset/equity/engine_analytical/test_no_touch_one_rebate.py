@@ -17,8 +17,8 @@ import warnings
 
 import pytest
 
-import test_barrier_lifecycle_discrete_observation as LC
-import test_discrete_barrier_between_observations as T
+import test_asset.equity.lifecycle.test_barrier_lifecycle_discrete_observation as LC
+import test_asset.equity.engine_analytical.test_discrete_barrier_between_observations as T
 from quantark.asset.equity.lifecycle import BarrierLifecycleTracker, LifecycleEventType
 from quantark.asset.equity.engine.analytical.one_touch_analytical_engine import OneTouchAnalyticalEngine
 from quantark.asset.equity.engine.analytical.single_sharkfin_option_analytical_engine import (

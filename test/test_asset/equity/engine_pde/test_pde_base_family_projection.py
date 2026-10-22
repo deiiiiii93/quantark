@@ -19,7 +19,7 @@ from quantark.util.exceptions import ValidationError
 from pde_3a.semantics import cases
 from term_structure_benchmarks import make_term_env
 
-V070 = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "v070_event_semantics.json").read_text())
+V070 = json.loads((Path(__file__).parents[3] / "pde_3a" / "fixtures" / "v070_event_semantics.json").read_text())
 
 
 def _nodes(n=41, lo=80.0, hi=125.0):
@@ -200,8 +200,8 @@ from pde_3a.products import PRODUCTS, HORIZONS, dates, env as study_env  # noqa:
 from quantark.asset.equity.engine import PDEEngine  # noqa: E402
 from quantark.asset.equity.riskmeasures import GreeksCalculator  # noqa: E402
 
-REF = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "base_family_reference.json").read_text())
-V070_GREEKS = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "base_family_nodal_v070.json").read_text())
+REF = json.loads((Path(__file__).parents[3] / "pde_3a" / "fixtures" / "base_family_reference.json").read_text())
+V070_GREEKS = json.loads((Path(__file__).parents[3] / "pde_3a" / "fixtures" / "base_family_nodal_v070.json").read_text())
 QUANTITIES = ("pv", "delta", "gamma", "bump_delta", "bump_gamma")
 
 #: Twice the largest error spec §4.6 reports at 400 points, per horizon and quantity. "projection" is

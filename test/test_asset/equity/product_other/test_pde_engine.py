@@ -15,7 +15,7 @@ from pathlib import Path
 import sys
 
 # Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 # Import products
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct

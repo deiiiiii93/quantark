@@ -14,7 +14,7 @@ from quantark.util.enum import BarrierType, ObservationType, OptionType
 
 from term_structure_benchmarks import make_term_env
 
-REF = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "term_curve_reference.json").read_text())
+REF = json.loads((Path(__file__).parents[3] / "pde_3a" / "fixtures" / "term_curve_reference.json").read_text())
 OBS = [k / 12.0 for k in range(1, 13)]
 
 
@@ -86,7 +86,7 @@ def test_the_rows_are_the_forward_formulas(case):
     assert abs(row - formula(df, remaining, s_edge)) > 1e-8
 
 
-BEFORE_G = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "far_field_before_g.json").read_text())
+BEFORE_G = json.loads((Path(__file__).parents[3] / "pde_3a" / "fixtures" / "far_field_before_g.json").read_text())
 
 
 def _unmoved_cases(shape):

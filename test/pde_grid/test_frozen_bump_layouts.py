@@ -204,7 +204,7 @@ def test_dcn_bump_context_identity_matrix():
     import sys
 
     sys.path.insert(0, "test")
-    from test_dcn_pde_solver import DCN_A, FLAT, flat_env, make_dcn
+    from test_asset.equity.engine_pde.test_dcn_pde_solver import DCN_A, FLAT, flat_env, make_dcn
 
     product = make_dcn(DCN_A)
     base_env = flat_env(**FLAT, spot=DCN_A["initial_price"])

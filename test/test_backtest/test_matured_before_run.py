@@ -17,7 +17,7 @@ import pytest
 
 from quantark.asset.equity.lifecycle.ko_reset import tracker_for
 
-from test_tracker_clock_parity import BUILDERS, START, env
+from test_asset.equity.product_other.test_tracker_clock_parity import BUILDERS, START, env
 
 FORMS = ("numeric", "dated")
 #: the day each contract's terminal falls due, in days after its initial_date (a KO-reset not knocked in matures
@@ -124,7 +124,7 @@ def test_the_manager_drops_a_matured_position_with_no_cash(form):
 # -- the replay: zero initial value, zero marks, no maturity action ---------------------------------------------------
 
 def test_the_replay_values_a_matured_contract_at_zero_on_every_day():
-    from test_book_backtest import _single_config, _synthetic_market
+    from test_backtest.test_book_backtest import _single_config, _synthetic_market
     from quantark.backtest.replay import AutocallableBacktestEngine
 
     config = _single_config(_synthetic_market(end="2024-01-31"))

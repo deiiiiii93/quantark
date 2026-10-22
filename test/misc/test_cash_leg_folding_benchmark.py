@@ -2,7 +2,7 @@
 import importlib.util
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "example" / "case_studies" / "engine_benchmarks" / "cash_leg_folding_benchmark.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "example" / "case_studies" / "engine_benchmarks" / "cash_leg_folding_benchmark.py"
 
 
 def _load():

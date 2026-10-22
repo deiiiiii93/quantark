@@ -22,7 +22,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from test_vol_dated_schedules import BARRIER_ROUTES, EXERCISE, INITIAL, _on, _quiet, _records, env
+from test_asset.equity.product_other.test_vol_dated_schedules import BARRIER_ROUTES, EXERCISE, INITIAL, _on, _quiet, _records, env
 
 from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
 from quantark.asset.equity.engine.pde import HestonBarrierPDESolver, HestonSLVBarrierPDESolver

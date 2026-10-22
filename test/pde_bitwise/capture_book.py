@@ -630,7 +630,7 @@ def lv_snowball_prebuilt():
 
 def settlement_lag_row(kind):
     """Through the solver: the ``PDEEngine`` facade declares no settlement support."""
-    from test_structured_numerical_settlement import _convention, _env, _phoenix, _snowball
+    from test_asset.equity.product_other.test_structured_numerical_settlement import _convention, _env, _phoenix, _snowball
     from quantark.asset.equity.engine.pde import PhoenixPDESolver, SnowballPDESolver
     product = _snowball(_convention()) if kind == "snowball" else _phoenix(_convention())
     cls = SnowballPDESolver if kind == "snowball" else PhoenixPDESolver

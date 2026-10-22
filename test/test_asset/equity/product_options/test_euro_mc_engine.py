@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine

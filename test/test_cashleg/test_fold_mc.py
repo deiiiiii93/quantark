@@ -63,7 +63,7 @@ from test_cashleg.test_fold_quad_v1 import (
     _route,
 )
 from test_cashleg.test_folding import UNIT
-from test_snowball_vol_model_engines import (
+from test_asset.equity.engine_pde.test_snowball_vol_model_engines import (
         _env as _vol_env,
     _heston,
     _unit_leverage,

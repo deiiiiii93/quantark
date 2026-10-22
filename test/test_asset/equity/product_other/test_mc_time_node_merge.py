@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pytest
 
-from test_dated_expiry_settles import HESTON, SLV_LEVERAGE, env as _env
+from test_asset.equity.engine_pde.test_dated_expiry_settles import HESTON, SLV_LEVERAGE, env as _env
 
 from quantark.asset.equity.engine.mc import PhoenixMCEngine, SnowballMCEngine
 from quantark.asset.equity.engine.mc.phoenix_vol_mc_engines import (

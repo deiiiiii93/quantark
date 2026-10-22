@@ -20,7 +20,7 @@ from typing import List
 import pytest
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,

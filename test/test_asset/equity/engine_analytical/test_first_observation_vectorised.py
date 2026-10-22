@@ -16,7 +16,7 @@ import warnings
 import numpy as np
 import pytest
 
-import test_discrete_barrier_between_observations as T
+import test_asset.equity.engine_analytical.test_discrete_barrier_between_observations as T
 from quantark.asset.equity.engine.analytical import (
     barrier_analytical_engine,
     double_barrier_option_engine,

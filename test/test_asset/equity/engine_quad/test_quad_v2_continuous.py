@@ -6,7 +6,7 @@ from scipy.special import ndtr
 from quantark.asset.equity.param import QuadV2Params
 from quantark.asset.equity.engine.quad.v2.contract import affine
 from quantark.asset.equity.engine.quad.v2.continuous import continuous_readout
-from test_quad_v2_engine import snowball, environment
+from test_asset.equity.product_other.test_quad_v2_engine import snowball, environment
 from quantark.asset.equity.engine.quad import SnowballQuadEngineV2
 
 

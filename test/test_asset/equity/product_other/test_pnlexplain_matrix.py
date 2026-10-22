@@ -32,7 +32,7 @@ from quantark.util.enum.deltaone_enums import DeltaOneType
 from quantark.util.enum.engine_enums import AmericanAnalyticalMethod
 
 sys.path.insert(0, os.path.dirname(__file__))
-from test_pnlexplain_lifecycle_days import _snowball  # noqa: E402
+from test_asset.equity.lifecycle.test_pnlexplain_lifecycle_days import _snowball  # noqa: E402
 
 T0, T1 = datetime(2026, 6, 26), datetime(2026, 6, 29)
 _USED = (BookSnapshot, ExplainRow, ExplainTrade, FactorCoordinate, FactorMoves, LifecycleTransition,

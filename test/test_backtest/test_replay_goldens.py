@@ -87,7 +87,7 @@ def assert_frame_matches(actual, expected, label: str) -> None:
             err_msg=f"{label} column {column!r}",
         )
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 from replay_golden import fixtures  # noqa: E402
 
 GOLDEN_DIR = fixtures.GOLDEN_DIR

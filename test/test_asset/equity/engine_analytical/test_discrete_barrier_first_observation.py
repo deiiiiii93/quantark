@@ -25,7 +25,7 @@ import warnings
 
 import pytest
 
-import test_discrete_barrier_between_observations as T
+import test_asset.equity.engine_analytical.test_discrete_barrier_between_observations as T
 from golden_compare import assert_close
 from quantark.asset.equity.engine.analytical import (
     barrier_analytical_engine,

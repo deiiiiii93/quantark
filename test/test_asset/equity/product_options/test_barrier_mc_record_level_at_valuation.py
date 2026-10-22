@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from test_vol_dated_schedules import BARRIER_ROUTES, DAYS, EXERCISE, INITIAL, _on, _quiet, env
+from test_asset.equity.product_other.test_vol_dated_schedules import BARRIER_ROUTES, DAYS, EXERCISE, INITIAL, _on, _quiet, env
 
 from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
 from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver

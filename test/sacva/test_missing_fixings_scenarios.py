@@ -217,7 +217,7 @@ def test_equity_dynamic_scenario_fills_once_at_the_first_valuation():
 
 
 def test_equity_backtest_fills_once_at_the_first_valuation():
-    from test_backtest_lifecycle import START, RampAdapter
+    from test_asset.equity.engine_analytical.test_backtest_lifecycle import START, RampAdapter
 
     from quantark.backtest import BacktestConfig, BacktestEngine, ZeroCostModel
     from quantark.backtest.strategy import DeltaNeutralStrategy

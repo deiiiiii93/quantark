@@ -28,7 +28,7 @@ from quantark.util.enum import OptionType
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import PricingError
 
-from test_expiry_carried_knock_in import BARRIER_PRODUCTS, BEFORE, _mc, env as carried_env
+from test_asset.equity.engine_pde.test_expiry_carried_knock_in import BARRIER_PRODUCTS, BEFORE, _mc, env as carried_env
 
 VALUATION = datetime(2026, 1, 5)
 _TERM_PILLARS = [(0.0, 0.01), (0.01, 0.02), (0.25, 0.03), (1.0, 0.045), (2.0, 0.05)]

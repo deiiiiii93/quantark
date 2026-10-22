@@ -169,8 +169,8 @@ def test_from_portfolio_snapshots_rolled_products_without_mutation():
     from quantark.portfolio import Portfolio
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent))
-    from test_pnlexplain_lifecycle_days import _snowball, _env as _lc_env
+    sys.path.insert(0, str(Path(__file__).parents[3]))
+    from test_asset.equity.lifecycle.test_pnlexplain_lifecycle_days import _snowball, _env as _lc_env
 
     start = datetime(2024, 1, 1)
     day = datetime(2024, 1, 31)

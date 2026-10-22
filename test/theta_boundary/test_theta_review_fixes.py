@@ -98,7 +98,7 @@ def test_phoenix_expiry_coupon_decided_at_t0_is_refused():
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).parents[1]))
     from dataclasses import replace
-    from test_autocallable_observation_at_valuation import NOW_AND_LATER, PAYS, env, phoenix
+    from test_asset.equity.product_autocallable.test_autocallable_observation_at_valuation import NOW_AND_LATER, PAYS, env, phoenix
     from quantark.util.enum.option_enums import CouponPayType
     p = phoenix(NOW_AND_LATER)
     p.coupon_config = replace(p.coupon_config, coupon_pay_type=CouponPayType.EXPIRY)

@@ -104,7 +104,7 @@ def test_roll_through_events_landing_on_an_event_is_after_that_event(sse_calenda
 
 def test_legacy_numerical_theta_is_unchanged():
     from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-    from test_snowball_pde import create_pricing_env, create_standard_snowball
+    from test_asset.equity.product_snowball.test_snowball_pde import create_pricing_env, create_standard_snowball
     theta = GreeksCalculator().calculate_numerical_theta(create_standard_snowball(), create_pricing_env(), SnowballQuadEngineV2())
     # frozen on the banking machine; a bumped QUAD solve drifts by ULPs across architectures
     assert theta == pytest.approx(float.fromhex(LEGACY_THETA_HEX), rel=GOLDEN_REL_TOL)

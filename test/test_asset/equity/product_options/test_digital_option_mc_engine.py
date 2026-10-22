@@ -7,7 +7,7 @@ from pathlib import Path
 import math
 from scipy.stats import norm
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parents[4]))
 
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.engine.mc.digital_option_mc_engine import DigitalOptionMCEngine

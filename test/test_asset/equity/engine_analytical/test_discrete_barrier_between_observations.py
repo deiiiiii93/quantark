@@ -357,7 +357,7 @@ def test_on_a_record_day_beyond_the_level_every_route_decides_at_once(name, rout
 # ======================================================================================================================
 
 def _vol_routes():
-    from test_vol_dated_schedules import BARRIER_ROUTES
+    from test_asset.equity.product_other.test_vol_dated_schedules import BARRIER_ROUTES
 
     from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
 
@@ -368,7 +368,7 @@ def _vol_routes():
             return engine
         return build
 
-    from test_dated_expiry_settles import HESTON, SLV_LEVERAGE
+    from test_asset.equity.engine_pde.test_dated_expiry_settles import HESTON, SLV_LEVERAGE
 
     from quantark.asset.equity.engine.pde import HestonBarrierPDESolver, HestonSLVBarrierPDESolver
 
@@ -391,7 +391,7 @@ VOL_KINDS = {"up_out_call": (BarrierType.UP_OUT, OptionType.CALL, 120.0, +1),
 
 
 def _vol_case(route: str, kind: str, day: int, spot: float, keep_landing: bool = False) -> float:
-    from test_vol_dated_schedules import EXERCISE, INITIAL, _on, _records, env as vol_env
+    from test_asset.equity.product_other.test_vol_dated_schedules import EXERCISE, INITIAL, _on, _records, env as vol_env
 
     barrier_type, option_type, level, _ = VOL_KINDS[kind]
     product = BarrierOption(strike=100.0, option_type=option_type, barrier=level, barrier_type=barrier_type,
