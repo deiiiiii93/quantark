@@ -1,8 +1,8 @@
 # AI strategy index study
 
-Builds an equal-weighted index of ten China A-share AI stocks and asks whether it suits snowball
-products: backtest, KO/KI probabilities under two barrier structures (103% KO / 70% KI and the
-original), hedging and replication feasibility, and the q/sigma pricing parameters.
+A ten-stock China A-share AI index, studied as a snowball underlying following the Strategy Index Research SOP:
+index construction and backtest, KO probability, a higher-KO structure (103% KO / 70% KI), hedging and replication
+assessment, pricing parameters (q/sigma) and methodology.
 
 - `ai_index_backtest.py`, `ai_index_wind_backtest.py` — index construction and backtest (AKShare / Wind data)
 - `ai_index_snowball_analysis.py` — phases 1-4
