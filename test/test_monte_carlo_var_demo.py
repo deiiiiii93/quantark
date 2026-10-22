@@ -11,7 +11,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from example.monte_carlo_var_demo import (
+from example.var.monte_carlo_var_demo import (
     create_portfolio_for_mc,
     generate_market_data_for_mc,
     main as monte_carlo_var_main,

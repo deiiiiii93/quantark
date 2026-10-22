@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from example.var_backtest_demo import (
+from example.var.var_backtest_demo import (
     create_portfolio_for_backtesting,
     generate_historical_data_extended,
     generate_portfolio_pnl_timeseries,
@@ -65,7 +65,7 @@ class TestVarBacktestDemo:
         # Use smaller window for faster testing
         try:
             # Call the demo function with our stable data
-            from example.var_backtest_demo import generate_portfolio_pnl_timeseries
+            from example.var.var_backtest_demo import generate_portfolio_pnl_timeseries
             
             portfolio_pnl, var_values = generate_portfolio_pnl_timeseries(
                 portfolio, historical_data, method="Historical"

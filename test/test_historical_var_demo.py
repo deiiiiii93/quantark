@@ -11,7 +11,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from example.historical_var_demo import (
+from example.var.historical_var_demo import (
     create_options_portfolio,
     generate_historical_data,
     main as historical_var_main,

@@ -24,7 +24,7 @@ from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde import GridConfig, SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
-from example.snowball_rfq_ko_rate_demo_workflow import (
+from example.case_studies.snowball_rfq_ko_rate.snowball_rfq_ko_rate_demo_workflow import (
     BASE_KI_BARRIER,
     BASE_KO_BARRIER,
     solve_fair_ko_rate_with_engine,

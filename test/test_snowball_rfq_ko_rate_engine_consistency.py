@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from example.snowball_rfq_ko_rate_engine_compare_demo import (
+from example.case_studies.snowball_rfq_ko_rate.snowball_rfq_ko_rate_engine_compare_demo import (
     DEFAULT_SMOKE_CASES,
     build_engines,
     run_case,
 )
-from example.snowball_rfq_ko_rate_demo_workflow import solve_fair_ko_rate_with_engine
+from example.case_studies.snowball_rfq_ko_rate.snowball_rfq_ko_rate_demo_workflow import solve_fair_ko_rate_with_engine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import QuadParams
 from quantark.util.numerical import almost_equal, is_non_positive
