@@ -2,8 +2,8 @@
 Trinomial tree engine for convertible bond pricing.
 
 Implements the Hull-White trinomial model with explicit default branch,
-where at each node there's a probability of default leading to recovery
-value.
+where at each node there's a probability of default, on which the holder
+takes the better of the recovery and conversion into the surviving shares.
 """
 import logging
 import math
@@ -46,7 +46,9 @@ class ConvertibleBondTrinomialResult:
         gamma: Second derivative of price with respect to stock
         equity_component: Equity-like component of value
         bond_component: Bond-like component of value
-        recovery_component: Recovery value component
+        recovery_component: Recovery floor of the default leg (default probability
+            * recovery_rate * face_value, undiscounted); conversion on default is
+            not in it, so it lands in bond_component
     """
 
     price: float
@@ -67,7 +69,7 @@ class ConvertibleBondTrinomialEngine:
     This engine implements a trinomial tree where:
     1. Stock price can go up, down, or default at each node
     2. Default probability is derived from the hazard rate
-    3. Upon default, bondholder receives recovery value
+    3. Upon default, bondholder receives the recovery or converts (see below)
     4. Early exercise (conversion, call, put) is handled via backward induction
 
     The default probability per time step is:

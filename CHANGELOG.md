@@ -39,8 +39,10 @@ During 0.x the public API may still change between minor versions.
   recovery alone, so a bond with η < 1 threw away conversion into surviving shares. Jump-diffusion's
   conversion probability counts conversion on default (HW's stays conditional on survival). At
   η = 1 (Hull, Andersen–Buffum: the stock goes to zero) or with conversion closed the payoff is the
-  recovery as before, and prices are byte-identical. At η = 0.4 with hazard `credit_spread / (1 − R)`
-  the demo bond rises 4.48 per 100 face (132.64 → 137.12; the gap to η = 1 shrinks from 8.1 to
+  recovery as before, and prices are byte-identical. The product default is η = 0.4, so every
+  bond built with default settings, a hazard rate and open conversion reprices upward. The HW
+  `recovery_component` stays the recovery floor (default probability × R × face); conversion on
+  default lands in `bond_component`. At η = 0.4 with hazard `credit_spread / (1 − R)` the demo bond rises 4.48 per 100 face (132.64 → 137.12; the gap to η = 1 shrinks from 8.1 to
   3.6), and the AC7 cases rise 0.09–4.52. An American zero-coupon convertible (q = 0, where early
   conversion is never optimal) matches its exact value to 0.005 in jump-diffusion and 0.01 in HW.
 
