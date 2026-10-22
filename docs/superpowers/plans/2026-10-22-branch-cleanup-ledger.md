@@ -27,3 +27,6 @@ Remaining CI dependency on a study (report to user): 8 library tests (test_futur
 Also: the demo tests (VaR/FX/RFQ/PPP/OTC/cash-leg) intentionally still import example demos (how-to PATTERN guards).
 Added fixtures: test/volcalibration/data/ (4 JSONs, ~150 KB), test/data/mo_iv_surface_20230504.json (20 KB; revives 46 tests: test_otc_vol_calibrators 42 + test_mo_frozen_feller 4).
 Project 2 regression #2: 'from example import <demo>' form (4 test modules + 6 rfq study scripts), found by the clean full-suite baseline after main was migrated; fixed.
+Project 3 FINAL: full suite 18076 passed / 1108 skipped / 1 xfailed / 0 failed / 0 errors (43m46s); git status clean afterward.
+Reconciliation vs clean baseline 18790 passed / 1204 skipped (4 import errors): -771 passes moved out of the default run into studies' tests/ (mo 575, fx 28, q 145, sim 23); +27 four repaired modules; +46 revived skips (artifact fixture); -7 stage tests +1 e2e; -5 dup/iv tests +1 ported; +2 golden pins; -3 splits moved to studies; -5 shim tests moved => 18076. Skips 1204 -> 1108 = -50 (moved) -46 (revived).
+Study-local suites verified separately: mo 575 passed/50 skipped (history-gated), fx 28, q 145, sim 23.
