@@ -20,6 +20,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import (
     Tolerance,
     almost_equal,
+    is_zero,
     is_valid_number,
     validate_positive,
 )
@@ -220,7 +221,11 @@ class AutocallableCashLeg(CashLeg):
         is ahead the leg keeps its terminal branch, with or without observations.
         """
         dt = float(dt)
-        if dt <= 0.0:
+        if dt < 0.0:
+            return self
+        if almost_equal(dt, 0.0, tol=0.0) and not keep_landing and not any(
+            is_zero(float(t)) for t in self.observation_schedule
+        ) and not is_zero(float(self.terminal_settlement_time)):
             return self
 
         obs = np.asarray(self.observation_schedule, dtype=float)

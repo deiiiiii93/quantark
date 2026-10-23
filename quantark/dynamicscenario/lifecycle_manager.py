@@ -34,8 +34,8 @@ class LifecycleManager:
     produces into dynamic-scenario :class:`LifecycleEventSnapshot` records.
     """
 
-    def __init__(self, base_date: datetime) -> None:
-        self._core = PortfolioLifecycleManager(base_date=base_date)
+    def __init__(self, base_date: datetime, *, trade_value: bool = False) -> None:
+        self._core = PortfolioLifecycleManager(base_date=base_date, trade_value=trade_value)
 
     @property
     def base_date(self) -> pd.Timestamp:
@@ -61,9 +61,20 @@ class LifecycleManager:
         """Number of positions with an attached lifecycle tracker."""
         return self._core.num_tracked
 
+    @property
+    def leg_paid_cash(self) -> float:
+        """Cumulative cash-leg cash paid through the current day (trade mode; part of ``paid_cash``)."""
+        return self._core.leg_paid_cash
+
+    @property
+    def leg_receivable_pv(self) -> float:
+        """PV of determined cash-leg flows awaiting payment (trade mode; part of ``pending_receivable_pv``)."""
+        return self._core.leg_receivable_pv
+
     def register_positions(self, portfolio) -> None:
-        """Attach lifecycle trackers to all trackable positions."""
+        """Attach lifecycle trackers to all trackable positions, then (trade mode) the cash-leg books."""
         self._core.register_positions(portfolio)
+        self._core.register_leg_books(portfolio)
 
     def date_for_day(
         self, day_index: int, day_date: Optional[datetime]

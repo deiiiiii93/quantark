@@ -39,6 +39,11 @@ class BacktestConfig:
             unaffected.
         pnl_explain: Optional daily PnL explain configuration (quantark.pnlexplain).
             None (the default) records nothing and changes no behaviour.
+        trade_value: Opt-in. The backtest portfolio values every EquityPosition at
+            its full trade value (product x quantity + cash legs; Greeks from
+            get_trade_risk, PnL against entry_trade_value) and books the cash legs'
+            flows as paid cash / receivables (spec 2026-10-23 portfolio-trade-value
+            D16). False (default) is the product path.
         metadata: Additional metadata for the backtest
     """
 
@@ -60,6 +65,7 @@ class BacktestConfig:
     metadata: Dict[str, Any] = field(default_factory=dict)
     # Appended AFTER metadata so existing positional construction keeps its slots.
     pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
+    trade_value: bool = False
 
     def __post_init__(self):
         """Validate configuration parameters."""

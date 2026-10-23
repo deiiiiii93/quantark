@@ -51,6 +51,7 @@ import pandas as pd
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.util.exceptions import ValidationError
 from quantark.util.run_fixings import participates
 
 from .autocallable import AutocallableLifecycleTracker
@@ -59,7 +60,7 @@ from .cashflows import (
     LifecycleCashflowLedger,
     ValuationPoint,
 )
-from .events import LifecycleEvent
+from .events import LifecycleEvent, LifecycleEventType
 from .ko_reset import tracker_for
 from .providers import require_rebased_provider
 from .float_roll import FloatMaturityRoller, has_unrolled_float_maturity, is_float_rollable
@@ -89,8 +90,17 @@ class ProcessedLifecycleEvent:
 class PortfolioLifecycleManager:
     """Detects and applies realized lifecycle events for a portfolio replay."""
 
-    def __init__(self, base_date: datetime) -> None:
+    def __init__(self, base_date: datetime, *, trade_value: bool = False) -> None:
         self.base_date = pd.Timestamp(base_date).normalize()
+        # Trade mode (spec 2026-10-23 portfolio-trade-value D15): positions' cash legs roll and book through
+        # one LegCashBook each; their paid cash and receivable PV are part of ``paid_cash`` /
+        # ``pending_receivable_pv`` and are also reported on their own.
+        self.trade_value = bool(trade_value)
+        self.leg_paid_cash: float = 0.0
+        self.leg_receivable_pv: float = 0.0
+        self._leg_books: Dict[str, Any] = {}
+        self._leg_underlyings: Dict[str, str] = {}
+        self._leg_receivables: Dict[str, float] = {}
         self.ledger = LifecycleCashflowLedger()
         self.pending_receivable_pv: float = 0.0
         self.paid_cash: float = 0.0
@@ -178,6 +188,99 @@ class PortfolioLifecycleManager:
         for position_id in matured:
             portfolio.remove_position(position_id)
 
+    def register_leg_books(self, portfolio) -> None:
+        """Attach a cash-leg book to every position with cash legs (trade mode only; spec 2026-10-23 D15).
+
+        Call once, after ``register_positions`` (if trackers are used) and before the first ``process_day``.
+        Leg times run from ``base_date``. A position an autocallable tracker follows gets its leg times snapped
+        with the tracker's rule (D14) and may carry legs that pay on termination; an untracked position may
+        carry only legs that pay while it lives (D13).
+
+        Raises:
+            CapabilityError: Legs on a position whose termination has no booking rule (barrier-family or DCN
+                trackers), or legs the book cannot book.
+        """
+        if not self.trade_value:
+            return
+        from quantark.asset.equity.lifecycle.snapping import snap_time
+        from quantark.cashleg.booking import LegCashBook
+        from quantark.execution.errors import CapabilityError
+
+        for position_id, position in portfolio.positions.items():
+            legs = getattr(position, "cash_legs", None)
+            if not legs or position_id in self._leg_books:
+                continue
+            if position_id in self._barrier or isinstance(position.product, DCNOption):
+                raise CapabilityError(
+                    f"position {position_id}: cash legs on a {type(position.product).__name__} have no "
+                    "multi-day booking rule for its termination events"
+                )
+            tracked = position_id in self._autocallable
+            env = portfolio.pricing_environments[position.underlying]
+            book = LegCashBook(
+                legs,
+                position._get_unit_notional(env),
+                self.base_date,
+                snap=snap_time if tracked else None,
+                terminable=tracked,
+            )
+            self._leg_books[position_id] = book
+            self._leg_underlyings[position_id] = position.underlying
+            position.cash_legs = list(book.legs)
+
+    def _leg_outcome(self, tracker, events: List[LifecycleEvent], date: pd.Timestamp, env):
+        """The realized outcome a terminating autocallable event gives the position's cash legs (D12/D13)."""
+        from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+        from quantark.cashleg.booking import RealizedOutcome, run_time
+        from quantark.execution.errors import CapabilityError
+
+        terminal = next(event for event in events if event.terminates_position)
+        origin = tracker.clock_origin if tracker.clock_origin is not None else self.base_date
+        today = run_time(self.base_date, date)
+
+        def run_frame(event_date, event_time):
+            if event_date is not None:
+                return run_time(self.base_date, event_date)
+            if event_time is not None:
+                return float(event_time) + run_time(self.base_date, origin)
+            return None
+
+        cashflow = terminal.realized_cashflow
+        determined = run_frame(cashflow.determination_date, cashflow.determination_time) if cashflow else None
+        settled = run_frame(cashflow.payment_date, cashflow.payment_time) if cashflow else None
+        if terminal.event_type is LifecycleEventType.KNOCK_OUT:
+            event_time = today if determined is None else determined
+            maturity = today + resolve_terminal_timing(tracker.product_for_pricing(date, env), env).payment_time
+            return RealizedOutcome.ko(
+                event_time, event_time if settled is None else settled, maturity_settlement_time=maturity
+            )
+        if terminal.event_type is LifecycleEventType.MATURITY:
+            return RealizedOutcome.maturity(tracker.lifecycle.knocked_in, today if settled is None else settled)
+        raise CapabilityError(
+            f"cash legs: a terminating {terminal.event_type.value} event has no multi-day booking rule"
+        )
+
+    def _book_legs(self, portfolio, date: pd.Timestamp, terminated_today: Dict[str, Any]) -> None:
+        """Roll every live leg book to ``date`` and pay what is due; terminated books pay their receivables."""
+        for position_id, book in self._leg_books.items():
+            env = portfolio.pricing_environments[self._leg_underlyings[position_id]]
+            if position_id in terminated_today:
+                day = terminated_today[position_id]
+            elif book.terminated:
+                day = book.roll(date, env)
+            else:
+                position = portfolio.positions.get(position_id)
+                if position is None:
+                    raise ValidationError(
+                        f"position {position_id} left the portfolio without a lifecycle termination; "
+                        "its cash legs cannot be booked"
+                    )
+                day = book.roll(date, env)
+                position.cash_legs = list(day.live_legs)
+            self.leg_paid_cash += day.paid_cash
+            self._leg_receivables[position_id] = day.receivable_pv
+        self.leg_receivable_pv = float(sum(self._leg_receivables.values()))
+
     def register_float_rolls(self, portfolio) -> None:
         """Anchor every schedule-free float-maturity position at ``base_date``.
 
@@ -253,6 +356,7 @@ class PortfolioLifecycleManager:
         """
         date = self.date_for_day(day_index, day_date)
         processed: List[ProcessedLifecycleEvent] = []
+        terminated_legs: Dict[str, Any] = {}
         for position_id in list(portfolio.positions.keys()):
             position = portfolio.positions[position_id]
             env = portfolio.pricing_environments[position.underlying]
@@ -260,7 +364,7 @@ class PortfolioLifecycleManager:
             if position_id in self._autocallable:
                 processed.extend(
                     self._process_autocallable(
-                        portfolio, position_id, position, env, spot, date
+                        portfolio, position_id, position, env, spot, date, terminated_legs
                     )
                 )
             elif position_id in self._barrier:
@@ -274,11 +378,15 @@ class PortfolioLifecycleManager:
                 if rolled is not None:
                     position.product = rolled
         self._float_roller.retain(portfolio.positions.keys())
+        self._book_legs(portfolio, date, terminated_legs)
         self._revalue_ledger(portfolio, date)
+        # leg cash is part of the day's cash totals (spec 2026-10-23 D15)
+        self.paid_cash += self.leg_paid_cash
+        self.pending_receivable_pv += self.leg_receivable_pv
         return processed
 
     def _process_autocallable(
-        self, portfolio, position_id, position, env, spot, date
+        self, portfolio, position_id, position, env, spot, date, terminated_legs=None
     ) -> List[ProcessedLifecycleEvent]:
         tracker = self._autocallable[position_id]
         lifecycle_product = tracker.product_for_lifecycle()
@@ -301,6 +409,11 @@ class PortfolioLifecycleManager:
             self._processed(position_id, position, event) for event in events
         ]
         if terminated:
+            book = self._leg_books.get(position_id)
+            if book is not None:
+                # decided once, by the outcome, on the day the position ends (spec 2026-10-23 D12)
+                outcome = self._leg_outcome(tracker, events, date, env)
+                terminated_legs[position_id] = book.terminate(outcome, date, env)
             portfolio.remove_position(position_id)
             del self._autocallable[position_id]
         else:

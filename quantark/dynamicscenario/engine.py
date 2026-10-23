@@ -135,6 +135,14 @@ class DynamicScenarioEngine:
         # Lifecycle event handling: trackers attach BEFORE the baseline is priced, so a tracked position is valued
         # from its tracker's initial copy from day 0 (review finding I2)
         lifecycle_manager: Optional[LifecycleManager] = None
+        trade_value = bool(getattr(working_portfolio, "trade_value", False))
+        if trade_value and any(getattr(p, "cash_legs", None) for p in working_portfolio.positions.values()):
+            # legs age with the product (spec 2026-10-23 D17): only lifecycle handling on a dated path ages it
+            if not self.config.handle_lifecycle_events or day_path.start_date is None:
+                raise ValidationError(
+                    "A trade-value dynamic scenario with cash legs needs handle_lifecycle_events=True and a dated "
+                    "day path (day_path.start_date): the legs roll and book only as the products age."
+                )
         if self.config.handle_lifecycle_events:
             base_date = day_path.start_date
             if base_date is None:
@@ -148,7 +156,7 @@ class DynamicScenarioEngine:
                     "pricing environment valuation_date to anchor observation "
                     "schedules (or set handle_lifecycle_events=False)."
                 )
-            lifecycle_manager = LifecycleManager(base_date=base_date)
+            lifecycle_manager = LifecycleManager(base_date=base_date, trade_value=trade_value)
             lifecycle_manager.register_positions(working_portfolio)
 
         # Run fixings (spec 2026-10-09 run fixings §3.5): registered on the WORKING copy at the first valuation (the
@@ -589,18 +597,25 @@ class DynamicScenarioEngine:
         
         for position_id, position in portfolio.positions.items():
             env = portfolio.pricing_environments[position.underlying]
-            market_value = position.get_market_value(env)
-            pnl = position.get_pnl(env)
+            # the portfolio's basis (trade value in trade mode, spec 2026-10-23 D17)
+            switch = hasattr(portfolio, "position_value")
+            market_value = portfolio.position_value(position, env) if switch else position.get_market_value(env)
+            pnl = portfolio.position_pnl(position, env) if switch else position.get_pnl(env)
             
             # Get position Greeks if calculating
             greeks = None
             if self.config.calculate_greeks and self.greeks_calculator:
                 use_analytical = (self.config.greeks_method == 'analytical')
-                greeks = position.get_greeks(
-                    env,
-                    self.greeks_calculator,
-                    use_analytical=use_analytical
-                )
+                if switch:
+                    greeks = portfolio.position_greeks(
+                        position, self.greeks_calculator, use_analytical, env=env
+                    )
+                else:
+                    greeks = position.get_greeks(
+                        env,
+                        self.greeks_calculator,
+                        use_analytical=use_analytical
+                    )
             
             snapshot = PositionSnapshot(
                 position_id=position_id,

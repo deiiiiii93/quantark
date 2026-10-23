@@ -207,4 +207,5 @@ def test_pnl_explain_field_is_appended_after_metadata():
     """Positional construction of the config must keep its existing slots (review finding)."""
     from dataclasses import fields
     names = [f.name for f in fields(BacktestConfig)]
-    assert names[-2:] == ["metadata", "pnl_explain"]
+    # later fields append after pnl_explain (trade_value, portfolio-trade-value run), never before it
+    assert names[names.index("metadata"):] == ["metadata", "pnl_explain", "trade_value"]

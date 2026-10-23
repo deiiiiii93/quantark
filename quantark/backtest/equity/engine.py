@@ -175,6 +175,7 @@ class BacktestEngine:
             portfolio_name=f"Backtest_{self.config.underlying}",
             pricing_environments={self.config.underlying: self.pricing_env},
             creation_date=self.config.start_date,
+            trade_value=self.config.trade_value,
         )
 
         # Add initial positions. TRS swap positions price through their cashflow
@@ -191,7 +192,7 @@ class BacktestEngine:
                     entry_timestamp=position.entry_timestamp,
                 )
             else:
-                self.portfolio.add_position(
+                added = self.portfolio.add_position(
                     product=position.product,
                     quantity=position.quantity,
                     entry_price=position.entry_price,
@@ -199,6 +200,10 @@ class BacktestEngine:
                     engine=position.engine,
                     entry_timestamp=position.entry_timestamp,
                 )
+                # the trade terms ride with the position (spec 2026-10-23 D16); legs are immutable, the list copied
+                added.cash_legs = list(getattr(position, "cash_legs", None) or [])
+                added.cash_leg_folding = getattr(position, "cash_leg_folding", None)
+                added.entry_trade_value = getattr(position, "entry_trade_value", None)
 
         self.logger.logger.info(
             f"Initialized portfolio with {len(self.config.initial_positions)} positions"
@@ -211,7 +216,7 @@ class BacktestEngine:
         # once, before stepping, so hedge instruments added later stay
         # untracked either way.
         self.lifecycle_manager = PortfolioLifecycleManager(
-            base_date=self.config.start_date
+            base_date=self.config.start_date, trade_value=self.config.trade_value
         )
         # Anchored at start_date in BOTH modes: the flag must not change how a contract ages.
         self.lifecycle_manager.register_float_rolls(self.portfolio)
@@ -222,6 +227,8 @@ class BacktestEngine:
                     f"Lifecycle tracking enabled for "
                     f"{self.lifecycle_manager.num_tracked} position(s)"
                 )
+        # trade mode: cash legs roll and book from start_date (after the trackers, which decide snapping)
+        self.lifecycle_manager.register_leg_books(self.portfolio)
 
         # Record initial portfolio value, after the trackers attach: a tracked position is valued from its
         # tracker's initial copy (review finding I2)
@@ -387,7 +394,7 @@ class BacktestEngine:
         # realized P&L matches the (price - entry) * quantity convention used
         # by Portfolio.get_portfolio_pnl for still-live positions.
         pre_costs = {
-            pid: pos.entry_price * pos.quantity
+            pid: self._cost_basis(pos)
             for pid, pos in self.portfolio.positions.items()
         }
         events = self.lifecycle_manager.process_day(
@@ -400,6 +407,12 @@ class BacktestEngine:
                     0.0,
                 )
         self._lifecycle_events_today = events
+
+    def _cost_basis(self, position) -> float:
+        """A position's cost basis on the portfolio's basis: its entry trade value in trade mode (D16)."""
+        if self.portfolio.trade_value and callable(getattr(position, "resolved_entry_trade_value", None)):
+            return position.resolved_entry_trade_value()
+        return position.entry_price * position.quantity
 
     def _update_pricing_environment(self, timestamp: datetime):
         """Update pricing environment with current market data."""
