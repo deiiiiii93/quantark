@@ -14,6 +14,13 @@ from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.util.exceptions import ValidationError
 
 
+def _position_greeks(portfolio, position, pricing_env, greeks_calculator):
+    """A position's Greeks on the portfolio's basis (``position_greeks``: trade risk on a trade-value portfolio)."""
+    if hasattr(portfolio, "position_greeks"):
+        return dict(portfolio.position_greeks(position, greeks_calculator, True, env=pricing_env))
+    return position.get_greeks(pricing_env, greeks_calculator)
+
+
 class PortfolioExporter:
     """
     Export and persistence manager for portfolios and snapshots.
@@ -72,7 +79,7 @@ class PortfolioExporter:
             for position in portfolio.positions.values():
                 pricing_env = portfolio.pricing_environments[position.underlying]
                 try:
-                    greeks = position.get_greeks(pricing_env, greeks_calculator)
+                    greeks = _position_greeks(portfolio, position, pricing_env, greeks_calculator)
                     greeks_data.append(greeks)
                 except Exception as e:
                     # Add empty Greeks on error
@@ -176,7 +183,7 @@ class PortfolioExporter:
                 for pos_id, position in portfolio.positions.items():
                     pricing_env = portfolio.pricing_environments[position.underlying]
                     try:
-                        greeks = position.get_greeks(pricing_env, greeks_calculator)
+                        greeks = _position_greeks(portfolio, position, pricing_env, greeks_calculator)
                         greeks['position_id'] = pos_id
                         greeks['underlying'] = position.underlying
                         greeks['product_type'] = position.product.__class__.__name__

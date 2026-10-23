@@ -113,7 +113,9 @@ def _with_cash_legs(result: PortfolioExplainResult, pnl: float) -> PortfolioExpl
                     else existing)
     if not placed:
         rows.append(row)
-    return dataclasses.replace(result, rows=tuple(rows), total_pnl=result.total_pnl + pnl)
+    # the explain's own reconciliation was taken before the leg row; the sink reconciles the returned rows
+    metadata = {k: v for k, v in result.metadata.items() if k != "reconciliation"}
+    return dataclasses.replace(result, rows=tuple(rows), total_pnl=result.total_pnl + pnl, metadata=metadata)
 
 
 def _leg_total_backtest(engine: Any) -> Optional[float]:

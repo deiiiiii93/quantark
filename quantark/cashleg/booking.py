@@ -30,6 +30,7 @@ import numpy as np
 from quantark.cashleg.accrual_leg import AccrualLeg, KOBehavior, PaymentConvention, SurvivalBasis
 from quantark.cashleg.autocallable_leg import AccrualBasis, AutocallableCashLeg, PvFormula
 from quantark.cashleg.base import CashLeg, roll_payment_time
+from quantark.cashleg.base_amount import BaseAmountMode
 from quantark.cashleg.deterministic_leg import DeterministicLeg
 from quantark.cashleg.event_distribution import EventType
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
@@ -221,6 +222,27 @@ def _termination_flows(leg: CashLeg, outcome: RealizedOutcome, unit_notional: fl
         return [(len(leg.observation_schedule), scale * float(leg.terminal_accrual_factor),
                  float(leg.terminal_settlement_time))]
     raise ValidationError(f"no termination rule for {type(leg).__name__}")
+
+
+def refuse_floating_notional(legs: Sequence[CashLeg], product) -> None:
+    """Refuse fraction-based accruals on a product whose notional floats with spot (spec C6, final review).
+
+    The book resolves a leg's amounts against the unit notional once, at registration; the trade value resolves
+    it on every valuation. They agree unless the notional comes from spot (no positive ``initial_price``) and an
+    ``AccrualLeg`` scales with it.
+    """
+    from quantark.execution.errors import CapabilityError
+
+    initial = getattr(product, "initial_price", None)
+    if initial is not None and float(initial) > 0.0:
+        return
+    for leg in legs:
+        if isinstance(leg, AccrualLeg) and leg.base.mode is not BaseAmountMode.ABSOLUTE:
+            raise CapabilityError(
+                f"multi-day cash-leg booking: AccrualLeg {leg.leg_id} scales with the position notional, which "
+                f"this {type(product).__name__} takes from spot (no initial_price); booked and valued amounts "
+                "would diverge - give the product an initial_price or the leg an ABSOLUTE base"
+            )
 
 
 class LegCashBook:

@@ -75,16 +75,25 @@ class PortfolioSnapshot:
             # Add current market data
             pos_dict['snapshot_timestamp'] = timestamp.isoformat()
             pos_dict['current_price'] = position.get_current_price(pricing_env)
-            pos_dict['market_value'] = position.get_market_value(pricing_env)
-            pos_dict['pnl'] = position.get_pnl(pricing_env)
+            # the portfolio's basis (trade value on a trade-value portfolio), so rows add up to the totals
+            switch = hasattr(portfolio, "position_value")
+            pos_dict['market_value'] = (portfolio.position_value(position, pricing_env) if switch
+                                        else position.get_market_value(pricing_env))
+            pos_dict['pnl'] = (portfolio.position_pnl(position, pricing_env) if switch
+                               else position.get_pnl(pricing_env))
             
             # Add position-level Greeks
             try:
-                pos_greeks = position.get_greeks(
-                    pricing_env,
-                    greeks_calculator,
-                    use_analytical
-                )
+                if switch:
+                    pos_greeks = portfolio.position_greeks(
+                        position, greeks_calculator, use_analytical, env=pricing_env
+                    )
+                else:
+                    pos_greeks = position.get_greeks(
+                        pricing_env,
+                        greeks_calculator,
+                        use_analytical
+                    )
                 pos_dict['greeks'] = pos_greeks
             except Exception as e:
                 pos_dict['greeks'] = {}

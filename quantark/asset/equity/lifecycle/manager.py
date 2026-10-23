@@ -255,7 +255,7 @@ class PortfolioLifecycleManager:
         if not self.trade_value:
             return
         from quantark.asset.equity.lifecycle.snapping import snap_time
-        from quantark.cashleg.booking import LegCashBook
+        from quantark.cashleg.booking import LegCashBook, refuse_floating_notional
         from quantark.execution.errors import CapabilityError
 
         for position_id, position in portfolio.positions.items():
@@ -267,6 +267,7 @@ class PortfolioLifecycleManager:
                     f"position {position_id}: cash legs on a {type(position.product).__name__} have no "
                     "multi-day booking rule for its termination events"
                 )
+            refuse_floating_notional(legs, position.product)
             tracked = position_id in self._autocallable
             env = portfolio.pricing_environments[position.underlying]
             origin = (self._autocallable[position_id].clock_origin if tracked

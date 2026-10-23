@@ -764,7 +764,7 @@ class ReplayBacktestEngine:
         are history. A product matured before the run books nothing (user ruling 2026-10-09).
         """
         from quantark.asset.equity.lifecycle.snapping import snap_time
-        from quantark.cashleg.booking import LegCashBook
+        from quantark.cashleg.booking import LegCashBook, refuse_floating_notional
         from quantark.portfolio.equity.position import EquityPosition
 
         for index, (bp, replay, engine) in enumerate(
@@ -772,6 +772,7 @@ class ReplayBacktestEngine:
         ):
             if not bp.cash_legs or replay.retire_if_matured_before_run(env):
                 continue
+            refuse_floating_notional(bp.cash_legs, replay.tracker.product)
             position = EquityPosition(
                 product=replay.tracker.product, quantity=float(bp.quantity), entry_price=0.0,
                 underlying=self.config.underlying, engine=engine,
