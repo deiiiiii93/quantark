@@ -19,6 +19,17 @@ from quantark.var.config import VaRConfig, VaRMethod
 from quantark.util.fixings import freeze_portfolio_fixings
 
 
+def _position_value(portfolio, position, env: PricingEnvironment) -> float:
+    """One position's value under ``env`` in the portfolio's valuation mode.
+
+    An ``EquityPortfolio`` decides through its switch (``position_value``: trade value in trade mode, else
+    ``get_market_value``); any other portfolio values ``get_market_value``.
+    """
+    if isinstance(portfolio, EquityPortfolio):
+        return portfolio.position_value(position, env)
+    return position.get_market_value(env)
+
+
 class MonteCarloVaREngine:
     """
     Monte Carlo Value-at-Risk engine using simulated scenarios.
@@ -399,10 +410,11 @@ class MonteCarloVaREngine:
             base_env = portfolio.pricing_environments[position.underlying]
             stressed_env = self._create_stressed_environment(base_env, scenario)
 
-            # Revalue through the BasePosition interface (engine-agnostic;
-            # equivalent to engine.price * quantity for options, routes a TRS
+            # Revalue through the portfolio's valuation switch: the trade value
+            # (product + cash legs) when the EquityPortfolio is in trade mode,
+            # else get_market_value (engine.price * quantity for options, a TRS
             # through its cashflow valuator).
-            total_value += position.get_market_value(stressed_env)
+            total_value += _position_value(portfolio, position, stressed_env)
 
         return total_value
 
@@ -545,25 +557,7 @@ class MonteCarloVaREngine:
         """
         position_component_var = {}
 
-        for pos_id, position in portfolio.positions.items():
-            # Revalue this position under all scenarios
-            position_pnls = []
-            base_env = portfolio.pricing_environments[position.underlying]
-
-            # Get current (un-stressed) price of the position (per unit) via the
-            # BasePosition interface so swaps and options are handled uniformly.
-            current_price = position.get_current_price(base_env)
-
-            for idx, scenario in scenarios.iterrows():
-                stressed_env = self._create_stressed_environment(base_env, scenario)
-                stressed_price = position.get_current_price(stressed_env)
-                pnl = stressed_price * position.quantity - (
-                    position.quantity * current_price
-                )
-                position_pnls.append(pnl)
-
-            position_pnls = np.array(position_pnls)
-
+        for pos_id, position_pnls in self._position_scenario_pnls(portfolio, scenarios).items():
             # Calculate VaR for this position
             var_percentile = (1 - self.config.confidence_level) * 100
             pos_var = -np.percentile(position_pnls, var_percentile)
@@ -571,6 +565,48 @@ class MonteCarloVaREngine:
             position_component_var[pos_id] = abs(pos_var)
 
         return position_component_var
+
+    def _position_scenario_pnls(
+        self,
+        portfolio: Union[EquityPortfolio, FIPortfolio],
+        scenarios: pd.DataFrame,
+    ) -> Dict[str, np.ndarray]:
+        """
+        Each position's P&L under every scenario, in the scenarios' order.
+
+        An ``EquityPortfolio`` values through its switch (``position_value``), so
+        in trade mode the per-position P&L are trade-value P&L and sum to the
+        portfolio scenario P&L; in product mode ``get_market_value`` is
+        ``price × quantity``, the historical per-unit formula. Other portfolios
+        keep the per-unit price × quantity formula.
+
+        Args:
+            portfolio: Portfolio to analyze
+            scenarios: Scenario DataFrame
+
+        Returns:
+            Dictionary mapping position ID to its scenario P&L array
+        """
+        position_pnls = {}
+        for pos_id, position in portfolio.positions.items():
+            base_env = portfolio.pricing_environments[position.underlying]
+            pnls = []
+            if isinstance(portfolio, EquityPortfolio):
+                base = portfolio.position_value(position, base_env)
+                for idx, scenario in scenarios.iterrows():
+                    stressed_env = self._create_stressed_environment(base_env, scenario)
+                    pnls.append(portfolio.position_value(position, stressed_env) - base)
+            else:
+                # Current (un-stressed) price per unit via the BasePosition interface.
+                current_price = position.get_current_price(base_env)
+                for idx, scenario in scenarios.iterrows():
+                    stressed_env = self._create_stressed_environment(base_env, scenario)
+                    stressed_price = position.get_current_price(stressed_env)
+                    pnls.append(
+                        stressed_price * position.quantity - (position.quantity * current_price)
+                    )
+            position_pnls[pos_id] = np.array(pnls)
+        return position_pnls
 
     def _calculate_marginal_var(
         self,

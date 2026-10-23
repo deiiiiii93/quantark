@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.portfolio.equity.portfolio import EquityPortfolio
 from quantark.portfolio.fi.portfolio import FIPortfolio
 from quantark.util.exceptions import ValidationError, MarketDataError
@@ -23,6 +24,12 @@ from quantark.var.risk_factors import (
     DivYieldShiftFactor,
 )
 from quantark.util.fixings import freeze_portfolio_fixings
+
+
+#: Trade ``dividend_rho`` is the trade value's change per 1% (0.01) move in q (``get_trade_risk`` rescales the
+#: one-sided ``div_bump`` P&L by ``0.01 / div_bump``); dividing by this unit gives $ per unit of q, the unit of
+#: the Black–Scholes psi proxy × quantity and of the ``div_yield_shift`` factor (an absolute change in q).
+TRADE_DIVIDEND_RHO_UNIT = 0.01
 
 
 class ParametricVaREngine:
@@ -589,21 +596,27 @@ class ParametricVaREngine:
     ) -> Dict[str, float]:
         """Compute portfolio-level sensitivities for equity.
 
-        Greeks are sourced from each position's own ``get_risk_measures`` (already
-        quantity-scaled), keeping the engine agnostic to how a position prices:
+        Greeks are sourced per position through ``_position_risk`` (already
+        quantity-scaled), keeping the engine agnostic to how a position prices.
+        Product mode: each position's own ``get_risk_measures`` —
         ``EquityPosition`` returns analytical option greeks, ``EquitySwapPosition``
-        returns the TRS delta-one / funding-rate sensitivities. The dollar
+        returns the TRS delta-one / funding-rate sensitivities. Trade mode
+        (``portfolio.trade_value``): the portfolio's switch — trade-risk totals
+        (bump Greeks, cash legs included) for every ``EquityPosition``. The dollar
         spot-return sensitivity multiplies the scaled delta by the underlying spot.
+
+        The dividend-yield sensitivity is $ per unit change of q: product mode
+        uses the Black–Scholes psi proxy × quantity; trade mode the trade
+        ``dividend_rho`` (per 1% of q) divided by ``TRADE_DIVIDEND_RHO_UNIT``.
         """
         from quantark.portfolio.equity.swap_position import EquitySwapPosition
 
         factors_config = self.config.equity_factors or EquityRiskFactorConfig()
+        trade = getattr(portfolio, "trade_value", False)
 
         sensitivities: Dict[str, float] = {}
         per_position_greeks = {
-            position.position_id: position.get_risk_measures(
-                portfolio.pricing_environments[position.underlying]
-            )
+            position.position_id: self._position_risk(portfolio, position)
             for position in portfolio.positions.values()
         }
 
@@ -634,6 +647,11 @@ class ParametricVaREngine:
                 # sensitivity in this model; only payoff-on-spot products do.
                 if isinstance(position, EquitySwapPosition):
                     continue
+                if trade:
+                    # Quantity-scaled trade dividend_rho (legs included) in psi's units.
+                    greeks = per_position_greeks[position.position_id]
+                    total_psi += greeks["dividend_rho"] / TRADE_DIVIDEND_RHO_UNIT
+                    continue
                 pricing_env = portfolio.pricing_environments[position.underlying]
                 psi = self._calculate_div_yield_sensitivity(
                     position.product, pricing_env
@@ -642,6 +660,20 @@ class ParametricVaREngine:
             sensitivities["div_yield_shift"] = total_psi
 
         return sensitivities
+
+    def _position_risk(self, portfolio, position) -> Dict[str, float]:
+        """
+        One position's quantity-scaled Greeks under its underlying's environment.
+
+        Trade mode (``portfolio.trade_value``): ``portfolio.position_greeks`` with the
+        default ``GreeksCalculator`` — trade-risk totals for an ``EquityPosition``
+        (incl. ``dividend_rho``), ``get_greeks`` for a position without the trade
+        API. Product mode: the position's own ``get_risk_measures``.
+        """
+        pricing_env = portfolio.pricing_environments[position.underlying]
+        if getattr(portfolio, "trade_value", False):
+            return portfolio.position_greeks(position, GreeksCalculator(), env=pricing_env)
+        return position.get_risk_measures(pricing_env)
 
     def _calculate_div_yield_sensitivity(
         self, product: any, pricing_env: any, bump_size: float = 0.0001
@@ -794,7 +826,7 @@ class ParametricVaREngine:
                 # _compute_equity_sensitivities and the dollar-sensitivities loop
                 # below, and dimensionally correct for both options and TRS. Uses
                 # the scaled delta directly, so no division by quantity is needed.
-                scaled = position.get_risk_measures(pricing_env)
+                scaled = self._position_risk(portfolio, position)
                 pos_pnl = factor_returns[:, 0] * scaled["delta"] * pricing_env.spot
                 position_pnls[pos_id] = pos_pnl
 
@@ -820,7 +852,7 @@ class ParametricVaREngine:
                 for pos_id, position in portfolio.positions.items():
                     pricing_env = portfolio.pricing_environments[position.underlying]
                     # Quantity-scaled delta × spot = delta × spot × quantity.
-                    scaled = position.get_risk_measures(pricing_env)
+                    scaled = self._position_risk(portfolio, position)
                     pos_dollar_sensitivity = scaled["delta"] * pricing_env.spot
                     position_dollar_sensitivities[pos_id] = pos_dollar_sensitivity
 
@@ -883,7 +915,7 @@ class ParametricVaREngine:
 
             # Per-unit delta × spot, recovered from the quantity-scaled risk
             # measures so options and swaps are handled uniformly.
-            scaled = position.get_risk_measures(pricing_env)
+            scaled = self._position_risk(portfolio, position)
             pos_sensitivity = (scaled["delta"] / position.quantity) * pricing_env.spot
 
             # Marginal VaR ≈ Component VaR for parametric method
