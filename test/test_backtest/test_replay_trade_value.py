@@ -234,6 +234,57 @@ def test_a_product_price_cannot_enter_a_trade_with_cash_legs():
         ReplayBacktestEngine(_config(days=PATH[:3], initial_price=50.0)).run()
 
 
+def _record_leg_greeks(engine):
+    """Hook the day's Greeks: recompute the legs' delta/gamma independently (trade-risk total less product, one
+    bump loop) on the day's product, environment and live rolled legs."""
+    from quantark.asset.equity.riskmeasures import GreeksCalculator
+
+    replay = engine._replays[0]
+    original = replay.calculate_greeks
+    seen = {}
+
+    def hooked(product, env, *, engine=None):
+        result = original(product, env, engine=engine)
+        legs = list(engine_obj._leg_positions[0].cash_legs) if 0 in engine_obj._leg_positions else []
+        if legs:
+            position = EquityPosition(product=product, quantity=float(engine_obj._quantities[0]), entry_price=0.0,
+                                      underlying="equity_index", engine=engine, entry_timestamp=START,
+                                      position_id="note", cash_legs=legs)
+            risk = position.get_trade_risk(env, GreeksCalculator(), greeks=["delta", "gamma"])
+            seen[pd.Timestamp(env.valuation_date).normalize()] = (
+                risk.total["delta"] - risk.product["delta"], risk.total["gamma"] - risk.product["gamma"])
+        return result
+
+    engine_obj = engine
+    replay.calculate_greeks = hooked
+    return seen
+
+
+@pytest.mark.parametrize("kind", ["snowball", "phoenix"])
+def test_trade_mode_hedges_the_trade_total_delta(kind):
+    """User decision 2026-10-23: replay in trade mode with legs hedges on product + legs Greeks."""
+    engine = ReplayBacktestEngine(_config(kind))
+    seen = _record_leg_greeks(engine)
+    result = engine.run()
+    states = result.states_df().set_index("date")
+    greeks = result.greeks_df().set_index("date")
+    legless = ReplayBacktestEngine(_config(kind, legs=[])).run().greeks_df().set_index("date")
+    live = [d for d in seen if d in states.index]
+    assert live, "the note must be alive on some days"
+    for date in live:
+        leg_delta, leg_gamma = seen[date]
+        assert states.loc[date, "leg_delta"] == pytest.approx(leg_delta, rel=1e-12, abs=1e-12)
+        assert states.loc[date, "leg_gamma"] == pytest.approx(leg_gamma, rel=1e-12, abs=1e-12)
+        assert greeks.loc[date, "product_position_delta"] == pytest.approx(
+            legless.loc[date, "product_position_delta"] + leg_delta, rel=1e-12, abs=1e-12)
+    assert any(abs(seen[d][0]) > 0.0 for d in live)
+
+
+def test_leg_greek_columns_exist_only_with_leg_books():
+    states = ReplayBacktestEngine(_config(trade_value=False)).run().states_df()
+    assert "leg_delta" not in states.columns and "leg_gamma" not in states.columns
+
+
 def test_fixed_payoff_on_knock_in_is_refused():
     legs = [FixedPayoffLeg(direction=LegDirection.BUYER_RECEIVES, amount=1_000.0, trigger=PaymentTrigger.AT_KI)]
     with pytest.raises(CapabilityError):

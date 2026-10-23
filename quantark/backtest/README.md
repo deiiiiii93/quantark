@@ -225,8 +225,10 @@ the cash it booked (tested to 1e-10 on Snowball, Phoenix and mid-life runs). Cas
 legs on a position no lifecycle tracker ends.
 
 The product-replay engine has the same switch on its config (`trade_value=True`) with per-trade `cash_legs` (and
-optional `entry_trade_value`; without it a trade enters at its day-0 pre-close trade value). Its book mark
-and leg cash follow the flag; the replay's hedge delta, Greeks and carry risk stay on the product basis. With a PnL explain
+optional `entry_trade_value`; without it a trade enters at its day-0 pre-close trade value). Its book mark,
+leg cash and hedge follow the flag: the hedge sizes on the trade-total delta / gamma (the engine's product
+Greeks plus the legs' share of `get_trade_risk`, reported as the `leg_delta` / `leg_gamma` state columns); the
+carry-risk measurement stays on the product. With a PnL explain
 configured, the explain adds one portfolio `cash_legs` line per day (the legs' value change plus their cash), so
 the explain still reconciles to the run's PnL.
 

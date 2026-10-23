@@ -243,6 +243,14 @@ class ReplayBacktestEngine:
         self.leg_paid_today: float = 0.0
         self.leg_receivable_pv: float = 0.0
         self.leg_live_pv: float = 0.0
+        # the legs' delta / gamma the day's hedge includes (trade mode with legs)
+        self.leg_delta: float = 0.0
+        self.leg_gamma: float = 0.0
+        self._leg_greeks_calculator = None
+        if getattr(self.config, "trade_value", False):
+            from quantark.asset.equity.riskmeasures import GreeksCalculator
+
+            self._leg_greeks_calculator = GreeksCalculator()
         if self._trade_value:
             self._validate_trade_legs()
 
@@ -448,6 +456,8 @@ class ReplayBacktestEngine:
             alive_specs: list[tuple] = []
             self.leg_paid_today = 0.0
             self.leg_live_pv = 0.0
+            self.leg_delta = 0.0
+            self.leg_gamma = 0.0
 
             for index, (bp, quantity, replay, engine) in enumerate(zip(
                 self.config.products, self._quantities, self._replays,
@@ -505,6 +515,16 @@ class ReplayBacktestEngine:
                         book_product_mtm += trade_value
                         # the legs' part of the mark, against the price the explain values the product at
                         self.leg_live_pv += trade_value - quantity * price
+                        # the hedge covers the whole trade (user decision 2026-10-23): the legs' delta / gamma are
+                        # the trade-risk total less the product's, from one frozen-grid bump loop, on top of the
+                        # engine's own product Greeks
+                        risk = position.get_trade_risk(env, self._leg_greeks_calculator, greeks=["delta", "gamma"])
+                        leg_delta = risk.total["delta"] - risk.product["delta"]
+                        leg_gamma = risk.total["gamma"] - risk.product["gamma"]
+                        net_position_delta += leg_delta
+                        net_position_gamma += leg_gamma
+                        self.leg_delta += leg_delta
+                        self.leg_gamma += leg_gamma
                     else:
                         book_product_mtm += quantity * price
                     alive_specs.append(
@@ -1426,6 +1446,8 @@ class ReplayBacktestEngine:
             # trade mode with cash legs: the leg share of paid_cash / pending_receivable_pv (spec 2026-10-23 D9)
             self._states[-1]["leg_paid_cash"] = self.leg_paid_cash
             self._states[-1]["leg_receivable_pv"] = self.leg_receivable_pv
+            self._states[-1]["leg_delta"] = self.leg_delta
+            self._states[-1]["leg_gamma"] = self.leg_gamma
         self._greeks.append(
             {
                 "date": date,
