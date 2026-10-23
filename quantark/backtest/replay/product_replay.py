@@ -577,7 +577,8 @@ class ProductReplay:
     # ------------------------------------------------------------------
 
     def carry_price_callback(
-        self, product: Any, env: PricingEnvironment, *, engine: BaseEngine
+        self, product: Any, env: PricingEnvironment, *, engine: BaseEngine, position: Any = None,
+        quantity: float = 1.0,
     ):
         """``price_at(spot, dividend)`` over one fixed product/engine state.
 
@@ -591,6 +592,20 @@ class ProductReplay:
         # The day's contract carries every fixing the run has recorded (product_for_date); this freeze finds nothing
         # strictly past, and a fixing dated today stays live under the carry bumps (D1).
         product = freeze_missing_fixings(product, env, warn=False)
+
+        if position is not None:
+            # a trade with cash legs: its trade value per unit of quantity (spec 2026-10-23 D9), so the
+            # aggregation by quantity gives the whole trade
+            import copy as _copy
+
+            trade = _copy.copy(position)
+            trade.product, trade.engine = product, engine
+
+            def price_trade(spot: float, dividend: Any) -> float:
+                scenario = _env_with(env, spot=float(spot), div_yield=dividend, underlying=self.underlying)
+                return float(trade.get_trade_value(scenario)) / float(quantity)
+
+            return price_trade
 
         def price_at(spot: float, dividend: Any) -> float:
             return float(
@@ -617,6 +632,8 @@ class ProductReplay:
         delta_q: float,
         points: float,
         base_price: Optional[float] = None,
+        position: Any = None,
+        quantity: float = 1.0,
     ):
         """This product's UNIT-position carry buckets on ``context``.
 
@@ -630,7 +647,7 @@ class ProductReplay:
         from .carry_risk import measure_product_carry_risk
 
         return measure_product_carry_risk(
-            self.carry_price_callback(product, env, engine=engine),
+            self.carry_price_callback(product, env, engine=engine, position=position, quantity=quantity),
             context,
             delta_q=delta_q,
             points=points,

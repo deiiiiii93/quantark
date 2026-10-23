@@ -362,7 +362,7 @@ def test_replay_carry_reprices_keep_the_days_fill():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", MissingFixingWarning)
         single = ProductReplay.carry_price_callback(replay, _ra_dated(), env, engine=engine)
-        book = _book_price_callback([(2.0, replay, engine, _ra_dated(), 0.0, 0.0)], env)
+        book = _book_price_callback([(2.0, replay, engine, _ra_dated(), 0.0, 0.0, None)], env)
         assert single(111.0, env.div_yield) == want
         assert book(111.0, env.div_yield) == 2.0 * want
 

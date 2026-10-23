@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
+import copy
 import math
 import time
 
@@ -51,24 +52,21 @@ def _book_price_callback(alive_specs, env):
     # The day's contract carries every fixing the run has recorded (product_for_date); this freeze finds nothing
     # strictly past, and a fixing dated today stays live under the carry bumps (D1).
     alive_specs = [
-        (quantity, replay, engine, freeze_missing_fixings(product, env, warn=False), delta, price)
-        for quantity, replay, engine, product, delta, price in alive_specs
+        (quantity, replay, engine, freeze_missing_fixings(product, env, warn=False), delta, price, position)
+        for quantity, replay, engine, product, delta, price, position in alive_specs
     ]
 
     def price_at(spot: float, dividend) -> float:
         total = 0.0
-        for quantity, replay, engine, product, _delta, _price in alive_specs:
-            total += quantity * float(
-                engine.price(
-                    product,
-                    _env_with(
-                        env,
-                        spot=float(spot),
-                        div_yield=dividend,
-                        underlying=replay.underlying,
-                    ),
-                )
-            )
+        for quantity, replay, engine, product, _delta, _price, position in alive_specs:
+            scenario = _env_with(env, spot=float(spot), div_yield=dividend, underlying=replay.underlying)
+            if position is not None:
+                # a trade with cash legs is its trade value (product x quantity + legs; spec 2026-10-23 D9)
+                trade = copy.copy(position)
+                trade.product, trade.engine = product, engine
+                total += float(trade.get_trade_value(scenario))
+            else:
+                total += quantity * float(engine.price(product, scenario))
         return total
 
     return price_at
@@ -246,11 +244,7 @@ class ReplayBacktestEngine:
         # the legs' delta / gamma the day's hedge includes (trade mode with legs)
         self.leg_delta: float = 0.0
         self.leg_gamma: float = 0.0
-        self._leg_greeks_calculator = None
-        if getattr(self.config, "trade_value", False):
-            from quantark.asset.equity.riskmeasures import GreeksCalculator
-
-            self._leg_greeks_calculator = GreeksCalculator()
+        self._leg_calculators: dict[int, tuple] = {}
         if self._trade_value:
             self._validate_trade_legs()
 
@@ -505,6 +499,7 @@ class ReplayBacktestEngine:
                         )
                     net_position_delta += float(greeks.get("delta", 0.0)) * quantity
                     net_position_gamma += float(greeks.get("gamma", 0.0)) * quantity
+                    unit_delta, unit_price, spec_position = float(greeks.get("delta", 0.0)), price, None
                     if index in self._leg_books:
                         # trade value: the product's npv x quantity plus its live rolled legs on the engine's
                         # event distribution (EquityPosition.get_trade_value, the portfolio's own function)
@@ -518,25 +513,20 @@ class ReplayBacktestEngine:
                         # the hedge covers the whole trade (user decision 2026-10-23): the legs' delta / gamma are
                         # the trade-risk total less the product's, from one frozen-grid bump loop, on top of the
                         # engine's own product Greeks
-                        risk = position.get_trade_risk(env, self._leg_greeks_calculator, greeks=["delta", "gamma"])
-                        leg_delta = risk.total["delta"] - risk.product["delta"]
-                        leg_gamma = risk.total["gamma"] - risk.product["gamma"]
+                        leg_delta, leg_gamma = self._leg_greeks(position, env, engine)
                         net_position_delta += leg_delta
                         net_position_gamma += leg_gamma
                         self.leg_delta += leg_delta
                         self.leg_gamma += leg_gamma
+                        # the bucket hedge and the carry audit measure the whole trade: unit delta and price of the
+                        # trade value per unit of quantity (the aggregation scales back by quantity), priced from a
+                        # snapshot of today's position (the legs list is replaced, not mutated, on the next roll)
+                        unit_delta += leg_delta / quantity
+                        unit_price = trade_value / quantity
+                        spec_position = copy.copy(position)
                     else:
                         book_product_mtm += quantity * price
-                    alive_specs.append(
-                        (
-                            quantity,
-                            replay,
-                            engine,
-                            product,
-                            float(greeks.get("delta", 0.0)),
-                            price,
-                        )
-                    )
+                    alive_specs.append((quantity, replay, engine, product, unit_delta, unit_price, spec_position))
 
                 provenance = getattr(replay, "last_surface_provenance", None)
                 self._product_daily.append(
@@ -776,6 +766,35 @@ class ReplayBacktestEngine:
                     "give entry_trade_value (the signed trade total at entry, legs included)"
                 )
 
+    def _leg_greeks_calculators(self, pricing_engine):
+        """``(delta, gamma)`` calculators on the pricing engine's own effective bumps: ``spot_bump`` for delta,
+        ``gamma_spot_bump`` (else ``spot_bump``) for gamma, as the engine bumps the product."""
+        key = id(pricing_engine)
+        if key not in self._leg_calculators:
+            from dataclasses import replace as _replace
+
+            from quantark.asset.equity.param import EngineParams
+            from quantark.asset.equity.riskmeasures import GreeksCalculator
+
+            bumps = pricing_engine.params.get_effective_bump_config()
+            gamma_bump = bumps.gamma_spot_bump if bumps.gamma_spot_bump is not None else bumps.spot_bump
+            self._leg_calculators[key] = (
+                GreeksCalculator(EngineParams(bump_config=_replace(bumps, spot_bump=bumps.spot_bump))),
+                GreeksCalculator(EngineParams(bump_config=_replace(bumps, spot_bump=gamma_bump))),
+            )
+        return self._leg_calculators[key]
+
+    def _leg_greeks(self, position, env, pricing_engine) -> tuple:
+        """The legs' delta and gamma for the hedge (user decision 2026-10-23): the trade-risk total less the
+        product's, from one frozen-grid bump loop per bump size."""
+        delta_gc, gamma_gc = self._leg_greeks_calculators(pricing_engine)
+        if delta_gc._bump_config.spot_bump == gamma_gc._bump_config.spot_bump:
+            risk = position.get_trade_risk(env, delta_gc, greeks=["delta", "gamma"])
+            return (risk.total["delta"] - risk.product["delta"], risk.total["gamma"] - risk.product["gamma"])
+        d = position.get_trade_risk(env, delta_gc, greeks=["delta"])
+        g = position.get_trade_risk(env, gamma_gc, greeks=["gamma"])
+        return d.total["delta"] - d.product["delta"], g.total["gamma"] - g.product["gamma"]
+
     def _register_leg_books(self, env) -> None:
         """One LegCashBook per product with cash legs, on the run's first day (before its first valuation).
 
@@ -1001,7 +1020,7 @@ class ReplayBacktestEngine:
         points = float(settings.futures_bump_points)
         started = time.perf_counter()
         entries = []
-        for quantity, replay, engine, product, unit_delta, price in alive_specs:
+        for quantity, replay, engine, product, unit_delta, price, position in alive_specs:
             entries.append(
                 (
                     quantity,
@@ -1013,6 +1032,8 @@ class ReplayBacktestEngine:
                         delta_q=unit_delta,
                         points=points,
                         base_price=price,
+                        position=position,
+                        quantity=quantity,
                     ),
                 )
             )
