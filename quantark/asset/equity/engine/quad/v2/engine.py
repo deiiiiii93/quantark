@@ -1,7 +1,9 @@
 """Opt-in autocallable wrappers around the shared QUAD V2 core."""
 
+from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
+from types import MappingProxyType
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
@@ -19,10 +21,55 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
 )
 from quantark.util.enum.engine_enums import EngineType
 from quantark.execution.errors import CapabilityError
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 from .adapters import compile_contract
 from .context import prepare_compiled, interval_moments
 from .contract import Action, Event, CompiledContract
+
+
+def _canonical(value):
+    """An equality-comparable form of compiled-contract metadata (arrays by bytes, mappings by sorted items)."""
+    if isinstance(value, np.ndarray):
+        return ("ndarray", value.dtype.str, value.shape, value.tobytes())
+    if isinstance(value, (dict, MappingProxyType)):
+        return tuple(sorted((key, _canonical(item)) for key, item in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_canonical(item) for item in value)
+    return value
+
+
+@dataclass
+class _SpotBatch:
+    """One ``spot_batch`` session: prepared contexts by session key, most recently used last."""
+
+    lo: float
+    hi: float
+    max_contexts: int
+    contexts: list = field(default_factory=list)
+    seen: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+
+    def lookup(self, key, spot):
+        for i, (k, context) in enumerate(self.contexts):
+            if k == key and context.spot_range[0] <= spot <= context.spot_range[1]:
+                self.contexts.append(self.contexts.pop(i))
+                return context
+        return None
+
+    def store(self, key, context):
+        self.contexts = [(k, c) for k, c in self.contexts if not k == key]
+        self.contexts.append((key, context))
+        del self.contexts[: max(0, len(self.contexts) - self.max_contexts)]
+        if not any(k == key for k in self.seen):
+            self.seen.append(key)
+
+    def widens(self, key, spot):
+        """A key already used once, at a spot the declared range covers, whose wide prepare has not failed."""
+        return (
+            self.lo <= spot <= self.hi
+            and any(k == key for k in self.seen)
+            and not any(k == key for k in self.failed)
+        )
 
 
 class AutocallableQuadEngineV2(BaseEngine):
@@ -31,6 +78,7 @@ class AutocallableQuadEngineV2(BaseEngine):
     supports_lifecycle_state = True
     supports_spot_greeks_grid = True
     supports_cash_leg_folding = True
+    supports_spot_batch = True
     product_type = None
 
     def __init__(self, params=None):
@@ -41,6 +89,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         super().__init__(deepcopy(params))
         self._prepared = None
         self._prepared_key = None
+        self._batch = None
 
     def __getstate__(self):
         """Copies and pickles start cold, as a fresh engine.
@@ -51,7 +100,60 @@ class AutocallableQuadEngineV2(BaseEngine):
         state = self.__dict__.copy()
         state["_prepared"] = None
         state["_prepared_key"] = None
+        state["_batch"] = None
         return state
+
+    @contextmanager
+    def spot_batch(self, spot_range, *, max_contexts=32):
+        """Scope a session that reuses prepared contexts across calls differing only by spot.
+
+        Inside the session a call reuses a context when the engine's cache key, the compiled contract's
+        metadata and the event phase are all equal and its spot lies in that context's range. The first
+        use of a key prepares exactly the scalar context (the default width around its spot); a later use
+        at a spot outside it, inside ``spot_range``, prepares one context over the whole declared range.
+        A wide prepare over the resource limit (``NumericalError``) falls back to the scalar context and
+        is not retried for that key. On exit the single-slot cache is restored and the contexts dropped.
+        Sessions do not nest, and an engine in a session must not be shared across threads.
+        """
+        lo, hi = (float(x) for x in spot_range)
+        if not (np.isfinite(lo) and np.isfinite(hi)) or lo <= 0 or lo > hi:
+            raise ValidationError(f"spot_batch needs a finite range 0 < lo <= hi, got {spot_range!r}")
+        if isinstance(max_contexts, bool) or not isinstance(max_contexts, int) or max_contexts < 1:
+            raise ValidationError(f"max_contexts must be a positive int, got {max_contexts!r}")
+        if getattr(self, "_batch", None) is not None:
+            raise ValidationError("spot_batch sessions do not nest")
+        saved = (self._prepared, self._prepared_key)
+        self._batch = _SpotBatch(lo, hi, max_contexts)
+        try:
+            yield self
+        finally:
+            self._batch = None
+            self._prepared, self._prepared_key = saved
+
+    def _batch_context(
+        self, batch, key, contract, product, pricing_env, pending, *, components, event_phase,
+        lifecycle_state, fold,
+    ):
+        """The session's context for ``key`` at this spot (see ``spot_batch``)."""
+        spot = pricing_env.spot
+        context = batch.lookup(key, spot)
+        if context is not None:
+            return context
+        if batch.widens(key, spot):
+            try:
+                context = prepare_compiled(
+                    contract, pricing_env, product.strike, self.params, [batch.lo, batch.hi],
+                    pending_pv=pending,
+                )
+            except NumericalError:
+                batch.failed.append(key)
+        if context is None:
+            context = self.prepare(
+                product, pricing_env, components=components, event_phase=event_phase,
+                lifecycle_state=lifecycle_state, fold=fold,
+            )
+        batch.store(key, context)
+        return context
 
     def _compile(self, product, pricing_env, components, event_phase, lifecycle_state, fold=None):
         if event_phase not in {"before", "after"}:
@@ -195,6 +297,13 @@ class AutocallableQuadEngineV2(BaseEngine):
         self._validate_market(product, pricing_env, contract)
         pending = pending_receivable_pv(lifecycle_state, pricing_env)
         key = self._key(contract, pricing_env, product.strike, pending, fold)
+        batch = getattr(self, "_batch", None)
+        if batch is not None:
+            return self._batch_context(
+                batch, (key, _canonical(contract.metadata), event_phase), contract, product,
+                pricing_env, pending, components=components, event_phase=event_phase,
+                lifecycle_state=lifecycle_state, fold=fold,
+            )
         cached = self._prepared
         if (
             cached is not None

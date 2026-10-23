@@ -92,6 +92,9 @@ class BaseEngine(ABC):
     supports_lifecycle_state = False
     #: Whether ``price_folded`` prices a ``FoldOverlay`` of cash legs inside the product solve.
     supports_cash_leg_folding = False
+    #: Whether ``spot_batch(spot_range)`` scopes a session that reuses one prepared context across calls
+    #: whose market inputs differ only by spot (QUAD V2); callers fall back to plain repricing otherwise.
+    supports_spot_batch = False
 
     #: Attribute names that fully determine this engine's pricing function. ``None`` (the
     #: default) means "identity only": two instances are never equivalent. Engines whose
