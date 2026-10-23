@@ -35,7 +35,7 @@ from quantark.cashleg.event_distribution import EventType
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.cashleg.leg_schedule import LegSchedule
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_zero
+from quantark.util.numerical import almost_equal, is_zero
 
 DAYS_PER_YEAR = 365.0
 
@@ -111,6 +111,15 @@ def _refusal(leg: CashLeg) -> Optional[str]:
             return "a COUPON-basis AutocallableCashLeg reads realized coupon events the book does not track"
     if isinstance(leg, AccrualLeg) and leg.payment_convention is PaymentConvention.AT_KO:
         return "an AT_KO AccrualLeg has no specified realized payment time"
+    if (isinstance(leg, AccrualLeg) and leg.payment_convention is PaymentConvention.AT_PERIOD_END
+            and leg.ko_behavior is KOBehavior.TRUNCATE_AT_KO):
+        s = leg.schedule
+        refs = s.period_starts if leg.survival_basis is SurvivalBasis.ENTER_PERIOD else s.period_ends
+        early = [i for i, (t, r) in enumerate(zip(s.payment_times, refs))
+                 if float(t) < float(r) and not is_zero(float(t) - float(r))]
+        if early:
+            return (f"periods {early} pay before their survival reference; a later knock-out could not "
+                    "reverse cash already paid")
     return None
 
 
@@ -248,6 +257,9 @@ class LegCashBook:
                           "this position")
             if reason is not None:
                 raise CapabilityError(f"multi-day cash-leg booking: {reason} (leg {leg.leg_id})")
+        ids = [leg.leg_id for leg in legs]
+        if len(set(ids)) != len(ids):
+            raise ValidationError(f"cash-leg book: legs must have distinct leg_id values, got {ids}")
         self.legs: Tuple[CashLeg, ...] = tuple(_snap_leg(leg, snap) if snap else leg for leg in legs)
         self.unit_notional = float(unit_notional)
         self.anchor_date = anchor_date
@@ -296,7 +308,7 @@ class LegCashBook:
         for leg in self.legs:
             for i, amount, t in _termination_flows(leg, outcome, self.unit_notional):
                 key = (leg.leg_id, i)
-                if key not in self._paid and amount != 0.0:
+                if key not in self._paid and not almost_equal(amount, 0.0, tol=0.0):
                     flows.append((key, amount, t))
         return flows
 

@@ -18,6 +18,7 @@ from quantark.util.calendar.day_counter import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import almost_equal
 
 
 class PaymentConvention(Enum):
@@ -209,7 +210,7 @@ class AccrualLeg(CashLeg):
             payments = [t for t in rolled if t is not None]
             if not payments:
                 return None
-        if dt == 0.0 and all(keep):
+        if almost_equal(dt, 0.0, tol=0.0) and all(keep):
             return self
         idx = np.flatnonzero(keep)
 

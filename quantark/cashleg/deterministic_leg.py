@@ -8,6 +8,7 @@ from typing import Optional
 
 from quantark.cashleg.base import CashLeg, roll_payment_time
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import almost_equal
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ class DeterministicLeg(CashLeg):
         payment_time = roll_payment_time(self.payment_time, dt, keep_landing=keep_landing)
         if payment_time is None:
             return None
-        if payment_time == self.payment_time:
+        if almost_equal(payment_time, float(self.payment_time), tol=0.0):
             return self
         return replace(self, payment_time=payment_time)
 

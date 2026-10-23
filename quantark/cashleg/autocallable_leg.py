@@ -14,7 +14,7 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from quantark.cashleg.base import CashLeg
+from quantark.cashleg.base import CashLeg, roll_payment_time
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import (
@@ -243,10 +243,14 @@ class AutocallableCashLeg(CashLeg):
             if k
         )
 
-        if had_obs and not new_obs:
-            return None  # every observation dropped => leg expired
+        # the terminal branch lives while its settlement is ahead (spec 2026-10-23 D10), observations or not
+        terminal = roll_payment_time(self.terminal_settlement_time, dt, keep_landing=keep_landing)
+        if not new_obs and terminal is None:
+            return None  # every observation dropped and the terminal settlement passed => leg expired
 
-        new_terminal_settlement = max(0.0, float(self.terminal_settlement_time - dt))
+        new_terminal_settlement = (
+            terminal if terminal is not None else max(0.0, float(self.terminal_settlement_time - dt))
+        )
         return replace(
             self,
             observation_schedule=new_obs,

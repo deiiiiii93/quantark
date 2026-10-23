@@ -15,7 +15,7 @@ from quantark.asset.equity.engine.event_stats import (
     StatisticsProvenance,
 )
 from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import Tolerance, almost_equal
+from quantark.util.numerical import Tolerance, almost_equal, is_zero
 
 
 class EventType(Enum):
@@ -397,10 +397,20 @@ class EventDistribution:
         return float(self.event_times[-1])
 
     def survival_at(self, t: float) -> float:
-        """Linearly interpolate survival probability at a year fraction."""
+        """Linearly interpolate survival probability at a year fraction.
+
+        A strictly past time reads 1. A time at the valuation instant (``is_zero``) reads the post-observation
+        survival of an event the grid keeps at 0 — a theta-shifted contract keeps the observation landing on its
+        new origin — else 1.
+        """
 
         t = float(t)
-        if t <= 0.0:
+        if is_zero(t):
+            time_grid, survival_grid = self._survival_grid()
+            if almost_equal(float(time_grid[0]), 0.0, tol=Tolerance.PROBABILITY):
+                return float(survival_grid[0])
+            return 1.0
+        if t < 0.0:
             return 1.0
 
         time_grid, survival_grid = self._survival_grid()
