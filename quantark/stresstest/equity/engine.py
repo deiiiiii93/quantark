@@ -178,7 +178,10 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
 
     @staticmethod
     def _view(portfolio: Portfolio, envs: Dict[str, Any]) -> Portfolio:
-        """The stressed portfolio for assembly: scenario envs, the positions shared (read, never priced)."""
+        """The stressed portfolio for assembly: scenario envs, the positions shared (read, never priced).
+
+        A metrics adapter receives this view in batch and pool modes and must treat it as read-only: its
+        positions are the caller's own objects, not scenario copies."""
         stressed = Portfolio(
             portfolio_name=portfolio.portfolio_name + "_stressed",
             pricing_environments=envs,
@@ -193,7 +196,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         scenarios: Sequence[Scenario],
         originals: Dict[str, float],
         baseline_value: float,
-    ) -> List[ScenarioResult]:
+    ) -> Tuple[List[ScenarioResult], str, int]:
         """Every scenario's environments built once; session-capable positions batched across them (spec D14).
 
         Each session-capable position is valued on its own copy over all scenarios in one spot-batch session;
@@ -202,7 +205,8 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         batch_start = time.time()
         envs = [StressApplicator.apply_scenario_to_portfolio(portfolio, s) for s in scenarios]
         batched = [i for i, p in portfolio.positions.items() if supports_native_batch(p)]
-        others = {i: p for i, p in portfolio.positions.items() if i not in set(batched)}
+        batched_ids = set(batched)
+        others = {i: p for i, p in portfolio.positions.items() if i not in batched_ids}
 
         gc = self.greeks_calculator
         position_tasks = [

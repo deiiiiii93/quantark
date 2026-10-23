@@ -86,6 +86,7 @@ def _scenarios():
             ScenarioBuilder().name("spot -12%").spot_stress(-0.12).build(),
             ScenarioBuilder().name("spot +5%").spot_stress(0.05).build(),
             ScenarioBuilder().name("vol +5").vol_stress(0.05, stress_type=StressType.ABSOLUTE).build(),
+            ScenarioBuilder().name("vol -5").vol_stress(-0.05, stress_type=StressType.ABSOLUTE).build(),
             ScenarioBuilder().name("rate +100bp").rate_stress(0.01, stress_type=StressType.ABSOLUTE).build(),
             ScenarioBuilder().name("crash").spot_stress(-0.20).vol_stress(0.10, stress_type=StressType.ABSOLUTE).build()]
 
@@ -138,6 +139,9 @@ def _compare_scenario(s_res, b_res, book):
         b_u = b_res.underlying_results[underlying]
         assert b_u["num_positions"] == s_u["num_positions"]
         assert abs(b_u["total_value"] - s_u["total_value"]) <= budget["value"] + 1e-12 * abs(s_u["total_value"])
+        if s_u["greeks"] is not None:
+            for name in AGGREGATE_GREEK_KEYS:
+                assert abs(b_u["greeks"][name] - s_u["greeks"][name]) <= budget[name] + 1e-12 * abs(s_u["greeks"][name])
 
 
 @pytest.fixture(scope="module")
@@ -176,7 +180,7 @@ def test_native_batch_without_greeks_matches_scalar():
 def test_standalone_evaluate_scenario_honours_native_batch(runs):
     _, batch = runs
     engine = StressTestEngine(StressTestConfig(calculate_greeks=True, native_batch=True))
-    for k in (1, 3):
+    for k in (1, 4):
         alone = engine.evaluate_scenario(_book(), _scenarios()[k], batch.baseline_value)
         assert alone.metadata["valuation_mode"] == "native_batch"
         _compare_scenario(batch.scenario_results[k], alone, _book())   # two session histories: V2 within ceilings

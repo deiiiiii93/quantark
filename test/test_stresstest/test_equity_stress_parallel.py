@@ -60,17 +60,22 @@ def _numbers(results):
               r.underlying_results) for r in results.scenario_results])
 
 
+def _pool_warnings(recwarn):
+    return [w for w in recwarn if "static stress parallel_execution" in str(w.message)]
+
+
 @pytest.mark.parametrize("native_batch", [False, True])
 def test_pool_results_are_bitwise_serial(native_batch, recwarn):
     serial = _run(native_batch=native_batch, parallel_execution=False)
     pooled = _run(native_batch=native_batch, parallel_execution=True)
-    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+    assert not _pool_warnings(recwarn)
     assert pooled.metadata["execution"] == "process_pool" and pooled.metadata["workers"] >= 1
     assert serial.metadata["execution"] == "serial"
     assert _numbers(pooled) == _numbers(serial)
 
 
-def test_a_pool_that_cannot_start_warns_and_runs_serially(monkeypatch):
+@pytest.mark.parametrize("native_batch", [False, True])
+def test_a_pool_that_cannot_start_warns_and_runs_serially(monkeypatch, native_batch):
     class Broken:
         def __init__(self, *args, **kwargs):
             pass
@@ -84,10 +89,13 @@ def test_a_pool_that_cannot_start_warns_and_runs_serially(monkeypatch):
         def map(self, *args, **kwargs):
             raise BrokenProcessPool("simulated bootstrap failure")
 
+        def shutdown(self, *args, **kwargs):
+            pass
+
     monkeypatch.setattr(parallel, "ProcessPoolExecutor", Broken)
-    serial = _run(native_batch=False, parallel_execution=False)
+    serial = _run(native_batch=native_batch, parallel_execution=False)
     with pytest.warns(RuntimeWarning, match="serial"):
-        fallback = _run(native_batch=False, parallel_execution=True)
+        fallback = _run(native_batch=native_batch, parallel_execution=True)
     assert fallback.metadata["execution"] == "serial"
     assert _numbers(fallback) == _numbers(serial)
 
@@ -112,7 +120,46 @@ def _explode(task):
 def test_a_pricing_error_inside_a_task_propagates(recwarn):
     with pytest.raises(NotImplementedError, match="task 1 refuses|task 2 refuses"):
         parallel.run_tasks(_explode, [1, 2], max_workers=2)
-    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+    assert not _pool_warnings(recwarn)
+
+
+UNGUARDED = """
+from datetime import datetime
+from quantark.asset.equity.engine import BlackScholesEngine
+from quantark.asset.equity.product import EuropeanVanillaOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.portfolio import Portfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.stresstest import ScenarioBuilder, StressTestConfig, StressTestEngine
+from quantark.util.enum import OptionType
+
+env = PricingEnvironment(spot_quote=SpotQuote(100.0, asset_name="X"), vol_surface=FlatVolSurface(0.2),
+                         rate_curve=FlatRateCurve(0.03), div_yield=ContinuousDividendYield(0.0),
+                         valuation_date=datetime(2026, 3, 16))
+pf = Portfolio(portfolio_name="unguarded", pricing_environments={"X": env}, creation_date=datetime(2026, 3, 16))
+pf.add_position(product=EuropeanVanillaOption(strike=100.0, maturity=0.5, option_type=OptionType.CALL), quantity=1,
+                entry_price=0.0, underlying="X", engine=BlackScholesEngine(), entry_timestamp=datetime(2026, 3, 16))
+scenarios = [ScenarioBuilder().name(f"s{s}").spot_stress(s).build() for s in (-0.1, 0.1)]
+config = StressTestConfig(calculate_greeks=False, parallel_execution=True, max_workers=2)
+result = StressTestEngine(config).run_static_scenarios(pf, scenarios)
+print("RESULT", result.metadata["execution"])
+"""
+
+
+def test_a_script_without_a_main_guard_warns_and_runs_serially(tmp_path):
+    """Spawn re-imports an unguarded main script in each worker: the workers must die, the parent run serially."""
+    import os
+    import subprocess
+    import sys
+
+    script = tmp_path / "unguarded_stress.py"
+    script.write_text(UNGUARDED)
+    done = subprocess.run([sys.executable, "-W", "always::RuntimeWarning", str(script)], capture_output=True,
+                          text=True, timeout=300, env=dict(os.environ))
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert done.stdout.count("RESULT") == 1                 # no worker ran the stress itself
+    assert "RESULT serial" in done.stdout
+    assert "static stress parallel_execution" in done.stderr
 
 
 def test_single_task_or_one_worker_stays_serial():

@@ -20,7 +20,8 @@ class EquityStressConfig:
     # context across scenarios (results within the route's measured tolerance of the scalar path)
     native_batch: bool = False
 
-    # Static scenarios on a spawn process pool (bitwise equal to serial); a callback stays in the parent
+    # Static scenarios on a spawn process pool (bitwise equal to serial); a callback stays in the parent.
+    # A script that runs with it must guard its entry point (``if __name__ == "__main__":``)
     parallel_execution: bool = False
     max_workers: int = 4
     progress_callback: Optional[Any] = None

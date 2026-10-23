@@ -1,8 +1,12 @@
 """Static equity stress tasks on a spawn process pool (ship spec 2026-10-23 D13).
 
 Each task's arguments are pickled on submit, so every task prices a fresh copy of its post-baseline inputs, as the
-serial loop's deepcopy does; nothing prepared is shared between tasks or processes. Workers inherit the parent's
-thread settings and never receive the config (a progress callback stays in the parent).
+serial loop's deepcopy does; nothing prepared is shared between tasks or processes. Workers never receive the
+config (a progress callback stays in the parent), and this module never changes thread settings.
+
+Spawn re-imports the caller's main module in every worker, so a script that starts a run must guard it with
+``if __name__ == "__main__":``. Without the guard each worker would start the run again while bootstrapping; that
+attempt is refused, the worker dies, and the parent warns and runs serially.
 
 Pool infrastructure failures (inputs that do not pickle, a pool that cannot start or breaks) return ``None`` after a
 ``RuntimeWarning`` so the caller runs serially; an exception raised by a task itself is re-raised unchanged.
@@ -57,12 +61,19 @@ def run_tasks(
     except Exception as exc:
         _warn_serial(f"inputs do not pickle ({type(exc).__name__}: {exc})")
         return None
+    if getattr(multiprocessing.current_process(), "_inheriting", False):
+        # a spawn worker re-running an unguarded main script: die, so the parent's pool breaks and it falls back
+        raise RuntimeError("static stress started while a spawn worker bootstraps; guard the script's entry point")
     try:
         with ProcessPoolExecutor(
             max_workers=min(max_workers, len(packed)),
             mp_context=multiprocessing.get_context("spawn"),
         ) as pool:
-            outcomes = list(pool.map(_call, packed))
+            try:
+                outcomes = list(pool.map(_call, packed))
+            except BaseException:
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
     except (BrokenProcessPool, RuntimeError, OSError, pickle.PicklingError) as exc:
         _warn_serial(f"the process pool failed ({type(exc).__name__}: {exc})")
         return None
