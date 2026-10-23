@@ -2,8 +2,9 @@
 Equity position class for tracking individual equity derivative positions.
 """
 import copy
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Sequence
 from datetime import datetime
 import uuid
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -402,6 +403,48 @@ class EquityPosition:
             )
 
         return TradeGreeks(product=product_g, total=total_g, leg_pvs=leg_pvs)
+
+    # --- many environments at once (ship spec 2026-10-23 C2) ---------------------------------------------
+
+    def batch_trade_values(self, envs: Sequence[PricingEnvironment]) -> List[float]:
+        """``get_trade_value`` of each environment, in order.
+
+        On an engine with ``supports_spot_batch`` the calls run inside one ``spot_batch`` session, so
+        environments whose market differs only by spot share a prepared context (equal to the scalar values
+        within the engine's measured tolerance); on any other engine this is the plain loop, bitwise.
+        """
+        envs = list(envs)
+        with self._spot_batch(envs):
+            return [self.get_trade_value(env) for env in envs]
+
+    def batch_trade_risk(
+        self,
+        envs: Sequence[PricingEnvironment],
+        greeks_calculator: GreeksCalculator,
+        greeks: Optional[List[str]] = None,
+    ) -> List[TradeGreeks]:
+        """``get_trade_risk`` of each environment, in order, under the same session rule as
+        ``batch_trade_values``. Each call still makes its own bumps and theta shift at its own spot; states
+        that compile to different contracts (a knock-in or knock-out decided at that spot) never share."""
+        envs = list(envs)
+        with self._spot_batch(envs, greeks_calculator):
+            return [self.get_trade_risk(env, greeks_calculator, greeks) for env in envs]
+
+    @contextmanager
+    def _spot_batch(self, envs, greeks_calculator: Optional[GreeksCalculator] = None):
+        """The engine's ``spot_batch`` session over every spot the calls can reach, or nothing."""
+        if not envs or not getattr(self.engine, "supports_spot_batch", False):
+            yield
+            return
+        engine_bumps = self.engine.params.get_effective_bump_config()
+        bumps = [engine_bumps.spot_bump, engine_bumps.gamma_spot_bump or 0.0]
+        if greeks_calculator is not None:
+            bumps.append(greeks_calculator._bump_config.spot_bump)
+        # the width V2 prepares by default around one spot, so every bump of every env stays inside
+        width = max([0.02] + [2.0 * b for b in bumps])
+        spots = [float(env.spot) for env in envs]
+        with self.engine.spot_batch((min(spots) * (1.0 - width), max(spots) * (1.0 + width))):
+            yield
 
     def _trade_theta(
         self, gc, bump_engine, pricing_env, streams, base_npv, base_legs, q
