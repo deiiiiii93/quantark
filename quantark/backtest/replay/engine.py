@@ -244,7 +244,7 @@ class ReplayBacktestEngine:
         # the legs' delta / gamma the day's hedge includes (trade mode with legs)
         self.leg_delta: float = 0.0
         self.leg_gamma: float = 0.0
-        self._leg_calculators: dict[int, tuple] = {}
+        self._leg_calculators: dict[tuple, tuple] = {}
         if self._trade_value:
             self._validate_trade_legs()
 
@@ -769,14 +769,15 @@ class ReplayBacktestEngine:
     def _leg_greeks_calculators(self, pricing_engine):
         """``(delta, gamma)`` calculators on the pricing engine's own effective bumps: ``spot_bump`` for delta,
         ``gamma_spot_bump`` (else ``spot_bump``) for gamma, as the engine bumps the product."""
-        key = id(pricing_engine)
-        if key not in self._leg_calculators:
-            from dataclasses import replace as _replace
+        from dataclasses import astuple, replace as _replace
 
+        # keyed on the bump sizes, not the engine object: engines are rebuilt per day and ids recycle
+        bumps = pricing_engine.params.get_effective_bump_config()
+        key = astuple(bumps)
+        if key not in self._leg_calculators:
             from quantark.asset.equity.param import EngineParams
             from quantark.asset.equity.riskmeasures import GreeksCalculator
 
-            bumps = pricing_engine.params.get_effective_bump_config()
             gamma_bump = bumps.gamma_spot_bump if bumps.gamma_spot_bump is not None else bumps.spot_bump
             self._leg_calculators[key] = (
                 GreeksCalculator(EngineParams(bump_config=_replace(bumps, spot_bump=bumps.spot_bump))),
