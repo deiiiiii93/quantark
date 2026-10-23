@@ -54,7 +54,7 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.util.exceptions import ValidationError
 from quantark.util.run_fixings import participates
 
-from .autocallable import AutocallableLifecycleTracker
+from .autocallable import AutocallableLifecycleTracker, lifecycle_clock_origin
 from .barrier import TRACKED_BARRIER_PRODUCTS, BarrierLifecycleTracker
 from .cashflows import (
     LifecycleCashflowLedger,
@@ -192,7 +192,9 @@ class PortfolioLifecycleManager:
         """Attach a cash-leg book to every position with cash legs (trade mode only; spec 2026-10-23 D15).
 
         Call once, after ``register_positions`` (if trackers are used) and before the first ``process_day``.
-        Leg times run from ``base_date``. A position an autocallable tracker follows gets its leg times snapped
+        Leg times run from the contract's clock origin (its ``initial_date`` when set — the tracker's clock —
+        else ``base_date``; user ruling 2026-10-23); flows paid before ``base_date`` are history. A position an
+        autocallable tracker follows gets its leg times snapped
         with the tracker's rule (D14) and may carry legs that pay on termination; an untracked position may
         carry only legs that pay while it lives (D13).
 
@@ -217,32 +219,37 @@ class PortfolioLifecycleManager:
                 )
             tracked = position_id in self._autocallable
             env = portfolio.pricing_environments[position.underlying]
+            origin = (self._autocallable[position_id].clock_origin if tracked
+                      else lifecycle_clock_origin(position.product, self.base_date))
             book = LegCashBook(
                 legs,
                 position._get_unit_notional(env),
-                self.base_date,
+                pd.Timestamp(origin).normalize(),
                 snap=snap_time if tracked else None,
                 terminable=tracked,
+                run_start=self.base_date,
             )
             self._leg_books[position_id] = book
             self._leg_underlyings[position_id] = position.underlying
-            position.cash_legs = list(book.legs)
+            position.cash_legs = list(book.legs_at_run_start())
 
-    def _leg_outcome(self, tracker, events: List[LifecycleEvent], date: pd.Timestamp, env):
+    def _leg_outcome(self, tracker, book, events: List[LifecycleEvent], date: pd.Timestamp, env):
         """The realized outcome a terminating autocallable event gives the position's cash legs (D12/D13)."""
         from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
         from quantark.cashleg.booking import RealizedOutcome, run_time
         from quantark.execution.errors import CapabilityError
 
         terminal = next(event for event in events if event.terminates_position)
+        anchor = book.anchor_date
         origin = tracker.clock_origin if tracker.clock_origin is not None else self.base_date
-        today = run_time(self.base_date, date)
+        today = run_time(anchor, date)
 
         def run_frame(event_date, event_time):
+            # into the legs' frame: dates directly, the tracker's clock times shifted by origin - anchor (0 here)
             if event_date is not None:
-                return run_time(self.base_date, event_date)
+                return run_time(anchor, event_date)
             if event_time is not None:
-                return float(event_time) + run_time(self.base_date, origin)
+                return float(event_time) + run_time(anchor, origin)
             return None
 
         cashflow = terminal.realized_cashflow
@@ -412,7 +419,7 @@ class PortfolioLifecycleManager:
             book = self._leg_books.get(position_id)
             if book is not None:
                 # decided once, by the outcome, on the day the position ends (spec 2026-10-23 D12)
-                outcome = self._leg_outcome(tracker, events, date, env)
+                outcome = self._leg_outcome(tracker, book, events, date, env)
                 terminated_legs[position_id] = book.terminate(outcome, date, env)
             portfolio.remove_position(position_id)
             del self._autocallable[position_id]

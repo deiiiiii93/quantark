@@ -229,10 +229,14 @@ class LegCashBook:
     Args:
         legs: The position's cash legs, times in years from ``anchor_date``.
         unit_notional: The position's per-unit notional that fraction-based amounts resolve against.
-        anchor_date: The run's start date (the legs' time origin).
+        anchor_date: The legs' time origin: the contract's own clock origin (its ``initial_date`` when set, the
+            lifecycle tracker's origin), else the run's start date (user ruling 2026-10-23).
         snap: The lifecycle tracker's time snap for a tracked position (D14), applied to every leg time.
         terminable: False for a position no lifecycle tracker ends; legs that pay only at termination are
             then refused.
+        run_start: The run's start date when it is later than ``anchor_date`` (a trade replayed mid-life): flows
+            paid strictly before it are history — neither booked nor valued; the run sees every later flow's
+            time to payment from the run start.
 
     Raises:
         CapabilityError: A leg with no specified realized rule, or a termination-paying leg on a
@@ -247,6 +251,7 @@ class LegCashBook:
         *,
         snap: Optional[Callable[[float], float]] = None,
         terminable: bool = True,
+        run_start=None,
     ):
         from quantark.execution.errors import CapabilityError
 
@@ -269,6 +274,21 @@ class LegCashBook:
         self._paid: set = set()
         self._receivables: List[Flow] = []
         self._tau: Optional[float] = None
+        #: flows paid before the run started (history: never booked)
+        self.history: List[Tuple[FlowKey, float]] = []
+        self.run_start_time = 0.0 if run_start is None else max(0.0, run_time(anchor_date, run_start))
+        if self.run_start_time > 0.0:
+            for leg in self.legs:
+                for i, amount, t in _live_flows(leg, self.unit_notional):
+                    if roll_payment_time(t, self.run_start_time, keep_landing=True) is None:   # strictly before
+                        self._paid.add((leg.leg_id, i))
+                        self.history.append(((leg.leg_id, i), amount))
+
+    def legs_at_run_start(self) -> Tuple[CashLeg, ...]:
+        """The legs as the run's first (pre-close) valuation sees them: rolled to the run start, a flow due that
+        day kept at 0 (it pays on the run's first close)."""
+        rolled = (leg.time_shift(self.run_start_time, keep_landing=True) for leg in self.legs)
+        return tuple(leg for leg in rolled if leg is not None)
 
     def _advance(self, date) -> float:
         tau = run_time(self.anchor_date, date)

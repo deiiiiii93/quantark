@@ -52,6 +52,25 @@ def _snowball():
                                                        ki_barrier=75.0, ki_continuous=True))
 
 
+def _phoenix():
+    """A Phoenix note on the same schedule: a coupon at every observation (barrier 80) and the same
+    KO_MATURITY cash legs as a Snowball (user ruling 2026-10-23: a Phoenix's AutocallableCashLeg is never
+    coupon-basis)."""
+    from quantark.asset.equity.product.option.phoenix_helpers import create_standard_phoenix
+
+    phoenix = create_standard_phoenix(initial_price=100.0, strike=100.0, maturity=OBS[-1] * D, ko_barrier=103.0,
+                                      ki_barrier=75.0, coupon_barrier=80.0, coupon_rate=0.01,
+                                      num_observations=len(OBS))
+    assert phoenix.barrier_config.ko_observation_schedule.times == pytest.approx([d * D for d in OBS], abs=1e-15)
+    return phoenix
+
+
+def _engine(kind):
+    from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+
+    return PhoenixQuadEngine(params=QuadParams()) if kind == "phoenix" else SnowballQuadEngine(params=QuadParams())
+
+
 def _accrual(ko, basis, convention=PaymentConvention.AT_PERIOD_END):
     starts = np.array([0] + OBS[:-1]) * D
     ends = np.array(OBS) * D
@@ -83,11 +102,12 @@ def _env(day, spot):
                               valuation_date=START + timedelta(days=day))
 
 
-def _book(legs=None, trade_value=True):
+def _book(legs=None, trade_value=True, kind="snowball"):
     pf = Portfolio(portfolio_name="legs", pricing_environments={"X": _env(0, 100.0)}, creation_date=START,
                    trade_value=trade_value)
-    pf.positions["note"] = EquityPosition(product=_snowball(), quantity=1.0, entry_price=0.0, underlying="X",
-                                          engine=SnowballQuadEngine(params=QuadParams()), entry_timestamp=START,
+    product = _phoenix() if kind == "phoenix" else _snowball()
+    pf.positions["note"] = EquityPosition(product=product, quantity=1.0, entry_price=0.0, underlying="X",
+                                          engine=_engine(kind), entry_timestamp=START,
                                           position_id="note", cash_legs=_legs() if legs is None else legs,
                                           entry_trade_value=0.0)
     return pf
@@ -110,8 +130,9 @@ def _pre_close_value(manager, pf, original_legs, day, env):
     return pre.get_trade_value(env)
 
 
-def test_value_plus_booked_cash_is_conserved_through_payments_and_the_knock_out():
-    pf = _book()
+@pytest.mark.parametrize("kind", ["snowball", "phoenix"])
+def test_value_plus_booked_cash_is_conserved_through_payments_and_the_knock_out(kind):
+    pf = _book(kind=kind)
     original = list(pf.positions["note"].cash_legs)
     manager = _manager(pf)
     paid_before = 0.0
@@ -127,8 +148,9 @@ def test_value_plus_booked_cash_is_conserved_through_payments_and_the_knock_out(
     assert manager.leg_receivable_pv > 0.0                             # PAY_FULL + AT_MATURITY flows still owed
 
 
-def test_receivables_pay_at_nominal_and_total_leg_cash_is_the_realized_flows():
-    pf = _book()
+@pytest.mark.parametrize("kind", ["snowball", "phoenix"])
+def test_receivables_pay_at_nominal_and_total_leg_cash_is_the_realized_flows(kind):
+    pf = _book(kind=kind)
     manager = _manager(pf)
     for i, day in enumerate(PATH + [70, 90, 95]):
         env = _env(day, 110.0 if day == KO_DAY else 100.0)
@@ -143,6 +165,46 @@ def test_receivables_pay_at_nominal_and_total_leg_cash_is_the_realized_flows():
                 + 10_000.0 * 0.05 * KO_DAY * D)           # rebate at the KO observation
     assert manager.leg_paid_cash == pytest.approx(realized, rel=1e-13)
     assert manager.leg_receivable_pv == 0.0
+
+
+def test_mid_life_run_anchors_legs_on_the_contract_initial_date():
+    """User ruling 2026-10-23: legs count from the contract's initial date (the tracker's clock); a run started 40
+    days later sees each flow's time to payment from its own start, and a flow paid before it is history."""
+    run_start = START + timedelta(days=40)
+    product = _snowball()
+    product.initial_date = START
+    early = DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=100.0, payment_time=10 * D)   # history
+    late = DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=250.0, payment_time=50 * D)
+    legs = [early, late] + [l for l in _legs() if not isinstance(l, DeterministicLeg)]
+    pf = _book(legs=legs)
+    pf.positions["note"].product = product
+    pf.pricing_environments["X"] = _env(40, 100.0)
+    manager = PortfolioLifecycleManager(base_date=run_start, trade_value=True)
+    manager.register_positions(pf)
+    manager.register_leg_books(pf)
+    book = manager._leg_books["note"]
+    # pre-run history: the early fee and the first period (paid on day 30) of each period-end accrual
+    accruals = [l for l in legs if isinstance(l, AccrualLeg) and l.payment_convention is PaymentConvention.AT_PERIOD_END]
+    assert [key for key, _ in book.history] == [(early.leg_id, 0)] + [(l.leg_id, 0) for l in accruals]
+    # the run's first valuation sees the late fee 10 days out, the early one gone
+    fees = [l for l in pf.positions["note"].cash_legs if isinstance(l, DeterministicLeg)]
+    assert [f.payment_time for f in fees] == [50 * D - 40 * D]
+
+    paid_before = 0.0
+    for i, day in enumerate([40, 45, 50, 59, KO_DAY]):
+        env = _env(day, 110.0 if day == KO_DAY else 100.0)
+        pf.pricing_environments["X"] = env
+        before = _pre_close_value(manager, pf, legs, day, env) + paid_before
+        manager.process_day(pf, i, env.valuation_date)
+        after = pf.get_portfolio_value() + manager.pending_receivable_pv + manager.paid_cash
+        assert after == pytest.approx(before, rel=1e-10), f"day {day}"
+        paid_before = manager.paid_cash
+    assert "note" not in pf.positions
+    paid = dict(book.paid_today)
+    assert (early.leg_id, 0) not in paid
+    # leg cash booked in the run: the late fee, accruals of periods starting before the KO, the KO payoff, rebate
+    c = 0.04 * 100_000.0 * 30 * D
+    assert manager.leg_paid_cash == pytest.approx(-250.0 + c + c + 1_000.0 + 10_000.0 * 0.05 * KO_DAY * D, rel=1e-13)
 
 
 def test_live_position_carries_the_rolled_legs():
