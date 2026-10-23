@@ -414,8 +414,8 @@ class EquityPosition:
         within the engine's measured tolerance); on any other engine this is the plain loop, bitwise.
         """
         envs = list(envs)
-        with self._spot_batch(envs):
-            return [self.get_trade_value(env) for env in envs]
+        with self._spot_batch(envs) as order:
+            return self._in_order(envs, order, self.get_trade_value)
 
     def batch_trade_risk(
         self,
@@ -427,21 +427,50 @@ class EquityPosition:
         ``batch_trade_values``. Each call still makes its own bumps and theta shift at its own spot; states
         that compile to different contracts (a knock-in or knock-out decided at that spot) never share."""
         envs = list(envs)
-        with self._spot_batch(envs, greeks_calculator):
-            return [self.get_trade_risk(env, greeks_calculator, greeks) for env in envs]
+        with self._spot_batch(envs, greeks_calculator) as order:
+            return self._in_order(envs, order, lambda env: self.get_trade_risk(env, greeks_calculator, greeks))
+
+    @staticmethod
+    def _in_order(envs, order, value_of) -> list:
+        """``value_of`` of each env, evaluated in ``order`` and returned in the caller's order."""
+        out: list = [None] * len(envs)
+        for i in order:
+            out[i] = value_of(envs[i])
+        return out
+
+    @staticmethod
+    def _market_groups(envs) -> List[int]:
+        """Env indices grouped by their market apart from spot, first-seen order kept.
+
+        Inside a session the calls then run one market at a time, so that market's contexts (base, bumps,
+        theta) stay within the session's context budget however the caller ordered the envs. Grouping only
+        reorders evaluation; it never decides equivalence (the engine's key does). An env that cannot be
+        fingerprinted leaves the caller's order.
+        """
+        import pickle
+
+        groups: Dict[bytes, List[int]] = {}
+        for i, env in enumerate(envs):
+            try:
+                fingerprint = pickle.dumps({k: v for k, v in vars(env).items() if k != "spot_quote"})
+            except Exception:
+                return list(range(len(envs)))
+            groups.setdefault(fingerprint, []).append(i)
+        return [i for indices in groups.values() for i in indices]
 
     @contextmanager
     def _spot_batch(self, envs, greeks_calculator: Optional[GreeksCalculator] = None):
-        """The engine's ``spot_batch`` session over every spot the calls can reach, or nothing."""
+        """The engine's ``spot_batch`` session over every spot the calls can reach, yielding the evaluation
+        order (market groups); without a session, nothing changes and the caller's order is kept."""
         if not envs or not getattr(self.engine, "supports_spot_batch", False):
-            yield
+            yield list(range(len(envs)))
             return
         extra = () if greeks_calculator is None else (greeks_calculator._bump_config.spot_bump,)
         # the engine's default width around one spot, so every bump of every env stays inside
         width = self.engine.spot_width(*extra)
         spots = [float(env.spot) for env in envs]
         with self.engine.spot_batch((min(spots) * (1.0 - width), max(spots) * (1.0 + width))):
-            yield
+            yield self._market_groups(envs)
 
     def _trade_theta(
         self, gc, bump_engine, pricing_env, streams, base_npv, base_legs, q

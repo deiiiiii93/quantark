@@ -94,6 +94,7 @@ class BaseEngine(ABC):
     supports_cash_leg_folding = False
     #: Whether ``spot_batch(spot_range)`` scopes a session that reuses one prepared context across calls
     #: whose market inputs differ only by spot (QUAD V2); callers fall back to plain repricing otherwise.
+    #: An engine that sets it also provides ``spot_width(*extra_spot_bumps)``, the session's spot margin.
     supports_spot_batch = False
 
     #: Attribute names that fully determine this engine's pricing function. ``None`` (the

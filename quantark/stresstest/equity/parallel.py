@@ -74,7 +74,8 @@ def run_tasks(
             except BaseException:
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise
-    except (BrokenProcessPool, RuntimeError, OSError, pickle.PicklingError) as exc:
+    except (BrokenProcessPool, RuntimeError, OSError, pickle.PicklingError, AssertionError) as exc:
+        # AssertionError: a daemonic process (e.g. a multiprocessing.Pool worker) may not start children
         _warn_serial(f"the process pool failed ({type(exc).__name__}: {exc})")
         return None
     for _pid, ok, value in outcomes:

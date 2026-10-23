@@ -240,8 +240,9 @@ gamma, vega, theta, rho, dividend_rho) with the calculator's bump configuration.
 dict also carries `market_value` and the estimated theta split (`convexity_theta`, `r_theta`, `q_theta`).
 Portfolio and per-underlying aggregates report `market_value, delta, gamma, vega, theta, rho,
 dividend_rho`. `greeks_method` now only affects positions without a trade API (equity swaps), which
-keep `get_market_value` / `get_greeks`. Each (position, scenario) is priced once, and the baseline once
-per run.
+keep `get_market_value` / `get_greeks`. Each (position, scenario) is valued once (one value and one risk
+call, shared by the portfolio total, the position rows and the per-underlying totals), and the baseline
+once per run.
 
 #### Native batching (opt-in)
 
@@ -260,9 +261,9 @@ always takes the scalar path, and so does every other position, priced exactly a
 
 | Engine route | Batched | Why (measured 2026-10-23) |
 |---|---|---|
-| QUAD V2 (`SnowballQuadEngineV2`, `PhoenixQuadEngineV2`, `KOResetSnowballQuadEngineV2`) | yes | the readout at a spot is the exact Gaussian integral of the same contract; a context prepared over the scenario range matches the scalar engine to ≤5e-15 relative (PV), with tests pinned at PV 1e-10, first-order Greeks 1e-9, gamma 1e-7 relative |
-| PDE (all 1D routes) | no, scalar | one base-spot solve read at stress spots is off by 1e-6–5e-4 relative in PV and 2–46% in gamma, because the scalar solve re-centres its grid on each spot; linear, log-linear and cubic-spline readouts all give errors of that size |
-| QUAD V1 | no, scalar | a log-linear readout matches scalar (≤1e-14) only where the scalar solve picks the same alignment barrier; elsewhere PV is off by 7e-5 |
+| QUAD V2 (`SnowballQuadEngineV2`, `PhoenixQuadEngineV2`, `KOResetSnowballQuadEngineV2`) | yes | the readout at a spot is the exact Gaussian integral of the same contract (a context prepared over the scenario range matches the narrow scalar one to ≤5e-15 relative); end to end, with the PV taken from the trade-risk base solve, batch vs scalar measured PV ≤5e-12, first-order Greeks ≤1e-10, gamma ≤1e-8 relative, tests pinned at 1e-10 / 1e-9 / 1e-7 |
+| PDE (all 1D routes) | no, scalar | one base-spot solve read at stress spots is off by up to 5e-4 relative in PV and up to 46% in gamma, because the scalar solve re-centres its grid on each spot; linear, log-linear and cubic-spline readouts all give errors of that size |
+| QUAD V1 | no, scalar | a log-linear readout matches scalar (≤1e-14) only where the scalar solve picks the same alignment barrier; elsewhere PV is off by up to 7e-5 |
 | analytical, Monte Carlo, cash-flow (TRS) | no, scalar | no prepared context to share |
 
 Results carry `metadata["valuation_mode"]` (`"scalar"` or `"native_batch"`). In batch mode
@@ -540,7 +541,8 @@ along with CSV exports suitable for downstream analysis.
 - **Solution**: Ensure position_id is correct; use `portfolio.positions.keys()`
 
 **Issue**: Greeks calculation fails
-- **Solution**: Check if products support analytical Greeks; use 'numerical' method
+- **Solution**: Equity positions take bump Greeks from `get_trade_risk`; `greeks_method` only selects the
+  route for positions without a trade API (equity swaps), where 'numerical' always works
 
 **Issue**: Large memory usage
 - **Solution**: Disable `save_detailed_results` in config for large portfolios
@@ -549,7 +551,6 @@ along with CSV exports suitable for downstream analysis.
 
 The module is designed with placeholders for:
 - **Dynamic Scenario Analysis**: Time-series scenarios with hedging strategies
-- **Parallel Execution**: Run scenarios in parallel for better performance
 - **Monte Carlo Scenarios**: Generate scenarios from distributions
 - **Historical Replay**: Replay actual historical market moves
 - **Custom Stress Functions**: User-defined stress application logic

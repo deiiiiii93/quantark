@@ -182,3 +182,34 @@ def test_batch_keeps_order_and_leaves_the_position_alone():
     assert len(position.cash_legs) == len(legs_before)
     assert position.engine._batch is None
     assert position.batch_trade_values([]) == [] and position.batch_trade_risk([], gc) == []
+
+
+def test_batch_cost_does_not_depend_on_the_callers_env_order(monkeypatch):
+    """A spot-major grid with many vol levels must not thrash the session's context budget: the batch groups the
+    environments by their market apart from spot, so the prepare count equals the vol-major order's."""
+    import quantark.asset.equity.engine.quad.v2.engine as v2_engine
+    from quantark.asset.equity.param.quad_v2_params import QuadV2Params
+
+    calls = []
+    original = v2_engine.prepare_compiled
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(v2_engine, "prepare_compiled", counting)
+    vols = [0.15 + 0.02 * i for i in range(7)]                 # 7 vol levels x ~6 keys each > the 32-slot budget
+    spots = [88.0, 92.0, 96.0]                               # one branch at t0: every key recurs per spot
+    vol_major = [_env(s, vol=v) for v in vols for s in spots]
+    spot_major = [_env(s, vol=v) for s in spots for v in vols]
+    gc = GreeksCalculator()
+    counts, results = [], []
+    for envs in (vol_major, spot_major):
+        position = _position(_snowball(), SnowballQuadEngineV2(QuadV2Params(order=4, cells_per_sd=0.5)))
+        calls.clear()
+        results.append([r.total for r in position.batch_trade_risk(envs, gc)])
+        counts.append(len(calls))
+    assert counts[1] == counts[0]
+    by_env = dict(zip([(e.spot, e.vol_surface.volatility) for e in spot_major], results[1]))
+    for env, total in zip(vol_major, results[0]):
+        _assert_close(by_env[(env.spot, env.vol_surface.volatility)], total, 1e6)

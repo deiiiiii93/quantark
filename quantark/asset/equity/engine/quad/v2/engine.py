@@ -99,7 +99,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         state["_batch"] = None
         return state
 
-    def spot_width(self, *extra_spot_bumps):
+    def spot_width(self, *extra_spot_bumps: float) -> float:
         """Relative half-width of the spot range a default context covers around one spot: at least 2%, and
         twice every spot bump (the engine's own and any ``extra_spot_bumps`` a caller will apply)."""
         bump = self.params.get_effective_bump_config()
@@ -107,7 +107,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         return max([0.02] + [2 * b for b in bumps])
 
     @contextmanager
-    def spot_batch(self, spot_range, *, max_contexts=32):
+    def spot_batch(self, spot_range: "tuple[float, float]", *, max_contexts: int = 32):
         """Scope a session that reuses prepared contexts across calls differing only by spot.
 
         Inside the session a call at a spot in ``spot_range`` reuses a context when the engine's cache key,
@@ -117,7 +117,9 @@ class AutocallableQuadEngineV2(BaseEngine):
         at a spot outside it, inside ``spot_range``, prepares one context over the whole declared range.
         A wide prepare over the resource limit (``NumericalError``) falls back to the scalar context and
         is not retried for that key. On exit the single-slot cache is restored and the contexts dropped.
-        Sessions do not nest, and an engine in a session must not be shared across threads.
+        Inside a session ``_prepared`` is not the last context evaluated (hits and wide contexts live in the
+        session), so code that reads it for diagnostics must run outside one. Sessions do not nest, and an
+        engine in a session must not be shared across threads.
         """
         try:
             lo, hi = (float(x) for x in spot_range)
