@@ -13,6 +13,7 @@ from quantark.asset.equity.product.swap.base_swap import BaseSwap
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.util.exceptions import ValidationError
+from quantark.portfolio.equity import valuation
 
 
 @dataclass
@@ -29,11 +30,17 @@ class EquityPortfolio:
         positions: Dictionary of positions keyed by position_id
         pricing_environments: Dictionary of pricing environments keyed by underlying
         creation_date: When the portfolio was created
+        trade_value: Opt-in. Value every EquityPosition at its full trade value
+            (product × signed quantity + absolute cash legs) with Greeks from
+            ``get_trade_risk`` and PnL from ``get_trade_pnl``; every equity
+            consumer reading this portfolio follows it. ``False`` (default) is
+            the product path: ``get_market_value`` / ``get_greeks`` / ``get_pnl``.
     """
     portfolio_name: str
     pricing_environments: Dict[str, PricingEnvironment]
     creation_date: datetime = field(default_factory=datetime.now)
     positions: Dict[str, EquityPosition] = field(default_factory=dict)
+    trade_value: bool = False
     
     def __post_init__(self):
         """Validate portfolio parameters."""
@@ -175,6 +182,11 @@ class EquityPortfolio:
         if quantity is not None:
             if quantity == 0:
                 raise ValidationError("Quantity cannot be zero. Use remove_position() instead.")
+            if getattr(position, "entry_trade_value", None) is not None and quantity != position.quantity:
+                raise ValidationError(
+                    f"position {position_id} has an entry_trade_value for its current quantity; "
+                    "a quantity change would leave it stale"
+                )
             position.quantity = quantity
         
         if entry_price is not None:
@@ -211,12 +223,62 @@ class EquityPortfolio:
             if pos.underlying == underlying
         ]
     
+    def _env_for(self, position, env: Optional[PricingEnvironment]) -> PricingEnvironment:
+        return self.pricing_environments[position.underlying] if env is None else env
+
+    def position_value(self, position, env: Optional[PricingEnvironment] = None) -> float:
+        """
+        Value one position in this portfolio's mode (``trade_value``).
+
+        Args:
+            position: A position of this portfolio (or a copy of one)
+            env: Pricing environment; defaults to the position's underlying's
+
+        Returns:
+            Trade value in trade mode (EquityPosition), else market value
+        """
+        env = self._env_for(position, env)
+        if self.trade_value and valuation.has_trade_api(position):
+            return position.get_trade_value(env)
+        return position.get_market_value(env)
+
+    def position_greeks(
+        self,
+        position,
+        greeks_calculator: GreeksCalculator,
+        use_analytical: bool = True,
+        env: Optional[PricingEnvironment] = None,
+    ) -> Dict[str, float]:
+        """
+        Greeks of one position in this portfolio's mode.
+
+        Trade mode: ``get_trade_risk`` totals (bump Greeks; ``use_analytical`` is
+        ignored) keyed by ``valuation.POSITION_GREEK_KEYS``, ``market_value`` being
+        the trade value. Product mode: ``get_greeks(use_analytical=...)``.
+        """
+        env = self._env_for(position, env)
+        return valuation.value_position(
+            position, env, greeks_calculator, trade=self.trade_value, use_analytical=use_analytical
+        ).greeks
+
+    def position_pnl(self, position, env: Optional[PricingEnvironment] = None) -> float:
+        """
+        Unrealized PnL of one position in this portfolio's mode.
+
+        Trade mode: ``get_trade_pnl`` (raises ``ValidationError`` for a position with
+        cash legs and no ``entry_trade_value``). Product mode: ``get_pnl``.
+        """
+        return valuation.position_pnl(position, self._env_for(position, env), trade=self.trade_value)
+
+    def _aggregate_keys(self):
+        return valuation.AGGREGATE_GREEK_KEYS if self.trade_value else valuation.PRODUCT_AGGREGATE_KEYS
+
     def get_portfolio_value(self, as_of_date: Optional[datetime] = None) -> float:
         """
         Calculate total portfolio market value.
         
-        Sums market values across all positions using their respective
-        pricing environments and engines.
+        Sums position values (``position_value``: trade value in trade mode,
+        market value otherwise) using each position's pricing environment and engine.
         
         Args:
             as_of_date: Valuation date (currently not used, for future enhancement)
@@ -227,8 +289,7 @@ class EquityPortfolio:
         total_value = 0.0
         
         for position in self.positions.values():
-            pricing_env = self.pricing_environments[position.underlying]
-            total_value += position.get_market_value(pricing_env)
+            total_value += self.position_value(position)
         
         return total_value
     
@@ -236,7 +297,7 @@ class EquityPortfolio:
         """
         Calculate total portfolio unrealized P&L.
         
-        Sums P&L across all positions.
+        Sums ``position_pnl`` across all positions (trade PnL in trade mode).
         
         Returns:
             Total unrealized profit/loss
@@ -244,8 +305,7 @@ class EquityPortfolio:
         total_pnl = 0.0
         
         for position in self.positions.values():
-            pricing_env = self.pricing_environments[position.underlying]
-            total_pnl += position.get_pnl(pricing_env)
+            total_pnl += self.position_pnl(position)
         
         return total_pnl
     
@@ -258,36 +318,25 @@ class EquityPortfolio:
         Calculate aggregated Greeks across all positions.
         
         Each position uses its own engine for pricing and Greeks calculation.
+        Trade mode sums the trade-risk totals over
+        ``valuation.AGGREGATE_GREEK_KEYS`` (adds ``dividend_rho``); product mode
+        sums ``get_greeks`` over the historical keys.
         
         Args:
             greeks_calculator: Greeks calculator instance
             use_analytical: Whether to use analytical Greeks when possible
+                (product mode only)
             
         Returns:
             Dictionary of aggregated Greeks
         """
-        aggregated = {
-            'market_value': 0.0,
-            'delta': 0.0,
-            'gamma': 0.0,
-            'vega': 0.0,
-            'theta': 0.0,
-            'rho': 0.0
-        }
-        
-        for position in self.positions.values():
-            pricing_env = self.pricing_environments[position.underlying]
-            position_greeks = position.get_greeks(
-                pricing_env,
-                greeks_calculator,
-                use_analytical
-            )
-            
-            for key in aggregated:
-                if key in position_greeks:
-                    aggregated[key] += position_greeks[key]
-        
-        return aggregated
+        return valuation.aggregate_greeks(
+            (
+                self.position_greeks(position, greeks_calculator, use_analytical)
+                for position in self.positions.values()
+            ),
+            self._aggregate_keys(),
+        )
     
     def get_portfolio_risk_measures(
         self,
@@ -323,37 +372,23 @@ class EquityPortfolio:
             underlying: Underlying asset identifier
             greeks_calculator: Greeks calculator instance
             use_analytical: Whether to use analytical Greeks when possible
+                (product mode only)
             
         Returns:
             Dictionary of aggregated Greeks for the underlying
         """
-        aggregated = {
-            'market_value': 0.0,
-            'delta': 0.0,
-            'gamma': 0.0,
-            'vega': 0.0,
-            'theta': 0.0,
-            'rho': 0.0
-        }
-        
-        positions = self.get_positions_by_underlying(underlying)
         pricing_env = self.pricing_environments.get(underlying)
         
         if pricing_env is None:
-            return aggregated
+            return {key: 0.0 for key in self._aggregate_keys()}
         
-        for position in positions:
-            position_greeks = position.get_greeks(
-                pricing_env,
-                greeks_calculator,
-                use_analytical
-            )
-            
-            for key in aggregated:
-                if key in position_greeks:
-                    aggregated[key] += position_greeks[key]
-        
-        return aggregated
+        return valuation.aggregate_greeks(
+            (
+                self.position_greeks(position, greeks_calculator, use_analytical, env=pricing_env)
+                for position in self.get_positions_by_underlying(underlying)
+            ),
+            self._aggregate_keys(),
+        )
     
     def to_dataframe(self) -> pd.DataFrame:
         """

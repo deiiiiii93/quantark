@@ -186,6 +186,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             portfolio_name=portfolio.portfolio_name + "_stressed",
             pricing_environments=envs,
             creation_date=portfolio.creation_date,
+            trade_value=getattr(portfolio, "trade_value", False),
         )
         stressed.positions = dict(portfolio.positions)
         return stressed
@@ -259,7 +260,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
     ) -> Dict[str, PositionValuation]:
         """Each position valued once under its underlying's environment."""
         return value_positions(
-            positions, envs, self.greeks_calculator, use_analytical=self._use_analytical
+            positions, envs, self.greeks_calculator, trade=True, use_analytical=self._use_analytical
         )
 
     def _evaluate_scalar(
@@ -347,6 +348,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             portfolio_name=original_portfolio.portfolio_name + "_stressed",
             pricing_environments=stressed_envs,
             creation_date=original_portfolio.creation_date,
+            trade_value=getattr(original_portfolio, "trade_value", False),
         )
         stressed_portfolio.positions = deepcopy(original_portfolio.positions)
         return stressed_portfolio

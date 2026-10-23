@@ -20,6 +20,7 @@ from quantark.cashleg import (
     value_leg,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_valid_number
 from quantark.util.fixings import freeze_missing_fixings
 
 
@@ -44,6 +45,9 @@ class EquityPosition:
         cash_leg_folding: Opt-in: fold the cash legs into the product solve
             (``FoldMode.TOTAL`` or ``FoldMode.DRILLDOWN``); ``None`` keeps the
             event-distribution route. Ignored when there are no cash legs.
+        entry_trade_value: Optional signed trade total at entry (product × quantity
+            plus the absolute cash legs, the ``get_trade_value`` basis). Trade PnL is
+            measured against it; a position with cash legs needs it in trade mode.
     """
     product: BaseEquityProduct
     quantity: float
@@ -55,6 +59,7 @@ class EquityPosition:
     cash_legs: List[CashLeg] = field(default_factory=list)
     lifecycle_state: Optional[Any] = None
     cash_leg_folding: Optional[FoldMode] = None
+    entry_trade_value: Optional[float] = None
     
     def __post_init__(self):
         """Validate position parameters."""
@@ -77,6 +82,10 @@ class EquityPosition:
             raise ValidationError("Product is required")
         if self.engine is None:
             raise ValidationError("Engine is required")
+        if self.entry_trade_value is not None and not is_valid_number(self.entry_trade_value):
+            raise ValidationError(
+                f"entry_trade_value must be a finite number, got {self.entry_trade_value!r}"
+            )
         if self.cash_leg_folding is not None and not isinstance(self.cash_leg_folding, FoldMode):
             raise ValidationError(
                 f"cash_leg_folding must be None or a FoldMode, got {self.cash_leg_folding!r}"
@@ -688,6 +697,30 @@ class EquityPosition:
         current_price = self.get_current_price(pricing_env)
         return (current_price - self.entry_price) * self.quantity
     
+    def resolved_entry_trade_value(self) -> float:
+        """The trade total trade PnL is measured against.
+
+        ``entry_trade_value`` when set; else ``entry_price × quantity`` for a position
+        without cash legs (its trade value is its market value).
+
+        Raises:
+            ValidationError: A position with cash legs and no ``entry_trade_value``;
+                the legs' entry value cannot be derived from a per-unit price.
+        """
+        if self.entry_trade_value is not None:
+            return float(self.entry_trade_value)
+        if self.cash_legs:
+            raise ValidationError(
+                f"position {self.position_id} carries cash legs: trade PnL needs its "
+                "entry_trade_value (the signed trade total at entry, legs included)"
+            )
+        return self.entry_price * self.quantity
+
+    def get_trade_pnl(self, pricing_env: PricingEnvironment) -> float:
+        """Unrealized trade PnL: ``get_trade_value - resolved_entry_trade_value()``."""
+        entry = self.resolved_entry_trade_value()
+        return self.get_trade_value(pricing_env) - entry
+
     def get_greeks(
         self,
         pricing_env: PricingEnvironment,
@@ -800,7 +833,7 @@ class EquityPosition:
         Returns:
             Dictionary representation of position
         """
-        return {
+        data = {
             'position_id': self.position_id,
             'underlying': self.underlying,
             'product_type': self.product.__class__.__name__,
@@ -812,6 +845,9 @@ class EquityPosition:
             'direction': 'LONG' if self.is_long() else 'SHORT',
             'asset_class': 'equity',
         }
+        if self.entry_trade_value is not None:
+            data['entry_trade_value'] = self.entry_trade_value
+        return data
     
     def __repr__(self):
         direction = "LONG" if self.is_long() else "SHORT"

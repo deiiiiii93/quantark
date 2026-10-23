@@ -373,6 +373,7 @@ class DynamicScenarioEngine:
             portfolio_name=portfolio.portfolio_name + "_simulation",
             pricing_environments=cloned_envs,
             creation_date=portfolio.creation_date,
+            trade_value=getattr(portfolio, "trade_value", False),
         )
         
         # Deep copy positions

@@ -28,7 +28,7 @@ from quantark.stresstest.equity.valuation import PositionValuation, batch_value_
 def scenario_task(task: Tuple[Dict[str, Any], Dict[str, Any], Any, bool]) -> Dict[str, PositionValuation]:
     """One scenario: ``(positions, envs, greeks_calculator, use_analytical)``, each position valued once."""
     positions, envs, greeks_calculator, use_analytical = task
-    return value_positions(positions, envs, greeks_calculator, use_analytical=use_analytical)
+    return value_positions(positions, envs, greeks_calculator, trade=True, use_analytical=use_analytical)
 
 
 def position_task(task: Tuple[Any, Sequence[Any], Any]) -> List[PositionValuation]:
