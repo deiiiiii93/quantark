@@ -12,6 +12,7 @@ from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostModel
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_valid_number
 
 from .market import AutocallableMarketDataSet
 from .strategy_state import AutocallableDeltaHedgeStrategy
@@ -570,17 +571,31 @@ class AutocallableBacktestConfig:
 
 @dataclass
 class ReplayProduct:
+    """One replayed trade.
+
+    ``cash_legs`` (times in years from the contract's clock origin: its ``initial_date`` when set, else the run
+    start) and ``entry_trade_value`` (the signed trade total at entry, legs included) are read only in trade mode
+    (``ReplayBacktestConfig.trade_value``; spec 2026-10-23 portfolio-trade-value D9). Appended after
+    ``initial_price`` so positional construction keeps its slots.
+    """
+
     product: Any
     quantity: float
     position_id: int
     has_lifecycle: bool
     initial_price: Optional[float] = None
+    cash_legs: list = field(default_factory=list)
+    entry_trade_value: Optional[float] = None
 
     def __post_init__(self):
         if self.product is None:
             raise ValidationError("ReplayProduct.product is required")
         if self.quantity == 0:
             raise ValidationError("ReplayProduct.quantity must be non-zero")
+        if self.entry_trade_value is not None and not is_valid_number(self.entry_trade_value):
+            raise ValidationError(
+                f"ReplayProduct.entry_trade_value must be a finite number, got {self.entry_trade_value!r}"
+            )
 
 
 @dataclass
@@ -632,6 +647,10 @@ class ReplayBacktestConfig:
     carry_audit_mode: str = "none"
     carry_audit_dates: tuple = ()
     carry_risk_settings: Optional[Any] = None  # CarryRiskSettings
+    # Trade mode (spec 2026-10-23 portfolio-trade-value D9), appended last so positional construction keeps its
+    # slots: a product carrying cash legs is marked at its trade value and its leg cash is booked by a
+    # LegCashBook. Off (default), or a product without legs: the product-only replay, unchanged.
+    trade_value: bool = False
 
     def __post_init__(self):
         if not self.products:

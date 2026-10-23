@@ -284,6 +284,16 @@ class LegCashBook:
                         self._paid.add((leg.leg_id, i))
                         self.history.append(((leg.leg_id, i), amount))
 
+    @property
+    def unpaid_receivables(self) -> float:
+        """Nominal of the termination receivables not paid yet (0 before termination)."""
+        return float(sum(a for key, a, _t in self._receivables if key not in self._paid))
+
+    @property
+    def settled(self) -> bool:
+        """True once the position has ended and every termination receivable has paid."""
+        return self.terminated and all(key in self._paid for key, _a, _t in self._receivables)
+
     def legs_at_run_start(self) -> Tuple[CashLeg, ...]:
         """The legs as the run's first (pre-close) valuation sees them: rolled to the run start, a flow due that
         day kept at 0 (it pays on the run's first close)."""

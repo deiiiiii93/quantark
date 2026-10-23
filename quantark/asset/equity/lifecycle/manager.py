@@ -87,6 +87,51 @@ class ProcessedLifecycleEvent:
     event: LifecycleEvent
 
 
+def realized_leg_outcome(tracker, book, events: List[LifecycleEvent], date: pd.Timestamp, env, *, base_date):
+    """The realized outcome a terminating autocallable event gives a trade's cash legs (spec 2026-10-23 D12/D13).
+
+    Shared by ``PortfolioLifecycleManager`` and the product replay so both book legs the same way. ``events`` are the
+    day's lifecycle events (one terminates the position); ``book`` is the trade's ``LegCashBook``; ``base_date`` is
+    the run start (the clock origin when the tracker has none). The terminating event's realized cashflow dates (or
+    tracker-clock times) convert into the legs' frame; a knock-out's maturity settlement is the pricing copy's
+    terminal payment time from today; a maturity carries the tracker's realized knock-in state.
+
+    Raises:
+        CapabilityError: A terminating event other than an autocallable knock-out or maturity.
+    """
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.cashleg.booking import RealizedOutcome, run_time
+    from quantark.execution.errors import CapabilityError
+
+    terminal = next(event for event in events if event.terminates_position)
+    anchor = book.anchor_date
+    origin = tracker.clock_origin if tracker.clock_origin is not None else base_date
+    today = run_time(anchor, date)
+
+    def run_frame(event_date, event_time):
+        # into the legs' frame: dates directly, the tracker's clock times shifted by origin - anchor (0 here)
+        if event_date is not None:
+            return run_time(anchor, event_date)
+        if event_time is not None:
+            return float(event_time) + run_time(anchor, origin)
+        return None
+
+    cashflow = terminal.realized_cashflow
+    determined = run_frame(cashflow.determination_date, cashflow.determination_time) if cashflow else None
+    settled = run_frame(cashflow.payment_date, cashflow.payment_time) if cashflow else None
+    if terminal.event_type is LifecycleEventType.KNOCK_OUT:
+        event_time = today if determined is None else determined
+        maturity = today + resolve_terminal_timing(tracker.product_for_pricing(date, env), env).payment_time
+        return RealizedOutcome.ko(
+            event_time, event_time if settled is None else settled, maturity_settlement_time=maturity
+        )
+    if terminal.event_type is LifecycleEventType.MATURITY:
+        return RealizedOutcome.maturity(tracker.lifecycle.knocked_in, today if settled is None else settled)
+    raise CapabilityError(
+        f"cash legs: a terminating {terminal.event_type.value} event has no multi-day booking rule"
+    )
+
+
 class PortfolioLifecycleManager:
     """Detects and applies realized lifecycle events for a portfolio replay."""
 
@@ -235,37 +280,7 @@ class PortfolioLifecycleManager:
 
     def _leg_outcome(self, tracker, book, events: List[LifecycleEvent], date: pd.Timestamp, env):
         """The realized outcome a terminating autocallable event gives the position's cash legs (D12/D13)."""
-        from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
-        from quantark.cashleg.booking import RealizedOutcome, run_time
-        from quantark.execution.errors import CapabilityError
-
-        terminal = next(event for event in events if event.terminates_position)
-        anchor = book.anchor_date
-        origin = tracker.clock_origin if tracker.clock_origin is not None else self.base_date
-        today = run_time(anchor, date)
-
-        def run_frame(event_date, event_time):
-            # into the legs' frame: dates directly, the tracker's clock times shifted by origin - anchor (0 here)
-            if event_date is not None:
-                return run_time(anchor, event_date)
-            if event_time is not None:
-                return float(event_time) + run_time(anchor, origin)
-            return None
-
-        cashflow = terminal.realized_cashflow
-        determined = run_frame(cashflow.determination_date, cashflow.determination_time) if cashflow else None
-        settled = run_frame(cashflow.payment_date, cashflow.payment_time) if cashflow else None
-        if terminal.event_type is LifecycleEventType.KNOCK_OUT:
-            event_time = today if determined is None else determined
-            maturity = today + resolve_terminal_timing(tracker.product_for_pricing(date, env), env).payment_time
-            return RealizedOutcome.ko(
-                event_time, event_time if settled is None else settled, maturity_settlement_time=maturity
-            )
-        if terminal.event_type is LifecycleEventType.MATURITY:
-            return RealizedOutcome.maturity(tracker.lifecycle.knocked_in, today if settled is None else settled)
-        raise CapabilityError(
-            f"cash legs: a terminating {terminal.event_type.value} event has no multi-day booking rule"
-        )
+        return realized_leg_outcome(tracker, book, events, date, env, base_date=self.base_date)
 
     def _book_legs(self, portfolio, date: pd.Timestamp, terminated_today: Dict[str, Any]) -> None:
         """Roll every live leg book to ``date`` and pay what is due; terminated books pay their receivables."""

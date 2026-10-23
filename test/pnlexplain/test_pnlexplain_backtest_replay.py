@@ -155,6 +155,7 @@ def test_pnl_explain_field_is_appended_after_metadata_in_both_replay_configs():
             "carry_audit_mode",
             "carry_audit_dates",
             "carry_risk_settings",
+            "trade_value",          # the replay's trade mode (spec 2026-10-23 D9), appended last
         }, cfg.__name__
 
 

@@ -325,12 +325,16 @@ def test_the_new_fields_are_appended_after_dividend_roll_policy():
         assert names.index("dividend_roll_policy") < names.index(
             "record_carry_exposure"
         )
-        assert names[-4:] == [
+        # the carry fields keep their slots right after dividend_roll_policy; later work (the replay's
+        # trade_value, spec 2026-10-23 D9) is appended after them
+        first = names.index("dividend_roll_policy") + 1
+        assert names[first:first + 4] == [
             "record_carry_exposure",
             "carry_audit_mode",
             "carry_audit_dates",
             "carry_risk_settings",
         ]
+        assert set(names[first + 4:]) <= {"trade_value"}
 
 
 def test_the_single_wrapper_forwards_every_new_setting_unchanged():

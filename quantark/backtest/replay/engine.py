@@ -231,6 +231,20 @@ class ReplayBacktestEngine:
             self._replays.append(replay)
             self._quantities.append(float(bp.quantity))
 
+        # Trade mode (spec 2026-10-23 portfolio-trade-value D9): a product with cash legs is marked at its trade
+        # value and its leg cash is booked by one LegCashBook (built on the run's first day). Leg cash is part of
+        # the book's paid cash / pending receivable PV and is also kept on its own: ``leg_paid_cash`` (cumulative),
+        # ``leg_paid_today``, ``leg_receivable_pv``.
+        self._trade_value = bool(getattr(config, "trade_value", False))
+        self._leg_books: dict[int, Any] = {}
+        self._leg_positions: dict[int, Any] = {}
+        self._leg_receivables: dict[int, float] = {}
+        self.leg_paid_cash: float = 0.0
+        self.leg_paid_today: float = 0.0
+        self.leg_receivable_pv: float = 0.0
+        if self._trade_value:
+            self._validate_trade_legs()
+
         # Optional daily PnL explain (quantark.pnlexplain); None changes nothing
         self._explain_recorder = None
         self._explain_frames = None
@@ -401,13 +415,19 @@ class ReplayBacktestEngine:
             # Initial book value: priced BEFORE lifecycle on the first day,
             # mirroring the single engine's pre-lifecycle initial value.
             if self._initial_book_value is None:
+                if self._trade_value:
+                    self._register_leg_books(env)
                 initial_book_value = 0.0
-                for bp, replay, engine in zip(
+                for index, (bp, replay, engine) in enumerate(zip(
                     self.config.products, self._replays, self._pricing_engines
-                ):
+                )):
                     if replay.retire_if_matured_before_run(env):
                         # matured before the run (user ruling 2026-10-09): no cash, zero value every day
                         initial_price = 0.0
+                    elif index in self._leg_books:
+                        # a trade with cash legs enters at its trade value (signed, legs absolute)
+                        initial_book_value += self._entry_trade_value(index, bp, replay, engine, date, env)
+                        continue
                     elif bp.initial_price is not None:
                         initial_price = float(bp.initial_price)
                     else:
@@ -425,11 +445,15 @@ class ReplayBacktestEngine:
             # unit delta, so the carry measurement uses the SAME calibrated
             # engine as the day's pricing rather than the factory default.
             alive_specs: list[tuple] = []
+            self.leg_paid_today = 0.0
 
-            for bp, quantity, replay, engine in zip(
+            for index, (bp, quantity, replay, engine) in enumerate(zip(
                 self.config.products, self._quantities, self._replays,
                 self._pricing_engines,
-            ):
+            )):
+                if index in self._leg_books:
+                    # the day's lifecycle events decide the legs' termination (one buffer per date)
+                    replay.events_today = []
                 lifecycle_product = replay.product_for_lifecycle()
                 replay.apply_lifecycle_events(
                     date, lifecycle_product, env, market["spot"]
@@ -448,6 +472,8 @@ class ReplayBacktestEngine:
                         date, lifecycle_product, env, market["spot"]
                     )
                 replay.settle_pending_if_due(date)
+                if index in self._leg_books:
+                    self._book_legs(index, replay, date, env)
 
                 price = 0.0
                 greeks: dict[str, float] = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
@@ -467,7 +493,15 @@ class ReplayBacktestEngine:
                         )
                     net_position_delta += float(greeks.get("delta", 0.0)) * quantity
                     net_position_gamma += float(greeks.get("gamma", 0.0)) * quantity
-                    book_product_mtm += quantity * price
+                    if index in self._leg_books:
+                        # trade value: the product's npv x quantity plus its live rolled legs on the engine's
+                        # event distribution (EquityPosition.get_trade_value, the portfolio's own function)
+                        position = self._leg_positions[index]
+                        position.product = product
+                        position.engine = engine
+                        book_product_mtm += float(position.get_trade_value(env))
+                    else:
+                        book_product_mtm += quantity * price
                     alive_specs.append(
                         (
                             quantity,
@@ -501,6 +535,11 @@ class ReplayBacktestEngine:
             book_receivable_pv = 0.0
             for replay in self._replays:
                 book_receivable_pv += replay.pending_receivable_pv(env, date)
+            if self._leg_books:
+                # leg cash is part of the book's cash totals (spec 2026-10-23 D9/D15)
+                self.leg_receivable_pv = float(sum(self._leg_receivables.values()))
+                book_cashflows += self.leg_paid_cash
+                book_receivable_pv += self.leg_receivable_pv
 
             if day_calibration_record is not None:
                 day_calibration_record["pricing_seconds"] = (
@@ -587,9 +626,7 @@ class ReplayBacktestEngine:
                     self, date, env, market, selected, self._trades[trades_before:], self._states[-1],
                 )
             self._days_replayed += 1
-            if self.config.terminate_on_lifecycle_end and all(
-                r.lifecycle.settled for r in self._replays
-            ):
+            if self.config.terminate_on_lifecycle_end and self._all_settled():
                 # Terminal cash has landed for every product: the replay ends
                 # on the later of observation and settlement (study spec §6).
                 self._terminated_all_settled = True
@@ -639,7 +676,7 @@ class ReplayBacktestEngine:
         market data with an open receivable is "data_end" — anything else
         would hide truncated settlement exposure.
         """
-        all_settled = all(r.lifecycle.settled for r in self._replays)
+        all_settled = self._all_settled()
         if not all_settled:
             reason = "data_end"
         elif any(r.lifecycle.knocked_out for r in self._replays):
@@ -657,13 +694,137 @@ class ReplayBacktestEngine:
             "days_replayed": int(self._days_replayed),
             "days_in_contract": int(self._days_in_contract),
             "all_settled": bool(all_settled),
-            "outstanding_receivable": float(
-                sum(
-                    r.lifecycle.pending_settlement_cashflow
-                    for r in self._replays
-                )
-            ),
+            "outstanding_receivable": self._outstanding_receivable(),
         }
+
+    def _all_settled(self) -> bool:
+        """Every product's terminal cash has landed, and every leg book's termination receivables have paid."""
+        return all(r.lifecycle.settled for r in self._replays) and all(
+            book.settled for book in self._leg_books.values()
+        )
+
+    def _outstanding_receivable(self) -> float:
+        outstanding = float(
+            sum(
+                r.lifecycle.pending_settlement_cashflow
+                for r in self._replays
+            )
+        )
+        if self._leg_books:
+            outstanding += float(sum(book.unpaid_receivables for book in self._leg_books.values()))
+        return outstanding
+
+    # ------------------------------------------------------------------
+    # Trade mode: cash legs (spec 2026-10-23 portfolio-trade-value D9, D11-D15)
+    # ------------------------------------------------------------------
+
+    def _validate_trade_legs(self) -> None:
+        """Refuse, before the run, cash legs the replay has no booking rule for (D13, C6).
+
+        Raises:
+            CapabilityError: Legs on a product whose termination has no leg rule (only a Snowball, a KO-reset
+                snowball or a Phoenix ends by a mapped knock-out or maturity), or on a replay that does not observe
+                its lifecycle (``has_lifecycle=False``: no realized knock-out or knock-in to book against).
+            ValidationError: A product with legs entered at a per-unit ``initial_price`` and no
+                ``entry_trade_value`` (the legs' entry value cannot be derived from a product price).
+        """
+        from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+        from quantark.asset.equity.product.option.snowball_option import SnowballOption
+        from quantark.execution.errors import CapabilityError
+
+        for bp in self.config.products:
+            if not bp.cash_legs:
+                continue
+            if not isinstance(bp.product, (SnowballOption, PhoenixOption)):
+                raise CapabilityError(
+                    f"position_id={bp.position_id}: cash legs on a {type(bp.product).__name__} have no multi-day "
+                    "booking rule for its termination events"
+                )
+            if not bp.has_lifecycle:
+                raise CapabilityError(
+                    f"position_id={bp.position_id}: cash legs need the replay to observe the product's lifecycle "
+                    "(has_lifecycle=True); without it no realized knock-out or knock-in decides the legs"
+                )
+            if bp.entry_trade_value is None and bp.initial_price is not None:
+                raise ValidationError(
+                    f"position_id={bp.position_id} carries cash legs: a per-unit initial_price cannot price them; "
+                    "give entry_trade_value (the signed trade total at entry, legs included)"
+                )
+
+    def _register_leg_books(self, env) -> None:
+        """One LegCashBook per product with cash legs, on the run's first day (before its first valuation).
+
+        The anchor is the tracker's clock origin (the contract's ``initial_date`` when set, else the run start; user
+        ruling 2026-10-23), leg times are snapped with the tracker's rule (D14), and flows paid before the run start
+        are history. A product matured before the run books nothing (user ruling 2026-10-09).
+        """
+        from quantark.asset.equity.lifecycle.snapping import snap_time
+        from quantark.cashleg.booking import LegCashBook
+        from quantark.portfolio.equity.position import EquityPosition
+
+        for index, (bp, replay, engine) in enumerate(
+            zip(self.config.products, self._replays, self._pricing_engines)
+        ):
+            if not bp.cash_legs or replay.retire_if_matured_before_run(env):
+                continue
+            position = EquityPosition(
+                product=replay.tracker.product, quantity=float(bp.quantity), entry_price=0.0,
+                underlying=self.config.underlying, engine=engine,
+                entry_timestamp=self._start_date.to_pydatetime(), position_id=str(bp.position_id),
+                cash_legs=list(bp.cash_legs),
+            )
+            book = LegCashBook(
+                list(bp.cash_legs),
+                position._get_unit_notional(env),
+                pd.Timestamp(replay.tracker.clock_origin).normalize(),
+                snap=snap_time,
+                terminable=True,
+                run_start=self._start_date,
+            )
+            position.cash_legs = list(book.legs_at_run_start())
+            replay.record_events = True
+            self._leg_books[index] = book
+            self._leg_positions[index] = position
+            self._leg_receivables[index] = 0.0
+
+    def _entry_trade_value(self, index, bp, replay, engine, date, env) -> float:
+        """The trade's entry value: ``entry_trade_value`` when given, else its trade value before the first close
+        (the replay's own convention for a product without ``initial_price``: priced at the start)."""
+        if bp.entry_trade_value is not None:
+            return float(bp.entry_trade_value)
+        position = self._leg_positions[index]
+        # before the first close: a record due today is still pending (spec 2026-10-08 4a)
+        position.product = replay.product_for_date(date, env, initial=True)
+        position.engine = engine
+        return float(position.get_trade_value(env))
+
+    def _book_legs(self, index, replay, date, env) -> None:
+        """Book the day's leg cash after the product's lifecycle step (the lifecycle manager's rule, D12/D15).
+
+        The day the product ends, its book terminates with the realized outcome (a flow due that day is decided
+        once, by it); afterwards the receivables roll until they pay; while it lives the legs roll and the pricing
+        position carries the live rolled legs.
+        """
+        from quantark.asset.equity.lifecycle.manager import realized_leg_outcome
+
+        book = self._leg_books[index]
+        events = replay.events_today
+        if not book.terminated and any(event.terminates_position for event in events):
+            outcome = realized_leg_outcome(replay.tracker, book, events, date, env, base_date=self._start_date)
+            day = book.terminate(outcome, date, env)
+        elif book.terminated:
+            day = book.roll(date, env)
+        elif not replay.lifecycle.alive:
+            raise ValidationError(
+                f"position_id={self.config.products[index].position_id}: the product ended without a lifecycle "
+                "termination; its cash legs cannot be booked"
+            )
+        else:
+            day = book.roll(date, env)
+            self._leg_positions[index].cash_legs = list(day.live_legs)
+        self.leg_paid_today += day.paid_cash
+        self.leg_paid_cash += day.paid_cash
+        self._leg_receivables[index] = day.receivable_pv
 
     def _calibrate_day(self, date: pd.Timestamp) -> dict[str, Any]:
         """Calibrate the day's vol model and swap in per-replay day engines.
@@ -1255,6 +1416,10 @@ class ReplayBacktestEngine:
                 ),
             }
         )
+        if self._leg_books:
+            # trade mode with cash legs: the leg share of paid_cash / pending_receivable_pv (spec 2026-10-23 D9)
+            self._states[-1]["leg_paid_cash"] = self.leg_paid_cash
+            self._states[-1]["leg_receivable_pv"] = self.leg_receivable_pv
         self._greeks.append(
             {
                 "date": date,
