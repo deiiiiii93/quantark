@@ -17,9 +17,11 @@ from quantark.simm.sensitivity import (
 )
 from quantark.simm.engines.base import BaseSensitivityEngine
 from quantark.simm.engines.classification.bucket_mapper import BucketMapper
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_zero
 
 from quantark.portfolio.equity.position import EquityPosition
+from quantark.portfolio.equity.valuation import has_trade_api
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 
 
@@ -35,19 +37,38 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
     - Integrates with EquityPosition.get_greeks() method
     - Supports bucket classification (12 equity buckets)
     - Handles option expiry-based vega tenor assignment
+    - Trade mode (``trade_value=True``, set by the portfolio adapter for an
+      ``EquityPortfolio`` in trade mode): delta / vega of every position with the
+      trade API come from ``get_trade_risk(...).total`` (bump Greeks, cash legs
+      included); other positions keep ``get_greeks``
     """
 
-    def __init__(self, config: SIMMConfig, greeks_calculator: Optional[GreeksCalculator] = None):
+    def __init__(
+        self,
+        config: SIMMConfig,
+        greeks_calculator: Optional[GreeksCalculator] = None,
+        *,
+        trade_value: bool = False,
+    ):
         """
         Initialize the equity sensitivity engine.
 
         Args:
             config: SIMM configuration settings
             greeks_calculator: GreeksCalculator instance (creates default if None)
+            trade_value: Read delta / vega from the trade risk (product + cash legs)
+                instead of the product Greeks, for positions with the trade API
         """
         super().__init__(config)
         self.greeks_calculator = greeks_calculator if greeks_calculator is not None else GreeksCalculator()
         self.bucket_mapper = BucketMapper()
+        self.trade_value = trade_value
+
+    def _position_greek(self, position: Any, env: Any, name: str) -> float:
+        """One quantity-scaled Greek of a position: trade-risk total in trade mode, else ``get_greeks``."""
+        if self.trade_value and has_trade_api(position):
+            return position.get_trade_risk(env, self.greeks_calculator, greeks=[name]).total.get(name, 0.0)
+        return position.get_greeks(env, self.greeks_calculator).get(name, 0.0)
 
     @property
     def risk_class(self) -> RiskClass:
@@ -85,9 +106,8 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
                     f"Missing equity pricing environment for {position.underlying}"
                 )
 
-            # Get Greeks from position
-            greeks = position.get_greeks(env, self.greeks_calculator)
-            delta = greeks.get('delta', 0.0)
+            # Get Greeks from position (trade risk in trade mode)
+            delta = self._position_greek(position, env, 'delta')
 
             if is_zero(delta, tol=Tolerance.ZERO):
                 # Skip positions with negligible delta
@@ -141,9 +161,8 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
                     f"Missing equity pricing environment for {position.underlying}"
                 )
 
-            # Get Greeks from position
-            greeks = position.get_greeks(env, self.greeks_calculator)
-            vega = greeks.get('vega', 0.0)
+            # Get Greeks from position (trade risk in trade mode)
+            vega = self._position_greek(position, env, 'vega')
 
             # Skip if no vega (e.g., equity spot, futures)
             if is_zero(vega, tol=Tolerance.ZERO):

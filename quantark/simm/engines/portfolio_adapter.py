@@ -5,6 +5,7 @@ This module provides an adapter to convert portfolio positions to SIMM sensitivi
 routing positions to appropriate engines based on risk class.
 """
 
+import inspect
 from typing import Dict, List, Any, Union, Optional
 from quantark.simm.config import SIMMConfig
 from quantark.simm.sensitivity import SensitivityCollection
@@ -33,6 +34,14 @@ try:
     from quantark.simm.crif.parser import CRIFParser
 except ImportError:
     CRIFParser = None
+
+
+def _accepts_trade_value(method: Any) -> bool:
+    """True when ``method`` declares a ``trade_value`` parameter (``EquityPosition.get_simm_sensitivities``)."""
+    try:
+        return "trade_value" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class SIMMPortfolioAdapter:
@@ -68,6 +77,12 @@ class SIMMPortfolioAdapter:
         market-vertex generation with the position/market model that can
         represent the required shocks and prevents silent approximations.
 
+        A portfolio object's ``trade_value`` flag (``EquityPortfolio``) is passed
+        as ``trade_value=`` to every position whose ``get_simm_sensitivities``
+        accepts that keyword (``EquityPosition``), so in trade mode equity
+        delta / vega come from the trade risk; other providers are called as
+        before.
+
         Args:
             portfolio: Portfolio object or dict with positions
             **kwargs: Reserved for backward compatibility
@@ -77,6 +92,9 @@ class SIMMPortfolioAdapter:
         """
         # Extract positions and pricing environments
         positions, pricing_environments = self._extract_portfolio_data(portfolio)
+        trade_value = (
+            False if isinstance(portfolio, dict) else bool(getattr(portfolio, "trade_value", False))
+        )
 
         all_sensitivities = SensitivityCollection()
         errors: List[str] = []
@@ -88,8 +106,13 @@ class SIMMPortfolioAdapter:
                 )
                 continue
             try:
+                kwargs = (
+                    {"trade_value": trade_value}
+                    if _accepts_trade_value(position.get_simm_sensitivities)
+                    else {}
+                )
                 position_collection = position.get_simm_sensitivities(
-                    self.config, pricing_environments
+                    self.config, pricing_environments, **kwargs
                 )
                 all_sensitivities.add_many(position_collection.sensitivities)
             except Exception as e:

@@ -795,8 +795,17 @@ class EquityPosition:
             greeks_calculator = GreeksCalculator()
         return self.get_greeks(pricing_env, greeks_calculator, use_analytical)
 
-    def get_simm_sensitivities(self, config: Any, market_data: Any):
-        """Return built-in SIMM equity sensitivities for this position."""
+    def get_simm_sensitivities(self, config: Any, market_data: Any, *, trade_value: bool = False):
+        """Return built-in SIMM equity sensitivities for this position.
+
+        Args:
+            config: SIMM configuration
+            market_data: Pricing environments mapped by underlying
+            trade_value: Delta / vega from ``get_trade_risk`` totals (product + cash
+                legs) instead of the product Greeks. The SIMM portfolio adapter passes
+                the ``EquityPortfolio.trade_value`` flag; a direct call defaults to
+                the product path.
+        """
         from quantark.simm.engines.risk_class.equity_engine import EquitySensitivityEngine
 
         if config.calculation_currency.upper() != "USD":
@@ -814,7 +823,7 @@ class EquityPosition:
             raise ValidationError(
                 f"Missing equity pricing environment for {self.underlying}"
             )
-        return EquitySensitivityEngine(config).calculate_sensitivities(
+        return EquitySensitivityEngine(config, trade_value=trade_value).calculate_sensitivities(
             [self], market_data, config
         )
     
