@@ -215,9 +215,9 @@ class AutocallableCashLeg(CashLeg):
         terminal settlement shifts likewise. With ``keep_landing`` (theta,
         spec 2026-10-07 R1) an observation landing on the bumped instant
         (``obs - dt`` zero within tolerance) is kept at time 0, as the parent
-        keeps it. Returns ``None`` when the leg had observations and they all
-        drop (fully expired within the bump); a terminal-only leg (no
-        observations) survives with a shifted terminal.
+        keeps it. Returns ``None`` once every observation has dropped and the
+        terminal settlement is no longer ahead (``roll_payment_time``); while it
+        is ahead the leg keeps its terminal branch, with or without observations.
         """
         dt = float(dt)
         if dt <= 0.0:
