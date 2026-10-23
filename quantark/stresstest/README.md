@@ -232,15 +232,18 @@ print(results.get_summary())
 
 #### What an equity position is worth under stress
 
-Static equity stress values every `EquityPosition` at its **full trade value**: the product priced by the
-position's engine × the signed quantity, plus the position's cash legs (absolute, in the holder's
-direction, never scaled by the quantity), on the event route or folded with `cash_leg_folding`. The
-Greeks come from `EquityPosition.get_trade_risk(...).total`. These are the six finite-bump Greeks (delta,
+Static equity stress follows the portfolio's basis, `EquityPortfolio.trade_value`. On a trade-value portfolio
+every `EquityPosition` is valued at its **full trade value**: the product priced by the position's engine × the
+signed quantity, plus the position's cash legs (absolute, in the holder's direction, never scaled by the
+quantity), on the event route or folded with `cash_leg_folding`. The Greeks come from
+`EquityPosition.get_trade_risk(...).total`. These are the six finite-bump Greeks (delta,
 gamma, vega, theta, rho, dividend_rho) with the calculator's bump configuration. Each position's Greeks
 dict also carries `market_value` and the estimated theta split (`convexity_theta`, `r_theta`, `q_theta`).
 Portfolio and per-underlying aggregates report `market_value, delta, gamma, vega, theta, rho,
-dividend_rho`. `greeks_method` now only affects positions without a trade API (equity swaps), which
-keep `get_market_value` / `get_greeks`. Each (position, scenario) is valued once (one value and one risk
+dividend_rho`. On a product-mode portfolio (`trade_value=False`, the default) positions are valued with
+`get_market_value` and `get_greeks(use_analytical=greeks_method == "analytical")`, aggregated over the historical
+keys `market_value, delta, gamma, vega, theta, rho`. Results carry `metadata["value_basis"]` (`"trade"` or
+`"product"`). Each (position, scenario) is valued once (one value and one risk
 call, shared by the portfolio total, the position rows and the per-underlying totals), and the baseline
 once per run.
 
@@ -249,6 +252,9 @@ once per run.
 ```python
 config = StressTestConfig(calculate_greeks=True, native_batch=True)
 ```
+
+Native batching batches trade values, so it runs on a trade-value portfolio only; on a product-mode portfolio
+`native_batch=True` emits a `UserWarning` and the scenarios run scalar (`valuation_mode == "scalar"`).
 
 With `native_batch=True` every scenario's environments are built up front. A position whose engine
 offers a spot-batch session (`engine.supports_spot_batch`) is valued over all scenarios inside one

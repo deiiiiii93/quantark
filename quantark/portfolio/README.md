@@ -122,6 +122,24 @@ Portfolio-level Greeks are computed by:
 
 This provides accurate portfolio-level risk metrics while respecting position-specific pricing logic.
 
+### Trade value (opt-in)
+
+`EquityPortfolio(..., trade_value=True)` values every `EquityPosition` at its **full trade value**: the product ×
+the signed quantity plus the position's cash legs (absolute, in the holder's direction). With the flag on:
+
+- `get_portfolio_value` sums `get_trade_value`; `get_portfolio_greeks` / `get_greeks_by_underlying` sum the
+  `get_trade_risk(...).total` bump Greeks for every position (no analytical Greeks; `use_analytical` is ignored)
+  over `market_value, delta, gamma, vega, theta, rho, dividend_rho`, with `market_value` equal to the value;
+- `get_portfolio_pnl` sums `get_trade_pnl` = trade value − `EquityPosition.entry_trade_value`. A position with cash
+  legs must carry `entry_trade_value` (the signed trade total at entry, legs included) or trade PnL raises
+  `ValidationError`; a position without legs uses `entry_price × quantity`;
+- `position_value`, `position_greeks` and `position_pnl` value one position in the portfolio's mode — every
+  equity consumer (VaR, SIMM via the portfolio adapter, static stress, dynamic scenarios, backtests) goes through
+  them, so all of them follow the one flag.
+
+`EquitySwapPosition` (TRS) keeps its own path in both modes. The flag defaults to `False`, the product path,
+bitwise as before.
+
 ## Export Formats
 
 ### Excel Export Structure

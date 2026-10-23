@@ -199,6 +199,36 @@ cost_model = CompleteCostModel(
 )
 ```
 
+## Trade Value and Cash Legs (opt-in)
+
+`BacktestConfig(..., trade_value=True)` builds the backtest portfolio as an `EquityPortfolio(trade_value=True)`
+and carries each initial position's `cash_legs`, `cash_leg_folding` and `entry_trade_value` into it. Values,
+Greeks and PnL are then trade values (see the portfolio README), the terminated cost basis is the entry trade
+value, and the legs' cash is **booked**:
+
+- leg times are year fractions from the contract's clock origin — its `initial_date` when set (the lifecycle
+  tracker's own clock), else the run's start date; a run started mid-life sees each flow's time to payment from
+  its own start, and flows paid before it are history (neither booked nor valued);
+- each day the legs roll with the product (whole days / 365, the trackers' frame). A deterministic amount or a
+  period-end accrual pays at nominal on its payment day and leaves the position's value;
+- when an autocallable knocks out or matures, every unpaid flow becomes a fixed receivable by its leg's rule (a
+  `TRUNCATE_AT_KO` accrual keeps the periods whose survival reference precedes the knock-out; `AT_MATURITY`
+  accruals and maturity-triggered payoffs pay at the contractual maturity settlement; an `AutocallableCashLeg`
+  pays its accrual at the knock-out observation, or its terminal amount at maturity);
+- leg cash is part of `paid_cash` / `pending_receivable_pv` (so `portfolio_value` = book value + pending + paid,
+  as before) and is reported on its own by the lifecycle manager (`leg_paid_cash`, `leg_receivable_pv`).
+
+On every day value + booked cash is conserved: the trade value before the close equals the value after it plus
+the cash it booked (tested to 1e-10 on Snowball, Phoenix and mid-life runs). Cases without a booking rule raise
+`CapabilityError` rather than guess: a `FixedPayoffLeg` on knock-in, a `NOTIONAL_MINUS_PAYOFF` or coupon-basis
+`AutocallableCashLeg`, an `AT_KO` accrual, cash legs on barrier-family or DCN positions, and termination-paying
+legs on a position no lifecycle tracker ends.
+
+The product-replay engine has the same switch on its config (`trade_value=True`) with per-trade `cash_legs` (and
+optional `entry_trade_value`; without it a trade enters at its day-0 pre-close trade value). With a PnL explain
+configured, the explain adds one portfolio `cash_legs` line per day (the legs' value change plus their cash), so
+the explain still reconciles to the run's PnL.
+
 ## Results and Analysis
 
 ### Accessing Results

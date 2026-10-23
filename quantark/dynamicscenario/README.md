@@ -171,6 +171,13 @@ FIDynamicScenarioConfig(
 )
 ```
 
+### Trade value and cash legs
+
+A dynamic scenario on an `EquityPortfolio(trade_value=True)` values, Greeks and position rows at trade value and
+books the positions' cash legs through its lifecycle manager exactly as the equity backtest does (see the
+backtest README). Legs roll only as the products age, so a trade-value scenario with cash legs needs
+`handle_lifecycle_events=True` and a dated path (`day_path.start_date`); otherwise it raises `ValidationError`.
+
 ## Results
 
 ### Equity Results

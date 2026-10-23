@@ -33,6 +33,14 @@ The QuantArk VaR module provides comprehensive Value-at-Risk calculation capabil
 - **MarketDataSet**: Time series from QuantArk market data module
 - **Flexible formatting**: Multiple input formats supported
 
+### Trade-value portfolios
+
+On an `EquityPortfolio(trade_value=True)` historical and Monte Carlo VaR reprice every `EquityPosition` at its
+trade value (cash legs included) in each scenario, and component attribution uses the same values, so the
+components sum to the trade-valued total. Parametric VaR reads delta, vega and rho from the trade risk and takes
+the dividend-yield sensitivity from the trade `dividend_rho` (converted to $ per unit of q) instead of the
+Black–Scholes proxy. Product-mode portfolios (the default) are unchanged.
+
 ## Quick Start
 
 ### Basic VaR Calculation

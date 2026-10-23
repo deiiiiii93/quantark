@@ -9,6 +9,19 @@ During 0.x the public API may still change between minor versions.
 
 ### Added
 
+- Trade-value portfolios: `EquityPortfolio(trade_value=True)` values every `EquityPosition` at its full trade
+  value (product × signed quantity + cash legs), with bump Greeks from `get_trade_risk` and PnL against the new
+  `EquityPosition.entry_trade_value`. VaR (historical, Monte Carlo incl. attribution, parametric), SIMM via the
+  portfolio adapter, static stress, dynamic scenarios and backtests follow the flag through one shared switch
+  (`quantark.portfolio.equity.valuation`). Default off: the product path is bitwise unchanged.
+- Multi-day cash-leg booking: `quantark.cashleg.booking.LegCashBook` rolls a position's legs with the product and
+  books their flows as paid cash and receivables by explicit per-leg rules on knock-out and maturity. The equity
+  backtest (`BacktestConfig.trade_value`), dynamic scenarios and the product-replay engine (`trade_value`,
+  per-trade `cash_legs`) use it; leg cash is part of `paid_cash` / `pending_receivable_pv`. Leg times count from
+  the contract's `initial_date` (else the run start); unruled leg variants raise `CapabilityError`.
+- `time_shift` on `DeterministicLeg`, `AccrualLeg` and `FixedPayoffLeg` (shared landing rule
+  `quantark.cashleg.base.roll_payment_time`); PnL explain's `cash_legs` line (`Factor.CASH_LEGS`).
+
 - `ConvertibleBondTFTreeEngine`: the Tsiveriotis-Fernandes model on a CRR binomial tree, a lattice
   twin of the TF PDE. Each node carries the total value and its cash-only component (COCB), which
   discounts at `r + credit_spread`. Time steps are equal in total implied variance, so a vol term
@@ -32,6 +45,14 @@ During 0.x the public API may still change between minor versions.
 
 ### Changed
 
+- Static equity stress follows `EquityPortfolio.trade_value` (default product mode): a product-mode portfolio is
+  valued with `get_market_value` / `get_greeks` again; `native_batch` runs on trade-value portfolios only. New
+  result metadata `value_basis`.
+- Trade theta now carries the time value of deterministic, accrual and fixed-payoff cash legs (they roll with
+  the product; a payment inside the bump is gone at t1, as for other engine-determined cash).
+- `EventDistribution.survival_at` at the valuation instant reads the post-observation survival of an event kept
+  at 0 (a theta-shifted or knocked-out-at-valuation contract) instead of 1; an `AutocallableCashLeg` keeps its
+  terminal branch after its last observation while the terminal settlement is ahead.
 - `ConvertibleBond.hazard_rate` now defaults to `None`, which derives the intensity from the credit
   triangle: `ConvertibleBond.effective_hazard_rate = credit_spread / (1 − recovery_rate)` (new
   `quantark.asset.credit.conventions.spread_to_hazard`). Jump-diffusion, the HW trinomial and their
