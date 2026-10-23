@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, TYPE_CHECKING
 
+from quantark.util.numerical import is_zero
+
 if TYPE_CHECKING:
     from quantark.cashleg.event_distribution import EventDistribution, EventType
     from quantark.priceenv import PricingEnvironment
@@ -23,6 +25,22 @@ class LegDirection(Enum):
 
     BUYER_RECEIVES = +1
     BUYER_PAYS = -1
+
+
+def roll_payment_time(payment_time: float, dt: float, *, keep_landing: bool = False) -> Optional[float]:
+    """A payment time seen from an origin ``dt`` later (spec 2026-10-23 portfolio-trade-value D10).
+
+    ``payment_time - dt`` when that is still ahead; ``0.0`` when it lands on the new origin (``is_zero``) and
+    ``keep_landing`` is set; ``None`` when the payment is no longer ahead (strictly past, or landing without
+    ``keep_landing``). The leg rolls and the multi-day booking share this predicate: a flow is paid exactly when
+    its roll without ``keep_landing`` returns ``None``.
+    """
+    remaining = float(payment_time) - float(dt)
+    if is_zero(remaining):
+        return 0.0 if keep_landing else None
+    if remaining < 0.0:
+        return None
+    return remaining
 
 
 @dataclass(frozen=True)

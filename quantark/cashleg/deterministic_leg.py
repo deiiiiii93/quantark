@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
+from typing import Optional
 
-from quantark.cashleg.base import CashLeg
+from quantark.cashleg.base import CashLeg, roll_payment_time
 from quantark.util.exceptions import ValidationError
 
 
@@ -32,6 +33,16 @@ class DeterministicLeg(CashLeg):
         return self.sign() * float(self.amount) * env.get_discount_factor(
             float(self.payment_time)
         )
+
+    def time_shift(self, dt: float, *, keep_landing: bool = False) -> "Optional[DeterministicLeg]":
+        """The leg seen ``dt`` years later (spec 2026-10-23 D10): the payment moves by ``-dt``; ``None`` once it
+        is no longer ahead (a landing payment kept at 0 only with ``keep_landing``)."""
+        if float(dt) <= 0.0:
+            return self
+        payment_time = roll_payment_time(self.payment_time, dt, keep_landing=keep_landing)
+        if payment_time is None:
+            return None
+        return replace(self, payment_time=payment_time)
 
     def requires_event_distribution(self) -> bool:
         """A deterministic leg can be valued without event timing."""

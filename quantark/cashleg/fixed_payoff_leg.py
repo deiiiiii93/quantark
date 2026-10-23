@@ -52,6 +52,11 @@ class FixedPayoffLeg(CashLeg):
         if not isinstance(self.trigger, PaymentTrigger):
             raise ValidationError(f"Invalid PaymentTrigger: {self.trigger}")
 
+    def time_shift(self, dt: float, *, keep_landing: bool = False) -> "FixedPayoffLeg":
+        """No own times: the payment is the triggering event's (plus the offset), which moves with the
+        distribution (spec 2026-10-23 D10)."""
+        return self
+
     def required_event_types(self) -> frozenset:
         """The single trigger stream (or both maturity buckets for ANY) [§11.1]."""
 

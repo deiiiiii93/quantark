@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
-from quantark.cashleg.base import CashLeg
+from quantark.cashleg.base import CashLeg, roll_payment_time
 from quantark.cashleg.base_amount import BaseAmount
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.leg_schedule import LegSchedule
@@ -75,6 +75,9 @@ class AccrualLeg(CashLeg):
     survival_basis: SurvivalBasis = SurvivalBasis.ENTER_PERIOD
     calendar: Optional[Calendar] = None
     bus_days_in_year: Optional[int] = None
+    #: per-period accrual fractions carried by ``time_shift`` on a schedule without dates, so a rolled period
+    #: keeps its exact original amount (``(end - dt) - (start - dt)`` is not ``end - start`` in floating point)
+    fixed_fractions: Optional[Tuple[float, ...]] = None
 
     def __post_init__(self) -> None:
         if self.base is None:
@@ -92,6 +95,13 @@ class AccrualLeg(CashLeg):
         if not isinstance(self.survival_basis, SurvivalBasis):
             raise ValidationError(f"Invalid SurvivalBasis: {self.survival_basis}")
         self._validate_day_count_inputs()
+        if self.fixed_fractions is not None and len(self.fixed_fractions) != len(
+            self.schedule.period_starts
+        ):
+            raise ValidationError(
+                f"AccrualLeg fixed_fractions has {len(self.fixed_fractions)} entries for "
+                f"{len(self.schedule.period_starts)} periods"
+            )
 
     def _validate_day_count_inputs(self) -> None:
         dated = self.schedule.has_period_dates()
@@ -172,6 +182,49 @@ class AccrualLeg(CashLeg):
             * float(np.sum(dcf * survival * dfs))
         )
 
+    def time_shift(self, dt: float, *, keep_landing: bool = False) -> "Optional[AccrualLeg]":
+        """The leg seen ``dt`` years later (spec 2026-10-23 portfolio-trade-value D10).
+
+        Every schedule time moves by ``-dt`` and each kept period keeps its exact accrual fraction (a period
+        start may pass 0; a past survival reference time reads as survived). A period paid on its schedule
+        time drops once that payment is no longer ahead (``roll_payment_time``; a landing payment kept at 0
+        only with ``keep_landing``); ``None`` when every period has dropped. ``AT_MATURITY`` periods pay at the
+        maturity settlement, read from the distribution, so none drops on its schedule time — the owner ends
+        the leg with the note.
+        """
+        dt = float(dt)
+        if dt <= 0.0:
+            return self
+        schedule = self.schedule
+        fractions = self.accrual_fractions()
+        if self.payment_convention is PaymentConvention.AT_MATURITY:
+            keep = [True] * len(schedule.payment_times)
+            payments = [max(0.0, float(t) - dt) for t in schedule.payment_times]
+        else:
+            rolled = [
+                roll_payment_time(t, dt, keep_landing=keep_landing)
+                for t in schedule.payment_times
+            ]
+            keep = [t is not None for t in rolled]
+            payments = [t for t in rolled if t is not None]
+            if not payments:
+                return None
+        idx = np.flatnonzero(keep)
+
+        def pick(dates):
+            return None if dates is None else [dates[i] for i in idx]
+
+        new_schedule = LegSchedule(
+            period_starts=schedule.period_starts[idx] - dt,
+            period_ends=schedule.period_ends[idx] - dt,
+            payment_times=np.asarray(payments, dtype=float),
+            period_start_dates=pick(schedule.period_start_dates),
+            period_end_dates=pick(schedule.period_end_dates),
+            payment_dates=pick(schedule.payment_dates),
+        )
+        carried = None if schedule.has_period_dates() else tuple(float(f) for f in fractions[idx])
+        return replace(self, schedule=new_schedule, fixed_fractions=carried)
+
     def _payment_times(self, event_dist: EventDistribution) -> np.ndarray:
         if self.payment_convention is PaymentConvention.AT_MATURITY:
             return np.full(
@@ -188,6 +241,8 @@ class AccrualLeg(CashLeg):
         """Per-period accrual fraction: ``day_count`` over the period dates
         when the schedule has them, else ``period_end - period_start``."""
 
+        if self.fixed_fractions is not None:
+            return np.asarray(self.fixed_fractions, dtype=float)
         if not self.schedule.has_period_dates():
             return np.asarray(
                 self.schedule.period_ends - self.schedule.period_starts, dtype=float
