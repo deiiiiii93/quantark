@@ -257,8 +257,10 @@ class EquityPortfolio:
         the trade value. Product mode: ``get_greeks(use_analytical=...)``.
         """
         env = self._env_for(position, env)
+        if not (self.trade_value and valuation.has_trade_api(position)):
+            return position.get_greeks(env, greeks_calculator, use_analytical=use_analytical)
         return valuation.value_position(
-            position, env, greeks_calculator, trade=self.trade_value, use_analytical=use_analytical
+            position, env, greeks_calculator, trade=True, use_analytical=use_analytical
         ).greeks
 
     def position_pnl(self, position, env: Optional[PricingEnvironment] = None) -> float:
@@ -394,6 +396,9 @@ class EquityPortfolio:
         """
         Convert portfolio positions to pandas DataFrame.
         
+        ``market_value`` and ``pnl`` follow the portfolio's mode (``position_value`` /
+        ``position_pnl``).
+
         Returns:
             DataFrame with position details and current values
         """
@@ -406,8 +411,8 @@ class EquityPortfolio:
             
             row = position.to_dict()
             row['current_price'] = position.get_current_price(pricing_env)
-            row['market_value'] = position.get_market_value(pricing_env)
-            row['pnl'] = position.get_pnl(pricing_env)
+            row['market_value'] = self.position_value(position, pricing_env)
+            row['pnl'] = self.position_pnl(position, pricing_env)
             
             rows.append(row)
         

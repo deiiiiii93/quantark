@@ -717,8 +717,15 @@ class EquityPosition:
         return self.entry_price * self.quantity
 
     def get_trade_pnl(self, pricing_env: PricingEnvironment) -> float:
-        """Unrealized trade PnL: ``get_trade_value - resolved_entry_trade_value()``."""
+        """Unrealized trade PnL: ``get_trade_value - resolved_entry_trade_value()``.
+
+        A position without cash legs or ``entry_trade_value`` returns ``get_pnl``: the
+        same quantity, computed as ``(price - entry_price) × quantity`` so it is bitwise
+        the product PnL (``price·q − entry·q`` differs in the last bit).
+        """
         entry = self.resolved_entry_trade_value()
+        if self.entry_trade_value is None:
+            return self.get_pnl(pricing_env)
         return self.get_trade_value(pricing_env) - entry
 
     def get_greeks(

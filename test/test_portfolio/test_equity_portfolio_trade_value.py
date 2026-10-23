@@ -176,6 +176,25 @@ def test_no_leg_position_entry_is_entry_price_times_quantity_and_pnl_is_bitwise_
     assert pf.position_pnl(vanilla) == copy.deepcopy(vanilla).get_pnl(env)
 
 
+@pytest.mark.parametrize("quantity,entry_price", [(3, 7.3), (-7, 2.9), (11, 6.1)])
+def test_no_leg_trade_pnl_is_bitwise_product_pnl_for_inexact_inputs(quantity, entry_price):
+    """CP1: price·q − entry·q is not (price − entry)·q in floating point; the no-leg trade PnL is get_pnl."""
+    pf = _book(trade_value=True)
+    vanilla = pf.positions["vanilla"]
+    vanilla.quantity, vanilla.entry_price = quantity, entry_price
+    env = pf.pricing_environments["X"]
+    assert vanilla.get_trade_pnl(env) == copy.deepcopy(vanilla).get_pnl(env)
+    assert pf.position_pnl(vanilla) == copy.deepcopy(vanilla).get_pnl(env)
+
+
+def test_to_dataframe_follows_the_mode():
+    pf = _book(trade_value=True)
+    frame = pf.to_dataframe().set_index("position_id")
+    assert frame.loc["note", "market_value"] == copy.deepcopy(pf).position_value(pf.positions["note"])
+    assert frame["market_value"].sum() == pytest.approx(copy.deepcopy(pf).get_portfolio_value(), rel=1e-15)
+    assert frame.loc["note", "pnl"] == copy.deepcopy(pf).position_pnl(pf.positions["note"])
+
+
 def test_cash_leg_position_without_entry_trade_value_raises_in_trade_mode():
     pf = _book(trade_value=True, entry_trade_value=None)
     with pytest.raises(ValidationError, match="entry_trade_value"):
