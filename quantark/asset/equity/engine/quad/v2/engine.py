@@ -42,6 +42,17 @@ class AutocallableQuadEngineV2(BaseEngine):
         self._prepared = None
         self._prepared_key = None
 
+    def __getstate__(self):
+        """Copies and pickles start cold, as a fresh engine.
+
+        The prepared context is a cache (and its read-only diagnostics mapping does not pickle), so a
+        copy never inherits the original's call history.
+        """
+        state = self.__dict__.copy()
+        state["_prepared"] = None
+        state["_prepared_key"] = None
+        return state
+
     def _compile(self, product, pricing_env, components, event_phase, lifecycle_state, fold=None):
         if event_phase not in {"before", "after"}:
             raise ValidationError("event_phase must be before or after")

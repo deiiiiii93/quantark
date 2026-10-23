@@ -16,7 +16,11 @@ class EquityStressConfig:
     output_dir: str = "./stress_results"
     save_detailed_results: bool = True
 
-    # Future features for dynamic scenario analysis
+    # Opt-in native batching: positions whose engine supports a spot-batch session reuse one prepared
+    # context across scenarios (results within the route's measured tolerance of the scalar path)
+    native_batch: bool = False
+
+    # Static scenarios on a spawn process pool (bitwise equal to serial); a callback stays in the parent
     parallel_execution: bool = False
     max_workers: int = 4
     progress_callback: Optional[Any] = None
@@ -50,7 +54,9 @@ class EquityStressConfig:
             "export_formats": self.export_formats,
             "output_dir": self.output_dir,
             "save_detailed_results": self.save_detailed_results,
+            "native_batch": self.native_batch,
             "parallel_execution": self.parallel_execution,
+            "max_workers": self.max_workers,
             "metadata": self.metadata,
         }
 

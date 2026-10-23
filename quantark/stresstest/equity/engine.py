@@ -13,6 +13,7 @@ from quantark.portfolio.base import BasePortfolio
 from quantark.stresstest.base import BaseStressEngine, ScenarioRunner, StressMetricsAdapter
 from quantark.stresstest.equity.config import EquityStressConfig
 from quantark.stresstest.equity.results import ScenarioResult, StressTestResults
+from quantark.stresstest.equity.valuation import PositionValuation, aggregate_greeks, value_position
 from quantark.stresstest.scenario.scenario import Scenario
 from quantark.stresstest.stress.stress_applicator import StressApplicator
 from quantark.util.exceptions import ValidationError
@@ -78,21 +79,20 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         start_time = time.time()
 
         print("Evaluating baseline portfolio...")
-        baseline_value = portfolio.get_portfolio_value()
+        # Baseline and per-position originals always take the scalar path, once per run (spec D5, D14)
+        baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments)
+        baseline_value = sum(v.value for v in baseline.values())
         baseline_greeks = None
-
-        if self.config.calculate_greeks and self.greeks_calculator:
-            use_analytical = self.config.greeks_method == "analytical"
-            baseline_greeks = portfolio.get_portfolio_greeks(
-                self.greeks_calculator,
-                use_analytical=use_analytical,
-            )
+        if self.greeks_calculator is not None:
+            baseline_greeks = aggregate_greeks(v.greeks for v in baseline.values())
+        originals = {position_id: v.value for position_id, v in baseline.items()}
 
         scenario_results: List[ScenarioResult] = []
         for i, scenario in enumerate(scenarios, 1):
             print(f"Running scenario {i}/{len(scenarios)}: {scenario.name}")
-            result = self.evaluate_scenario(portfolio, scenario, baseline_value)
-            scenario_results.append(result)
+            scenario_results.append(
+                self._evaluate_scalar(portfolio, scenario, originals, baseline_value)
+            )
 
         total_time = time.time() - start_time
 
@@ -102,7 +102,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             scenario_results=scenario_results,
             total_execution_time=total_time,
             config_summary=self.config.get_summary(),
-            metadata={"baseline_label": baseline_label},
+            metadata={"baseline_label": baseline_label, "valuation_mode": self._valuation_mode},
         )
 
     def evaluate_scenario(
@@ -113,35 +113,77 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
     ) -> ScenarioResult:
         # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
         portfolio = freeze_portfolio_fixings(portfolio)
-        scenario_start = time.time()
+        originals = {
+            position_id: value_position(position, portfolio.pricing_environments[position.underlying]).value
+            for position_id, position in portfolio.positions.items()
+        }
+        return self._evaluate_scalar(portfolio, scenario, originals, baseline_value)
 
+    @property
+    def _valuation_mode(self) -> str:
+        return "native_batch" if self.config.native_batch else "scalar"
+
+    @property
+    def _use_analytical(self) -> bool:
+        return self.config.greeks_method == "analytical"
+
+    def _value_positions(
+        self,
+        positions: Dict[str, Any],
+        envs: Dict[str, Any],
+    ) -> Dict[str, PositionValuation]:
+        """Each position valued once under its underlying's environment."""
+        return {
+            position_id: value_position(
+                position,
+                envs[position.underlying],
+                self.greeks_calculator,
+                use_analytical=self._use_analytical,
+            )
+            for position_id, position in positions.items()
+        }
+
+    def _evaluate_scalar(
+        self,
+        portfolio: Portfolio,
+        scenario: Scenario,
+        originals: Dict[str, float],
+        baseline_value: float,
+    ) -> ScenarioResult:
+        """One scenario on a fresh copy of the positions; each (position, environment) priced once (spec D5)."""
+        scenario_start = time.time()
         stressed_envs = StressApplicator.apply_scenario_to_portfolio(portfolio, scenario)
         stressed_portfolio = self._create_stressed_portfolio(portfolio, stressed_envs)
+        valuations = self._value_positions(stressed_portfolio.positions, stressed_envs)
+        result = self._assemble_result(
+            portfolio, stressed_portfolio, scenario, valuations, originals, baseline_value
+        )
+        result.execution_time = time.time() - scenario_start
+        return result
 
-        stressed_value = stressed_portfolio.get_portfolio_value()
+    def _assemble_result(
+        self,
+        portfolio: Portfolio,
+        stressed_portfolio: Portfolio,
+        scenario: Scenario,
+        valuations: Dict[str, PositionValuation],
+        originals: Dict[str, float],
+        baseline_value: float,
+    ) -> ScenarioResult:
+        """Portfolio total, position rows and per-underlying totals, all from the same valuations."""
+        stressed_value = sum(v.value for v in valuations.values())
         portfolio_pnl = stressed_value - baseline_value
         portfolio_pnl_pct = pnl_pct_of_abs_baseline(portfolio_pnl, baseline_value)
 
         greeks = None
-        if self.config.calculate_greeks and self.greeks_calculator:
-            use_analytical = self.config.greeks_method == "analytical"
-            greeks = stressed_portfolio.get_portfolio_greeks(
-                self.greeks_calculator,
-                use_analytical=use_analytical,
-            )
+        if self.greeks_calculator is not None:
+            greeks = aggregate_greeks(v.greeks for v in valuations.values())
 
         position_results: List[Dict[str, Any]] = []
         if self.config.save_detailed_results:
-            position_results = self._calculate_position_results(
-                portfolio,
-                stressed_portfolio,
-                scenario,
-            )
+            position_results = self._position_rows(stressed_portfolio, valuations, originals)
 
-        underlying_results = self._calculate_underlying_results(
-            stressed_portfolio,
-            scenario,
-        )
+        underlying_results = self._underlying_rows(stressed_portfolio, valuations)
 
         extra_metrics: Dict[str, Dict[str, Any]] = {}
         if self.metrics_adapter and self.metrics_adapter.supports(portfolio):
@@ -153,8 +195,6 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
                 stressed_value,
             )
 
-        execution_time = time.time() - scenario_start
-
         return ScenarioResult(
             scenario=scenario,
             portfolio_value=stressed_value,
@@ -163,8 +203,8 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             greeks=greeks,
             position_results=position_results,
             underlying_results=underlying_results,
-            execution_time=execution_time,
             extra_metrics=extra_metrics,
+            metadata={"valuation_mode": self._valuation_mode},
         )
 
     def run_dynamic_scenarios(
@@ -192,26 +232,18 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         stressed_portfolio.positions = deepcopy(original_portfolio.positions)
         return stressed_portfolio
 
-    def _calculate_position_results(
+    def _position_rows(
         self,
-        original_portfolio: Portfolio,
         stressed_portfolio: Portfolio,
-        scenario: Scenario,
+        valuations: Dict[str, PositionValuation],
+        originals: Dict[str, float],
     ) -> List[Dict[str, Any]]:
-        results = []
-
+        rows = []
         for position_id, position in stressed_portfolio.positions.items():
-            original_position = original_portfolio.positions[position_id]
-            original_env = original_portfolio.pricing_environments[position.underlying]
-            stressed_env = stressed_portfolio.pricing_environments[position.underlying]
-
-            original_value = original_position.get_market_value(original_env)
-            stressed_value = position.get_market_value(stressed_env)
-
+            original_value = originals[position_id]
+            stressed_value = valuations[position_id].value
             position_pnl = stressed_value - original_value
-            position_pnl_pct = pnl_pct_of_abs_baseline(position_pnl, original_value)
-
-            result = {
+            row = {
                 "position_id": position_id,
                 "underlying": position.underlying,
                 "product_type": position.product.__class__.__name__,
@@ -219,54 +251,35 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
                 "original_value": original_value,
                 "stressed_value": stressed_value,
                 "pnl": position_pnl,
-                "pnl_pct": position_pnl_pct,
+                "pnl_pct": pnl_pct_of_abs_baseline(position_pnl, original_value),
             }
+            if self.greeks_calculator is not None:
+                row["greeks"] = valuations[position_id].greeks
+            rows.append(row)
+        return rows
 
-            if self.config.calculate_greeks and self.greeks_calculator:
-                use_analytical = self.config.greeks_method == "analytical"
-                position_greeks = position.get_greeks(
-                    stressed_env,
-                    self.greeks_calculator,
-                    use_analytical=use_analytical,
-                )
-                result["greeks"] = position_greeks
-
-            results.append(result)
-
-        return results
-
-    def _calculate_underlying_results(
+    def _underlying_rows(
         self,
         stressed_portfolio: Portfolio,
-        scenario: Scenario,
+        valuations: Dict[str, PositionValuation],
     ) -> Dict[str, Dict[str, Any]]:
         results: Dict[str, Dict[str, Any]] = {}
-
         for underlying in stressed_portfolio.pricing_environments.keys():
-            positions = stressed_portfolio.get_positions_by_underlying(underlying)
-            if not positions:
+            ids = [
+                position_id
+                for position_id, position in stressed_portfolio.positions.items()
+                if position.underlying == underlying
+            ]
+            if not ids:
                 continue
-
-            total_value = sum(
-                pos.get_market_value(stressed_portfolio.pricing_environments[underlying])
-                for pos in positions
-            )
-
             greeks = None
-            if self.config.calculate_greeks and self.greeks_calculator:
-                use_analytical = self.config.greeks_method == "analytical"
-                greeks = stressed_portfolio.get_greeks_by_underlying(
-                    underlying,
-                    self.greeks_calculator,
-                    use_analytical=use_analytical,
-                )
-
+            if self.greeks_calculator is not None:
+                greeks = aggregate_greeks(valuations[i].greeks for i in ids)
             results[underlying] = {
-                "num_positions": len(positions),
-                "total_value": total_value,
+                "num_positions": len(ids),
+                "total_value": sum(valuations[i].value for i in ids),
                 "greeks": greeks,
             }
-
         return results
 
     def __repr__(self) -> str:
