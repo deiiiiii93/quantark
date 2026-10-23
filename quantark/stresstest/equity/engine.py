@@ -113,10 +113,9 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
     ) -> ScenarioResult:
         # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
         portfolio = freeze_portfolio_fixings(portfolio)
-        originals = {
-            position_id: value_position(position, portfolio.pricing_environments[position.underlying]).value
-            for position_id, position in portfolio.positions.items()
-        }
+        # the originals are priced exactly as a run prices its baseline, so engines reach the same state
+        baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments)
+        originals = {position_id: v.value for position_id, v in baseline.items()}
         return self._evaluate_scalar(portfolio, scenario, originals, baseline_value)
 
     @property

@@ -63,13 +63,9 @@ class _SpotBatch:
         if not any(k == key for k in self.seen):
             self.seen.append(key)
 
-    def widens(self, key, spot):
-        """A key already used once, at a spot the declared range covers, whose wide prepare has not failed."""
-        return (
-            self.lo <= spot <= self.hi
-            and any(k == key for k in self.seen)
-            and not any(k == key for k in self.failed)
-        )
+    def widens(self, key):
+        """A key already used once whose wide prepare has not failed (callers are inside the range)."""
+        return any(k == key for k in self.seen) and not any(k == key for k in self.failed)
 
 
 class AutocallableQuadEngineV2(BaseEngine):
@@ -103,19 +99,30 @@ class AutocallableQuadEngineV2(BaseEngine):
         state["_batch"] = None
         return state
 
+    def spot_width(self, *extra_spot_bumps):
+        """Relative half-width of the spot range a default context covers around one spot: at least 2%, and
+        twice every spot bump (the engine's own and any ``extra_spot_bumps`` a caller will apply)."""
+        bump = self.params.get_effective_bump_config()
+        bumps = [bump.spot_bump, bump.gamma_spot_bump or 0.0, *extra_spot_bumps]
+        return max([0.02] + [2 * b for b in bumps])
+
     @contextmanager
     def spot_batch(self, spot_range, *, max_contexts=32):
         """Scope a session that reuses prepared contexts across calls differing only by spot.
 
-        Inside the session a call reuses a context when the engine's cache key, the compiled contract's
-        metadata and the event phase are all equal and its spot lies in that context's range. The first
+        Inside the session a call at a spot in ``spot_range`` reuses a context when the engine's cache key,
+        the compiled contract's metadata and the event phase are all equal and its spot lies in that
+        context's range; a call outside ``spot_range`` takes the scalar single-slot path. The first
         use of a key prepares exactly the scalar context (the default width around its spot); a later use
         at a spot outside it, inside ``spot_range``, prepares one context over the whole declared range.
         A wide prepare over the resource limit (``NumericalError``) falls back to the scalar context and
         is not retried for that key. On exit the single-slot cache is restored and the contexts dropped.
         Sessions do not nest, and an engine in a session must not be shared across threads.
         """
-        lo, hi = (float(x) for x in spot_range)
+        try:
+            lo, hi = (float(x) for x in spot_range)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"spot_batch needs a (lo, hi) pair of numbers, got {spot_range!r}") from exc
         if not (np.isfinite(lo) and np.isfinite(hi)) or lo <= 0 or lo > hi:
             raise ValidationError(f"spot_batch needs a finite range 0 < lo <= hi, got {spot_range!r}")
         if isinstance(max_contexts, bool) or not isinstance(max_contexts, int) or max_contexts < 1:
@@ -139,7 +146,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         context = batch.lookup(key, spot)
         if context is not None:
             return context
-        if batch.widens(key, spot):
+        if batch.widens(key):
             try:
                 context = prepare_compiled(
                     contract, pricing_env, product.strike, self.params, [batch.lo, batch.hi],
@@ -220,8 +227,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         )
         self._validate_market(product, env, contract)
         if spot_levels is None:
-            bump = self.params.get_effective_bump_config()
-            width = max(0.02, 2 * bump.spot_bump, 2 * (bump.gamma_spot_bump or 0.0))
+            width = self.spot_width()
             spot_levels = [env.spot * (1 - width), env.spot * (1 + width)]
         pending = pending_receivable_pv(lifecycle_state, env)
         context = prepare_compiled(
@@ -298,7 +304,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         pending = pending_receivable_pv(lifecycle_state, pricing_env)
         key = self._key(contract, pricing_env, product.strike, pending, fold)
         batch = getattr(self, "_batch", None)
-        if batch is not None:
+        if batch is not None and batch.lo <= pricing_env.spot <= batch.hi:
             return self._batch_context(
                 batch, (key, _canonical(contract.metadata), event_phase), contract, product,
                 pricing_env, pending, components=components, event_phase=event_phase,

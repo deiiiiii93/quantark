@@ -95,9 +95,22 @@ def _scalar(position, envs, gc):
     return values, risks
 
 
-def _assert_close(got, want, scale, *, rel, gamma_rel):
+#: pinned ceilings, ~10x the measured batch-vs-scalar gaps at CP1 (PV 5e-12, first order 1e-10, gamma 1e-8
+#: relative; default V2 params) and inside AC5's caps (1e-9 / 1e-9 / 1e-6)
+PV_REL, FIRST_REL, GAMMA_REL = 1e-10, 1e-8, 1e-7
+
+
+def _assert_values_close(got, want, notional):
+    for g, w in zip(got, want):
+        assert abs(g - w) <= PV_REL * max(abs(w), notional), (g, w)
+
+
+def _assert_close(got, want, notional, spot=100.0):
+    """Relative ceilings per greek, with a near-zero floor of 1e-10 x notional in that greek's own units."""
     for name in want:
-        tol = (gamma_rel if name == "gamma" else rel) * max(abs(want[name]), scale)
+        rel = {"price": PV_REL, "gamma": GAMMA_REL}.get(name, FIRST_REL)
+        unit = {"delta": spot, "gamma": spot ** 2}.get(name, 1.0)
+        tol = rel * abs(want[name]) + 1e-10 * notional / unit
         assert abs(got[name] - want[name]) <= tol, (name, got[name], want[name])
 
 
@@ -111,11 +124,10 @@ def test_quad_v2_batch_matches_scalar_across_branches(make_product, make_engine,
     batch = copy.deepcopy(position)
     got_values = batch.batch_trade_values(ENVS)
     got_risks = [r.total for r in batch.batch_trade_risk(ENVS, gc)]
-    floor = 1e-10 * abs(position.get_actual_notional(_env()))
-    for g, w in zip(got_values, want_values):
-        assert abs(g - w) <= 1e-9 * max(abs(w), floor / 1e-9)
+    notional = abs(position.get_actual_notional(_env()))
+    _assert_values_close(got_values, want_values, notional)
     for g, w in zip(got_risks, want_risks):
-        _assert_close(g, w, floor / 1e-9, rel=1e-9, gamma_rel=1e-6)
+        _assert_close(g, w, notional)
 
 
 @pytest.mark.parametrize("mode", [FoldMode.TOTAL, FoldMode.DRILLDOWN])
@@ -135,9 +147,10 @@ def test_quad_v2_batch_with_folded_legs_matches_scalar(mode):
     position.cash_leg_folding = mode
     want_values, want_risks = _scalar(position, envs, gc)
     batch = copy.deepcopy(position)
-    assert all(abs(g - w) <= 1e-9 * max(abs(w), 1.0) for g, w in zip(batch.batch_trade_values(envs), want_values))
+    notional = abs(position.get_actual_notional(env))
+    _assert_values_close(batch.batch_trade_values(envs), want_values, notional)
     for g, w in zip(batch.batch_trade_risk(envs, gc), want_risks):
-        _assert_close(g.total, w, 1.0, rel=1e-9, gamma_rel=1e-6)
+        _assert_close(g.total, w, notional, spot=env.spot)
 
 
 @pytest.mark.parametrize("make_engine,product", [

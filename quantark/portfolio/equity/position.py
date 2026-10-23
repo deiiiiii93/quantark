@@ -436,12 +436,9 @@ class EquityPosition:
         if not envs or not getattr(self.engine, "supports_spot_batch", False):
             yield
             return
-        engine_bumps = self.engine.params.get_effective_bump_config()
-        bumps = [engine_bumps.spot_bump, engine_bumps.gamma_spot_bump or 0.0]
-        if greeks_calculator is not None:
-            bumps.append(greeks_calculator._bump_config.spot_bump)
-        # the width V2 prepares by default around one spot, so every bump of every env stays inside
-        width = max([0.02] + [2.0 * b for b in bumps])
+        extra = () if greeks_calculator is None else (greeks_calculator._bump_config.spot_bump,)
+        # the engine's default width around one spot, so every bump of every env stays inside
+        width = self.engine.spot_width(*extra)
         spots = [float(env.spot) for env in envs]
         with self.engine.spot_batch((min(spots) * (1.0 - width), max(spots) * (1.0 + width))):
             yield

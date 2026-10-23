@@ -148,6 +148,7 @@ def test_out_of_range_spot_takes_the_scalar_path(prepares):
     with engine.spot_batch(RANGE):
         engine.price(product, _env(100.0))
         assert engine.price(product, _env(130.0)) == want
+        assert len(engine._batch.contexts) == 1            # the out-of-range call never entered the session
     assert RANGE not in prepares                           # never widened for a spot it cannot cover
 
 
@@ -197,7 +198,8 @@ def test_small_context_budget_stays_correct():
 
 
 @pytest.mark.parametrize("spot_range,max_contexts", [((0.0, 10.0), 4), ((10.0, 5.0), 4), ((math.nan, 5.0), 4),
-                                                       ((5.0, math.inf), 4), ((5.0, 10.0), 0), ((5.0, 10.0), True)])
+                                                       ((5.0, math.inf), 4), ((5.0, 10.0), 0), ((5.0, 10.0), True),
+                                                       ((5.0,), 4), (("a", "b"), 4), (None, 4)])
 def test_bad_session_arguments_raise(spot_range, max_contexts):
     with pytest.raises(ValidationError):
         with SnowballQuadEngineV2().spot_batch(spot_range, max_contexts=max_contexts):
