@@ -1,6 +1,6 @@
 """Static equity stress at full trade value (ship spec 2026-10-23 D1–D5b, AC1–AC3, AC9a, AC9b).
 
-Every EquityPosition is valued at ``get_trade_value`` (product × signed quantity + absolute cash legs) and
+On an ``EquityPortfolio(trade_value=True)`` (opt-in since the portfolio-trade-value run) every EquityPosition is valued at ``get_trade_value`` (product × signed quantity + absolute cash legs) and
 its Greeks come from ``get_trade_risk(...).total``; each (position, environment) is priced once per scenario.
 """
 import copy
@@ -52,7 +52,7 @@ def _rebate_leg():
 
 
 def _portfolio(snowball_engine=None):
-    pf = Portfolio(portfolio_name="book", pricing_environments={"IDX": _env()}, creation_date=VAL)
+    pf = Portfolio(portfolio_name="book", pricing_environments={"IDX": _env()}, creation_date=VAL, trade_value=True)
     vanilla = EuropeanVanillaOption(strike=100.0, maturity=0.5, option_type=OptionType.CALL)
     pf.add_position(product=vanilla, quantity=10, entry_price=0.0, underlying="IDX", engine=BlackScholesEngine(),
                     entry_timestamp=VAL)

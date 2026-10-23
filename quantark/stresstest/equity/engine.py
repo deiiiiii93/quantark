@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import warnings
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -15,6 +16,8 @@ from quantark.stresstest.equity.config import EquityStressConfig
 from quantark.stresstest.equity.results import ScenarioResult, StressTestResults
 from quantark.stresstest.equity.parallel import position_task, run_tasks, scenario_task
 from quantark.stresstest.equity.valuation import (
+    AGGREGATE_GREEK_KEYS,
+    PRODUCT_AGGREGATE_KEYS,
     PositionValuation,
     aggregate_greeks,
     supports_native_batch,
@@ -25,6 +28,19 @@ from quantark.stresstest.stress.stress_applicator import StressApplicator
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
 from quantark.util.fixings import freeze_portfolio_fixings
+
+
+def _trade(portfolio: Any) -> bool:
+    """The portfolio's valuation basis: ``EquityPortfolio.trade_value`` (spec D5)."""
+    return bool(getattr(portfolio, "trade_value", False))
+
+
+def _aggregate_keys(trade: bool):
+    return AGGREGATE_GREEK_KEYS if trade else PRODUCT_AGGREGATE_KEYS
+
+
+def _value_basis(trade: bool) -> str:
+    return "trade" if trade else "product"
 
 
 def _tagged_task(tagged):
@@ -92,11 +108,12 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
 
         print("Evaluating baseline portfolio...")
         # Baseline and per-position originals always take the scalar path, once per run (spec D5, D14)
-        baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments)
+        trade = _trade(portfolio)
+        baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments, trade)
         baseline_value = sum(v.value for v in baseline.values())
         baseline_greeks = None
         if self.greeks_calculator is not None:
-            baseline_greeks = aggregate_greeks(v.greeks for v in baseline.values())
+            baseline_greeks = aggregate_greeks((v.greeks for v in baseline.values()), _aggregate_keys(trade))
         originals = {position_id: v.value for position_id, v in baseline.items()}
 
         scenario_results, execution, workers = self._run_scenarios(
@@ -113,7 +130,8 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             config_summary=self.config.get_summary(),
             metadata={
                 "baseline_label": baseline_label,
-                "valuation_mode": self._valuation_mode,
+                "valuation_mode": self._valuation_mode(trade),
+                "value_basis": _value_basis(trade),
                 "execution": execution,
                 "workers": workers,
             },
@@ -128,7 +146,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
         portfolio = freeze_portfolio_fixings(portfolio)
         # the originals are priced exactly as a run prices its baseline, so engines reach the same state
-        baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments)
+        baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments, _trade(portfolio))
         originals = {position_id: v.value for position_id, v in baseline.items()}
         return self._run_scenarios(portfolio, [scenario], originals, baseline_value)[0][0]
 
@@ -140,7 +158,15 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         baseline_value: float,
     ) -> Tuple[List[ScenarioResult], str, int]:
         """The scenario results, how they ran ("serial" | "process_pool") and the worker count."""
-        if self.config.native_batch:
+        if self.config.native_batch and not _trade(portfolio):
+            # the batch session reprices trade values; a product-path batch has no equivalent (spec D5)
+            warnings.warn(
+                "native_batch batches trade values only; this portfolio is in product mode "
+                "(trade_value=False), so the scenarios run scalar",
+                UserWarning,
+                stacklevel=3,
+            )
+        elif self.config.native_batch:
             print(f"Running {len(scenarios)} scenarios with native batching")
             return self._run_native_batch(portfolio, scenarios, originals, baseline_value)
         if self._pool_for(len(scenarios)):
@@ -160,7 +186,8 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         """Scalar scenarios as pool tasks: each prices a pickled copy of the post-baseline positions (D13)."""
         start = time.time()
         envs = [StressApplicator.apply_scenario_to_portfolio(portfolio, s) for s in scenarios]
-        tasks = [(portfolio.positions, e, self.greeks_calculator, self._use_analytical) for e in envs]
+        tasks = [(portfolio.positions, e, self.greeks_calculator, self._use_analytical, _trade(portfolio))
+                 for e in envs]
         print(f"Running {len(scenarios)} scenarios on up to {self.config.max_workers} processes")
         pooled = run_tasks(scenario_task, tasks, self.config.max_workers)
         if pooled is None:
@@ -213,7 +240,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         position_tasks = [
             (portfolio.positions[i], [e[portfolio.positions[i].underlying] for e in envs], gc) for i in batched
         ]
-        scenario_tasks = [(others, e, gc, self._use_analytical) for e in envs] if others else []
+        scenario_tasks = [(others, e, gc, self._use_analytical, True) for e in envs] if others else []
 
         execution, workers, outcome = "serial", 0, None
         if self._pool_for(len(position_tasks) + len(scenario_tasks)):
@@ -245,9 +272,9 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             results.append(result)
         return results, execution, workers
 
-    @property
-    def _valuation_mode(self) -> str:
-        return "native_batch" if self.config.native_batch else "scalar"
+    def _valuation_mode(self, trade: bool) -> str:
+        """How scenarios are valued: ``native_batch`` runs only on a trade-mode portfolio (spec D5)."""
+        return "native_batch" if self.config.native_batch and trade else "scalar"
 
     @property
     def _use_analytical(self) -> bool:
@@ -257,10 +284,11 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         self,
         positions: Dict[str, Any],
         envs: Dict[str, Any],
+        trade: bool,
     ) -> Dict[str, PositionValuation]:
-        """Each position valued once under its underlying's environment."""
+        """Each position valued once under its underlying's environment, on the portfolio's basis."""
         return value_positions(
-            positions, envs, self.greeks_calculator, trade=True, use_analytical=self._use_analytical
+            positions, envs, self.greeks_calculator, trade=trade, use_analytical=self._use_analytical
         )
 
     def _evaluate_scalar(
@@ -274,7 +302,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         scenario_start = time.time()
         stressed_envs = StressApplicator.apply_scenario_to_portfolio(portfolio, scenario)
         stressed_portfolio = self._create_stressed_portfolio(portfolio, stressed_envs)
-        valuations = self._value_positions(stressed_portfolio.positions, stressed_envs)
+        valuations = self._value_positions(stressed_portfolio.positions, stressed_envs, _trade(portfolio))
         result = self._assemble_result(
             portfolio, stressed_portfolio, scenario, valuations, originals, baseline_value
         )
@@ -295,9 +323,10 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         portfolio_pnl = stressed_value - baseline_value
         portfolio_pnl_pct = pnl_pct_of_abs_baseline(portfolio_pnl, baseline_value)
 
+        trade = _trade(portfolio)
         greeks = None
         if self.greeks_calculator is not None:
-            greeks = aggregate_greeks(v.greeks for v in valuations.values())
+            greeks = aggregate_greeks((v.greeks for v in valuations.values()), _aggregate_keys(trade))
 
         position_results: List[Dict[str, Any]] = []
         if self.config.save_detailed_results:
@@ -324,7 +353,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             position_results=position_results,
             underlying_results=underlying_results,
             extra_metrics=extra_metrics,
-            metadata={"valuation_mode": self._valuation_mode},
+            metadata={"valuation_mode": self._valuation_mode(trade), "value_basis": _value_basis(trade)},
         )
 
     def run_dynamic_scenarios(
@@ -395,7 +424,9 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
                 continue
             greeks = None
             if self.greeks_calculator is not None:
-                greeks = aggregate_greeks(valuations[i].greeks for i in ids)
+                greeks = aggregate_greeks(
+                    (valuations[i].greeks for i in ids), _aggregate_keys(_trade(stressed_portfolio))
+                )
             results[underlying] = {
                 "num_positions": len(ids),
                 "total_value": sum(valuations[i].value for i in ids),

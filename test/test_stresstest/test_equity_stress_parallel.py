@@ -32,7 +32,7 @@ def _env():
 
 
 def _book():
-    pf = Portfolio(portfolio_name="pool", pricing_environments={"X": _env()}, creation_date=VAL)
+    pf = Portfolio(portfolio_name="pool", pricing_environments={"X": _env()}, creation_date=VAL, trade_value=True)
     shared = SnowballQuadEngine(params=QuadParams())       # two positions on ONE engine object
     _add(pf, "v2_snowball", _snowball(), SnowballQuadEngineV2(), quantity=-2.0)
     _add(pf, "v2_phoenix_leg", _phoenix(), PhoenixQuadEngineV2(), legs=(_rebate_leg(),))

@@ -63,7 +63,8 @@ def _add(pf, position_id, product, engine, quantity=-1.0, legs=(), underlying="X
 
 
 def _book():
-    pf = Portfolio(portfolio_name="book", pricing_environments={"X": _env(), "IDX": _trs_env()}, creation_date=VAL)
+    pf = Portfolio(portfolio_name="book", pricing_environments={"X": _env(), "IDX": _trs_env()}, creation_date=VAL,
+                   trade_value=True)
     knocked = _snowball()
     knocked._otc_lifecycle_knocked_in = True
     _add(pf, "v2_snowball_obs", _snowball(), SnowballQuadEngineV2(), quantity=-2.0)
@@ -195,7 +196,7 @@ def test_folded_cash_legs_batch_matches_scalar(mode):
     legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).event_times)
 
     def book():
-        pf = Portfolio(portfolio_name="folded", pricing_environments={"X": copy.deepcopy(env)}, creation_date=VAL)
+        pf = Portfolio(portfolio_name="folded", pricing_environments={"X": copy.deepcopy(env)}, creation_date=VAL, trade_value=True)
         _add(pf, "folded", copy.deepcopy(product), SnowballQuadEngineV2(), quantity=2.0, legs=copy.deepcopy(legs))
         pf.positions["folded"].cash_leg_folding = mode
         return pf
@@ -221,7 +222,7 @@ def test_spot_vol_grid_prepares_scale_with_vol_points(monkeypatch):
                 for v in (-0.05, 0.0, 0.05) for s in spots]
 
     def book():
-        pf = Portfolio(portfolio_name="grid", pricing_environments={"X": _env()}, creation_date=VAL)
+        pf = Portfolio(portfolio_name="grid", pricing_environments={"X": _env()}, creation_date=VAL, trade_value=True)
         _add(pf, "v2", _plain_snowball(), SnowballQuadEngineV2())
         return pf
 
@@ -248,7 +249,7 @@ def test_unsupported_market_raises_the_same_in_both_modes():
         env = _env()
         env.vol_surface = GridVolSurface(strikes=[60.0, 100.0, 140.0], maturities=[0.25, 1.0],
                                          iv_grid=np.array([[0.3, 0.25, 0.24]] * 2))
-        pf = Portfolio(portfolio_name="smile", pricing_environments={"X": env}, creation_date=VAL)
+        pf = Portfolio(portfolio_name="smile", pricing_environments={"X": env}, creation_date=VAL, trade_value=True)
         _add(pf, "v2", _plain_snowball(), SnowballQuadEngineV2())
         return pf
 
@@ -266,7 +267,7 @@ def test_wide_prepare_over_the_limit_falls_back_and_matches_scalar():
     params = QuadV2Params(max_nodes=(narrow + wide) // 2)
 
     def book():
-        pf = Portfolio(portfolio_name="limit", pricing_environments={"X": _env()}, creation_date=VAL)
+        pf = Portfolio(portfolio_name="limit", pricing_environments={"X": _env()}, creation_date=VAL, trade_value=True)
         _add(pf, "v2", _plain_snowball(), SnowballQuadEngineV2(params))
         return pf
 
