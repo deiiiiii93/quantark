@@ -230,6 +230,60 @@ results = engine.run_static_scenarios(
 print(results.get_summary())
 ```
 
+#### What an equity position is worth under stress
+
+Static equity stress values every `EquityPosition` at its **full trade value**: the product priced by the
+position's engine × the signed quantity, plus the position's cash legs (absolute, in the holder's
+direction, never scaled by the quantity), on the event route or folded with `cash_leg_folding`. The
+Greeks come from `EquityPosition.get_trade_risk(...).total`. These are the six finite-bump Greeks (delta,
+gamma, vega, theta, rho, dividend_rho) with the calculator's bump configuration. Each position's Greeks
+dict also carries `market_value` and the estimated theta split (`convexity_theta`, `r_theta`, `q_theta`).
+Portfolio and per-underlying aggregates report `market_value, delta, gamma, vega, theta, rho,
+dividend_rho`. `greeks_method` now only affects positions without a trade API (equity swaps), which
+keep `get_market_value` / `get_greeks`. Each (position, scenario) is priced once, and the baseline once
+per run.
+
+#### Native batching (opt-in)
+
+```python
+config = StressTestConfig(calculate_greeks=True, native_batch=True)
+```
+
+With `native_batch=True` every scenario's environments are built up front. A position whose engine
+offers a spot-batch session (`engine.supports_spot_batch`) is valued over all scenarios inside one
+session: environments whose market differs **only by spot** share one prepared context, at the
+scenario spots and at the spot bumps used for delta/gamma. Theta still shifts the contract at each
+scenario's own spot. States that differ (a knock-in or knock-out decided at that spot, carried arrears,
+another vol, rate or dividend input, a folded overlay) compile to different contracts and never share. On
+a spot × vol grid the number of solves grows with the vol points, not with spot × vol. The baseline
+always takes the scalar path, and so does every other position, priced exactly as without batching.
+
+| Engine route | Batched | Why (measured 2026-10-23) |
+|---|---|---|
+| QUAD V2 (`SnowballQuadEngineV2`, `PhoenixQuadEngineV2`, `KOResetSnowballQuadEngineV2`) | yes | the readout at a spot is the exact Gaussian integral of the same contract; a context prepared over the scenario range matches the scalar engine to ≤5e-15 relative (PV), with tests pinned at PV 1e-10, first-order Greeks 1e-9, gamma 1e-7 relative |
+| PDE (all 1D routes) | no, scalar | one base-spot solve read at stress spots is off by 1e-6–5e-4 relative in PV and 2–46% in gamma, because the scalar solve re-centres its grid on each spot; linear, log-linear and cubic-spline readouts all give errors of that size |
+| QUAD V1 | no, scalar | a log-linear readout matches scalar (≤1e-14) only where the scalar solve picks the same alignment barrier; elsewhere PV is off by 7e-5 |
+| analytical, Monte Carlo, cash-flow (TRS) | no, scalar | no prepared context to share |
+
+Results carry `metadata["valuation_mode"]` (`"scalar"` or `"native_batch"`). In batch mode
+`ScenarioResult.execution_time` is the batch wall time divided by the number of scenarios.
+
+#### Parallel execution
+
+```python
+config = StressTestConfig(parallel_execution=True, max_workers=4)
+```
+
+Scenarios (scalar mode), or batched positions and per-scenario tasks (native batch), run on a spawn
+process pool. Each task prices a freshly pickled copy of the post-baseline positions, exactly as the
+serial loop prices a fresh copy, so the results are **bitwise equal to serial** and in input order. No
+prepared context is ever shared across processes or threads. `results.metadata` reports `execution`
+(`"serial"` or `"process_pool"`) and `workers`. Inputs that do not pickle, or a pool that cannot start,
+raise a `RuntimeWarning` and the run goes serial. An error raised while pricing propagates. Spawn
+re-imports the main module in every worker, so **guard a script's entry point** with
+`if __name__ == "__main__":`; without the guard the workers refuse to start and the run goes serial. A
+metrics adapter receives the stressed portfolio read-only in batch and pool modes.
+
 ### Analyzing Results
 
 ```python
@@ -404,17 +458,6 @@ from stresstest.stress.stress_applicator import StressApplicator
 # Get stress summary showing changes
 stressed_env = StressApplicator.apply_scenario_to_portfolio(portfolio, scenario)
 summary = StressApplicator.get_stress_summary(original_env, stressed_env)
-```
-
-### Parallel Execution (Future)
-
-The API is designed to support parallel execution in the future:
-
-```python
-config = StressTestConfig(
-    parallel_execution=True,
-    max_workers=4
-)
 ```
 
 ### Dynamic Scenario Analysis (Future)
