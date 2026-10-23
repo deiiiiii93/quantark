@@ -9,7 +9,7 @@ its full trade value (product × signed quantity + absolute cash legs, ``get_tra
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 
@@ -32,6 +32,11 @@ class PositionValuation:
 def has_trade_api(position: Any) -> bool:
     """True for a position valued on the trade path (``get_trade_value`` / ``get_trade_risk``)."""
     return callable(getattr(position, "get_trade_risk", None))
+
+
+def supports_native_batch(position: Any) -> bool:
+    """True when the position's engine offers a spot-batch session (QUAD V2) and the position the trade API."""
+    return has_trade_api(position) and bool(getattr(position.engine, "supports_spot_batch", False))
 
 
 def trade_greeks(position: Any, env: Any, greeks_calculator: GreeksCalculator, total: Dict[str, float]) -> Dict[str, float]:
@@ -69,6 +74,26 @@ def value_position(
         return PositionValuation(value)
     total = position.get_trade_risk(env, greeks_calculator).total
     return PositionValuation(value, trade_greeks(position, env, greeks_calculator, total))
+
+
+def batch_value_position(
+    position: Any,
+    envs: Sequence[Any],
+    greeks_calculator: Optional[GreeksCalculator] = None,
+) -> List[PositionValuation]:
+    """A session-capable position under every environment, in order, in one spot-batch session.
+
+    With Greeks the value is the trade-risk base (``total["price"]``, the same solve the bumps start from,
+    spec D9); without, ``batch_trade_values``. The caller passes a copy it owns: the engine's session state
+    lives on the position's engine for the duration of the call.
+    """
+    if greeks_calculator is None:
+        return [PositionValuation(value) for value in position.batch_trade_values(envs)]
+    risks = position.batch_trade_risk(envs, greeks_calculator)
+    return [
+        PositionValuation(risk.total["price"], trade_greeks(position, env, greeks_calculator, risk.total))
+        for env, risk in zip(envs, risks)
+    ]
 
 
 def aggregate_greeks(greeks_dicts: Iterable[Dict[str, float]]) -> Dict[str, float]:

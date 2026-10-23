@@ -97,7 +97,7 @@ def _scalar(position, envs, gc):
 
 #: pinned ceilings, ~10x the measured batch-vs-scalar gaps at CP1 (PV 5e-12, first order 1e-10, gamma 1e-8
 #: relative; default V2 params) and inside AC5's caps (1e-9 / 1e-9 / 1e-6)
-PV_REL, FIRST_REL, GAMMA_REL = 1e-10, 1e-8, 1e-7
+PV_REL, FIRST_REL, GAMMA_REL = 1e-10, 1e-9, 1e-7
 
 
 def _assert_values_close(got, want, notional):
