@@ -44,7 +44,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -232,6 +232,11 @@ class PortfolioLifecycleManager:
                 self._float_roller.register(position_id, product, self.base_date)
         for position_id in matured:
             portfolio.remove_position(position_id)
+
+    @property
+    def leg_book_ids(self) -> Tuple[str, ...]:
+        """Positions with a cash-leg book (trade mode)."""
+        return tuple(self._leg_books)
 
     def register_leg_books(self, portfolio) -> None:
         """Attach a cash-leg book to every position with cash legs (trade mode only; spec 2026-10-23 D15).

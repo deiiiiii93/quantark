@@ -31,6 +31,7 @@ class Factor(Enum):
     FIXING_REFILL = "fixing_refill"      # a missing past fixing decided at t0's spot and again at t1's
     TRADE = "trade"
     TRANSACTION_COST = "transaction_cost"
+    CASH_LEGS = "cash_legs"              # trade-value runs: the cash legs' value change and cash (one line)
     UNEXPLAINED = "unexplained"
     TOTAL = "total"
 

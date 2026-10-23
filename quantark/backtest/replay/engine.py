@@ -242,6 +242,7 @@ class ReplayBacktestEngine:
         self.leg_paid_cash: float = 0.0
         self.leg_paid_today: float = 0.0
         self.leg_receivable_pv: float = 0.0
+        self.leg_live_pv: float = 0.0
         if self._trade_value:
             self._validate_trade_legs()
 
@@ -446,6 +447,7 @@ class ReplayBacktestEngine:
             # engine as the day's pricing rather than the factory default.
             alive_specs: list[tuple] = []
             self.leg_paid_today = 0.0
+            self.leg_live_pv = 0.0
 
             for index, (bp, quantity, replay, engine) in enumerate(zip(
                 self.config.products, self._quantities, self._replays,
@@ -499,7 +501,10 @@ class ReplayBacktestEngine:
                         position = self._leg_positions[index]
                         position.product = product
                         position.engine = engine
-                        book_product_mtm += float(position.get_trade_value(env))
+                        trade_value = float(position.get_trade_value(env))
+                        book_product_mtm += trade_value
+                        # the legs' part of the mark, against the price the explain values the product at
+                        self.leg_live_pv += trade_value - quantity * price
                     else:
                         book_product_mtm += quantity * price
                     alive_specs.append(

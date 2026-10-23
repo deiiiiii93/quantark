@@ -1,6 +1,7 @@
 """Backtest recorders: one explain row set per day (spec §10)."""
 from __future__ import annotations
 
+import dataclasses
 import math
 from copy import deepcopy
 from datetime import datetime
@@ -11,7 +12,7 @@ import pandas as pd
 from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
 from quantark.asset.equity.lifecycle.cashflows import ValuationPoint
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
-from quantark.pnlexplain.base import ExplainMethod, component_sum, rows_to_frame
+from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind, component_sum, rows_to_frame
 from quantark.pnlexplain.config import PnLExplainConfig
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition
 from quantark.pnlexplain.equity.portfolio import (
@@ -97,6 +98,49 @@ def _state_point(state: Any, ts: datetime, base_date: Optional[datetime],
     return ValuationPoint(time=max(0.0, elapsed / 365.0))
 
 
+def _with_cash_legs(result: PortfolioExplainResult, pnl: float) -> PortfolioExplainResult:
+    """``result`` with one portfolio ``cash_legs`` row (spec 2026-10-23 portfolio-trade-value D18): the cash legs'
+    value change and cash for the day, a SHARED component; the portfolio total moves with it."""
+    row = ExplainRow(factor=Factor.CASH_LEGS, term="cash_legs", method=ExplainMethod.SHARED,
+                     kind=RowKind.COMPONENT, level="portfolio", pnl=pnl)
+    rows: List[ExplainRow] = []
+    placed = False
+    for existing in result.rows:
+        if existing.factor is Factor.TOTAL and not placed:
+            rows.append(row)
+            placed = True
+        rows.append(dataclasses.replace(existing, pnl=existing.pnl + pnl) if existing.factor is Factor.TOTAL
+                    else existing)
+    if not placed:
+        rows.append(row)
+    return dataclasses.replace(result, rows=tuple(rows), total_pnl=result.total_pnl + pnl)
+
+
+def _leg_total_backtest(engine: Any) -> Optional[float]:
+    """The equity backtest's cash-leg total: live legs' PV (trade value less the product's market value, the
+    price the explain values the product at) + leg receivables + leg cash paid; None without leg books."""
+    manager = getattr(engine, "lifecycle_manager", None)
+    ids = getattr(manager, "leg_book_ids", ()) if manager is not None else ()
+    if not ids:
+        return None
+    portfolio = engine.portfolio
+    live = 0.0
+    for pid in ids:
+        position = portfolio.positions.get(pid)
+        if position is None:
+            continue
+        env = portfolio.pricing_environments[position.underlying]
+        live += position.get_trade_value(env) - position.get_market_value(env)
+    return live + manager.leg_receivable_pv + manager.leg_paid_cash
+
+
+def _leg_total_replay(engine: Any) -> Optional[float]:
+    """The replay's cash-leg total (its day's live leg PV + leg receivables + leg cash paid); None without legs."""
+    if not getattr(engine, "_leg_books", None):
+        return None
+    return engine.leg_live_pv + engine.leg_receivable_pv + engine.leg_paid_cash
+
+
 class _RowSink:
     def __init__(self) -> None:
         self.frames: List[pd.DataFrame] = []
@@ -168,6 +212,7 @@ class PnLExplainRecorder:
         self._prev_book: Optional[BookSnapshot] = None
         self._prev_costs = 0.0
         self._prev_state_pnl = 0.0
+        self._prev_leg_total: Optional[float] = None
         self._pending: Dict[str, Dict[str, Any]] = {}
         self._carried: Dict[str, PositionSnapshot] = {}
 
@@ -213,9 +258,11 @@ class PnLExplainRecorder:
                                      date=ts, quantity=float(pos.quantity), lifecycle_state=state,
                                      valuation_point=_state_point(state, ts, base, pos.product), label=pid)
             live[pid] = PositionSnapshot(pid, pos.underlying, snap)
+        leg_total = _leg_total_backtest(engine)
         if self._prev_book is None:
             self._prev_book = BookSnapshot(date=ts, positions=live, environments=envs)
             self._prev_costs, self._prev_state_pnl = float(cumulative_costs), float(state_pnl)
+            self._prev_leg_total = leg_total
             return
 
         trades = [t for t in (_trade_from_record(r) for r in trade_records) if t is not None]
@@ -263,6 +310,9 @@ class PnLExplainRecorder:
             extra_costs = 0.0
         result = explain_portfolio(self._prev_book, book_t1, trades=trades, transaction_costs=extra_costs,
                                    transitions=transitions, config=self.config)
+        if leg_total is not None:
+            result = _with_cash_legs(result, leg_total - (self._prev_leg_total or 0.0))
+        self._prev_leg_total = leg_total
         self._sink.add(ts, result, self.config.methods, float(state_pnl) - self._prev_state_pnl)
 
         # tomorrow's t0: live positions + terminal tombstones with pending cash
@@ -326,6 +376,7 @@ class ReplayPnLExplainRecorder:
         self._prev_book: Optional[BookSnapshot] = None
         self._prev_costs = 0.0
         self._prev_state_pnl = 0.0
+        self._prev_leg_total: Optional[float] = None
         self._pending: Dict[str, Dict[str, Any]] = {}
 
     @staticmethod
@@ -402,7 +453,9 @@ class ReplayPnLExplainRecorder:
             legs[pid] = self._leg(underlying, ts, spot, closed[pid], pid.split(":", 1)[1], 0.0, True)
 
         book_t1 = BookSnapshot(date=ts, positions=live, environments={underlying: env_copy}, quoted_legs=legs)
+        leg_total = _leg_total_replay(engine)
         if self._prev_book is None:
+            self._prev_leg_total = leg_total
             # the baseline carries only legs still held: a leg opened and closed on day one is
             # a tombstone and must not be expected to close again tomorrow
             self._prev_book = BookSnapshot(date=ts, positions=live, environments={underlying: env_copy},
@@ -424,6 +477,9 @@ class ReplayPnLExplainRecorder:
             extra = 0.0
         result = explain_portfolio(self._prev_book, book_t1, trades=trades, transaction_costs=extra,
                                    transitions=transitions, config=self.config)
+        if leg_total is not None:
+            result = _with_cash_legs(result, leg_total - (self._prev_leg_total or 0.0))
+        self._prev_leg_total = leg_total
         self._sink.add(ts, result, self.config.methods, float(state_row["total_pnl"]) - self._prev_state_pnl)
 
         live_legs = {pid: leg for pid, leg in legs.items() if not leg.tombstone}
