@@ -36,12 +36,15 @@ class DeterministicLeg(CashLeg):
 
     def time_shift(self, dt: float, *, keep_landing: bool = False) -> "Optional[DeterministicLeg]":
         """The leg seen ``dt`` years later (spec 2026-10-23 D10): the payment moves by ``-dt``; ``None`` once it
-        is no longer ahead (a landing payment kept at 0 only with ``keep_landing``)."""
-        if float(dt) <= 0.0:
+        is no longer ahead (a landing payment kept at 0 only with ``keep_landing``). ``dt == 0`` drops a payment
+        due at 0 (paid on that day) and otherwise returns the leg itself."""
+        if float(dt) < 0.0:
             return self
         payment_time = roll_payment_time(self.payment_time, dt, keep_landing=keep_landing)
         if payment_time is None:
             return None
+        if payment_time == self.payment_time:
+            return self
         return replace(self, payment_time=payment_time)
 
     def requires_event_distribution(self) -> bool:

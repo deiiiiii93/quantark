@@ -7,7 +7,7 @@ from quantark.cashleg.autocallable_leg import (
     AutocallableLegType,
     PvFormula,
 )
-from quantark.cashleg.base import CashLeg, LegDirection
+from quantark.cashleg.base import CashLeg, LegDirection, roll_payment_time
 from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
 from quantark.cashleg.deterministic_leg import DeterministicLeg
 from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
@@ -22,6 +22,7 @@ from quantark.cashleg.folding import (
     is_foldable,
 )
 from quantark.cashleg.leg_schedule import LegSchedule
+from quantark.cashleg.booking import LegBookDay, LegCashBook, OutcomeKind, RealizedOutcome, run_time
 from quantark.cashleg.leg_valuator import (
     LegPV,
     TradeGreeks,
@@ -30,6 +31,12 @@ from quantark.cashleg.leg_valuator import (
 )
 
 __all__ = [
+    "run_time",
+    "roll_payment_time",
+    "RealizedOutcome",
+    "OutcomeKind",
+    "LegCashBook",
+    "LegBookDay",
     "AccrualBasis",
     "AccrualLeg",
     "AutocallableCashLeg",

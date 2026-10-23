@@ -64,6 +64,10 @@ def test_deterministic_moves_drops_and_lands():
     landed = leg.time_shift(0.25 + 1e-12, keep_landing=True)  # landing within Tolerance.ZERO, kept at 0
     assert landed.payment_time == 0.0
     assert leg.time_shift(0.0) is leg and leg.time_shift(-0.1) is leg
+    # day 0 of a run: a payment due at 0 is paid that day and leaves the leg; nothing else moves
+    due_now = DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=50.0, payment_time=0.0)
+    assert due_now.time_shift(0.0) is None
+    assert due_now.time_shift(0.0, keep_landing=True) is due_now
 
 
 # --- AccrualLeg ------------------------------------------------------------------------------------------------
@@ -92,6 +96,7 @@ def test_accrual_landing_and_exhaustion():
     kept = leg.time_shift(0.35, keep_landing=True)
     np.testing.assert_array_equal(kept.schedule.payment_times, [0.0, 0.6 - 0.35, 0.85 - 0.35])
     assert leg.time_shift(0.9) is None
+    assert leg.time_shift(0.0) is leg
 
 
 def test_repeated_shifts_keep_fractions_exact():

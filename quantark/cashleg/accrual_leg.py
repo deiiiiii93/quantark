@@ -190,10 +190,10 @@ class AccrualLeg(CashLeg):
         time drops once that payment is no longer ahead (``roll_payment_time``; a landing payment kept at 0
         only with ``keep_landing``); ``None`` when every period has dropped. ``AT_MATURITY`` periods pay at the
         maturity settlement, read from the distribution, so none drops on its schedule time — the owner ends
-        the leg with the note.
+        the leg with the note. ``dt == 0`` drops the periods paid at 0 and otherwise returns the leg itself.
         """
         dt = float(dt)
-        if dt <= 0.0:
+        if dt < 0.0:
             return self
         schedule = self.schedule
         fractions = self.accrual_fractions()
@@ -209,6 +209,8 @@ class AccrualLeg(CashLeg):
             payments = [t for t in rolled if t is not None]
             if not payments:
                 return None
+        if dt == 0.0 and all(keep):
+            return self
         idx = np.flatnonzero(keep)
 
         def pick(dates):
