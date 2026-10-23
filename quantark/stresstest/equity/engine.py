@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.portfolio import Portfolio
@@ -13,18 +13,24 @@ from quantark.portfolio.base import BasePortfolio
 from quantark.stresstest.base import BaseStressEngine, ScenarioRunner, StressMetricsAdapter
 from quantark.stresstest.equity.config import EquityStressConfig
 from quantark.stresstest.equity.results import ScenarioResult, StressTestResults
+from quantark.stresstest.equity.parallel import position_task, run_tasks, scenario_task
 from quantark.stresstest.equity.valuation import (
     PositionValuation,
     aggregate_greeks,
-    batch_value_position,
     supports_native_batch,
-    value_position,
+    value_positions,
 )
 from quantark.stresstest.scenario.scenario import Scenario
 from quantark.stresstest.stress.stress_applicator import StressApplicator
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
 from quantark.util.fixings import freeze_portfolio_fixings
+
+
+def _tagged_task(tagged):
+    """A pool task carrying its own function (position or scenario task); module level for spawn."""
+    fn, task = tagged
+    return fn(task)
 
 
 class EquityStressMetricsAdapter(StressMetricsAdapter):
@@ -93,7 +99,9 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             baseline_greeks = aggregate_greeks(v.greeks for v in baseline.values())
         originals = {position_id: v.value for position_id, v in baseline.items()}
 
-        scenario_results = self._run_scenarios(portfolio, scenarios, originals, baseline_value)
+        scenario_results, execution, workers = self._run_scenarios(
+            portfolio, scenarios, originals, baseline_value
+        )
 
         total_time = time.time() - start_time
 
@@ -103,7 +111,12 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             scenario_results=scenario_results,
             total_execution_time=total_time,
             config_summary=self.config.get_summary(),
-            metadata={"baseline_label": baseline_label, "valuation_mode": self._valuation_mode},
+            metadata={
+                "baseline_label": baseline_label,
+                "valuation_mode": self._valuation_mode,
+                "execution": execution,
+                "workers": workers,
+            },
         )
 
     def evaluate_scenario(
@@ -117,7 +130,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         # the originals are priced exactly as a run prices its baseline, so engines reach the same state
         baseline = self._value_positions(portfolio.positions, portfolio.pricing_environments)
         originals = {position_id: v.value for position_id, v in baseline.items()}
-        return self._run_scenarios(portfolio, [scenario], originals, baseline_value)[0]
+        return self._run_scenarios(portfolio, [scenario], originals, baseline_value)[0][0]
 
     def _run_scenarios(
         self,
@@ -125,15 +138,54 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         scenarios: Sequence[Scenario],
         originals: Dict[str, float],
         baseline_value: float,
-    ) -> List[ScenarioResult]:
+    ) -> Tuple[List[ScenarioResult], str, int]:
+        """The scenario results, how they ran ("serial" | "process_pool") and the worker count."""
         if self.config.native_batch:
             print(f"Running {len(scenarios)} scenarios with native batching")
             return self._run_native_batch(portfolio, scenarios, originals, baseline_value)
+        if self._pool_for(len(scenarios)):
+            pooled = self._run_scalar_pool(portfolio, scenarios, originals, baseline_value)
+            if pooled is not None:
+                return pooled
         results = []
         for i, scenario in enumerate(scenarios, 1):
             print(f"Running scenario {i}/{len(scenarios)}: {scenario.name}")
             results.append(self._evaluate_scalar(portfolio, scenario, originals, baseline_value))
-        return results
+        return results, "serial", 0
+
+    def _pool_for(self, n_tasks: int) -> bool:
+        return self.config.parallel_execution and self.config.max_workers > 1 and n_tasks > 1
+
+    def _run_scalar_pool(self, portfolio, scenarios, originals, baseline_value):
+        """Scalar scenarios as pool tasks: each prices a pickled copy of the post-baseline positions (D13)."""
+        start = time.time()
+        envs = [StressApplicator.apply_scenario_to_portfolio(portfolio, s) for s in scenarios]
+        tasks = [(portfolio.positions, e, self.greeks_calculator, self._use_analytical) for e in envs]
+        print(f"Running {len(scenarios)} scenarios on up to {self.config.max_workers} processes")
+        pooled = run_tasks(scenario_task, tasks, self.config.max_workers)
+        if pooled is None:
+            return None
+        valuations, workers = pooled
+        per_scenario = (time.time() - start) / len(scenarios)
+        results = []
+        for scenario, scenario_envs, rows in zip(scenarios, envs, valuations):
+            result = self._assemble_result(
+                portfolio, self._view(portfolio, scenario_envs), scenario, rows, originals, baseline_value
+            )
+            result.execution_time = per_scenario
+            results.append(result)
+        return results, "process_pool", workers
+
+    @staticmethod
+    def _view(portfolio: Portfolio, envs: Dict[str, Any]) -> Portfolio:
+        """The stressed portfolio for assembly: scenario envs, the positions shared (read, never priced)."""
+        stressed = Portfolio(
+            portfolio_name=portfolio.portfolio_name + "_stressed",
+            pricing_environments=envs,
+            creation_date=portfolio.creation_date,
+        )
+        stressed.positions = dict(portfolio.positions)
+        return stressed
 
     def _run_native_batch(
         self,
@@ -152,35 +204,41 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         batched = [i for i, p in portfolio.positions.items() if supports_native_batch(p)]
         others = {i: p for i, p in portfolio.positions.items() if i not in set(batched)}
 
+        gc = self.greeks_calculator
+        position_tasks = [
+            (portfolio.positions[i], [e[portfolio.positions[i].underlying] for e in envs], gc) for i in batched
+        ]
+        scenario_tasks = [(others, e, gc, self._use_analytical) for e in envs] if others else []
+
+        execution, workers, outcome = "serial", 0, None
+        if self._pool_for(len(position_tasks) + len(scenario_tasks)):
+            tagged = [(position_task, t) for t in position_tasks] + [(scenario_task, t) for t in scenario_tasks]
+            pooled = run_tasks(_tagged_task, tagged, self.config.max_workers)
+            if pooled is not None:
+                outcome, workers = pooled
+                execution = "process_pool"
+        if outcome is None:
+            # serially, each task on its own copy exactly as a worker gets one (spec D14)
+            outcome = [position_task(deepcopy(t)) for t in position_tasks]
+            outcome += [scenario_task(deepcopy(t)) for t in scenario_tasks]
+
         valuations: List[Dict[str, PositionValuation]] = [{} for _ in scenarios]
-        for position_id in batched:
-            position = deepcopy(portfolio.positions[position_id])
-            rows = batch_value_position(
-                position, [e[position.underlying] for e in envs], self.greeks_calculator
-            )
+        for position_id, rows in zip(batched, outcome[: len(position_tasks)]):
             for k, row in enumerate(rows):
                 valuations[k][position_id] = row
-        if others:
-            for k, scenario_envs in enumerate(envs):
-                valuations[k].update(self._value_positions(deepcopy(others), scenario_envs))
+        for k, rows in enumerate(outcome[len(position_tasks):]):
+            valuations[k].update(rows)
 
         per_scenario = (time.time() - batch_start) / len(scenarios)
         results = []
         for scenario, scenario_envs, rows in zip(scenarios, envs, valuations):
-            # positions are shared, not copied: assembly reads their terms, it never prices them
-            stressed = Portfolio(
-                portfolio_name=portfolio.portfolio_name + "_stressed",
-                pricing_environments=scenario_envs,
-                creation_date=portfolio.creation_date,
-            )
-            stressed.positions = dict(portfolio.positions)
             ordered = {position_id: rows[position_id] for position_id in portfolio.positions}
             result = self._assemble_result(
-                portfolio, stressed, scenario, ordered, originals, baseline_value
+                portfolio, self._view(portfolio, scenario_envs), scenario, ordered, originals, baseline_value
             )
             result.execution_time = per_scenario
             results.append(result)
-        return results
+        return results, execution, workers
 
     @property
     def _valuation_mode(self) -> str:
@@ -196,15 +254,9 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
         envs: Dict[str, Any],
     ) -> Dict[str, PositionValuation]:
         """Each position valued once under its underlying's environment."""
-        return {
-            position_id: value_position(
-                position,
-                envs[position.underlying],
-                self.greeks_calculator,
-                use_analytical=self._use_analytical,
-            )
-            for position_id, position in positions.items()
-        }
+        return value_positions(
+            positions, envs, self.greeks_calculator, use_analytical=self._use_analytical
+        )
 
     def _evaluate_scalar(
         self,

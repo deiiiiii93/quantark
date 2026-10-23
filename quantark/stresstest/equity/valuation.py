@@ -76,6 +76,22 @@ def value_position(
     return PositionValuation(value, trade_greeks(position, env, greeks_calculator, total))
 
 
+def value_positions(
+    positions: Dict[str, Any],
+    envs: Dict[str, Any],
+    greeks_calculator: Optional[GreeksCalculator] = None,
+    *,
+    use_analytical: bool = True,
+) -> Dict[str, PositionValuation]:
+    """Each position valued once under its underlying's environment, in the positions' order."""
+    return {
+        position_id: value_position(
+            position, envs[position.underlying], greeks_calculator, use_analytical=use_analytical
+        )
+        for position_id, position in positions.items()
+    }
+
+
 def batch_value_position(
     position: Any,
     envs: Sequence[Any],
