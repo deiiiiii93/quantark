@@ -14,6 +14,7 @@ from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.cashleg import (
     CashLeg,
     FoldMode,
+    LegClock,
     LegPV,
     TradeGreeks,
     TradeValueBreakdown,
@@ -48,6 +49,11 @@ class EquityPosition:
         entry_trade_value: Optional signed trade total at entry (product × quantity
             plus the absolute cash legs, the ``get_trade_value`` basis). Trade PnL is
             measured against it; a position with cash legs needs it in trade mode.
+        cash_legs_clock: The origin the cash-leg times count from. ``LegClock.CONTRACT``
+            (default): the trade's initial date (``product.initial_date``; the valuation
+            date when the product has none) — every trade valuation first rolls the legs
+            to the valuation date (``on_valuation_clock``). ``LegClock.VALUATION``: the
+            legs are already on the valuation date (a multi-day run's rolled legs).
     """
     product: BaseEquityProduct
     quantity: float
@@ -60,6 +66,7 @@ class EquityPosition:
     lifecycle_state: Optional[Any] = None
     cash_leg_folding: Optional[FoldMode] = None
     entry_trade_value: Optional[float] = None
+    cash_legs_clock: LegClock = LegClock.CONTRACT
     
     def __post_init__(self):
         """Validate position parameters."""
@@ -85,6 +92,10 @@ class EquityPosition:
         if self.entry_trade_value is not None and not is_valid_number(self.entry_trade_value):
             raise ValidationError(
                 f"entry_trade_value must be a finite number, got {self.entry_trade_value!r}"
+            )
+        if not isinstance(self.cash_legs_clock, LegClock):
+            raise ValidationError(
+                f"cash_legs_clock must be a LegClock, got {self.cash_legs_clock!r}"
             )
         if self.cash_leg_folding is not None and not isinstance(self.cash_leg_folding, FoldMode):
             raise ValidationError(
@@ -133,6 +144,28 @@ class EquityPosition:
             streams = streams | leg.required_event_types()
         return streams
 
+    def on_valuation_clock(self, pricing_env: PricingEnvironment) -> "EquityPosition":
+        """This position with its cash legs counted from ``pricing_env``'s valuation date (user decision 2026-10-24).
+
+        Leg times on the ``CONTRACT`` clock count from the trade's initial date: they roll to the valuation date by
+        whole days / 365 exactly as a multi-day run's ``LegCashBook`` rolls them (``legs_seen_from``) — a flow paid
+        strictly before the valuation date is history, a flow due that day is kept at 0 — so a trade has one value
+        in the point-in-time tools and on a run's first day. Returns ``self`` when nothing moves: no legs, legs
+        already on the ``VALUATION`` clock, a product without ``initial_date``, or a valuation on or before it.
+        """
+        if not self.cash_legs or self.cash_legs_clock is LegClock.VALUATION:
+            return self
+        from quantark.cashleg import legs_seen_from, run_time
+
+        origin = getattr(self.product, "initial_date", None)
+        valuation_date = getattr(pricing_env, "valuation_date", None)
+        if origin is None or valuation_date is None or run_time(origin, valuation_date) <= 0.0:
+            return self
+        aged = copy.copy(self)
+        aged.cash_legs = list(legs_seen_from(self.cash_legs, origin, valuation_date))
+        aged.cash_legs_clock = LegClock.VALUATION
+        return aged
+
     def get_trade_value(self, pricing_env: PricingEnvironment) -> float:
         """
         Calculate full trade value including product and attached cash legs.
@@ -146,6 +179,9 @@ class EquityPosition:
         """
         if not self.cash_legs:
             return self.get_market_value(pricing_env)
+        aged = self.on_valuation_clock(pricing_env)
+        if aged is not self:
+            return aged.get_trade_value(pricing_env)
         if self.cash_leg_folding is not None:
             return self._folded_value(self.engine, pricing_env, FoldMode.TOTAL).total
 
@@ -178,6 +214,9 @@ class EquityPosition:
                 product_npv=self.get_market_value(pricing_env),
                 leg_pvs={},
             )
+        aged = self.on_valuation_clock(pricing_env)
+        if aged is not self:
+            return aged.get_trade_value_breakdown(pricing_env)
         if self.cash_leg_folding is FoldMode.TOTAL:
             raise ValidationError(
                 "a per-leg breakdown needs cash_leg_folding=FoldMode.DRILLDOWN "
@@ -238,6 +277,9 @@ class EquityPosition:
         frozen = self.with_past_fixings_frozen(pricing_env)
         if frozen is not self:
             return frozen.get_trade_greeks(pricing_env, greeks_calculator)
+        aged = self.on_valuation_clock(pricing_env)
+        if aged is not self:
+            return aged.get_trade_greeks(pricing_env, greeks_calculator)
         from quantark.asset.equity.riskmeasures.greeks.bump_envs import (
             build_rate_bumped_env,
         )
@@ -304,6 +346,9 @@ class EquityPosition:
         frozen = self.with_past_fixings_frozen(pricing_env)
         if frozen is not self:
             return frozen.get_trade_risk(pricing_env, greeks_calculator, greeks)
+        aged = self.on_valuation_clock(pricing_env)
+        if aged is not self:
+            return aged.get_trade_risk(pricing_env, greeks_calculator, greeks)
         if self.cash_legs and self.cash_leg_folding is not None:
             return self._folded_trade_risk(pricing_env, greeks_calculator, greeks)
 

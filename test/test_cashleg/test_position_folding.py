@@ -11,7 +11,7 @@ from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadE
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.riskmeasures import GreeksCalculator
-from quantark.cashleg import DeterministicLeg, FoldMode, LegDirection
+from quantark.cashleg import DeterministicLeg, FoldMode, LegClock, LegDirection
 from quantark.execution.errors import CapabilityError
 from quantark.portfolio.equity.position import EquityPosition
 from quantark.util.calendar import CalendarType, create_calendar
@@ -28,9 +28,10 @@ CAL = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
 T0 = datetime(2026, 3, 16)
 
 
-def _position(product, engine, legs, quantity=1.0, mode=None):
+def _position(product, engine, legs, quantity=1.0, mode=None, clock=LegClock.CONTRACT):
     pos = EquityPosition(product=product, quantity=quantity, entry_price=0.0, underlying="X",
-                         engine=engine, entry_timestamp=datetime(2024, 1, 1), cash_legs=list(legs))
+                         engine=engine, entry_timestamp=datetime(2024, 1, 1), cash_legs=list(legs),
+                         cash_legs_clock=clock)
     pos.cash_leg_folding = mode
     return pos
 
@@ -135,9 +136,12 @@ def test_theta_and_lifecycle_states_match_the_event_route(case):
         product._otc_lifecycle_knocked_in = True
     legs = [leg for leg in legs if _leg_valid(leg, product, env)]
     gc = GreeksCalculator()
+    # the legs are built on the aged contract's remaining grid as seen at env: already on the valuation clock
+    clock = LegClock.VALUATION
     for mode in (FoldMode.TOTAL, FoldMode.DRILLDOWN):
-        want = _position(product, SnowballPDESolver(PDEParams()), legs).get_trade_risk(env, gc, GREEKS)
-        got = _position(product, SnowballPDESolver(PDEParams()), legs, mode=mode).get_trade_risk(env, gc, GREEKS)
+        want = _position(product, SnowballPDESolver(PDEParams()), legs, clock=clock).get_trade_risk(env, gc, GREEKS)
+        got = _position(product, SnowballPDESolver(PDEParams()), legs, mode=mode, clock=clock) \
+            .get_trade_risk(env, gc, GREEKS)
         for name in want.total:
             _close(got.total[name], want.total[name], rel=1e-8)
 

@@ -42,7 +42,11 @@ _BUMP_IDS = ("base", "spot_up", "spot_down", "vol_up", "rate_up", "div_up",
 @dataclasses.dataclass
 class TradeState:
     """Resolved per-trade base the bump transformer mutates (same type in,
-    same type out; never in place — the planner's purity check verifies)."""
+    same type out; never in place — the planner's purity check verifies).
+
+    ``cash_legs`` are resolved to ``pricing_env``'s valuation date (the
+    ``LegClock.VALUATION`` frame): for a position whose legs count from the
+    trade's initial date, pass ``position.on_valuation_clock(env).cash_legs``."""
 
     product: object
     pricing_env: object

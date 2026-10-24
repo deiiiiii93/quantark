@@ -255,7 +255,7 @@ class PortfolioLifecycleManager:
         if not self.trade_value:
             return
         from quantark.asset.equity.lifecycle.snapping import snap_time
-        from quantark.cashleg.booking import LegCashBook, refuse_floating_notional
+        from quantark.cashleg.booking import LegCashBook, LegClock, refuse_floating_notional
         from quantark.execution.errors import CapabilityError
 
         for position_id, position in portfolio.positions.items():
@@ -283,6 +283,8 @@ class PortfolioLifecycleManager:
             self._leg_books[position_id] = book
             self._leg_underlyings[position_id] = position.underlying
             position.cash_legs = list(book.legs_at_run_start())
+            # the book rolls the legs from here on: they are on the valuation clock (user decision 2026-10-24)
+            position.cash_legs_clock = LegClock.VALUATION
 
     def _leg_outcome(self, tracker, book, events: List[LifecycleEvent], date: pd.Timestamp, env):
         """The realized outcome a terminating autocallable event gives the position's cash legs (D12/D13)."""

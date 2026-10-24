@@ -140,6 +140,16 @@ the signed quantity plus the position's cash legs (absolute, in the holder's dir
 `EquitySwapPosition` (TRS) keeps its own path in both modes. The flag defaults to `False`, the product path,
 bitwise as before.
 
+**Cash-leg times count from the trade's initial date.** A leg's payment and accrual times are years from the
+contract's `initial_date` (from the valuation date when the product has none). Every trade valuation
+(`get_trade_value`, `get_trade_value_breakdown`, `get_trade_greeks`, `get_trade_risk`, so the portfolio, static
+stress, VaR and SIMM) first rolls the legs to the valuation date by whole days / 365, exactly as the multi-day runs'
+`LegCashBook` does: a flow paid before the valuation date is history, a flow due that day counts at t = 0, and each
+accrual period keeps its full amount. Example: struck 2026-10-01, valued 2026-10-10, a 5 % leg paying at
+2027-10-01 pays 1.0 × 5 % of its base, discounted over the 356 days to payment. `EquityPosition.on_valuation_clock(env)`
+returns the rolled position; `cash_legs_clock=LegClock.VALUATION` marks legs already on the valuation date (the
+lifecycle manager and the replay engine set it on the legs they roll), so they are not rolled twice.
+
 ## Export Formats
 
 ### Excel Export Structure

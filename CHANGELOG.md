@@ -45,6 +45,17 @@ During 0.x the public API may still change between minor versions.
 
 ### Changed
 
+- Cash-leg times count from the trade's `initial_date` in every consumer, not only in multi-day runs. Point-in-time
+  trade valuation (`EquityPosition.get_trade_value` / `get_trade_value_breakdown` / `get_trade_greeks` /
+  `get_trade_risk`, hence trade-value portfolios, static stress, VaR and SIMM) rolls the legs from the initial date to
+  the valuation date with the booking's own rule (`quantark.cashleg.legs_seen_from`), so an aged trade has one day-0
+  value across the static tools, backtests, dynamic scenarios and replay. New `EquityPosition.cash_legs_clock`
+  (`LegClock.CONTRACT` default, `LegClock.VALUATION` for legs already rolled) and `on_valuation_clock(env)`.
+  **Rebooking needed:** an aged trade (valuation after `initial_date`) whose legs were booked with times counted from
+  the valuation date now reprices — rebook its leg times from the initial date, or set
+  `cash_legs_clock=LegClock.VALUATION` on it. Trades valued on their initial date, and products without
+  `initial_date`, are unchanged. Numeric autocallable records are still read from the valuation date in static
+  pricing (the lifecycle trackers age them from `initial_date`): pass an aged copy for an aged numeric contract.
 - Static equity stress follows `EquityPortfolio.trade_value` (default product mode): a product-mode portfolio is
   valued with `get_market_value` / `get_greeks` again; `native_batch` runs on trade-value portfolios only. New
   result metadata `value_basis`.

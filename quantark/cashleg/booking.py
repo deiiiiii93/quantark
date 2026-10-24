@@ -1,7 +1,8 @@
 """Multi-day cash-leg booking (spec 2026-10-23 portfolio-trade-value D11–D14).
 
-A position's cash legs carry year fractions measured from the run's start date. Each run day ``d`` the book
-rolls the ORIGINAL legs by ``τ_d = whole days / 365`` from that anchor (the frame lifecycle trackers, the float
+A position's cash legs carry year fractions measured from the contract's clock origin (its ``initial_date``, else
+the run's start date; the same origin point-in-time valuation rolls from, ``legs_seen_from``). Each run day ``d`` the
+book rolls the ORIGINAL legs by ``τ_d = whole days / 365`` from that anchor (the frame lifecycle trackers, the float
 roller and the ledger already use; no accumulated drift) and pays, once and at nominal, every flow the shared
 landing predicate (:func:`quantark.cashleg.base.roll_payment_time`) says is no longer ahead.
 
@@ -53,6 +54,30 @@ def _day(value) -> _date:
 def run_time(anchor, date) -> float:
     """Run-frame time of ``date``: whole days from ``anchor`` over 365 (time of day ignored)."""
     return (_day(date) - _day(anchor)).days / DAYS_PER_YEAR
+
+
+class LegClock(Enum):
+    """The origin a position's cash-leg times are measured from (user decision 2026-10-24).
+
+    ``CONTRACT``: the contract's clock origin (``lifecycle_clock_origin``: the product's ``initial_date`` when set,
+    else the valuation date); point-in-time valuation rolls the legs to the valuation date. ``VALUATION``: the
+    valuation date itself — legs a multi-day run has already rolled to the day it values them.
+    """
+
+    CONTRACT = "contract"
+    VALUATION = "valuation"
+
+
+def legs_seen_from(legs: Sequence[CashLeg], anchor, date) -> Tuple[CashLeg, ...]:
+    """Legs whose times run from ``anchor``, seen on ``date`` before that day's close: rolled by
+    ``τ = max(0, run_time(anchor, date))``, a flow paid strictly before ``date`` dropped (history), a flow due on
+    ``date`` kept at 0. A ``date`` on or before ``anchor`` returns the legs themselves (the multi-day books' run-start
+    roll and point-in-time valuation share this one function)."""
+    tau = max(0.0, run_time(anchor, date))
+    if tau == 0.0:
+        return tuple(legs)
+    rolled = (leg.time_shift(tau, keep_landing=True) for leg in legs)
+    return tuple(leg for leg in rolled if leg is not None)
 
 
 class OutcomeKind(Enum):
@@ -299,6 +324,7 @@ class LegCashBook:
         #: flows paid before the run started (history: never booked)
         self.history: List[Tuple[FlowKey, float]] = []
         self.run_start_time = 0.0 if run_start is None else max(0.0, run_time(anchor_date, run_start))
+        self._run_start = run_start
         if self.run_start_time > 0.0:
             for leg in self.legs:
                 for i, amount, t in _live_flows(leg, self.unit_notional):
@@ -319,8 +345,10 @@ class LegCashBook:
     def legs_at_run_start(self) -> Tuple[CashLeg, ...]:
         """The legs as the run's first (pre-close) valuation sees them: rolled to the run start, a flow due that
         day kept at 0 (it pays on the run's first close)."""
-        rolled = (leg.time_shift(self.run_start_time, keep_landing=True) for leg in self.legs)
-        return tuple(leg for leg in rolled if leg is not None)
+        if self.run_start_time == 0.0:
+            rolled = (leg.time_shift(0.0, keep_landing=True) for leg in self.legs)
+            return tuple(leg for leg in rolled if leg is not None)
+        return legs_seen_from(self.legs, self.anchor_date, self._run_start)
 
     def _advance(self, date) -> float:
         tau = run_time(self.anchor_date, date)

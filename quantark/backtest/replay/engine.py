@@ -804,7 +804,7 @@ class ReplayBacktestEngine:
         are history. A product matured before the run books nothing (user ruling 2026-10-09).
         """
         from quantark.asset.equity.lifecycle.snapping import snap_time
-        from quantark.cashleg.booking import LegCashBook, refuse_floating_notional
+        from quantark.cashleg.booking import LegCashBook, LegClock, refuse_floating_notional
         from quantark.portfolio.equity.position import EquityPosition
 
         for index, (bp, replay, engine) in enumerate(
@@ -828,6 +828,8 @@ class ReplayBacktestEngine:
                 run_start=self._start_date,
             )
             position.cash_legs = list(book.legs_at_run_start())
+            # the book rolls the legs from here on: they are on the valuation clock (user decision 2026-10-24)
+            position.cash_legs_clock = LegClock.VALUATION
             replay.record_events = True
             self._leg_books[index] = book
             self._leg_positions[index] = position

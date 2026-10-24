@@ -204,6 +204,7 @@ class BacktestEngine:
                 added.cash_legs = list(getattr(position, "cash_legs", None) or [])
                 added.cash_leg_folding = getattr(position, "cash_leg_folding", None)
                 added.entry_trade_value = getattr(position, "entry_trade_value", None)
+                added.cash_legs_clock = getattr(position, "cash_legs_clock", added.cash_legs_clock)
 
         self.logger.logger.info(
             f"Initialized portfolio with {len(self.config.initial_positions)} positions"

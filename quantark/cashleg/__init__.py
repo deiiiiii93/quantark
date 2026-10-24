@@ -22,7 +22,15 @@ from quantark.cashleg.folding import (
     is_foldable,
 )
 from quantark.cashleg.leg_schedule import LegSchedule
-from quantark.cashleg.booking import LegBookDay, LegCashBook, OutcomeKind, RealizedOutcome, run_time
+from quantark.cashleg.booking import (
+    LegBookDay,
+    LegCashBook,
+    LegClock,
+    OutcomeKind,
+    RealizedOutcome,
+    legs_seen_from,
+    run_time,
+)
 from quantark.cashleg.leg_valuator import (
     LegPV,
     TradeGreeks,
@@ -32,6 +40,8 @@ from quantark.cashleg.leg_valuator import (
 
 __all__ = [
     "run_time",
+    "LegClock",
+    "legs_seen_from",
     "roll_payment_time",
     "RealizedOutcome",
     "OutcomeKind",
