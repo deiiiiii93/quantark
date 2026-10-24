@@ -240,10 +240,20 @@ class AutocallableLifecycleTracker:
         # time of day must not age the copy one day less than the close that books the record
         elapsed = 0.0 if origin is None else max(
             0.0, (pd.Timestamp(date).normalize() - origin.normalize()).days / 365.0)
+        return self.age_copy(product, elapsed, date, pricing_env, initial=initial, decay_maturity=origin is not None)
+
+    def age_copy(
+        self, product: Any, elapsed: float, date, pricing_env: PricingEnvironment, *, initial: bool,
+        decay_maturity: bool = True,
+    ) -> Any:
+        """Age the pricing copy ``product`` (mutated and returned) by ``elapsed`` years to ``date``: the maturity, the
+        barrier schedules and the banked accrual, as ``product_for_pricing`` ages its copy. ``initial`` keeps a record
+        due on ``date`` at time 0 (before that day's close). Point-in-time valuation ages a booked numeric note with
+        these same steps (``age_note_to_valuation_date``; user decision 2026-10-24)."""
         if (
             getattr(product, "exercise_date", None) is None
             and getattr(product, "maturity", None) is not None
-            and origin is not None
+            and decay_maturity
         ):
             if participates(product):
                 # a run-fixings product's records move with its maturity (spec 2026-10-09 run fixings §3.5). No

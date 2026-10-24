@@ -150,6 +150,11 @@ accrual period keeps its full amount. Example: struck 2026-10-01, valued 2026-10
 returns the rolled position; `cash_legs_clock=LegClock.VALUATION` marks legs already on the valuation date (the
 lifecycle manager and the replay engine set it on the legs they roll), so they are not rolled twice.
 
+**A numeric note counts from its initial date too.** A Snowball / Phoenix / KO-reset with numeric observation times
+and an `initial_date` is aged to the valuation date before every position valuation (product and trade mode) by
+`elapsed − accrual_config.accrued_offset`, with the lifecycle tracker's own steps. A fresh booking prices like the
+tracker's copy for that day; a copy already aged that far (`accrued_offset` equal to the elapsed time) is left alone.
+
 ## Export Formats
 
 ### Excel Export Structure

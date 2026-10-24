@@ -54,8 +54,16 @@ During 0.x the public API may still change between minor versions.
   **Rebooking needed:** an aged trade (valuation after `initial_date`) whose legs were booked with times counted from
   the valuation date now reprices — rebook its leg times from the initial date, or set
   `cash_legs_clock=LegClock.VALUATION` on it. Trades valued on their initial date, and products without
-  `initial_date`, are unchanged. Numeric autocallable records are still read from the valuation date in static
-  pricing (the lifecycle trackers age them from `initial_date`): pass an aged copy for an aged numeric contract.
+  `initial_date`, are unchanged.
+- A numeric Snowball / Phoenix / KO-reset note's observation times also count from its `initial_date` in
+  point-in-time valuation through `EquityPosition` (product and trade mode: `get_market_value`, `get_pnl`,
+  `get_greeks` and every trade method, hence the portfolio, static stress, VaR and SIMM). The note is aged by
+  `elapsed − accrual_config.accrued_offset` with the lifecycle tracker's own steps
+  (`AutocallableLifecycleTracker.age_copy`, via `quantark.asset.equity.lifecycle.ko_reset.age_note_to_valuation_date`),
+  so a fresh booking prices like the tracker's day copy and an already-aged copy (offset equal to the elapsed time)
+  is not aged again. Dated contracts are unchanged. **Rebooking needed:** an aged numeric note booked with times
+  counted from the valuation date and `accrued_offset = 0` now reprices — rebook its times from the initial date,
+  or set `accrued_offset` to the elapsed time. A raw `engine.price(product, env)` call is not aged.
 - Static equity stress follows `EquityPortfolio.trade_value` (default product mode): a product-mode portfolio is
   valued with `get_market_value` / `get_greeks` again; `native_batch` runs on trade-value portfolios only. New
   result metadata `value_basis`.

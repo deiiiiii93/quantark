@@ -114,6 +114,9 @@ class EquityPosition:
         Returns:
             Current market price
         """
+        aged = self.on_valuation_clock(pricing_env)
+        if aged is not self:
+            return aged.get_current_price(pricing_env)
         return self.engine.price(self.product, pricing_env)
     
     def get_market_value(self, pricing_env: PricingEnvironment) -> float:
@@ -145,25 +148,34 @@ class EquityPosition:
         return streams
 
     def on_valuation_clock(self, pricing_env: PricingEnvironment) -> "EquityPosition":
-        """This position with its cash legs counted from ``pricing_env``'s valuation date (user decision 2026-10-24).
+        """This position seen from ``pricing_env``'s valuation date: its numeric note and its cash legs, whose times
+        count from the trade's initial date, aged to it (user decisions 2026-10-24).
 
-        Leg times on the ``CONTRACT`` clock count from the trade's initial date: they roll to the valuation date by
-        whole days / 365 exactly as a multi-day run's ``LegCashBook`` rolls them (``legs_seen_from``) — a flow paid
-        strictly before the valuation date is history, a flow due that day is kept at 0 — so a trade has one value
-        in the point-in-time tools and on a run's first day. Returns ``self`` when nothing moves: no legs, legs
-        already on the ``VALUATION`` clock, a product without ``initial_date``, or a valuation on or before it.
+        - The note: a numeric Snowball / Phoenix / KO-reset ages by ``elapsed - accrued_offset`` with the lifecycle
+          tracker's own steps (``age_note_to_valuation_date``), so a fresh booking prices like the tracker's day copy
+          and a copy aged that far already is left alone.
+        - The legs, on the ``CONTRACT`` clock: rolled by whole days / 365 exactly as a multi-day run's
+          ``LegCashBook`` rolls them (``legs_seen_from``) — a flow paid strictly before the valuation date is
+          history, a flow due that day is kept at 0.
+
+        A trade therefore has one value in the point-in-time tools and on a run's first day. Returns ``self`` when
+        nothing moves (no ``initial_date``, a valuation on or before it, a dated note, legs already on the
+        ``VALUATION`` clock).
         """
-        if not self.cash_legs or self.cash_legs_clock is LegClock.VALUATION:
-            return self
+        from quantark.asset.equity.lifecycle.ko_reset import age_note_to_valuation_date
         from quantark.cashleg import legs_seen_from, run_time
 
+        product = age_note_to_valuation_date(self.product, pricing_env)
+        legs, clock = self.cash_legs, self.cash_legs_clock
         origin = getattr(self.product, "initial_date", None)
         valuation_date = getattr(pricing_env, "valuation_date", None)
-        if origin is None or valuation_date is None or run_time(origin, valuation_date) <= 0.0:
+        if (legs and clock is LegClock.CONTRACT and origin is not None and valuation_date is not None
+                and run_time(origin, valuation_date) > 0.0):
+            legs, clock = list(legs_seen_from(legs, origin, valuation_date)), LegClock.VALUATION
+        if product is self.product and clock is self.cash_legs_clock:
             return self
         aged = copy.copy(self)
-        aged.cash_legs = list(legs_seen_from(self.cash_legs, origin, valuation_date))
-        aged.cash_legs_clock = LegClock.VALUATION
+        aged.product, aged.cash_legs, aged.cash_legs_clock = product, legs, clock
         return aged
 
     def get_trade_value(self, pricing_env: PricingEnvironment) -> float:
@@ -792,6 +804,9 @@ class EquityPosition:
         Returns:
             Dictionary of Greeks scaled by quantity
         """
+        aged = self.on_valuation_clock(pricing_env)
+        if aged is not self:
+            return aged.get_greeks(pricing_env, greeks_calculator, use_analytical)
         # Calculate single-contract Greeks
         if use_analytical:
             try:
