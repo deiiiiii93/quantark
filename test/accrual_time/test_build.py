@@ -174,7 +174,7 @@ def test_explicit_periods_are_always_kept():
     from quantark.asset.equity.product.option.accrual import AccrualKind, AccrualPeriod
     ko = times(0.25)
     ko.records[0].accrual = AccrualPeriod(AccrualKind.TIME, origin=0.0, end=0.3)
-    p = snowball(ko=ko, maturity=0.25, initial_date=T0)
+    p = snowball(ko=ko, maturity=0.25)          # numeric clock alone (clock rule 2026-10-26: no initial_date)
     assert p.barrier_config.ko_observation_schedule.records[0].accrual.end == 0.3
 
 

@@ -134,7 +134,7 @@ def _dated_ko_reset_on_business_day_clock():
             ko_barrier=95.0, ko_rate=0.03, ko_observation_type=ObservationType.DISCRETE,
             ko_observation_schedule=schedule(post_dates, 95.0, 0.03),
         ),
-        maturity=1.0,
+        exercise_date=post_dates[-1],   # all dated (clock rule 2026-10-26): the last schedule-2 record
         initial_date=valuation_date,
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
     )

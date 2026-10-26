@@ -308,15 +308,22 @@ def _scheduled_barrier_config():
     )
 
 
+def _one_business_year(env):
+    """The exercise date 244 business days after the valuation date: maturity 1.0 on the environment's clock. The
+    contract has dated records, so it is dated throughout (clock rule 2026-10-26: no float maturity beside them)."""
+    return env.calendar.add_business_days(env.valuation_date, 244)
+
+
 def test_snowball_theta_business_day_shift_updates_state_and_keeps_the_bumped_date_record():
     env = _business_day_pricing_env()
     product = SnowballOption(
         initial_price=100.0,
         strike=100.0,
         barrier_config=_scheduled_barrier_config(),
-        maturity=1.0,
+        exercise_date=_one_business_year(env),
         initial_date=datetime(2026, 6, 26),   # accrual time R5: the dated contract's accrual start
     )
+    assert product.get_maturity(env) == pytest.approx(1.0)
     engine = _CapturingMaturityEngine()
     calc = GreeksCalculator()
 
@@ -325,7 +332,7 @@ def test_snowball_theta_business_day_shift_updates_state_and_keeps_the_bumped_da
     shifted_product, shifted_env = engine.calls[-1]
     assert theta == pytest.approx(-1 / 244)
     assert shifted_env.valuation_date == datetime(2026, 6, 29)
-    assert shifted_product.maturity == pytest.approx(1.0 - 1 / 244)
+    assert shifted_product.get_maturity(shifted_env) == pytest.approx(1.0 - 1 / 244)
     # Monday is the bumped date AND an observation date: kept at time 0 on the
     # bumped date (spec 2026-10-07 R1; before: dropped, one record left).
     for schedule in (
@@ -345,9 +352,10 @@ def test_phoenix_theta_business_day_shift_updates_state_and_keeps_the_bumped_dat
         strike=100.0,
         barrier_config=_scheduled_barrier_config(),
         coupon_config=CouponBarrierConfig(coupon_barrier=85.0, coupon_rate=0.01),
-        maturity=1.0,
+        exercise_date=_one_business_year(env),
         initial_date=datetime(2026, 6, 26),   # accrual time R5: the dated contract's accrual start
     )
+    assert product.get_maturity(env) == pytest.approx(1.0)
     engine = _CapturingMaturityEngine()
     calc = GreeksCalculator()
 
@@ -356,7 +364,7 @@ def test_phoenix_theta_business_day_shift_updates_state_and_keeps_the_bumped_dat
     shifted_product, shifted_env = engine.calls[-1]
     assert theta == pytest.approx(-1 / 244)
     assert shifted_env.valuation_date == datetime(2026, 6, 29)
-    assert shifted_product.maturity == pytest.approx(1.0 - 1 / 244)
+    assert shifted_product.get_maturity(shifted_env) == pytest.approx(1.0 - 1 / 244)
     # Monday is the bumped date AND an observation date: kept at time 0 on the
     # bumped date (spec 2026-10-07 R1; before: dropped, one record left).
     for schedule in (

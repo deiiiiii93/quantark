@@ -13,7 +13,8 @@ The same resolver serves the plain snowball and (its own copy) the Phoenix: a da
 schedule was refused the same way, and is pinned here too.
 
 The twins: the dated contract's records sit on ``INITIAL + d`` for the snapped contract days ``d``; the numeric
-twin's at ``d / 365`` years, aged to the valuation day with ``time_shift(keep_landing=True)``. The two forms reach the
+twin's at ``d / 365`` years on the numeric clock alone (no ``initial_date``: a contract is all dates or all floats,
+clock rule 2026-10-26), aged to the valuation day with ``time_shift(keep_landing=True)``. The two forms reach the
 engines as different floats (``d / 365 - n / 365`` against the day count ``(d - n) / 365``), so they agree to ulps of
 the time grid, not bitwise (as ``test_tracker_clock_parity.PV_ATOL``).
 """
@@ -110,7 +111,7 @@ def ko_reset(form: str, day: int, knocked_in_on: Optional[int] = None) -> KnockO
     (KO 95, flat 3%) on the last six; 5% rebate, no principal; one year."""
     dated = form == "dated"
     product = KnockOutResetSnowballOption(
-        initial_price=100.0, strike=100.0, maturity=None if dated else 1.0, initial_date=INITIAL,
+        initial_price=100.0, strike=100.0, maturity=None if dated else 1.0, initial_date=INITIAL if dated else None,
         exercise_date=on(365) if dated else None,
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=_schedule(form, PRE, 103.0), ki_barrier=75.0,
@@ -131,8 +132,8 @@ def _discrete_ki(product, form: str, level: float):
         product.barrier_config, ko_observation_dates=None, ko_observation_schedule=_schedule(form, DAYS, 103.0),
         ki_observation_type=ObservationType.DISCRETE, ki_continuous=False, ki_observation_dates=None,
         ki_observation_schedule=_schedule(form, DAYS, level))
-    product.initial_date = INITIAL
     if form == "dated":
+        product.initial_date = INITIAL
         product.maturity = None
         product.exercise_date = on(365)
     product.validate()

@@ -215,13 +215,14 @@ def at_maturity(make, obs_type, record=None, mode=None):
 
 def dated(make):
     """Continuous, at maturity, with the lag convention AND an explicit settlement date 400 days out:
-    a hit is paid 0.25 year after the hit, the terminal amount on the settlement date."""
+    a hit is paid 0.25 year after the hit, the terminal amount on the settlement date. A settlement date makes the
+    contract dated, so it expires on its exercise date, the valuation date (clock rule 2026-10-26: no float
+    maturity beside a date; the lag is a product term on either clock)."""
     from datetime import timedelta
     from pde_routes.cases import VAL_DATE
 
-    p = make(dict(maturity=1.0, observation_type=C, settlement_convention=conv(), settlement_date=VAL_DATE + timedelta(days=400)))
-    p.maturity = 0.0
-    return p
+    return make(dict(exercise_date=VAL_DATE, observation_type=C, settlement_convention=conv(),
+                     settlement_date=VAL_DATE + timedelta(days=400)))
 
 
 KO, KI = BarrierType.UP_OUT, BarrierType.UP_IN

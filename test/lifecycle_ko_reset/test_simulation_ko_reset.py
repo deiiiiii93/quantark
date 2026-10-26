@@ -28,11 +28,12 @@ def _schedule(days, level):
 
 
 def short_ko_reset(mode, *, pre=(2, 5), ki=(1, 3), post=(4, 7)):
-    """Calendar days from 2024-01-02 (a Tuesday): schedule 1 (103%) on `pre`, KI (75%) on `ki`, schedule 2 (100%)
-    on `post`, absolute days or offsets from the knock-in close (REBASED)."""
+    """Calendar days from 2024-01-02 (a Tuesday, INCEPTION, where every run starts): schedule 1 (103%) on `pre`, KI
+    (75%) on `ki`, schedule 2 (100%) on `post`, absolute days or offsets from the knock-in close (REBASED). On the
+    numeric clock alone (clock rule 2026-10-26: no initial_date), counted from the run's start."""
     maturity = (max(ki) + max(post) if mode == M.REBASED else max(post)) * D
     return KnockOutResetSnowballOption(
-        initial_price=SPOT, strike=SPOT, maturity=maturity, contract_multiplier=1.0, initial_date=INCEPTION,
+        initial_price=SPOT, strike=SPOT, maturity=maturity, contract_multiplier=1.0,
         barrier_config=BarrierConfig(ko_barrier=KO_BARRIER, ko_rate=0.20, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=_schedule(pre, KO_BARRIER), ki_barrier=KI_BARRIER,
                                      ki_observation_type=ObservationType.DISCRETE,

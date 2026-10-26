@@ -100,7 +100,7 @@ def test_a_re_dated_record_re_derives_its_cash():
 
 
 def test_a_rebuilt_numeric_terminal_follows_its_maturity():
-    p = snowball(accrual=AccrualConfig(is_annualized_rebate=True), initial_date=T0)
+    p = snowball(accrual=AccrualConfig(is_annualized_rebate=True))     # numeric clock alone: no initial_date
     q = rebuilt(p, maturity=1.0)
     assert contract_tenor(q) == 1.0
 
@@ -170,7 +170,7 @@ def test_the_terms_key_is_cheap_with_a_calendar():
 
 @pytest.mark.parametrize("shift_days", [1, 10, 31, 45, 70])
 def test_phoenix_coupons_and_tenors_are_invariant_under_any_shift(shift_days):
-    p = phoenix(accrual=AccrualConfig(is_annualized_rebate=True), initial_date=T0)
+    p = phoenix(accrual=AccrualConfig(is_annualized_rebate=True))      # numeric clock alone: no initial_date
     coupons = [p.get_coupon_payoff(i) for i in range(3)]
     tenor = contract_tenor(p)
     aged = deepcopy(p)

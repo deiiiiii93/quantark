@@ -85,11 +85,18 @@ def test_a_dated_rebased_knocked_in_copy_prices(engine):
     assert math.isfinite(engine().price(copy, env(90.0, day(100))))
 
 
+def _struck_100_days_before_the_run(product):
+    """A numeric contract struck 100 days before the run, booked on the numeric clock alone (clock rule 2026-10-26:
+    no initial_date on a numeric contract): aged 100 days to the run's start, its records 100 days nearer and the
+    elapsed time banked; REBASED schedule-2 offsets are a product term and stay as they are."""
+    product.time_shift(100 * D, START.to_pydatetime(), env(100.0, START), keep_landing=True)
+    return product
+
+
 def test_a_mid_life_run_places_schedule_two_after_the_knock_in():
-    """initial_date 100 days before the run: the record clock's origin; schedule 2 hangs 30 days after the knock-in
-    close, not 30 days after the run's own day 60 measured from initial_date (which lay before the knock-in)."""
-    product = kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250))
-    product.initial_date = (START - pd.Timedelta(days=100)).to_pydatetime()
+    """Struck 100 days before the run (records on run days 60 and 150): schedule 2 hangs 30 days after the knock-in
+    close, not 30 days after a day 60 measured from the strike (which lay before the knock-in)."""
+    product = _struck_100_days_before_the_run(kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250)))
     assert run(tracker(product), {60: 70.0, 90: 96.0}) == [(60, E.KNOCK_IN, None), (90, E.KNOCK_OUT, "knock-out:ko2:0")]
 
 
@@ -250,9 +257,7 @@ def test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events():
     contract ends on day 120; the day-70 copy holds them 20 and 50 days ahead (it held 120/150) and V1 is booked on
     day 120 (it was booked on day 220)."""
     def product():
-        p = kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250))
-        p.initial_date = (START - pd.Timedelta(days=100)).to_pydatetime()
-        return p
+        return _struck_100_days_before_the_run(kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250)))
     t = tracker(product())
     run(t, {60: 70.0})
     copy = t.product_for_pricing(day(70), env(90.0, day(70)))

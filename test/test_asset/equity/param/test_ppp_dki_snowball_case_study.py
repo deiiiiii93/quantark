@@ -70,11 +70,12 @@ def _product(
     ki_dates=None,
     disable_ko_after_ki=False,
 ) -> SnowballOption:
+    """Struck on the run's first day (2024-01-02), on the numeric clock alone (clock rule 2026-10-26: no
+    initial_date on a numeric contract): its times count from the run's start."""
     return SnowballOption(
         initial_price=100.0,
         strike=100.0,
         maturity=maturity,
-        initial_date=datetime(2024, 1, 2),
         contract_multiplier=100.0,
         barrier_config=BarrierConfig(
             ko_barrier=ko_barrier,

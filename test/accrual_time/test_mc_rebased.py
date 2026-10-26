@@ -8,7 +8,7 @@ from quantark.asset.equity.product.option.accrual import contract_tenor, knock_i
 from quantark.asset.equity.product.option.snowball_config import AccrualConfig, PayoffConfig
 from quantark.util.enum import PostKOScheduleMode as M
 
-from .conftest import T0, env, ko_reset, times
+from .conftest import env, ko_reset, times
 
 
 def _price_parts(product):
@@ -33,8 +33,8 @@ def test_rebased_mc_ko_cash_is_the_resolvers(monkeypatch):
 
 
 def test_rebased_v1_tenor_is_per_path_anchor():
-    p = ko_reset(M.REBASED, accrual=AccrualConfig(is_annualized_ki=True), payoff_config=PayoffConfig(rebate_rate=0.05),
-                 initial_date=T0)   # the pre-existing flag rule wants an initial_date; numeric periods ignore it
+    # numeric clock alone (clock rule 2026-10-26: no initial_date on a numeric contract)
+    p = ko_reset(M.REBASED, accrual=AccrualConfig(is_annualized_ki=True), payoff_config=PayoffConfig(rebate_rate=0.05))
     ki = p.barrier_config.ki_observation_schedule.records
     tenors = {contract_tenor(p, None, "post", knock_in=knock_in_anchor_for(r, i)) for i, r in enumerate(ki)}
     assert tenors == {1.0, 1.25}  # final offset 0.75 after fixings 0.25 and 0.5

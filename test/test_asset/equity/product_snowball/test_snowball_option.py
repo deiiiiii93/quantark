@@ -72,6 +72,28 @@ def create_basic_barrier_config(
     )
 
 
+def create_dated_barrier_config(
+    ko_dates: List[datetime] = None,
+    ko_barrier: float = 1.03,
+    ko_rate: float = 0.15,
+    ki_barrier: float = 0.75,
+) -> BarrierConfig:
+    """The basic barrier configuration on the date clock: quarterly dated KO records (2024-04-01 ... 2025-01-01 by
+    default) and a continuous KI. A dated contract books its schedule on dates (clock rule 2026-10-26)."""
+    if ko_dates is None:
+        ko_dates = [datetime(2024, 4, 1), datetime(2024, 7, 1), datetime(2024, 10, 1), datetime(2025, 1, 1)]
+    return BarrierConfig(
+        ko_barrier=ko_barrier,
+        ko_rate=ko_rate,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_schedule=ObservationSchedule(
+            records=[ObservationRecord(observation_date=d, barrier=ko_barrier) for d in ko_dates]
+        ),
+        ki_barrier=ki_barrier,
+        ki_observation_type=ObservationType.CONTINUOUS,
+    )
+
+
 def create_standard_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
@@ -250,7 +272,7 @@ class TestSnowballCreation:
 
     def test_date_based_creation(self):
         """Test snowball creation with date-based specification."""
-        barrier_config = create_basic_barrier_config()
+        barrier_config = create_dated_barrier_config()
 
         snowball = SnowballOption(
             initial_price=100.0,
@@ -530,7 +552,7 @@ class TestPayoffCalculations:
             payoff_config=payoff_config,
             accrual_config=accrual_config,
             contract_multiplier=10_000.0,
-            maturity=1.0,
+            exercise_date=datetime(2025, 1, 1),     # dated records: a dated contract
             initial_date=datetime(2024, 1, 1),
         )
 
@@ -586,7 +608,7 @@ class TestPayoffCalculations:
             payoff_config=payoff_config,
             accrual_config=accrual_config,
             contract_multiplier=10_000.0,
-            maturity=1.0,
+            exercise_date=datetime(2025, 1, 1),     # dated records: a dated contract
             initial_date=datetime(2024, 1, 1),
         )
         pricing_env = PricingEnvironment(
@@ -936,9 +958,9 @@ class TestValidationErrors:
     def test_missing_maturity_and_exercise_date_passes(self):
         """Test that exercise_date alone is sufficient (no maturity needed).
 
-        The rebate is flat: an unset rebate flag follows is_annualized, and an annualized rebate on a contract
+        The contract is on dates throughout (dated KO records) and accrues nothing: annualized cash on a contract
         dated by exercise_date alone has no accrual start (R5, see the next test)."""
-        barrier_config = create_basic_barrier_config()
+        barrier_config = create_dated_barrier_config()
 
         # Should work with exercise_date alone
         snowball = SnowballOption(
@@ -947,19 +969,21 @@ class TestValidationErrors:
             barrier_config=barrier_config,
             contract_multiplier=10_000.0,
             exercise_date=datetime(2025, 1, 1),
-            accrual_config=AccrualConfig(is_annualized_rebate=False),
+            accrual_config=AccrualConfig(is_annualized=False, is_annualized_rebate=False),
         )
         assert snowball.exercise_date == datetime(2025, 1, 1)
 
     def test_exercise_date_alone_with_an_annualized_rebate_is_refused_by_r5(self):
-        """The default rebate follows is_annualized=True: its tenor needs initial_date (accrual spec R5)."""
+        """An annualized rebate's tenor needs initial_date (accrual spec R5). The KO coupons accrue nothing, so the
+        rebate alone is what is refused."""
         with pytest.raises(ValidationError, match="R5"):
             SnowballOption(
                 initial_price=100.0,
                 strike=100.0,
-                barrier_config=create_basic_barrier_config(),
+                barrier_config=create_dated_barrier_config(),
                 contract_multiplier=10_000.0,
                 exercise_date=datetime(2025, 1, 1),
+                accrual_config=AccrualConfig(is_annualized=False, is_annualized_rebate=True),
             )
 
     def test_discrete_ko_without_dates_raises(self):
@@ -1003,14 +1027,16 @@ class TestValidationErrors:
 
     def test_get_maturity_after_exercise_date_raises(self):
         """Test that valuation after exercise_date raises ValidationError."""
-        barrier_config = create_basic_barrier_config()
+        barrier_config = create_dated_barrier_config(
+            ko_dates=[datetime(2023, 4, 1), datetime(2023, 7, 1), datetime(2023, 10, 1), datetime(2024, 1, 1)]
+        )
         snowball = SnowballOption(
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
             contract_multiplier=10_000.0,
             exercise_date=datetime(2024, 1, 1),
-            accrual_config=AccrualConfig(is_annualized_rebate=False),
+            accrual_config=AccrualConfig(is_annualized=False, is_annualized_rebate=False),
         )
         pricing_env = PricingEnvironment(
             rate_curve=FlatRateCurve(rate=0.01),

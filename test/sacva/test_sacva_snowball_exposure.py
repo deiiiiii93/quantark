@@ -456,10 +456,11 @@ def test_delayed_ko_settlement_expiry_exposure_oracle():
             assert profile.epe_discounted[j] == pytest.approx(0.0, abs=target * 3e-3)
 
 
-def _date_settled_ko_snowball(obs_days=182, settle_days=189, maturity=1.0):
+def _date_settled_ko_snowball(obs_days=182, settle_days=189, maturity_days=365):
     """Certain-KO snowball whose single KO observation settles ``settle_days`` after
     valuation (strictly between the observation and maturity) -> the QUAD engine must
-    record a continuation surface at the settlement node."""
+    record a continuation surface at the settlement node. Dated throughout (clock rule
+    2026-10-26): it expires ``maturity_days`` after valuation (365: one year, ACT/365)."""
     val = datetime(2024, 1, 1)
     rec = ObservationRecord(
         observation_date=val + timedelta(days=obs_days),
@@ -472,7 +473,7 @@ def _date_settled_ko_snowball(obs_days=182, settle_days=189, maturity=1.0):
         ko_observation_schedule=schedule)
     return SnowballOption(
         initial_price=100.0, strike=100.0, barrier_config=cfg,
-        contract_multiplier=1.0, maturity=maturity, is_reverse=False,
+        contract_multiplier=1.0, exercise_date=val + timedelta(days=maturity_days), is_reverse=False,
         initial_date=val)   # accrual time R5: the dated contract states its accrual start (the valuation date)
 
 
@@ -568,7 +569,7 @@ def test_value_process_martingale_delayed_settlement():
 def test_post_maturity_ko_settlement_deferred_raises():
     # a KO settling AFTER maturity has no continuation surface past the terminal node
     # -> the builder rejects it (deferred), rather than approximating.
-    product = _date_settled_ko_snowball(obs_days=360, settle_days=400, maturity=1.0)
+    product = _date_settled_ko_snowball(obs_days=360, settle_days=400, maturity_days=365)
     trade = CVATrade(
         trade_id="pmk", product=product,
         engine=SnowballQuadEngine(params=QuadParams(grid_points=301)),
