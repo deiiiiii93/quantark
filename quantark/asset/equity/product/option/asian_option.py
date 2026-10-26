@@ -139,7 +139,7 @@ class AsianOption(BaseEquityOption):
         asian_strike_type: FIXED or FLOATING
         averaging_type: ARITHMETIC or GEOMETRIC
         observation_times: List of observation times as year fractions (legacy)
-        observation_dates: List of observation dates (legacy, alternative to times)
+        observation_dates: List of observation dates (legacy; the date-clock observation_times, wins over them)
         observation_records: List of AsianObservationRecord (preferred, supports historical prices)
         num_observations: Number of observations for uniform schedule (default: 12).
                           Set to None for continuous averaging.
@@ -188,7 +188,7 @@ class AsianOption(BaseEquityOption):
             maturity: Time to maturity in years (optional if exercise_date provided)
             exercise_date: Date when option expires (optional if maturity provided)
             observation_times: List of observation times as year fractions (legacy)
-            observation_dates: List of observation dates (legacy, alternative to times)
+            observation_dates: List of observation dates (legacy; the date-clock observation_times, wins over them)
             observation_records: List of AsianObservationRecord with optional observed prices
             num_observations: Number of observations for uniform schedule (default: 12)
             initial_price: Reference/initial underlying price
@@ -551,13 +551,22 @@ class AsianOption(BaseEquityOption):
             for rec in self.observation_records
         ]
 
+    def _legacy_observation_times(self, pricing_env: "PricingEnvironment", maturity: float) -> List[float]:
+        """The legacy schedule in years from the valuation date: ``observation_dates`` (the date clock) resolve as a
+        record's dates do, and win over ``observation_times`` (clock rule 2026-10-26); otherwise
+        ``get_observation_times``."""
+        if self.observation_dates:
+            records = (AsianObservationRecord(observation_date=d) for d in self.observation_dates)
+            return [record.resolve_time(pricing_env) for record in records]
+        return self.get_observation_times(maturity)
+
     def _resolve_from_legacy(
         self,
         pricing_env: "PricingEnvironment",
     ) -> Tuple[List[float], List[float], List[float], List[float], int]:
         """Resolve observations from legacy observation_times/observation_dates."""
         T = self.get_maturity(pricing_env)
-        obs_times = self.get_observation_times(T)
+        obs_times = self._legacy_observation_times(pricing_env, T)
 
         # All observations are future (no historical prices in legacy mode)
         past_prices: List[float] = []

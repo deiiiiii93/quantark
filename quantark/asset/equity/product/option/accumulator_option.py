@@ -21,7 +21,7 @@ and is intentionally rejected.
 from dataclasses import dataclass
 from datetime import datetime
 from math import ceil
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
@@ -61,7 +61,8 @@ class AccumulatorOption(BaseEquityOption):
             maturity; otherwise it settles on the observation date.
         extra_shares_at_expiry: Additional terminal share leg.
         past_observations: Realized ``(observation_time, observed_spot)`` records
-            whose accrual is already locked in.
+            whose accrual is already locked in; ``(observation_date, observed_spot)``
+            on a dated contract. Only their order is read.
         observation_type: Monitoring style (DISCRETE by default).
         observation_dates: Discrete observation times in year fractions.
         observation_schedule: Preferred discrete observation schedule.
@@ -79,7 +80,7 @@ class AccumulatorOption(BaseEquityOption):
     notional: float = 0.0
     settlement_at_expiry: bool = False
     extra_shares_at_expiry: float = 0.0
-    past_observations: Optional[List[Tuple[float, float]]] = None
+    past_observations: Optional[List[Tuple[Union[float, datetime], float]]] = None
     observation_type: ObservationType = ObservationType.DISCRETE
     observation_dates: Optional[List[float]] = None
     observation_schedule: Optional[ObservationSchedule] = None
@@ -103,7 +104,7 @@ class AccumulatorOption(BaseEquityOption):
         notional: float = 0.0,
         settlement_at_expiry: bool = False,
         extra_shares_at_expiry: float = 0.0,
-        past_observations: Optional[List[Tuple[float, float]]] = None,
+        past_observations: Optional[List[Tuple[Union[float, datetime], float]]] = None,
         observation_type: ObservationType = ObservationType.DISCRETE,
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
@@ -137,7 +138,8 @@ class AccumulatorOption(BaseEquityOption):
             notional: Notional used to derive shares.
             settlement_at_expiry: Defer accrual settlement to maturity.
             extra_shares_at_expiry: Additional terminal share leg.
-            past_observations: Realized ``(time, spot)`` observation records.
+            past_observations: Realized ``(time, spot)`` observation records
+                (``(date, spot)`` on a dated contract).
             observation_type: Monitoring style (DISCRETE by default).
             observation_dates: Discrete observation times in years.
             observation_schedule: Preferred discrete schedule.
@@ -251,6 +253,13 @@ class AccumulatorOption(BaseEquityOption):
                 f"business_days_in_year must be positive, got "
                 f"{self.business_days_in_year}"
             )
+        if self.past_observations:
+            dated = [isinstance(when, datetime) for when, _ in self.past_observations]
+            if any(dated) and not all(dated):
+                raise ValidationError(
+                    "past_observations mixes dates and times: book every fixing as (date, spot) on a dated "
+                    "contract or (time, spot) on a numeric one"
+                )
 
         self._normalize_observation_schedule()
 

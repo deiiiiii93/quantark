@@ -756,9 +756,13 @@ def _legacy_asian(form):
     from quantark.asset.equity.product.option.asian_option import AsianOption
     from quantark.util.enum import AsianStrikeType, AveragingType, OptionType
 
-    term = dict(exercise_date=F.START + timedelta(days=10)) if form == "dated" else dict(maturity=10 / 365.0)
+    if form == "dated":
+        term = dict(exercise_date=F.START + timedelta(days=10),
+                    observation_dates=[F.START + timedelta(days=4), F.START + timedelta(days=8)])
+    else:
+        term = dict(maturity=10 / 365.0, observation_times=[4 / 365.0, 8 / 365.0])
     return AsianOption(strike=100.0, option_type=OptionType.CALL, asian_strike_type=AsianStrikeType.FIXED,
-                       averaging_type=AveragingType.ARITHMETIC, observation_times=[4 / 365.0, 8 / 365.0], **term)
+                       averaging_type=AveragingType.ARITHMETIC, **term)
 
 
 @pytest.mark.parametrize("form", ["dated", "numeric"])
@@ -769,7 +773,10 @@ def test_legacy_asian_settlement_names_the_fixings_it_does_not_carry(form):
 
 @pytest.mark.parametrize("form", ["dated", "numeric"])
 def test_replay_of_a_legacy_asian_through_t_refuses_with_a_validation_error_not_a_type_error(form):
+    # The dated form fixes on its observation_dates, so the replay refuses at its first strictly-past fixing (day 5)
+    # before it reaches the maturity settlement the numeric form refuses at.
+    message = "strictly-past" if form == "dated" else "no recorded fixing"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        with pytest.raises(ValidationError, match="no recorded fixing"):
+        with pytest.raises(ValidationError, match=message):
             _replay(_legacy_asian(form), n=12)

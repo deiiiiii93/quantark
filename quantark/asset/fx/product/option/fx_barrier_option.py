@@ -7,11 +7,11 @@ from typing import List, Optional
 
 from quantark.util.enum import OptionType, FxBarrierType, ObservationType
 from quantark.util.exceptions import ValidationError
-from ..base_fx_product import BaseFxProduct
 from ..currency_pair import CurrencyPair
+from .discrete_monitoring import DiscreteMonitoring
 
 
-class FxBarrierOption(BaseFxProduct):
+class FxBarrierOption(DiscreteMonitoring):
     """
     FX single-barrier vanilla option.
 
@@ -26,6 +26,9 @@ class FxBarrierOption(BaseFxProduct):
             only if the barrier is never touched.
         rebate_at_hit: KNOCK_OUT only — pay the rebate at hit (True) vs at
             expiry (False). Must be False for KNOCK_IN.
+        observation_times: Year-fraction fixing times for DISCRETE monitoring (numeric clock).
+        observation_dates: Fixing dates for DISCRETE monitoring (date clock); beside
+            ``observation_times`` the dates win.
     """
 
     def __init__(
@@ -44,6 +47,7 @@ class FxBarrierOption(BaseFxProduct):
         expiry_date: Optional[datetime] = None,
         delivery: Optional[float] = None,
         delivery_date: Optional[datetime] = None,
+        observation_dates: Optional[List[datetime]] = None,
     ):
         super().__init__(
             currency_pair=currency_pair,
@@ -61,6 +65,7 @@ class FxBarrierOption(BaseFxProduct):
         self.rebate_at_hit = rebate_at_hit
         self.monitoring = monitoring
         self.observation_times = observation_times
+        self.observation_dates = observation_dates
         self.validate()
 
     def validate(self) -> None:
@@ -84,23 +89,6 @@ class FxBarrierOption(BaseFxProduct):
         if self.monitoring == ObservationType.DISCRETE:
             self._validate_observation_times()
         self._validate_maturity_inputs()
-
-    def _validate_observation_times(self) -> None:
-        times = self.observation_times
-        if not times:
-            raise ValidationError(
-                "DISCRETE monitoring requires a non-empty observation_times list"
-            )
-        if list(times) != sorted(times):
-            raise ValidationError("observation_times must be ascending")
-        if len(set(times)) != len(times):
-            raise ValidationError("observation_times must be unique")
-        T = self.maturity
-        for t in times:
-            if t <= 0.0:
-                raise ValidationError("observation_times must be strictly positive")
-            if T is not None and t > T:
-                raise ValidationError("observation_times must not exceed maturity")
 
     def is_call(self) -> bool:
         return self.option_type == OptionType.CALL

@@ -169,7 +169,7 @@ class FxBarrierMCEngine(BaseFxEngine):
         """Simulate paths and return per-path survival + first-hit discount.
 
         Works for any product exposing ``barrier``, ``is_up``, ``monitoring``
-        and ``observation_times`` (FxBarrierOption and FxSharkfinOption), so the
+        and ``observation_times_at`` (FxBarrierOption and FxSharkfinOption), so the
         sharkfin engine reuses it.
         """
         if product.monitoring == ObservationType.DISCRETE:
@@ -196,7 +196,7 @@ class FxBarrierMCEngine(BaseFxEngine):
         return _BarrierSim(paths, terminal, survival, None)
 
     def _discrete_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
-        obs = np.array(product.observation_times, dtype=float)
+        obs = np.array(product.observation_times_at(fx_env), dtype=float)
         times = obs if np.isclose(obs[-1], T) else np.concatenate([obs, [T]])
         obs_idx = np.arange(obs.size)
         gen = self._make_generator(
