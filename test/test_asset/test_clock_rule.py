@@ -127,11 +127,16 @@ def test_a_dated_contract_with_a_legacy_float_list_is_partial():
     assert "barrier_config.ki_observation_dates" in _fields(note)
 
 
-def test_a_year_fraction_lag_on_a_dated_contract_is_partial():
-    vanilla = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=EXPIRY,
-                                    settlement_convention=SettlementConvention(2.0 / 365.0,
-                                                                               SettlementLagUnit.YEAR_FRACTION))
-    assert _fields(vanilla) == {"settlement_convention"}
+@pytest.mark.parametrize("unit, lag", [(SettlementLagUnit.YEAR_FRACTION, 2.0 / 365.0),
+                                       (SettlementLagUnit.CALENDAR_DAYS, 2), (SettlementLagUnit.BUSINESS_DAYS, 2)])
+def test_a_settlement_lag_is_a_product_term_on_either_clock(unit, lag):
+    """User ruling 2026-10-26: a settlement lag is a product term (a settlement date, "1D", "2D"), not a clock time."""
+    convention = SettlementConvention(lag, unit)
+    dated = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=EXPIRY,
+                                  settlement_convention=convention)
+    numeric = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0,
+                                    settlement_convention=convention)
+    assert clock_violations(dated) == [] and clock_violations(numeric) == []
 
 
 def test_a_dated_fx_option_needing_float_times_is_partial():

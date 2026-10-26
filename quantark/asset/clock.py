@@ -8,7 +8,8 @@ years from the valuation date), never on a mix of the two:
 - Partial or mixed input is a construction error: a date field on a numeric contract (``initial_date`` on a numeric
   note), or a numeric time on a dated contract that has no date for it (a record with only ``observation_time``).
 
-Durations and counts are clock-neutral: ``tenor``, settlement lags in days, accrual factors, coupon year fractions,
+Durations and counts are clock-neutral product terms: ``tenor``, settlement lags in any unit (user ruling
+2026-10-26: a lag is a product term, like a settlement date or "2D"), accrual factors, coupon year fractions,
 schedule generators, and the schedule-2 offsets of a REBASED knock-out-reset (a product term, measured from the
 knock-in). Floats that aging writes on a dated copy and that no dated reader uses (``accrued_offset``,
 ``first_period_start``) are ignored.
@@ -146,9 +147,6 @@ def clock_violations(product: Any) -> List[Tuple[str, str]]:
     if _is_fx(product) and getattr(product, "delivery", None) is not None \
             and getattr(product, "delivery_date", None) is None:
         found.append(("delivery", NUMERIC_TIME))
-    convention = getattr(product, "settlement_convention", None)
-    if convention is not None and getattr(getattr(convention, "lag_unit", None), "name", None) == "YEAR_FRACTION":
-        found.append(("settlement_convention", NUMERIC_TIME))
     return _unique(found)
 
 
