@@ -1,13 +1,18 @@
-"""A numeric contract shows no difference from its dated twin (tracker clock decision A, 2026-10-09).
+"""A numeric contract shows no difference from its dated twin (tracker clock decision A, 2026-10-09; clock rule
+2026-10-26).
 
-The same contract is written twice: numerically (observation times ``k / 12`` years and ``initial_date``) and on
-dates (``initial_date + d_k`` with ``d_k = round(k / 12 * 365)``, the tracker's snapped day mapping, and an
-``exercise_date``). Each is run through its lifecycle tracker with ``initial_date`` N = 0, 30 and 100 days before the
-run's ``start_date`` on the same market path (a function of the calendar date). Both must give the same event days,
-the same ledger (cash, and determination/payment instants measured from ``initial_date``) and the same pricing-copy
-PVs.
+The same contract, struck N = 0, 30 and 100 days before the run's ``start_date``, is written twice. On dates:
+``initial_date + d_k`` with ``d_k = round(k / 12 * 365)`` (the tracker's snapped day mapping) and an
+``exercise_date``. Numerically, on the numeric clock alone (no ``initial_date``: a contract is all dates or all
+floats): observation times ``k / 12`` years at the strike, aged N days to the run's start (``time_shift``), which is
+how a numeric contract struck before today is booked -- records already past dropped, the elapsed time banked. Each is
+run through its lifecycle tracker on the same market path (a function of the calendar date). Both must give the same
+event days, the same ledger (cash, and determination/payment instants measured from the strike) and the same
+pricing-copy PVs. The aged numeric form has lost the records before the run, so its observation indices (and the ids
+built on them) are the dated ones less the number dropped.
 
-Records dated before the run (N = 100 puts three of them there) are never tested (decision 2): both forms skip them.
+Records dated before the run (N = 100 puts three of them there) are never tested (decision 2): the dated form skips
+them, the numeric booking no longer carries them.
 
 Cash that ACCRUES cannot agree across the forms, at any N: a numeric record accrues its contractual time (``k / 12``,
 the accrual time spec fills it once at construction and snapping moves timing only), a dated record accrues its days
@@ -78,8 +83,8 @@ def snowball(annualized: bool) -> Callable:
     def build(form: str, initial: pd.Timestamp):
         p = create_standard_snowball(100.0, 100.0, 1.0, ko_barrier=103.0, ki_barrier=75.0, ko_rate=0.15,
                                      is_annualized=annualized)
-        p.initial_date = initial.to_pydatetime()
         if form == "dated":
+            p.initial_date = initial.to_pydatetime()
             _on_dates(p, initial)
         p.validate()
         return p
@@ -92,8 +97,8 @@ def phoenix(annualized: bool, memory: bool = True) -> Callable:
         p = create_standard_phoenix(100.0, 100.0, 1.0, ko_barrier=103.0, ki_barrier=70.0, coupon_barrier=80.0,
                                     coupon_rate=0.01, num_observations=12, memory_coupon=memory,
                                     is_annualized=annualized)
-        p.initial_date = initial.to_pydatetime()
         if form == "dated":
+            p.initial_date = initial.to_pydatetime()
             _on_dates(p, initial)
         p.validate()
         return p
@@ -115,7 +120,7 @@ def ko_reset(mode: M) -> Callable:
         exercise = on(initial, 365) if dated and mode == M.ABSOLUTE else None
         p = KnockOutResetSnowballOption(
             initial_price=100.0, strike=100.0, maturity=None if exercise is not None else maturity,
-            initial_date=initial.to_pydatetime(), exercise_date=exercise,
+            initial_date=initial.to_pydatetime() if dated else None, exercise_date=exercise,
             barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                          ko_observation_schedule=sched(pre, 103.0), ki_barrier=75.0,
                                          ki_observation_type=ObservationType.DISCRETE,
@@ -167,14 +172,34 @@ PATHS: Dict[str, Callable[[str], Callable[[int], float]]] = {
 }
 
 
-def tracker(kind: str, form: str, gap: int):
+def booking(kind: str, form: str, gap: int):
+    """The contract struck ``gap`` days before the run, as booked on the run's start: the dated form as written, the
+    numeric form aged ``gap`` days (keeping a record due on the run's first day)."""
     initial = START - pd.Timedelta(days=gap)
-    return tracker_for(BUILDERS[kind](form, initial), quantity=1.0, start_date=START), initial
+    product = BUILDERS[kind](form, initial)
+    if form == "numeric" and gap:
+        product.time_shift(gap / 365.0, START.to_pydatetime(), env(100.0, START), keep_landing=True)
+    return product, initial
+
+
+def dropped(kind: str, form: str, gap: int) -> int:
+    """How many knock-out records the numeric booking lost to the gap (0 for the dated form)."""
+    if form == "dated":
+        return 0
+    return BUILDERS[kind](form, START).barrier_config.ko_observation_count \
+        - booking(kind, form, gap)[0].barrier_config.ko_observation_count
+
+
+def tracker(kind: str, form: str, gap: int):
+    product, initial = booking(kind, form, gap)
+    return tracker_for(product, quantity=1.0, start_date=START), initial
 
 
 def walk(kind: str, form: str, gap: int, path: str) -> dict:
     """Observe every close from START until the contract is dead; events and ledger in a form-free shape."""
     t, initial = tracker(kind, form, gap)
+    offset = dropped(kind, form, gap)
+    shift = gap / 365.0 if form == "numeric" else 0.0
     spot_of = PATHS[path](kind)
     events: List[tuple] = []
     for r in range(HORIZON):
@@ -185,21 +210,36 @@ def walk(kind: str, form: str, gap: int, path: str) -> dict:
         fired = t.observe(day, product, e, spot)
         maturity = t.settle_maturity_if_due(day, product, e, spot)
         fired += [maturity] if maturity is not None else []
-        events += [(r, ev.event_type.value, ev.observation_index,
-                    getattr(ev.realized_cashflow, "cashflow_id", None), ev.cashflow) for ev in fired]
+        events += [(r, ev.event_type.value, _index(ev.observation_index, offset),
+                    _rekey(getattr(ev.realized_cashflow, "cashflow_id", None), offset), ev.cashflow) for ev in fired]
         if not t.lifecycle.alive:
             break
-    return {"events": events, "ledger": [_instants(cf, initial) for cf in t.lifecycle.ledger.cashflows],
-            "alive": t.lifecycle.alive}
+    ledger = sorted(_instants(cf, initial, offset, shift) for cf in t.lifecycle.ledger.cashflows)
+    return {"events": events, "ledger": ledger, "alive": t.lifecycle.alive}
 
 
-def _instants(cf, initial: pd.Timestamp) -> tuple:
-    """(id, amount, determination, payment), instants in years from initial_date on either clock."""
+def _index(index, offset: int):
+    """A numeric booking's record index in the contract's own numbering (the records it dropped come first)."""
+    return None if index is None else index + offset
+
+
+def _rekey(cashflow_id, offset: int):
+    """``kind:index`` in the contract's own numbering."""
+    if cashflow_id is None or ":" not in cashflow_id:
+        return cashflow_id
+    kind, index = cashflow_id.rsplit(":", 1)
+    return f"{kind}:{int(index) + offset}"
+
+
+def _instants(cf, initial: pd.Timestamp, offset: int, shift: float) -> tuple:
+    """(id, amount, determination, payment), instants in years from the strike on either clock: a dated instant by its
+    days from ``initial_date``, a numeric one (measured from the run's start) plus the gap ``shift``. Rounded to 12
+    places: ``t - gap/365 + gap/365`` need not return ``t`` exactly."""
     def years(date, time):
         if date is not None:
-            return (pd.Timestamp(date).normalize() - initial.normalize()).days / 365.0
-        return time
-    return (cf.cashflow_id, cf.amount, years(cf.determination_date, cf.determination_time),
+            return round((pd.Timestamp(date).normalize() - initial.normalize()).days / 365.0, 12)
+        return round(time + shift, 12)
+    return (_rekey(cf.cashflow_id, offset), cf.amount, years(cf.determination_date, cf.determination_time),
             years(cf.payment_date, cf.payment_time))
 
 

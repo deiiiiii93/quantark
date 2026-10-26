@@ -110,6 +110,7 @@ from quantark.asset.equity.product.option import (
 from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+from quantark.util.calendar.business_calendar import BusinessDayConvention
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, GridVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import (
@@ -188,11 +189,18 @@ SLV_LEVERAGE = LeverageSurface(time_grid=np.linspace(0.0, 1.0, 6), strike_grid=n
 
 # -- vanillas ------------------------------------------------------------------------------------------------------
 
+def _on_form(kw, form):
+    """``kw`` with a per-form term picked for ``form``: a settlement lag given as ``{"dated": ..., "numeric": ...}``
+    (a contract is all dates or all floats: a dated one lags in days, a numeric one in a year fraction)."""
+    return {k: (v[form] if isinstance(v, dict) else v) for k, v in kw.items()}
+
+
 def _vanilla(cls, option_type, **kw):
     def build(form):
+        terms = _on_form(kw, form)
         if form == "dated":
-            return cls(strike=100.0, option_type=option_type, exercise_date=VALUATION, initial_date=INITIAL, **kw)
-        return _age(cls(strike=100.0, option_type=option_type, maturity=1.0, **kw))
+            return cls(strike=100.0, option_type=option_type, exercise_date=VALUATION, initial_date=INITIAL, **terms)
+        return _age(cls(strike=100.0, option_type=option_type, maturity=1.0, **terms))
     return build
 
 
@@ -554,14 +562,17 @@ def test_an_instant_later_on_the_exercise_date_is_after_it():
 # route is checked against that counterpart in both forms, on the products and spots below: in / at / beyond the
 # money and the barrier, a knock-in fresh and carried as triggered, expiry monitoring and a two-day settlement lag.
 
-_LAG2D = SettlementConvention(lag=2 / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+#: two days: in days on the date clock, as a year fraction on the numeric clock
+_LAG2D = {"dated": SettlementConvention(lag=2, lag_unit=SettlementLagUnit.CALENDAR_DAYS,
+                                        business_day_convention=BusinessDayConvention.UNADJUSTED),
+          "numeric": SettlementConvention(lag=2 / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION)}
 
 
 def _barrier_variant(barrier_type, option_type, barrier, observation=ObservationType.CONTINUOUS, carried=False,
                      **extra):
     def build(form):
         kw = dict(strike=100.0, option_type=option_type, barrier=barrier, barrier_type=barrier_type, rebate=5.0,
-                  observation_type=observation, **extra)
+                  observation_type=observation, **_on_form(extra, form))
         product = (BarrierOption(exercise_date=VALUATION, initial_date=INITIAL, **kw) if form == "dated"
                    else _age(BarrierOption(maturity=1.0, **kw)))
         if carried:     # a knock-in carried into the valuation as triggered (spec 2026-10-07 R4)
