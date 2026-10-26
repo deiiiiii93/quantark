@@ -2,7 +2,8 @@
 
 A numeric contract shows no difference from its dated twin. Each contract below is written twice: on dates (records
 on ``INITIAL + d_k`` with ``d_k = round(k / 12 * 365)``, an ``exercise_date`` 365 days after ``INITIAL``) and
-numerically (records at ``d_k / 365`` years, maturity 1.0), so the two forms are the same contract. At several
+numerically on the numeric clock alone (records at ``d_k / 365`` years, maturity 1.0, no ``initial_date``), so the
+two forms are the same contract. At several
 valuation dates mid-life -- including the days right before and right after an observation -- the numeric twin is
 aged to the valuation date (``time_shift``, lifecycle aging), and both are priced by the same route. The two must
 agree to rel 1e-10 (the aged numeric times ``d_k / 365 - a / 365`` and the dated ``(d_k - a) / 365`` differ only
@@ -82,8 +83,10 @@ def _records(form: str, level: float, days=DAYS, **kw):
 
 
 def _set_expiry(product, form: str) -> None:
-    product.initial_date = INITIAL
+    """The dated form's clock (``initial_date`` and ``exercise_date``); the numeric form keeps its float times alone
+    (a contract is all dates or all floats)."""
     if form == "dated":
+        product.initial_date = INITIAL
         product.maturity = None
         product.exercise_date = EXERCISE
 
@@ -223,7 +226,7 @@ def _barrier(barrier_type, option_type, level, pay_at_hit=False):
                   observation_schedule=ObservationSchedule(records=_records(form, level)))
         if form == "dated":
             return BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL, **kw)
-        return BarrierOption(maturity=1.0, initial_date=INITIAL, **kw)
+        return BarrierOption(maturity=1.0, **kw)
     return build
 
 
@@ -315,7 +318,7 @@ def test_vol_barrier_varying_schedule_stays_refused_in_both_forms(route):
                   rebate=3.0, observation_type=ObservationType.DISCRETE,
                   observation_schedule=ObservationSchedule(records=records))
         product = (BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL, **kw) if form == "dated"
-                   else BarrierOption(maturity=1.0, initial_date=INITIAL, **kw))
+                   else BarrierOption(maturity=1.0, **kw))
         with pytest.raises(ValidationError, match="varying barriers/payoffs"):
             _quiet(lambda: factory().price(product, env(100.0, INITIAL, grid=grid)))
 
@@ -331,5 +334,5 @@ def test_vol_barrier_observation_after_maturity_stays_refused_in_both_forms(rout
                   observation_schedule=ObservationSchedule(records=_records(form, 120.0, days=days)))
         with pytest.raises(ValidationError):
             product = (BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL, **kw) if form == "dated"
-                       else BarrierOption(maturity=1.0, initial_date=INITIAL, **kw))
+                       else BarrierOption(maturity=1.0, **kw))
             _quiet(lambda: factory().price(product, env(100.0, INITIAL, grid=grid)))

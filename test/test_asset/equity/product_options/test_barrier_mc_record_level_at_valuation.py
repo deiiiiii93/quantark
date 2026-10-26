@@ -70,7 +70,7 @@ def _product(kind: str, form: str, barrier: float, level, days, payoff=None) -> 
               observation_schedule=ObservationSchedule(records=_records(form, level, days, payoff)))
     if form == "dated":
         return BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL, **kw)
-    return BarrierOption(maturity=1.0, initial_date=INITIAL, **kw)
+    return BarrierOption(maturity=1.0, **kw)
 
 
 def _aged(product: BarrierOption, day: int, keep_landing: bool) -> BarrierOption:

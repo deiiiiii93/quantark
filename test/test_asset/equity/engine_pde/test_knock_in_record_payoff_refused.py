@@ -63,7 +63,7 @@ def _product(kind: str, form: str, payoff=None) -> BarrierOption:
               observation_schedule=ObservationSchedule(records=_records(form, barrier, **extra)))
     if form == "dated":
         return BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL, **kw)
-    return BarrierOption(maturity=1.0, initial_date=INITIAL, **kw)
+    return BarrierOption(maturity=1.0, **kw)
 
 
 def _price(route: str, product: BarrierOption, day: int = 10) -> float:

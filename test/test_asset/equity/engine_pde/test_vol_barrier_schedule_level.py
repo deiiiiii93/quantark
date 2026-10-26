@@ -62,7 +62,7 @@ def _product(kind: str, form: str, barrier: float, level, *, rebate: float = REB
               observation_schedule=ObservationSchedule(records=records, aggregation_mode=aggregation))
     if form == "dated":
         return BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL, **kw)
-    return BarrierOption(maturity=1.0, initial_date=INITIAL, **kw)
+    return BarrierOption(maturity=1.0, **kw)
 
 
 def _aged(product: BarrierOption, day: int) -> BarrierOption:
@@ -197,8 +197,7 @@ def _settled_product(form: str, barrier: float, level: float) -> BarrierOption:
         return BarrierOption(exercise_date=EXERCISE, initial_date=INITIAL,
                              observation_schedule=ObservationSchedule(records=recs), **kw)
     recs = [ObservationRecord(observation_time=1.0, barrier=level)]
-    product = BarrierOption(maturity=1.0, initial_date=INITIAL, observation_schedule=ObservationSchedule(records=recs),
-                            **kw)
+    product = BarrierOption(maturity=1.0, observation_schedule=ObservationSchedule(records=recs), **kw)
     product.time_shift(1.0, EXERCISE, env(100.0, EXERCISE), keep_landing=True)
     return product
 

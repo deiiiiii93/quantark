@@ -392,6 +392,8 @@ class TestCompletedAveraging:
     def _completed_averaging_option(
         strike: float, option_type: OptionType, maturity: float = 0.5
     ) -> AsianOption:
+        """Every fixing already observed: 2023-12-15, -20 and -31 against the 2024-01-01 valuation date, booked
+        on the numeric clock (a numeric ``maturity`` takes float fixing times, here 17, 12 and 1 days past)."""
         return AsianOption(
             strike=strike,
             option_type=option_type,
@@ -399,15 +401,9 @@ class TestCompletedAveraging:
             asian_strike_type=AsianStrikeType.FIXED,
             maturity=maturity,
             observation_records=[
-                AsianObservationRecord(
-                    observation_date=datetime(2023, 12, 15), observed_price=100.0
-                ),
-                AsianObservationRecord(
-                    observation_date=datetime(2023, 12, 20), observed_price=110.0
-                ),
-                AsianObservationRecord(
-                    observation_date=datetime(2023, 12, 31), observed_price=90.0
-                ),
+                AsianObservationRecord(observation_time=-17 / 365.0, observed_price=100.0),
+                AsianObservationRecord(observation_time=-12 / 365.0, observed_price=110.0),
+                AsianObservationRecord(observation_time=-1 / 365.0, observed_price=90.0),
             ],
         )
 

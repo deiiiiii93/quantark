@@ -7,6 +7,13 @@ Decision 2: a record dated before ``start_date`` with no carried state was obser
 knock-in record is assumed not to have fired and is never tested against the run's first close; a Phoenix coupon
 record is history (a memory coupon's was paid: no cash in the run, nothing memorized). A record dated ON
 ``start_date`` is today's and is tested on the first close.
+
+The clock rule (2026-10-26): a contract is all dates or all floats. The numeric form of a contract struck N days
+before the run is booked on the numeric clock alone, aged N days to the run's start (``test_tracker_clock_parity``'s
+``booking``): it no longer carries the records before the run, so its observation indices (and the ids built on them)
+are the contract's less the number dropped, and its clock origin is the run's start. The tests marked HYBRID check
+the numeric clock origin = ``initial_date`` itself; they book that hybrid explicitly (``_hybrid``) until the rule
+retires them.
 """
 from __future__ import annotations
 
@@ -17,7 +24,7 @@ from quantark.asset.equity.lifecycle.ko_reset import tracker_for
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 
 from test_asset.equity.product_other.test_tracker_clock_parity import (
-    BUILDERS, START, env, phoenix, walk,
+    BUILDERS, START, booking, dropped, env, phoenix, walk,
 )
 
 FORMS = ("numeric", "dated")
@@ -28,7 +35,21 @@ def _initial(gap):
 
 
 def _tracker(kind, form, gap, **kw):
-    return tracker_for(BUILDERS[kind](form, _initial(gap)), quantity=1.0, start_date=START, **kw)
+    return tracker_for(booking(kind, form, gap)[0], quantity=1.0, start_date=START, **kw)
+
+
+def _hybrid(kind, gap):
+    """HYBRID: the numeric contract dated from an ``initial_date`` ``gap`` days before the run (the booking before
+    the clock rule). Only the tests that check that hybrid itself use it."""
+    product = BUILDERS[kind]("numeric", _initial(gap))
+    product.initial_date = _initial(gap).to_pydatetime()
+    product.validate()
+    return product
+
+
+def _index(index, kind, form, gap):
+    """A record index in the contract's own numbering (the numeric booking dropped the records before the run)."""
+    return index + dropped(kind, form, gap)
 
 
 def _close(t, r, spot):
@@ -43,17 +64,19 @@ def _close(t, r, spot):
 # -- decision A: one clock --------------------------------------------------------------------------------------------
 
 def test_the_clock_origin_is_the_initial_date_when_set():
+    """A dated contract's origin is its ``initial_date``; a numeric contract (which has none) counts from the run's
+    start."""
     from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
-    product = BUILDERS["snowball"]("numeric", _initial(30))
-    assert lifecycle_clock_origin(product, START) == _initial(30)
-    product.initial_date = None
-    assert lifecycle_clock_origin(product, START) == START
-    assert lifecycle_clock_origin(product, None) is None
+    assert lifecycle_clock_origin(BUILDERS["snowball"]("dated", _initial(30)), START) == _initial(30)
+    numeric = BUILDERS["snowball"]("numeric", _initial(30))
+    assert lifecycle_clock_origin(numeric, START) == START
+    assert lifecycle_clock_origin(numeric, None) is None
 
 
 @pytest.mark.parametrize("gap", [30, 100])
 def test_the_valuation_point_runs_from_the_initial_date(gap):
-    t = _tracker("snowball", "numeric", gap)
+    """HYBRID: a numeric contract's times run from its ``initial_date``."""
+    t = tracker_for(_hybrid("snowball", gap), quantity=1.0, start_date=START)
     assert t.clock_origin == _initial(gap)
     assert t._valuation_point(START, t.product).time == gap / 365.0
 
@@ -65,7 +88,7 @@ def test_the_pricing_copy_drops_a_record_on_the_close_that_books_it(gap):
     t = _tracker("snowball", "numeric", gap)
     for r in range(122 - gap + 1):
         _close(t, r, 100.0)
-    assert 3 in t.lifecycle.observed_ko_indices
+    assert 3 - dropped("snowball", "numeric", gap) in t.lifecycle.observed_ko_indices
     day = START + pd.Timedelta(days=122 - gap)
     copy = t.product_for_pricing(day, env(100.0, day))
     assert copy.barrier_config.ko_observation_count == 8                       # records 4..11
@@ -73,9 +96,9 @@ def test_the_pricing_copy_drops_a_record_on_the_close_that_books_it(gap):
 
 
 def test_an_initial_date_with_a_time_of_day_ages_the_copy_in_whole_days():
-    """A booking stamped 09:30 dates its records on whole days; the copy made after the close that books record 3
-    must not hold it for one more day."""
-    product = BUILDERS["snowball"]("numeric", _initial(30))
+    """HYBRID: a booking stamped 09:30 dates its records on whole days; the copy made after the close that books
+    record 3 must not hold it for one more day."""
+    product = _hybrid("snowball", 30)
     product.initial_date = (_initial(30) + pd.Timedelta(hours=9, minutes=30)).to_pydatetime()
     t = tracker_for(product, quantity=1.0, start_date=START)
     for r in range(122 - 30 + 1):
@@ -92,7 +115,8 @@ def test_the_numeric_terminal_falls_due_with_the_last_record(gap):
 
 
 def test_a_rebased_knock_in_time_runs_from_the_initial_date():
-    t = _tracker("ko_reset_rebased", "numeric", 100)
+    """HYBRID: a numeric REBASED contract's knock-in time and schedule-2 base run from its ``initial_date``."""
+    t = tracker_for(_hybrid("ko_reset_rebased", 100), quantity=1.0, start_date=START)
     for r in range(83):
         _close(t, r, 70.0 if r == 82 else 100.0)                                # record 5, contract day 182
     assert t.lifecycle.knocked_in
@@ -105,26 +129,32 @@ def test_a_rebased_knock_in_time_runs_from_the_initial_date():
 @pytest.mark.parametrize("form", FORMS)
 def test_knock_out_records_before_the_run_are_never_tested(form):
     """N = 100: records 0-2 (contract days 30, 61, 91) lie before the run; a first close above the barrier tests none
-    of them. They are observed, so they are never due again."""
+    of them. On dates they are observed, so they are never due again; the numeric booking no longer holds them."""
     t = _tracker("snowball", form, 100)
     assert _close(t, 0, 104.0) == []
-    assert t.lifecycle.alive and t.lifecycle.observed_ko_indices == {0, 1, 2}
-    assert [(e.event_type.value, e.observation_index) for e in _close(t, 22, 104.0)] == [("KO", 3)]
+    before_run = {0, 1, 2} if form == "dated" else set()
+    assert form == "dated" or dropped("snowball", form, 100) == 3
+    assert t.lifecycle.alive and t.lifecycle.observed_ko_indices == before_run
+    assert [(e.event_type.value, _index(e.observation_index, "snowball", form, 100))
+            for e in _close(t, 22, 104.0)] == [("KO", 3)]
 
 
 @pytest.mark.parametrize("form", FORMS)
 def test_a_record_dated_on_the_run_start_is_tested_on_the_first_close(form):
     t = _tracker("snowball", form, 30)                                          # record 0 on contract day 30
-    assert [(e.event_type.value, e.observation_index) for e in _close(t, 0, 104.0)] == [("KO", 0)]
+    assert [(e.event_type.value, _index(e.observation_index, "snowball", form, 30))
+            for e in _close(t, 0, 104.0)] == [("KO", 0)]
 
 
 @pytest.mark.parametrize("form", FORMS)
 def test_knock_in_records_before_the_run_are_never_tested(form):
     """A KO-reset's discrete knock-in records at contract days 30, 61, 91 lie before a run issued 100 days earlier;
-    a first close below the knock-in level does not knock it in."""
+    a first close below the knock-in level does not knock it in (the numeric booking no longer holds them)."""
     t = _tracker("ko_reset_absolute", form, 100)
     assert _close(t, 0, 70.0) == []
-    assert not t.lifecycle.knocked_in and t.lifecycle.observed_ki_indices == {0, 1, 2}
+    before_run = {0, 1, 2} if form == "dated" else set()
+    assert form == "dated" or len(t.product.barrier_config.ki_observation_schedule.records) == 3  # records 3..5
+    assert not t.lifecycle.knocked_in and t.lifecycle.observed_ki_indices == before_run
     # the next knock-in record (contract day 122) is tested
     assert [e.event_type.value for e in _close(t, 22, 70.0)] == ["KI"]
 
@@ -134,22 +164,27 @@ def test_memory_coupons_before_the_run_were_paid(form):
     """Coupons 0-2 lie before the run: no cash, nothing memorized, even on a first close below the coupon barrier;
     coupon 3 then pays its own period only."""
     t = _tracker("phoenix", form, 100)
+    offset = dropped("phoenix", form, 100)
     assert _close(t, 0, 75.0) == []
-    assert t.lifecycle.observed_coupon_indices == {0, 1, 2}
+    assert t.lifecycle.observed_coupon_indices == ({0, 1, 2} if form == "dated" else set())
     assert not t.lifecycle.missed_coupon_indices and t.lifecycle.coupon_memory_count == 0
     coupon = _close(t, 22, 100.0)
-    assert [(e.event_type.value, e.observation_index) for e in coupon] == [("COUPON", 3)]
+    assert [(e.event_type.value, e.observation_index + offset) for e in coupon] == [("COUPON", 3)]
     assert coupon[0].metadata == {}                                             # no arrears released
-    assert [cf.cashflow_id for cf in t.lifecycle.ledger.cashflows] == ["coupon:3"]
+    assert [cf.cashflow_id for cf in t.lifecycle.ledger.cashflows] == [f"coupon:{3 - offset}"]
 
 
 @pytest.mark.parametrize("form", FORMS)
 def test_non_memory_coupons_before_the_run_are_history(form):
     """A first close above the coupon barrier pays none of the coupons dated before the run."""
     product = phoenix(annualized=False, memory=False)(form, _initial(100))
+    if form == "numeric":                                                       # struck 100 days before the run
+        product.time_shift(100 / 365.0, START.to_pydatetime(), env(100.0, START), keep_landing=True)
+        assert product.barrier_config.ko_observation_count == 9                 # coupons 0-2 dropped
     t = tracker_for(product, quantity=1.0, start_date=START)
     assert _close(t, 0, 100.0) == []
-    assert t.lifecycle.observed_coupon_indices == {0, 1, 2} and not t.lifecycle.ledger.cashflows
+    assert t.lifecycle.observed_coupon_indices == ({0, 1, 2} if form == "dated" else set())
+    assert not t.lifecycle.ledger.cashflows
 
 
 def test_carried_observations_are_still_honoured():
@@ -166,9 +201,12 @@ def test_the_calendar_schedule_never_fires_a_record_before_the_run(form):
     t = _tracker("snowball", form, 100)
     dates = pd.date_range(START, periods=300, freq="D")
     schedule = t.resolve_calendar_schedule(dates, env(100.0, START))
-    assert list(schedule.ko_due_day[:4]) == [-1, -1, -1, 22]
+    # the numeric booking no longer holds records 0-2: its schedule starts at record 3
+    held = [-1] * dropped("snowball", form, 100) + list(schedule.ko_due_day)
+    assert held[:4] == [-1, -1, -1, 22]
     assert schedule.terminal_due_day == 265
-    assert schedule.clock_origin == _initial(100)
+    # the clock origin: a dated contract's initial_date, a numeric contract's run start
+    assert schedule.clock_origin == (_initial(100) if form == "dated" else START)
 
 
 @pytest.mark.parametrize("form", FORMS)
@@ -176,7 +214,8 @@ def test_the_ko_reset_calendar_never_fires_a_knock_in_before_the_run(form):
     t = _tracker("ko_reset_rebased", form, 100)
     dates = pd.date_range(START, periods=300, freq="D")
     schedule = t.resolve_calendar_schedule(dates, env(100.0, START))
-    assert list(schedule.ki_due_day) == [-1, -1, -1, 22, 52, 82]
+    held = [-1] * dropped("ko_reset_rebased", form, 100) + list(schedule.ki_due_day)
+    assert held == [-1, -1, -1, 22, 52, 82]
     assert list(schedule.placement(82).ko_due_day) == [112, 143, 173]           # 182 + 30/61/91 - 100
 
 
@@ -195,13 +234,13 @@ class _Book:
 
 
 def test_the_manager_pays_a_numeric_flow_on_the_trackers_clock():
-    """N = 30 with a 2-day YEAR_FRACTION lag: record 0 knocks out on the first close and pays two days later.
+    """HYBRID: N = 30 with a 2-day YEAR_FRACTION lag: record 0 knocks out on the first close and pays two days later.
     The run ledger discounts it over 2 days and pays it on run day 2, not 30 days late."""
     from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
     from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
     from quantark.param import FlatRateCurve
 
-    product = BUILDERS["snowball"]("numeric", _initial(30))
+    product = _hybrid("snowball", 30)
     product.settlement_convention = SettlementConvention(lag=2 / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION)
     product._validate_settlement_convention()
     book = _Book(product, 104.0)
@@ -219,13 +258,13 @@ def test_the_manager_pays_a_numeric_flow_on_the_trackers_clock():
 
 
 def test_the_pnl_explain_recorder_reads_a_numeric_ledger_on_the_trackers_clock():
-    """The recorder rebuilds a contract-time state's valuation point for each snapshot day: an autocallable's from
-    its contract's clock origin, any other tracker's (a barrier's) from the manager's base date."""
+    """HYBRID: the recorder rebuilds a contract-time state's valuation point for each snapshot day: an autocallable's
+    from its contract's clock origin, any other tracker's (a barrier's) from the manager's base date."""
     from quantark.asset.equity.lifecycle.cashflows import ValuationPoint
     from quantark.asset.equity.lifecycle.state import BarrierLifecycleState
     from quantark.pnlexplain.equity.recorder import _state_point
 
-    product = BUILDERS["snowball"]("numeric", _initial(30))
+    product = _hybrid("snowball", 30)
     day = (START + pd.Timedelta(days=5)).to_pydatetime()
     state = AutocallableLifecycleState(valuation_point=ValuationPoint(time=35 / 365.0))
     assert _state_point(state, day, START.to_pydatetime(), product).time == 35 / 365.0
@@ -242,7 +281,7 @@ def test_the_dashboard_copy_is_the_trackers_copy(gap):
 
     from quantark.backtest.replay.dashboard import AutocallableBacktestDashboard
 
-    product = BUILDERS["snowball"]("numeric", _initial(gap))
+    product = booking("snowball", "numeric", gap)[0]                          # struck gap days before the run
     day = START + pd.Timedelta(days=10)
     dash = object.__new__(AutocallableBacktestDashboard)
     dash.results = SimpleNamespace(config=SimpleNamespace(product=product, start_date=START.to_pydatetime()))
@@ -250,6 +289,8 @@ def test_the_dashboard_copy_is_the_trackers_copy(gap):
     reference = tracker_for(product, quantity=1.0, start_date=START).product_for_pricing(day, env(100.0, day))
     assert aged.maturity == reference.maturity == pytest.approx((365 - gap - 10) / 365.0)
     # the dashboard ages the booked (unsnapped) k/12 times, the tracker its snapped days: same records, < 1 day apart
+    # (at most half a day: record 5 sits on day 182.5, and its aged float lands an ulp past the half day)
     held = [r.observation_time for r in aged.barrier_config.ko_observation_schedule.records]
     assert held == pytest.approx(
-        [r.observation_time for r in reference.barrier_config.ko_observation_schedule.records], abs=0.5 / 365.0)
+        [r.observation_time for r in reference.barrier_config.ko_observation_schedule.records],
+        abs=0.5 / 365.0 + 1e-15)

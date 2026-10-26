@@ -9,7 +9,7 @@ closer than ``Tolerance.ZERO`` into its LAST member (maturity stays the exact fi
 each observation time onto it. A grid with no such run is returned bit-identical.
 
 The twins: records on contract days ``d_k = round(k / 12 * 365)``; dated on ``INITIAL + d_k`` (exercise 365 days
-on), numeric at ``d_k / 365`` (maturity 1.0) aged with ``time_shift(day / 365, keep_landing=True)``. The days are
+on), numeric at ``d_k / 365`` (maturity 1.0, no ``initial_date``: one clock) aged with ``time_shift(day / 365, keep_landing=True)``. The days are
 those whose grid held such a run in one form or both (W17 ``grid_scan.txt``).
 """
 from __future__ import annotations
@@ -76,8 +76,10 @@ def _schedule(form, days, level):
 
 
 def _expiry(product, form):
-    product.initial_date = INITIAL
+    """The dated form's clock; the numeric form keeps its float times alone (a contract is all dates or all
+    floats)."""
     if form == "dated":
+        product.initial_date = INITIAL
         product.maturity = None
         product.exercise_date = on(365)
 
@@ -115,7 +117,7 @@ def ko_reset(form, day):
     the last six; 5% rebate, no principal) with a CONTINUOUS knock-in at 75 over schedule 1."""
     dated = form == "dated"
     p = KnockOutResetSnowballOption(
-        initial_price=100.0, strike=100.0, maturity=None if dated else 1.0, initial_date=INITIAL,
+        initial_price=100.0, strike=100.0, maturity=None if dated else 1.0, initial_date=INITIAL if dated else None,
         exercise_date=on(365) if dated else None,
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=_schedule(form, PRE, 103.0), ki_barrier=75.0,

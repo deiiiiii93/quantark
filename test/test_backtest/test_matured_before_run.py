@@ -5,11 +5,18 @@ contract, its maturity and the run start) and the lifecycle returns zeroes -- no
 on every day of the run. "Before" is the decision-2 rule: the terminal's date strictly before ``start_date``; a
 maturity ON ``start_date`` is today's and is settled on the first close. A numeric contract behaves exactly like its
 dated twin.
+
+The clock rule (2026-10-26): a contract is all dates or all floats. A numeric contract struck N days before the run is
+booked aged N days to the run's start (``test_tracker_clock_parity``'s ``booking``), so a numeric contract whose
+maturity lies before the run cannot be booked at all (its maturity would be negative): the tests that need one are
+run on the dated form, and the numeric cases marked HYBRID book the numeric contract dated from an ``initial_date``
+(``_hybrid``) until the rule retires them.
 """
 from __future__ import annotations
 
 import warnings
-from datetime import date, datetime
+from dataclasses import replace
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -17,7 +24,7 @@ import pytest
 
 from quantark.asset.equity.lifecycle.ko_reset import tracker_for
 
-from test_asset.equity.product_other.test_tracker_clock_parity import BUILDERS, START, env
+from test_asset.equity.product_other.test_tracker_clock_parity import BUILDERS, START, booking, env
 
 FORMS = ("numeric", "dated")
 #: the day each contract's terminal falls due, in days after its initial_date (a KO-reset not knocked in matures
@@ -31,7 +38,24 @@ def _warning_class():
 
 
 def _tracker(kind, form, gap, **kw):
-    product = BUILDERS[kind](form, START - pd.Timedelta(days=gap))
+    product = booking(kind, form, gap)[0]
+    for name, value in kw.items():
+        setattr(product, name, value)
+    return tracker_for(product, quantity=1.0, start_date=START)
+
+
+def _hybrid(kind, gap):
+    """HYBRID: the numeric contract dated from an ``initial_date`` ``gap`` days before the run (the booking before
+    the clock rule), the only numeric form whose maturity can lie before the run."""
+    initial = START - pd.Timedelta(days=gap)
+    product = BUILDERS[kind]("numeric", initial)
+    product.initial_date = initial.to_pydatetime()
+    product.validate()
+    return product
+
+
+def _hybrid_tracker(kind, gap, **kw):
+    product = _hybrid(kind, gap)
     for name, value in kw.items():
         setattr(product, name, value)
     return tracker_for(product, quantity=1.0, start_date=START)
@@ -49,7 +73,9 @@ def _close(t, r, spot):
 @pytest.mark.parametrize("form", FORMS)
 @pytest.mark.parametrize("kind", list(MATURITY_DAY))
 def test_a_contract_matured_before_the_run_books_nothing_and_warns(kind, form):
-    t = _tracker(kind, form, MATURITY_DAY[kind] + 1)                # matured the day before the run
+    """The numeric cases are HYBRID (no numeric booking matured before the run exists on the numeric clock)."""
+    gap = MATURITY_DAY[kind] + 1                                    # matured the day before the run
+    t = _tracker(kind, form, gap) if form == "dated" else _hybrid_tracker(kind, gap)
     with pytest.warns(_warning_class()) as caught:
         assert _close(t, 0, 90.0) == []
     assert len(caught) == 1
@@ -76,20 +102,23 @@ def test_a_maturity_on_the_run_start_is_settled_on_the_first_close(kind, form):
 
 @pytest.mark.parametrize("form", FORMS)
 def test_a_ko_reset_knocked_in_before_the_run_matures_at_its_knocked_in_end(form):
-    """A carried knock-in makes the knocked-in end the maturity: ABSOLUTE schedule 2 ends on contract day 365."""
+    """A carried knock-in makes the knocked-in end the maturity: ABSOLUTE schedule 2 ends on contract day 365. The
+    numeric contract matured before the run (``dead``) is HYBRID."""
     carried = {"_otc_lifecycle_knocked_in": True,
                "_otc_lifecycle_knock_in_date": (START - pd.Timedelta(days=300)).to_pydatetime()}
     alive = _tracker("ko_reset_absolute", form, 300, **carried)     # schedule 1 ended, knocked-in end ahead
     assert _close(alive, 0, 90.0) == [] and alive.lifecycle.alive
-    dead = _tracker("ko_reset_absolute", form, 366, **carried)
+    dead = (_tracker("ko_reset_absolute", form, 366, **carried) if form == "dated"
+            else _hybrid_tracker("ko_reset_absolute", 366, **carried))
     with pytest.warns(_warning_class()):
         assert _close(dead, 0, 90.0) == []
     assert not dead.lifecycle.alive and not dead.lifecycle.ledger.cashflows
 
 
 def test_an_unknocked_ko_reset_matured_with_schedule_one_although_schedule_two_runs_on():
-    """R2: not knocked in when schedule 1 ended (contract day 182), it matured there, before a run 300 days in."""
-    t = _tracker("ko_reset_absolute", "numeric", 300)
+    """R2: not knocked in when schedule 1 ended (contract day 182), it matured there, before a run 300 days in (on
+    dates: a numeric booking cannot mature before the run)."""
+    t = _tracker("ko_reset_absolute", "dated", 300)
     with pytest.warns(_warning_class()):
         assert _close(t, 0, 90.0) == []
     assert not t.lifecycle.alive
@@ -109,9 +138,12 @@ class _Book:
 
 @pytest.mark.parametrize("form", FORMS)
 def test_the_manager_drops_a_matured_position_with_no_cash(form):
+    """The numeric case is HYBRID."""
     from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
 
-    book = _Book(BUILDERS["snowball"](form, START - pd.Timedelta(days=400)))
+    product = BUILDERS["snowball"]("dated", START - pd.Timedelta(days=400)) if form == "dated" \
+        else _hybrid("snowball", 400)
+    book = _Book(product)
     manager = PortfolioLifecycleManager(base_date=START.to_pydatetime())
     with pytest.warns(_warning_class()):
         manager.register_positions(book)
@@ -127,9 +159,19 @@ def test_the_replay_values_a_matured_contract_at_zero_on_every_day():
     from test_backtest.test_book_backtest import _single_config, _synthetic_market
     from quantark.backtest.replay import AutocallableBacktestEngine
 
+    from test_asset.equity.product_other.test_tracker_clock_parity import TIMES, dated_schedule
+
     config = _single_config(_synthetic_market(end="2024-01-31"))
     config.end_date = datetime(2024, 1, 31)
-    config.product.initial_date = datetime(2022, 12, 1)               # matured 2023-12-01
+    # the one-year snowball on dates, issued 2022-12-01: matured 2023-12-01 (a numeric booking cannot mature before
+    # the run)
+    product, initial = config.product, pd.Timestamp("2022-12-01")
+    product.initial_date = initial.to_pydatetime()
+    product.barrier_config = replace(product.barrier_config, ko_observation_dates=None,
+                                     ko_observation_schedule=dated_schedule(initial, TIMES, 6180.0))
+    product.maturity = None
+    product.exercise_date = datetime(2023, 12, 1)
+    product.validate()
     with pytest.warns(_warning_class()):
         results = AutocallableBacktestEngine(config).run()
     states = results.states_df
@@ -156,7 +198,7 @@ def test_the_vector_lifecycle_books_nothing_for_a_contract_matured_before_the_ru
     from quantark.backtest.simulation.lifecycle import VectorLifecycle
 
     dates = pd.date_range(START, periods=30, freq="D")
-    schedule = _tracker("snowball", "numeric", 400).resolve_calendar_schedule(dates, env(100.0, START))
+    schedule = _tracker("snowball", "dated", 400).resolve_calendar_schedule(dates, env(100.0, START))
     vec = VectorLifecycle([schedule], np.array([1.0]), n_paths=2)
     assert not vec.alive.any()
     for d in range(30):
@@ -165,13 +207,28 @@ def test_the_vector_lifecycle_books_nothing_for_a_contract_matured_before_the_ru
 
 
 def test_the_ensemble_values_a_contract_matured_before_the_run_at_zero():
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
     from quantark.backtest.replay import ReplayProduct
     from quantark.backtest.simulation.engine import EnsembleBacktestEngine
-    from simulation.conftest import ensemble_config, short_snowball
+    from simulation.conftest import KI_BARRIER, KO_BARRIER, ensemble_config, short_snowball
     from simulation.test_engine import _paths
 
+    # the short fixture on dates, issued 2023-11-01: a 6-day contract, long matured (KO on days 2 and 5, discrete KI
+    # on days 1 and 3, as the numeric fixture; a numeric booking cannot mature before the run)
+    initial = datetime(2023, 11, 1)
+
+    def schedule(days, level):
+        return ObservationSchedule(records=[ObservationRecord(observation_date=initial + timedelta(days=d),
+                                                              barrier=level) for d in days])
+
     product = short_snowball()
-    product.initial_date = datetime(2023, 11, 1)                      # a 6-day contract, long matured
+    product.initial_date = initial
+    product.barrier_config = replace(product.barrier_config, ko_observation_dates=None,
+                                     ko_observation_schedule=schedule((2, 5), KO_BARRIER), ki_observation_dates=None,
+                                     ki_observation_schedule=schedule((1, 3), KI_BARRIER))
+    product.maturity = None
+    product.exercise_date = initial + timedelta(days=6)
+    product.validate()
     cfg = ensemble_config(products=[ReplayProduct(product=product, quantity=-1000.0, position_id=1,
                                                   has_lifecycle=True)])
     with pytest.warns(_warning_class()):

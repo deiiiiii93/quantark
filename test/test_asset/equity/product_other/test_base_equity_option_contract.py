@@ -135,14 +135,11 @@ def test_maturity_date_and_tenor_are_real_construction_forms():
     assert tenored.get_tenor() == pytest.approx(1.25)
 
 
-def _shared_lifecycle_kwargs():
-    return {
-        "maturity": 1.0,
+def _shared_lifecycle_kwargs(form):
+    """The lifecycle terms on one clock (a contract is all dates or all floats): the dated form's dates, or the
+    numeric form's ``maturity``; the clock-neutral terms on both."""
+    terms = {
         "tenor": 1.25,
-        "initial_date": datetime(2024, 1, 1),
-        "settlement_date": datetime(2025, 1, 3),
-        "maturity_date": datetime(2025, 1, 1),
-        "tenor_end": TenorEnd.MATURITY,
         "annualization_day_count": DayCountConvention.ACT_365,
         "contract_multiplier": 2.0,
         "settlement_convention": SettlementConvention(
@@ -150,19 +147,59 @@ def _shared_lifecycle_kwargs():
             lag_unit=SettlementLagUnit.YEAR_FRACTION,
         ),
     }
+    if form == "dated":
+        terms.update({
+            "initial_date": datetime(2024, 1, 1),
+            "settlement_date": datetime(2025, 1, 3),
+            "maturity_date": datetime(2025, 1, 1),
+            "tenor_end": TenorEnd.MATURITY,
+        })
+    else:
+        terms.update({"maturity": 1.0, "tenor_end": TenorEnd.EXERCISE})
+    return terms
 
 
-def _barrier_config():
+#: the quarterly observations, on either clock
+_OBSERVATION_TIMES = [0.25, 0.5, 0.75, 1.0]
+_OBSERVATION_DATES = [datetime(2024, 4, 1), datetime(2024, 7, 1), datetime(2024, 10, 1), datetime(2025, 1, 1)]
+
+
+def _dated(terms):
+    return "maturity_date" in terms
+
+
+def _observation_schedule(level):
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+
+    return ObservationSchedule(records=[ObservationRecord(observation_date=d, barrier=level)
+                                        for d in _OBSERVATION_DATES])
+
+
+def _ko_observations(terms, level):
+    """The knock-out observations on the contract's clock: dated records, or the legacy float list."""
+    if _dated(terms):
+        return {"ko_observation_schedule": _observation_schedule(level)}
+    return {"ko_observation_dates": list(_OBSERVATION_TIMES)}
+
+
+def _barrier_config(terms):
     return BarrierConfig(
         ko_barrier=103.0,
         ko_rate=0.10,
         ko_observation_type=ObservationType.DISCRETE,
-        ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
         ki_barrier=75.0,
         ki_observation_type=ObservationType.CONTINUOUS,
+        **_ko_observations(terms, 103.0),
     )
 
 
+def _accumulator_observations(terms):
+    if _dated(terms):
+        return {"observation_schedule": _observation_schedule(105.0)}
+    return {"observation_dates": list(_OBSERVATION_TIMES)}
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
 @pytest.mark.parametrize(
     "factory",
     [
@@ -196,7 +233,7 @@ def _barrier_config():
             knock_out_barrier=105.0,
             initial_price=100.0,
             notional=1_000_000.0,
-            observation_dates=[0.25, 0.5, 0.75, 1.0],
+            **_accumulator_observations(terms),
             **terms,
         ),
         lambda terms: RangeAccrualOption(
@@ -212,13 +249,13 @@ def _barrier_config():
         lambda terms: SnowballOption(
             initial_price=100.0,
             strike=100.0,
-            barrier_config=_barrier_config(),
+            barrier_config=_barrier_config(terms),
             **terms,
         ),
         lambda terms: PhoenixOption(
             initial_price=100.0,
             strike=100.0,
-            barrier_config=_barrier_config(),
+            barrier_config=_barrier_config(terms),
             coupon_config=CouponBarrierConfig(
                 coupon_barrier=85.0,
                 coupon_rate=0.01,
@@ -228,19 +265,19 @@ def _barrier_config():
         lambda terms: KnockOutResetSnowballOption(
             initial_price=100.0,
             strike=100.0,
-            barrier_config=_barrier_config(),
+            barrier_config=_barrier_config(terms),
             post_barrier_config=BarrierConfig(
                 ko_barrier=101.0,
                 ko_rate=0.10,
                 ko_observation_type=ObservationType.DISCRETE,
-                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+                **_ko_observations(terms, 101.0),
             ),
             **terms,
         ),
     ],
 )
-def test_concrete_options_forward_lifecycle_values(factory):
-    terms = _shared_lifecycle_kwargs()
+def test_concrete_options_forward_lifecycle_values(factory, form):
+    terms = _shared_lifecycle_kwargs(form)
     option = factory(terms)
 
     for name, expected in terms.items():
