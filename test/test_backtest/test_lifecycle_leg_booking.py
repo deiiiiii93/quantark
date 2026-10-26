@@ -65,10 +65,25 @@ def _phoenix():
     return phoenix
 
 
+def _ko_reset():
+    """A knock-out-reset note on the same schedule: a knock-in moves it to a second schedule at 98 (rule:
+    ``KnockOutResetSnowballOption``); not knocked in here, so it knocks out on the first schedule's day 60."""
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+
+    dates = [d * D for d in OBS]
+    return KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0, maturity=90 * D, contract_multiplier=1_000.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_dates=dates,
+                                     ki_barrier=75.0, ki_continuous=True),
+        post_barrier_config=BarrierConfig(ko_barrier=98.0, ko_rate=0.03, ko_observation_dates=dates))
+
+
 def _engine(kind):
+    from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
     from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 
-    return PhoenixQuadEngine(params=QuadParams()) if kind == "phoenix" else SnowballQuadEngine(params=QuadParams())
+    engines = {"phoenix": PhoenixQuadEngine, "ko_reset": KOResetSnowballQuadEngine}
+    return engines.get(kind, SnowballQuadEngine)(params=QuadParams())
 
 
 def _accrual(ko, basis, convention=PaymentConvention.AT_PERIOD_END):
@@ -80,8 +95,9 @@ def _accrual(ko, basis, convention=PaymentConvention.AT_PERIOD_END):
                       payment_convention=convention, ko_behavior=ko, survival_basis=basis)
 
 
-def _legs():
-    obs = tuple(d * D for d in OBS)
+def _legs(grid=OBS):
+    """``grid`` is the note's knock-out event grid in days (a knock-out-reset holds both schedules' records)."""
+    obs = tuple(d * D for d in grid)
     return [
         DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=250.0, payment_time=10 * D),
         _accrual(KOBehavior.TRUNCATE_AT_KO, SurvivalBasis.ENTER_PERIOD),
@@ -96,6 +112,9 @@ def _legs():
     ]
 
 
+GRID = {"ko_reset": sorted(OBS * 2)}                                 # each date on both schedules
+
+
 def _env(day, spot):
     return PricingEnvironment(spot_quote=SpotQuote(spot=spot, asset_name="X"), vol_surface=FlatVolSurface(0.2),
                               rate_curve=FlatRateCurve(0.03), div_yield=ContinuousDividendYield(0.01),
@@ -105,10 +124,10 @@ def _env(day, spot):
 def _book(legs=None, trade_value=True, kind="snowball"):
     pf = Portfolio(portfolio_name="legs", pricing_environments={"X": _env(0, 100.0)}, creation_date=START,
                    trade_value=trade_value)
-    product = _phoenix() if kind == "phoenix" else _snowball()
+    product = {"phoenix": _phoenix, "ko_reset": _ko_reset}.get(kind, _snowball)()
     pf.positions["note"] = EquityPosition(product=product, quantity=1.0, entry_price=0.0, underlying="X",
                                           engine=_engine(kind), entry_timestamp=START,
-                                          position_id="note", cash_legs=_legs() if legs is None else legs,
+                                          position_id="note", cash_legs=_legs(GRID.get(kind, OBS)) if legs is None else legs,
                                           entry_trade_value=0.0)
     return pf
 
@@ -130,7 +149,7 @@ def _pre_close_value(manager, pf, original_legs, day, env):
     return pre.get_trade_value(env)
 
 
-@pytest.mark.parametrize("kind", ["snowball", "phoenix"])
+@pytest.mark.parametrize("kind", ["snowball", "phoenix", "ko_reset"])
 def test_value_plus_booked_cash_is_conserved_through_payments_and_the_knock_out(kind):
     pf = _book(kind=kind)
     original = list(pf.positions["note"].cash_legs)

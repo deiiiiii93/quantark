@@ -605,9 +605,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if rec.observation_time <= maturity
             or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
         ]
-        if not pre_ko_records:
-            return None
-
         post_ko_records = self._resolve_ko_records(
             product, pricing_env, product.post_barrier_config
         )
@@ -617,7 +614,15 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if rec.observation_time <= maturity
             or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
         ]
-        if not post_ko_records:
+        # A knock-out at the valuation instant is decided on the known spot, as in ``price``.
+        decision = product.decide_observations_at_valuation(
+            spot, pricing_env, knocked_in=carried_knock_in
+        )
+        if decision.knocked_out:
+            return self._decided_ko_event_stats(
+                product, pricing_env, pre_ko_records, post_ko_records, decision
+            )
+        if not pre_ko_records or not post_ko_records:
             return None
 
         ki_continuous = product.has_ki_barrier and (
@@ -876,8 +881,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             dtype=float,
         )
 
-        pre_times = np.array([rec.observation_time for rec in pre_ko_records], dtype=float)
-        post_times = np.array([rec.observation_time for rec in post_ko_records], dtype=float)
         pre_probability = np.zeros(n_pre, dtype=float)
         post_probability = np.zeros(n_post, dtype=float)
         expected_discounted_pre_ko_cashflow = np.zeros(n_pre, dtype=float)
@@ -911,9 +914,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             expected_discounted_post_ko_cashflows[i] = float(
                 post_unit[i] * payoff
             )
-        expected_discounted_post_ko_cashflow = float(
-            np.sum(expected_discounted_post_ko_cashflows)
-        )
 
         df_maturity = float(df_local(maturity))
         ki_survive = 0.0
@@ -927,13 +927,97 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 / df_maturity
             )
 
+        return self._assemble_event_stats(
+            product,
+            pricing_env,
+            pre_ko_records,
+            post_ko_records,
+            pre_probability,
+            post_probability,
+            expected_discounted_pre_ko_cashflow,
+            expected_discounted_post_ko_cashflows,
+            ki_ever=ki_ever,
+            ki_survive=ki_survive,
+            pv=float(self.price(product, pricing_env)),
+        )
+
+    def _decided_ko_event_stats(
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+        pre_ko_records: Sequence,
+        post_ko_records: Sequence,
+        decision,
+    ) -> KOResetEventStats:
+        """A knock-out decided at valuation: certain, on its record of the schedule in force.
+
+        ``price`` decides an observation at the valuation instant on the known spot; the recursion of
+        ``_compute_event_stats`` starts after time zero, so without this the decided record had no
+        probability and its value was booked as the maturity cash flow. The decided record carries
+        the whole price, so the ledger sums to it and nothing is left for maturity.
+        """
+        pre_probability = np.zeros(len(pre_ko_records), dtype=float)
+        post_probability = np.zeros(len(post_ko_records), dtype=float)
+        pre_cashflow = np.zeros(len(pre_ko_records), dtype=float)
+        post_cashflow = np.zeros(len(post_ko_records), dtype=float)
+        if decision.ko_regime == "pre":
+            records, probability, cashflow = pre_ko_records, pre_probability, pre_cashflow
+        else:
+            records, probability, cashflow = post_ko_records, post_probability, post_cashflow
+        decided = self._match_record(decision.ko_record.observation_time, records)
+        if decided is None:
+            raise PricingError("The knock-out decided at valuation has no record on the engine's schedule.")
+        pv = float(self.price(product, pricing_env))
+        index = records.index(decided)
+        probability[index] = 1.0
+        cashflow[index] = pv
+        knocked_in = 1.0 if decision.knocked_in else 0.0
+        return self._assemble_event_stats(
+            product,
+            pricing_env,
+            pre_ko_records,
+            post_ko_records,
+            pre_probability,
+            post_probability,
+            pre_cashflow,
+            post_cashflow,
+            ki_ever=knocked_in,
+            ki_survive=0.0,
+            pv=pv,
+        )
+
+    def _assemble_event_stats(
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+        pre_ko_records: Sequence,
+        post_ko_records: Sequence,
+        pre_probability: np.ndarray,
+        post_probability: np.ndarray,
+        expected_discounted_pre_ko_cashflow: np.ndarray,
+        expected_discounted_post_ko_cashflows: np.ndarray,
+        *,
+        ki_ever: float,
+        ki_survive: float,
+        pv: float,
+    ) -> KOResetEventStats:
+        """The event statistics from each knock-out record's probability and discounted cash flow.
+
+        The maturity cash flow is what the price leaves after the knock-outs.
+        """
+        n_pre = len(pre_ko_records)
+        pre_times = np.array([rec.observation_time for rec in pre_ko_records], dtype=float)
+        post_times = np.array([rec.observation_time for rec in post_ko_records], dtype=float)
+        expected_discounted_post_ko_cashflow = float(
+            np.sum(expected_discounted_post_ko_cashflows)
+        )
+
         survival_probability = np.ones(n_pre, dtype=float)
         cumulative_pre_ko = 0.0
         for i in range(n_pre):
             cumulative_pre_ko += pre_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_pre_ko)
 
-        pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cashflow = float(
             pv
             - float(np.sum(expected_discounted_pre_ko_cashflow))

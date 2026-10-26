@@ -105,6 +105,12 @@ During 0.x the public API may still change between minor versions.
   nonexistent `quantark.param.div_yield` (and the proxy could price only a European vanilla); it now uses the
   position's own `dividend_rho`, as trade mode does. Parametric vol/rate VaR, factor VaR and incremental VaR
   change; historical and Monte Carlo VaR (full revaluation) do not.
+- `KOResetSnowballQuadEngine` (QUAD v1) event distribution at an observation instant. `price` decides a
+  knock-out at the valuation instant on the known spot, on the schedule the knock-in state puts in force, but
+  `calculate_event_stats` / `price_with_events` skipped it: the decided record got no probability and its value was
+  booked as the maturity cash flow. Cash legs on a knock-out-reset were mis-valued on an observation day (a
+  trade-mode backtest or replay breaking value + booked cash conservation on the knock-out day). The decided
+  knock-out is now certain on its record, as on QUAD v2 and the PDE; every other distribution is bitwise unchanged.
 - Convertible puts were silently dropped. GS, HW (all three vol schemes), jump-diffusion and the
   TF PDE applied a put only on a step whose whole-day date equalled the put date; at the default
   200 GS steps the demo puttable bond priced the same with or without its put (worth ~2.4). Puts
