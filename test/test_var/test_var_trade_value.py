@@ -1,8 +1,8 @@
 """VaR honours ``EquityPortfolio.trade_value`` (ship spec 2026-10-23 portfolio-trade-value D7, D20; AC1, AC3, AC6).
 
 Historical and Monte Carlo VaR reprice every position, and every per-position component P&L, through the
-portfolio's valuation switch (trade value in trade mode); parametric VaR reads trade-risk Greeks and replaces the
-Black–Scholes psi proxy by the trade ``dividend_rho`` in psi's units ($ per unit of q). Flag off: the product
+portfolio's valuation switch (trade value in trade mode); parametric VaR reads trade-risk Greeks, the trade
+``dividend_rho`` included, in the factors' units (``test_parametric_factor_units``). Flag off: the product
 formulas, bitwise.
 """
 import copy
@@ -14,6 +14,7 @@ import pytest
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.param import ContinuousDividendYield
 from quantark.portfolio.equity import valuation as shared
+from quantark.portfolio.equity.swap_position import EquitySwapPosition
 from quantark.var import HistoricalVaREngine, MonteCarloVaREngine, ParametricVaREngine, VaRConfig
 from quantark.var.config import EquityRiskFactorConfig, VaRMethod
 from test_portfolio.test_equity_portfolio_trade_value import _book
@@ -193,7 +194,13 @@ def _parametric(factors=None, **kw):
     return ParametricVaREngine(config)
 
 
-def test_parametric_flag_off_sensitivities_are_the_product_path_bitwise():
+def _per_unit(position, greeks, key):
+    """A position's Greek per unit of its absolute factor: option Greeks are per 0.01, a TRS's rho per unit."""
+    value = greeks[position.position_id].get(key, 0.0)
+    return value if isinstance(position, EquitySwapPosition) else value / 0.01
+
+
+def test_parametric_flag_off_sensitivities_are_the_product_greeks():
     pf = _book()
     ref = copy.deepcopy(pf)
     envs = ref.pricing_environments
@@ -205,35 +212,14 @@ def test_parametric_flag_off_sensitivities_are_the_product_path_bitwise():
         delta += risk[p.position_id]["delta"] * envs[p.underlying].spot
     assert got == {
         "spot_return": delta,
-        "vol_change": sum(risk[p.position_id].get("vega", 0.0) for p in ref.positions.values()),
-        "rate_shift": sum(risk[p.position_id].get("rho", 0.0) for p in ref.positions.values()),
+        "vol_change": sum(_per_unit(p, risk, "vega") for p in ref.positions.values()),
+        "rate_shift": sum(_per_unit(p, risk, "rho") for p in ref.positions.values()),
     }
     result = engine.calculate_var(pf, _factor_history(30))
     total = sum(got.values())
     for pos_id, p in ref.positions.items():
         pos_sens = (risk[pos_id]["delta"] / p.quantity) * envs[p.underlying].spot
         assert result.marginal_var[pos_id] == pytest.approx(abs(pos_sens / total) * result.var, rel=1e-12)
-
-
-@pytest.mark.parametrize("trade_value", [False, True])
-def test_parametric_psi_proxy_only_in_product_mode(monkeypatch, trade_value):
-    # The BS proxy itself cannot run today (it imports the nonexistent quantark.param.div_yield); stub it to
-    # prove the routing: product mode sums proxy × quantity over option positions, trade mode never calls it.
-    calls = []
-
-    def proxy(product, env, bump_size=0.0001):
-        calls.append(product)
-        return 3.0 if product is pf.positions["vanilla"].product else 5.0
-
-    pf = _book(trade_value=trade_value)
-    engine = _parametric(ALL_FACTORS)
-    monkeypatch.setattr(engine, "_calculate_div_yield_sensitivity", proxy)
-    got = engine._compute_equity_sensitivities(pf)["div_yield_shift"]
-    if trade_value:
-        assert calls == []
-    else:
-        assert calls == [pf.positions["vanilla"].product, pf.positions["note"].product]
-        assert got == 0.0 + 3.0 * 10 + 5.0 * -2.0
 
 
 def test_parametric_flag_on_uses_trade_delta_vega_rho():
@@ -250,8 +236,8 @@ def test_parametric_flag_on_uses_trade_delta_vega_rho():
         delta += greeks[p.position_id]["delta"] * envs[p.underlying].spot
     assert got == {
         "spot_return": delta,
-        "vol_change": sum(greeks[p.position_id].get("vega", 0.0) for p in ref.positions.values()),
-        "rate_shift": sum(greeks[p.position_id].get("rho", 0.0) for p in ref.positions.values()),
+        "vol_change": sum(_per_unit(p, greeks, "vega") for p in ref.positions.values()),
+        "rate_shift": sum(_per_unit(p, greeks, "rho") for p in ref.positions.values()),
     }
     # the vanilla's delta is the bump delta, not the analytical one
     analytical = ref.positions["vanilla"].get_risk_measures(envs["X"])["delta"]

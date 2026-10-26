@@ -98,6 +98,13 @@ During 0.x the public API may still change between minor versions.
 
 ### Fixed
 
+- Parametric equity VaR understated vol and rate risk 100×, in both portfolio modes. An `EquityPosition`'s vega
+  is per vol point and its rho per 1 %, but the `vol_change` / `rate_shift` factors are absolute changes;
+  `ParametricVaREngine` now divides vega, rho and `dividend_rho` by 0.01 (TRS rho is per unit of rate already and
+  is unchanged). Product mode's `include_div_yield=True` crashed on a Black–Scholes proxy importing the
+  nonexistent `quantark.param.div_yield` (and the proxy could price only a European vanilla); it now uses the
+  position's own `dividend_rho`, as trade mode does. Parametric vol/rate VaR, factor VaR and incremental VaR
+  change; historical and Monte Carlo VaR (full revaluation) do not.
 - Convertible puts were silently dropped. GS, HW (all three vol schemes), jump-diffusion and the
   TF PDE applied a put only on a step whose whole-day date equalled the put date; at the default
   200 GS steps the demo puttable bond priced the same with or without its put (worth ~2.4). Puts

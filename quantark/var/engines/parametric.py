@@ -26,10 +26,11 @@ from quantark.var.risk_factors import (
 from quantark.util.fixings import freeze_portfolio_fixings
 
 
-#: Trade ``dividend_rho`` is the trade value's change per 1% (0.01) move in q (``get_trade_risk`` rescales the
-#: one-sided ``div_bump`` P&L by ``0.01 / div_bump``); dividing by this unit gives $ per unit of q, the unit of
-#: the Black–Scholes psi proxy × quantity and of the ``div_yield_shift`` factor (an absolute change in q).
-TRADE_DIVIDEND_RHO_UNIT = 0.01
+#: An ``EquityPosition``'s Greeks from the default ``GreeksCalculator`` (analytical, bump or trade risk) are per
+#: 0.01 of their parameter: vega per vol point, rho and dividend_rho per 1 %. The ``vol_change``, ``rate_shift``
+#: and ``div_yield_shift`` factors are absolute changes, so the sensitivity per unit of factor is the Greek
+#: divided by this unit. A TRS (``EquitySwapPosition``) reports rho per unit of its financing rate already.
+GREEK_UNIT = 0.01
 
 
 class ParametricVaREngine:
@@ -605,14 +606,17 @@ class ParametricVaREngine:
         (bump Greeks, cash legs included) for every ``EquityPosition``. The dollar
         spot-return sensitivity multiplies the scaled delta by the underlying spot.
 
-        The dividend-yield sensitivity is $ per unit change of q: product mode
-        uses the Black–Scholes psi proxy × quantity; trade mode the trade
-        ``dividend_rho`` (per 1% of q) divided by ``TRADE_DIVIDEND_RHO_UNIT``.
+        The vol, rate and dividend-yield sensitivities are $ per unit of their
+        factor (an absolute change): an ``EquityPosition``'s vega, rho and
+        ``dividend_rho`` divided by ``GREEK_UNIT``, a TRS's rho as reported.
         """
         from quantark.portfolio.equity.swap_position import EquitySwapPosition
 
         factors_config = self.config.equity_factors or EquityRiskFactorConfig()
-        trade = getattr(portfolio, "trade_value", False)
+
+        def per_unit(position, greek):
+            value = per_position_greeks[position.position_id].get(greek, 0.0)
+            return value if isinstance(position, EquitySwapPosition) else value / GREEK_UNIT
 
         sensitivities: Dict[str, float] = {}
         per_position_greeks = {
@@ -630,34 +634,22 @@ class ParametricVaREngine:
 
         if factors_config.include_vol:
             sensitivities["vol_change"] = sum(
-                per_position_greeks[p.position_id].get("vega", 0.0)
-                for p in portfolio.positions.values()
+                per_unit(p, "vega") for p in portfolio.positions.values()
             )
 
         if factors_config.include_rate:
             sensitivities["rate_shift"] = sum(
-                per_position_greeks[p.position_id].get("rho", 0.0)
-                for p in portfolio.positions.values()
+                per_unit(p, "rho") for p in portfolio.positions.values()
             )
 
         if factors_config.include_div_yield:
-            total_psi = 0.0
-            for position in portfolio.positions.values():
-                # A realized-cashflow TRS has no risk-neutral dividend-yield
-                # sensitivity in this model; only payoff-on-spot products do.
-                if isinstance(position, EquitySwapPosition):
-                    continue
-                if trade:
-                    # Quantity-scaled trade dividend_rho (legs included) in psi's units.
-                    greeks = per_position_greeks[position.position_id]
-                    total_psi += greeks["dividend_rho"] / TRADE_DIVIDEND_RHO_UNIT
-                    continue
-                pricing_env = portfolio.pricing_environments[position.underlying]
-                psi = self._calculate_div_yield_sensitivity(
-                    position.product, pricing_env
-                )
-                total_psi += psi * position.quantity
-            sensitivities["div_yield_shift"] = total_psi
+            # A realized-cashflow TRS has no risk-neutral dividend-yield
+            # sensitivity in this model; only payoff-on-spot products do.
+            sensitivities["div_yield_shift"] = sum(
+                per_position_greeks[p.position_id]["dividend_rho"] / GREEK_UNIT
+                for p in portfolio.positions.values()
+                if not isinstance(p, EquitySwapPosition)
+            )
 
         return sensitivities
 
@@ -674,48 +666,6 @@ class ParametricVaREngine:
         if getattr(portfolio, "trade_value", False):
             return portfolio.position_greeks(position, GreeksCalculator(), env=pricing_env)
         return position.get_risk_measures(pricing_env)
-
-    def _calculate_div_yield_sensitivity(
-        self, product: any, pricing_env: any, bump_size: float = 0.0001
-    ) -> float:
-        """
-        Calculate dividend yield sensitivity (psi) using finite difference.
-
-        Args:
-            product: Option product
-            pricing_env: Pricing environment
-            bump_size: Bump size for dividend yield (default: 1 bp = 0.0001)
-
-        Returns:
-            Psi: $ change per 1bp change in dividend yield
-        """
-        from quantark.asset.equity.engine.analytical import BlackScholesEngine
-        from quantark.param.div_yield import ContinuousDividendYield
-        from quantark.priceenv.pricing_environment import PricingEnvironment
-
-        engine = BlackScholesEngine()
-        base_price = engine.price(product, pricing_env)
-
-        # Bump dividend yield up
-        original_div = pricing_env.div_yield
-        T = product.get_maturity(pricing_env)
-        base_div_yield = pricing_env.get_div_yield(T)
-
-        bumped_div_yield = ContinuousDividendYield(base_div_yield + bump_size)
-        bumped_env = PricingEnvironment(
-            rate_curve=pricing_env.rate_curve,
-            valuation_date=pricing_env.valuation_date,
-            spot_quote=pricing_env.spot_quote,
-            vol_surface=pricing_env.vol_surface,
-            div_yield=bumped_div_yield,
-        )
-
-        bumped_price = engine.price(product, bumped_env)
-
-        # Sensitivity per bump_size change
-        psi = (bumped_price - base_price) / bump_size
-
-        return psi
 
     def _compute_fi_sensitivities(self, portfolio: FIPortfolio) -> Dict[str, float]:
         """Compute portfolio-level sensitivities for FI."""
