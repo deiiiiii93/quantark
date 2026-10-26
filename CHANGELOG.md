@@ -111,6 +111,12 @@ During 0.x the public API may still change between minor versions.
   booked as the maturity cash flow. Cash legs on a knock-out-reset were mis-valued on an observation day (a
   trade-mode backtest or replay breaking value + booked cash conservation on the knock-out day). The decided
   knock-out is now certain on its record, as on QUAD v2 and the PDE; every other distribution is bitwise unchanged.
+- `KOResetSnowballQuadEngine` (QUAD v1) event distribution once a knock-out schedule has ended. The event
+  statistics returned nothing when either schedule had no record left, so `price_with_events` fell back to a
+  maturity-only distribution: a knocked-in note past its first schedule had P(maturity, no knock-out) = 1, its
+  `AT_KO` legs raised `ValidationError` and its `AT_MATURITY_NO_KO` legs were paid in full, every day for the
+  rest of its life; an aged-out second schedule did the same before a knock-in. The recursion now runs with the
+  ended side empty and agrees with QUAD v2 to its lattice difference.
 - Convertible puts were silently dropped. GS, HW (all three vol schemes), jump-diffusion and the
   TF PDE applied a put only on a step whose whole-day date equalled the put date; at the default
   200 GS steps the demo puttable bond priced the same with or without its put (worth ~2.4). Puts

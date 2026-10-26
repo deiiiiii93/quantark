@@ -622,7 +622,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             return self._decided_ko_event_stats(
                 product, pricing_env, pre_ko_records, post_ko_records, decision
             )
-        if not pre_ko_records or not post_ko_records:
+        # An ended schedule is legal: past the first, only a carried knock-in is alive (``require_alive``);
+        # an aged-out second leaves a knock-in no knock-out before maturity. The recursion reads either
+        # as no records on that side.
+        if not pre_ko_records and not carried_knock_in:
             return None
 
         ki_continuous = product.has_ki_barrier and (
