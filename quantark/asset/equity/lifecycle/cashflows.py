@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, TYPE_CHECKING
 
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 from .events import LifecycleEventType
 
@@ -265,7 +266,11 @@ class LifecycleCashflowLedger:
                 f"cashflow {cashflow.cashflow_id!r} has no payment_time "
                 "for time-based valuation"
             )
-        return cashflow.payment_time > valuation_point.time
+        # A payment that lands on this valuation up to rounding is paid, the settlement resolver's rule
+        # (``resolve_pending`` refuses a payment within Tolerance.ZERO of the valuation): a numeric
+        # year-fraction lag added to an aged time can sit an ulp past the close it falls due on.
+        remaining = cashflow.payment_time - valuation_point.time
+        return remaining > 0.0 and not is_zero(remaining)
 
     def __deepcopy__(self, memo):
         copied = type(self)()

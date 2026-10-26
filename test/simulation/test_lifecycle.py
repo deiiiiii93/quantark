@@ -213,26 +213,15 @@ def test_an_early_issued_contract_matches_the_tracker_day_by_day(gap, name, spot
         assert a == pytest.approx(e), f"{name} gap {gap} day {d}: {a} != {e}"
 
 
-def _hybrid_issued_early(gap_days: int, **kwargs):
-    """HYBRID (numeric contract + ``initial_date``, the pre-2026-10-26 booking), kept for one test only.
-
-    The pure-numeric rebooking (``_issued_early``) of the ledger-times test fails: the YEAR_FRACTION lag puts the
-    receivable's payment time an ulp past its payment close (``(o + 2/365) - o != 2/365`` for the aged record time
-    ``o``), the ledger's exact ``payment_time > point.time`` keeps it pending, and ``SettlementResolver.resolve_pending``
-    refuses it ("payment must be strictly after valuation"). The hybrid's times happen to land exactly. A tracker /
-    ledger fix (quantark code), not a test change, is what lets this test be rebooked."""
-    product = short_snowball(**kwargs)
-    product.initial_date = (DATES[0] - pd.Timedelta(days=gap_days)).to_pydatetime()
-    return product
-
-
 @pytest.mark.parametrize("gap", [1, 2])
 def test_an_early_issued_contract_books_the_trackers_ledger_times(gap):
-    """HYBRID booking (see ``_hybrid_issued_early``). The numeric clock runs from ``initial_date``: the vector
-    lifecycle's determination and payment times, and the receivable it discounts, are the tracker ledger's. Gap 1
-    knocks out on its day-2 record (run day 1); gap 2 tests that record on the run's first close, below the barrier,
-    and matures on contract day 6 (run day 4)."""
-    product = _hybrid_issued_early(gap, settlement_lag_days=2)
+    """Issued before the run, booked on the numeric clock alone (``_issued_early``): the vector lifecycle's
+    determination and payment times, and the receivable it discounts, are the tracker ledger's, measured from the
+    run's start. Gap 1 knocks out on its day-2 record (run day 1); gap 2 tests that record on the run's first close,
+    below the barrier, and matures on contract day 6 (run day 4). The two-day YEAR_FRACTION lag lands the payment on
+    a close up to an ulp off its day (``(o + 2/365) - o != 2/365`` for an aged record time ``o``): the ledger settles
+    it on that close, not a day later."""
+    product = _issued_early(gap, settlement_lag_days=2)
     spots = [SPOT, KO + 1.0, KO + 1.0, SPOT, SPOT, SPOT, SPOT, SPOT]
     tracker = _tracker(product)
     lifecycle_product = tracker.product_for_lifecycle()
@@ -249,8 +238,9 @@ def test_an_early_issued_contract_books_the_trackers_ledger_times(gap):
     (flow,) = tracker.lifecycle.ledger.cashflows
     assert vec.determination_time[0, 0] == flow.determination_time
     assert vec.payment_time[0, 0] == flow.payment_time
-    assert flow.determination_time == (2 if gap == 1 else 6) / 365.0
-    assert flow.payment_time == flow.determination_time + 2 / 365.0
+    run_day = 1 if gap == 1 else 4                     # contract day 2 / 6, less the gap
+    assert flow.determination_time == pytest.approx(run_day / 365.0, abs=1e-15)
+    assert flow.payment_time == pytest.approx(flow.determination_time + 2 / 365.0, abs=1e-15)
 
 
 def test_a_record_before_the_run_is_due_on_no_day():
