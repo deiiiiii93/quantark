@@ -95,13 +95,25 @@ class FxBarrierMCEngine(BaseFxEngine):
         T_pay = float(opt.get_delivery(fx_env))
         df_pay = fx_env.get_domestic_df(T_pay)
 
-        if is_zero(T):
+        ahead = None
+        if opt.monitoring == ObservationType.DISCRETE:
+            # Only the fixings observe a discrete barrier: the past (recorded fixings) decides first, and a spot
+            # beyond the barrier on a day without a fixing knocks nothing.
+            hit_time, ahead = opt.monitoring_state(fx_env)
+            if hit_time is not None:
+                price = self._knocked_value(opt, fx_env, spot, T, T_pay, df_pay, hit_time)
+                self._last_result = FxBarrierMCResult(price, 0.0, 0, 0.0, "knocked")
+                return price
+            if is_zero(T):
+                price = self._unknocked_expiry_value(opt, spot, df_pay)
+                self._last_result = FxBarrierMCResult(price, 0.0, 0, 0.0, "expiry")
+                return price
+        elif is_zero(T):
             price = self._expiry_value(opt, spot, df_pay)
             self._last_result = FxBarrierMCResult(price, 0.0, 0, 0.0, "expiry")
             return price
-
-        # Inception state: already through the barrier.
-        if self._already_hit(opt, spot):
+        # Inception state: already through a continuously monitored barrier.
+        elif self._already_hit(opt, spot):
             price = self._inception_hit_value(opt, fx_env, spot, T, T_pay, df_pay)
             self._last_result = FxBarrierMCResult(price, 0.0, 0, 0.0, "inception")
             return price
@@ -117,7 +129,7 @@ class FxBarrierMCEngine(BaseFxEngine):
             strict=getattr(self.params, "strict_smile", False),
         )
 
-        sim = self._barrier_sim(opt, fx_env, T, sigma)
+        sim = self._barrier_sim(opt, fx_env, T, sigma, ahead)
         vanilla = self._vanilla_payoff(opt, sim.terminal)
         payoffs = self._assemble_ko_ki(
             opt.knock_type, opt.rebate, opt.rebate_at_hit, sim, vanilla, df_pay
@@ -165,15 +177,15 @@ class FxBarrierMCEngine(BaseFxEngine):
 
     # -- barrier simulation (shared with the sharkfin engine) -----------
 
-    def _barrier_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
+    def _barrier_sim(self, product, fx_env, T, sigma, ahead=None) -> "_BarrierSim":
         """Simulate paths and return per-path survival + first-hit discount.
 
-        Works for any product exposing ``barrier``, ``is_up``, ``monitoring``
-        and ``observation_times_at`` (FxBarrierOption and FxSharkfinOption), so the
-        sharkfin engine reuses it.
+        Works for any product exposing ``barrier``, ``is_up`` and ``monitoring`` (FxBarrierOption and
+        FxSharkfinOption), so the sharkfin engine reuses it. ``ahead``: a DISCRETE product's fixing times still
+        ahead, from the ``monitoring_state`` the caller has decided (no breach on or before today).
         """
         if product.monitoring == ObservationType.DISCRETE:
-            return self._discrete_sim(product, fx_env, T, sigma)
+            return self._discrete_sim(product, fx_env, T, sigma, ahead)
         return self._continuous_sim(product, fx_env, T, sigma)
 
     def _continuous_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
@@ -195,10 +207,9 @@ class FxBarrierMCEngine(BaseFxEngine):
         survival = (~hit_matrix.any(axis=1)).astype(float)
         return _BarrierSim(paths, terminal, survival, None)
 
-    def _discrete_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
-        hit_time, ahead = product.monitoring_state(fx_env)
-        if hit_time is not None or not ahead:
-            return self._decided_sim(fx_env, T, sigma, hit_time)
+    def _discrete_sim(self, product, fx_env, T, sigma, ahead) -> "_BarrierSim":
+        if not ahead:
+            return self._unmonitored_sim(fx_env, T, sigma)
         obs = np.array(ahead, dtype=float)
         times = obs if np.isclose(obs[-1], T) else np.concatenate([obs, [T]])
         obs_idx = np.arange(obs.size)
@@ -219,18 +230,13 @@ class FxBarrierMCEngine(BaseFxEngine):
         first_hit_disc = np.where(hit_any, df_hit, 0.0)
         return _BarrierSim(paths, terminal, survival, first_hit_disc)
 
-    def _decided_sim(self, fx_env, T, sigma, hit_time) -> "_BarrierSim":
-        """No fixing left can decide the barrier: a past fixing breached it (``hit_time`` <= 0), which knocked every
-        path, or every fixing is behind unbreached. Only the terminal is simulated. A rebate at hit was paid at that
-        fixing: today's (``hit_time`` 0) is paid now, an earlier one is already paid."""
+    def _unmonitored_sim(self, fx_env, T, sigma) -> "_BarrierSim":
+        """Every fixing is behind, none breached: no path can be knocked, only the terminal is simulated."""
         gen = self._make_generator(fx_env, fx_env.effective_spot(), sigma, np.array([T], dtype=float), use_bb=False)
         paths, _ = gen.generate_paths()
         terminal = paths[:, -1]
         n = terminal.size
-        if hit_time is None:
-            return _BarrierSim(paths, terminal, np.ones(n), np.zeros(n))
-        paid_now = 1.0 if is_zero(hit_time) else 0.0
-        return _BarrierSim(paths, terminal, np.zeros(n), np.full(n, paid_now))
+        return _BarrierSim(paths, terminal, np.ones(n), np.zeros(n))
 
     def _bb_first_hit_discount(self, p, times, fx_env) -> np.ndarray:
         """Discretized rebate-at-detection: first-hit prob * DF(step time)."""
@@ -286,6 +292,24 @@ class FxBarrierMCEngine(BaseFxEngine):
             delivery=T_pay, notional_foreign=1.0,
         )
         return GarmanKohlhagenEngine().price(vanilla, fx_env)
+
+    def _knocked_value(self, opt, fx_env, spot, T, T_pay, df_pay, hit_time) -> float:
+        """A DISCRETE barrier a fixing on or before today breached (``hit_time`` <= 0). A knock-out keeps only a
+        rebate not yet paid: one paid at the hit is paid now when the hit is today's fixing, and is gone when it was
+        an earlier one; one paid at expiry is still owed. A knock-in is the vanilla."""
+        if opt.knock_type == FxBarrierType.KNOCK_OUT:
+            if opt.rebate_at_hit:
+                return opt.rebate if is_zero(hit_time) else 0.0
+            return opt.rebate * df_pay
+        if is_zero(T):
+            return self._vanilla_payoff(opt, np.array([spot]))[0] * df_pay
+        return self._inception_hit_value(opt, fx_env, spot, T, T_pay, df_pay)
+
+    def _unknocked_expiry_value(self, opt, spot, df_pay) -> float:
+        """A DISCRETE barrier at its expiry with no fixing breached (today's decided by ``monitoring_state``)."""
+        if opt.knock_type == FxBarrierType.KNOCK_OUT:
+            return float(self._vanilla_payoff(opt, np.array([spot]))[0]) * df_pay
+        return opt.rebate * df_pay
 
     def _expiry_value(self, opt, spot, df_pay) -> float:
         hit = self._already_hit(opt, spot)

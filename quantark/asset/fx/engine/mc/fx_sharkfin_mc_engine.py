@@ -56,12 +56,27 @@ class FxSharkfinMCEngine(FxBarrierMCEngine):
         T_pay = float(opt.get_delivery(fx_env))
         df_pay = fx_env.get_domestic_df(T_pay)
 
-        if is_zero(T):
+        ahead = None
+        if opt.monitoring == ObservationType.DISCRETE:
+            # Only the fixings observe a discrete barrier (see FxBarrierMCEngine.price).
+            hit_time, ahead = opt.monitoring_state(fx_env)
+            if hit_time is not None:
+                # knocked out on or before today: a rebate at hit is paid now on today's fixing, gone on an earlier one
+                if opt.rebate_at_hit:
+                    price = opt.ko_rebate if is_zero(hit_time) else 0.0
+                else:
+                    price = opt.ko_rebate * df_pay
+                self._last_result = FxSharkfinMCResult(price, 0.0, 0, 0.0, "knocked")
+                return price
+            if is_zero(T):
+                price = (opt.capped_intrinsic(spot) + opt.no_hit_rebate) * df_pay
+                self._last_result = FxSharkfinMCResult(price, 0.0, 0, 0.0, "expiry")
+                return price
+        elif is_zero(T):
             price = self._expiry_value(opt, spot, df_pay)
             self._last_result = FxSharkfinMCResult(price, 0.0, 0, 0.0, "expiry")
             return price
-
-        if self._already_hit(opt, spot):
+        elif self._already_hit(opt, spot):
             # Knocked out at inception: only the KO rebate remains.
             price = opt.ko_rebate if opt.rebate_at_hit else opt.ko_rebate * df_pay
             self._last_result = FxSharkfinMCResult(price, 0.0, 0, 0.0, "inception")
@@ -71,7 +86,7 @@ class FxSharkfinMCEngine(FxBarrierMCEngine):
         if sigma <= 0:
             raise ValidationError(f"vol must be positive, got {sigma}")
 
-        sim = self._barrier_sim(opt, fx_env, T, sigma)
+        sim = self._barrier_sim(opt, fx_env, T, sigma, ahead)
         terminal_payoff = self._capped_payoff(opt, sim.terminal) + opt.no_hit_rebate
         payoffs = self._assemble_ko_ki(
             FxBarrierType.KNOCK_OUT, opt.ko_rebate, opt.rebate_at_hit,

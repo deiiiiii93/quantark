@@ -6,7 +6,7 @@ AC3: both forms complete: the date wins and the floats are dropped, so it prices
 alone; validation rebinds only the product's own attributes, never a shared record, schedule or config.
 """
 import math
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import replace
 from datetime import datetime
 
@@ -18,6 +18,7 @@ from quantark.asset.equity.product.option import (
     AccumulatorOption, AmericanOption, AsianOption, BarrierOption, DoubleBarrierOption, DoubleOneTouchOption,
     DoubleSharkfinOption, EuropeanVanillaOption, OneTouchOption, SingleSharkfinOption, create_ko_reset_snowball,
 )
+from quantark.asset.equity.product.option.asian_option import AsianObservationRecord
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.asset.equity.product.option.phoenix_helpers import create_standard_phoenix
@@ -70,12 +71,12 @@ NUMERIC = {
                                              touch_type=TouchType.ONE_TOUCH, **{"maturity": 1.0, **kw}),
     "double_one_touch": lambda **kw: DoubleOneTouchOption(upper_barrier=110.0, lower_barrier=90.0,
                                                           **{"maturity": 1.0, **kw}),
-    "single_sharkfin": lambda **kw: SingleSharkfinOption(strike=95.0, option_type=CALL, barrier=120.0,
-                                                         observation_type=ObservationType.EXPIRY,
-                                                         **{"maturity": 1.0, **kw}),
-    "double_sharkfin": lambda **kw: DoubleSharkfinOption(strike=100.0, option_type=CALL, lower_barrier=70.0,
-                                                         upper_barrier=130.0, observation_type=ObservationType.EXPIRY,
-                                                         **{"maturity": 1.0, **kw}),
+    "single_sharkfin": lambda **kw: SingleSharkfinOption(
+        strike=95.0, option_type=CALL, barrier=120.0,
+        **{"maturity": 1.0, "observation_type": ObservationType.EXPIRY, **kw}),
+    "double_sharkfin": lambda **kw: DoubleSharkfinOption(
+        strike=100.0, option_type=CALL, lower_barrier=70.0, upper_barrier=130.0,
+        **{"maturity": 1.0, "observation_type": ObservationType.EXPIRY, **kw}),
     "asian": lambda **kw: AsianOption(strike=100.0, option_type=CALL, asian_strike_type=AsianStrikeType.FIXED,
                                       averaging_type=AveragingType.ARITHMETIC, **{"maturity": 1.0, **kw}),
     "accumulator": lambda **kw: AccumulatorOption(strike=96.0, knock_out_barrier=110.0, daily_share_accumulation=1.0,
@@ -207,6 +208,70 @@ DATED_WITH_A_NEEDED_FLOAT = {
 }
 
 
+def _dated(kind, **kw):
+    """``kind`` booked on the date clock (an ``exercise_date`` / ``expiry_date`` in place of ``maturity``)."""
+    anchor = {"expiry_date": EXPIRY} if kind.startswith("fx_") else {"exercise_date": EXPIRY}
+    return NUMERIC[kind](maturity=None, **anchor, **kw)
+
+
+def _dated_autocallable(kind, **kw):
+    """A helper-built Snowball / Phoenix / KO-reset (numeric, legacy float schedules) re-dated: the float schedules
+    are now times the dated contract needs with no date for them."""
+    return NUMERIC[kind](maturity=None, initial_date=T0, exercise_date=EXPIRY, **kw)
+
+
+def _time_only_records(kind):
+    """A dated autocallable whose knock-out schedule is two dated records and one time-only record."""
+    records = [ObservationRecord(observation_date=datetime(2026, 7, 6), barrier=103.0),
+               ObservationRecord(observation_time=1.0, barrier=103.0)]
+    product = NUMERIC[kind]()
+    config = replace(product.barrier_config, ko_observation_dates=None, ko_barrier=103.0,
+                     ko_observation_schedule=ObservationSchedule(records=records))
+    return _dated_autocallable(kind, barrier_config=config)
+
+
+def _fx_dated_delivery_alone(kind):
+    if "range_accrual" in kind:
+        from quantark.asset.fx.product.option.fx_range_accrual_config import FxRangeAccrualObservationRecord
+        records = [FxRangeAccrualObservationRecord(observation_date=d) for d in (datetime(2026, 7, 6), EXPIRY)]
+        return _dated(kind, observation_times=None, observation_records=records, delivery=1.01)
+    return _dated(kind, delivery=1.01)
+
+
+def _discrete(**kw):
+    return dict(observation_type=ObservationType.DISCRETE, observation_dates=[0.5, 1.0], **kw)
+
+
+DATED_WITH_A_NEEDED_FLOAT.update({
+    # legacy float lists, on every class that books them
+    "double_barrier_legacy_float_list": (lambda: _dated("double_barrier", **_discrete()), "observation_dates"),
+    "single_sharkfin_legacy_float_list": (lambda: _dated("single_sharkfin", **_discrete()), "observation_dates"),
+    "double_sharkfin_legacy_float_list": (lambda: _dated("double_sharkfin", **_discrete()), "observation_dates"),
+    "double_one_touch_legacy_float_list": (lambda: _dated("double_one_touch", **_discrete()), "observation_dates"),
+    "snowball_barrier_config_float_list": (lambda: _dated_autocallable("snowball"), "observation_"),
+    "phoenix_barrier_config_float_list": (lambda: _dated_autocallable("phoenix"), "observation_"),
+    "ko_reset_barrier_config_float_list": (lambda: _dated_autocallable("ko_reset"), "observation_"),
+    # a record with only observation_time, on every class with records
+    "phoenix_time_only_record": (lambda: _time_only_records("phoenix"), "observation_time"),
+    "ko_reset_time_only_record": (lambda: _time_only_records("ko_reset"), "observation_time"),
+    "asian_time_only_record": (
+        lambda: _dated("asian", observation_records=[AsianObservationRecord(observation_date=datetime(2026, 7, 6)),
+                                                     AsianObservationRecord(observation_time=1.0)]),
+        "observation_time"),
+    "range_accrual_time_only_record": (lambda: _range_accrual_time_only_record(), "observation_time"),
+    # FX delivery without delivery_date, on every FX class
+    **{f"{kind}_delivery_alone": ((lambda kind=kind: _fx_dated_delivery_alone(kind)), "delivery")
+       for kind in NUMERIC if kind.startswith("fx_")},
+})
+
+
+def _range_accrual_time_only_record():
+    from quantark.asset.equity.product.option.range_accrual_config import RangeAccrualObservationRecord
+    records = [RangeAccrualObservationRecord(observation_date=datetime(2026, 7, 6)),
+               RangeAccrualObservationRecord(observation_time=1.0)]
+    return _dated("range_accrual", observation_times=None, observation_records=records)
+
+
 @pytest.mark.parametrize("case", DATED_WITH_A_NEEDED_FLOAT)
 def test_ac2_a_dated_product_needing_a_numeric_time_is_refused(case):
     build, field = DATED_WITH_A_NEEDED_FLOAT[case]
@@ -279,3 +344,39 @@ def test_ac3_a_dated_theta_landing_record_stays_put():
     landing = aged.barrier_config.ko_observation_schedule.records[0]
     assert landing.observation_date == datetime(2026, 7, 6) and landing.observation_time == 0.0
     assert math.isfinite(float(SnowballQuadEngineV2().price(aged, env)))
+
+
+# --- AC4: dated theta is unchanged by enforcement (QUAD V2, MC, PDE) -----------------------------------------------
+
+def _theta_engines():
+    from quantark.asset.equity.engine.mc import SnowballMCEngine
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.asset.equity.param import MCParams, PDEParams
+    return {
+        "quad_v2": SnowballQuadEngineV2,
+        "mc": lambda: SnowballMCEngine(params=MCParams(num_paths=2_000, seed=11)),
+        "pde": lambda: SnowballPDESolver(PDEParams()),
+    }
+
+
+@pytest.mark.parametrize("engine", ["quad_v2", "mc", "pde"])
+def test_ac4_dated_theta_is_bitwise_unchanged_by_enforcement(engine, monkeypatch):
+    """Theta on a dated note valued the day before a knock-out date: its bumped copy lands a record on the bumped
+    date (observation_time 0.0 beside the date) and is re-validated. Enforcement must not move it: theta with the
+    clock rule wired equals theta with ``enforce_clock`` a no-op, bit for bit."""
+    from quantark.asset.equity.product.option import base_equity_option, snowball_option
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+
+    records = [ObservationRecord(observation_date=d, barrier=103.0)
+               for d in (datetime(2026, 4, 6), datetime(2026, 7, 6), datetime(2026, 10, 5), EXPIRY)]
+    env = _eq_env()
+    env.valuation_date = datetime(2026, 4, 5)
+
+    def theta():
+        note = _dated_snowball([replace(r) for r in records])
+        return GreeksCalculator().calculate_numerical_theta(note, deepcopy(env), _theta_engines()[engine]())
+
+    enforced = theta()
+    for module in (base_equity_option, snowball_option):
+        monkeypatch.setattr(module, "enforce_clock", lambda product: None)
+    assert theta() == enforced and math.isfinite(enforced)

@@ -113,6 +113,8 @@ class DiscreteMonitoring(BaseFxProduct):
     def _fixings(self, fx_env: Optional["FxPricingEnvironment"]) -> List[Tuple[Key, float]]:
         """``(key, time)`` of every fixing, the time in years from the valuation date (<= 0 on or before it)."""
         if self.observation_dates:
+            if fx_env is None:
+                raise ValidationError("FxPricingEnvironment required to resolve observation_dates")
             return [(when, self._fixing_time(when, fx_env)) for when in self.observation_dates]
         return [(t, float(t)) for t in self.observation_times or ()]
 

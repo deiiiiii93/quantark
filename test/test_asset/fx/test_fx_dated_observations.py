@@ -242,3 +242,59 @@ def test_a_numeric_mid_life_booking_carries_its_past_fixings():
 def test_a_numeric_past_time_without_its_fixing_is_refused():
     with pytest.raises(ValidationError, match="strictly positive"):
         _barrier(maturity=0.75, observation_times=[-0.25, 0.25, 0.75])
+
+
+# --- CP2 review: the engines' expiry and inception shortcuts read the recorded fixings too --------------------------
+
+def test_a_knock_out_recorded_earlier_is_dead_on_its_expiry_date():
+    env = _env_on(EXPIRY, spot=1.30)
+    dead = _barrier(expiry_date=EXPIRY, observation_dates=DATES, observed_fixings={**HIT, DATES[2]: 1.25})
+    assert _mc("barrier").price(dead, env) == 0.0
+    shark = _sharkfin(expiry_date=EXPIRY, observation_dates=DATES, observed_fixings={**HIT, DATES[2]: 1.25})
+    assert _mc("sharkfin").price(shark, env) == pytest.approx(0.01 * env.get_domestic_df(shark.get_delivery(env)),
+                                                              abs=1e-15)
+
+
+def test_on_its_expiry_date_a_knock_in_reads_todays_recorded_fixing_not_the_live_spot():
+    env = _env_on(EXPIRY, spot=1.36)
+    fixings = {DATES[0]: 1.25, DATES[1]: 1.30, DATES[2]: 1.30, DATES[3]: 1.30}      # never breached 1.35
+    knock_in = _barrier(expiry_date=EXPIRY, observation_dates=DATES, observed_fixings=fixings,
+                        knock_type=FxBarrierType.KNOCK_IN)
+    assert _mc("barrier").price(knock_in, env) == 0.0                                 # its rebate: none
+
+
+@pytest.mark.parametrize("spot", [1.30, 1.36])
+def test_a_rebate_paid_at_an_earlier_hit_is_not_paid_again_whatever_todays_spot(spot):
+    dead = _barrier(expiry_date=EXPIRY, observation_dates=DATES, observed_fixings=HIT, rebate=0.02,
+                    rebate_at_hit=True)
+    assert _mc("barrier").price(dead, _env_on(MID, spot=spot)) == 0.0
+
+
+@pytest.mark.parametrize("kind", BUILDERS)
+def test_a_discrete_product_is_not_knocked_by_a_spot_between_its_fixings(kind):
+    """Only a fixing observes a discrete barrier: a spot beyond it on a day without a fixing knocks nothing."""
+    env = _env_on(MID, spot=1.36)
+    product = BUILDERS[kind](expiry_date=EXPIRY, observation_dates=DATES, observed_fixings=BELOW)
+    hit, ahead = product.monitoring_state(env)
+    assert hit is None and len(ahead) == 2
+    numeric = BUILDERS[kind](maturity=product.get_maturity(env), observation_times=ahead)
+    price = _mc(kind).price(product, env)
+    assert price == _mc(kind).price(numeric, env) > 0.0
+    knocked_now = 0.0 if kind == "barrier" else 0.01 * env.get_domestic_df(product.get_delivery(env))
+    assert price != pytest.approx(knocked_now, abs=1e-12)                # not the inception-hit value
+
+
+def test_a_missing_fixing_warns_once_per_pricing():
+    from quantark.util.fixings import MissingFixingWarning
+    import warnings as _warnings
+    product = _barrier(expiry_date=EXPIRY, observation_dates=DATES, observed_fixings={DATES[0]: 1.25})
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        _mc("barrier").price(product, _env_on(MID))
+    assert sum(issubclass(w.category, MissingFixingWarning) for w in caught) == 1
+
+
+@pytest.mark.parametrize("kind", BUILDERS)
+def test_dated_fixing_times_need_an_environment(kind):
+    with pytest.raises(ValidationError, match="FxPricingEnvironment required"):
+        BUILDERS[kind](expiry_date=EXPIRY, observation_dates=DATES).observation_times_at()
