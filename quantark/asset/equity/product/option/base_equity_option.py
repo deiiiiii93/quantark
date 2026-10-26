@@ -221,7 +221,6 @@ class BaseEquityOption(BaseEquityProduct):
                 "Either maturity/tenor or exercise_date/maturity_date must be provided"
             )
 
-
     def _validate_date_ordering(self) -> None:
         """Validate that dates are in proper chronological order."""
         # initial_date should be before exercise_date

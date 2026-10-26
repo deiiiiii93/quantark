@@ -131,6 +131,9 @@ During 0.x the public API may still change between minor versions.
 
 ### Fixed
 
+- A realised receivable due on this close up to rounding (`Tolerance.ZERO`) is paid on it
+  (`LifecycleCashflowLedger`): a numeric year-fraction lag added to an aged time could land an ulp past the close,
+  stay pending, and then raise "payment must be strictly after valuation".
 - Theta of a numeric discrete FX barrier / sharkfin raised "times must be strictly increasing and positive":
   `time_shift` aged the maturity but not the fixing times. The fixing times (and recorded fixings) now move with the
   clock, so numeric theta equals its dated twin's.

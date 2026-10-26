@@ -19,9 +19,10 @@ observation method is called.
 One clock (tracker clock decision A, 2026-10-09): every time the tracker
 measures -- a numeric record's date, the pricing copy's ageing, the numeric
 valuation point, the terminal's due day, a ledger entry's time -- runs from
-``lifecycle_clock_origin``: the contract's ``initial_date`` when it has one,
-else the run's ``start_date``. A numeric contract therefore books what its
-dated twin books, whenever the run starts.
+``lifecycle_clock_origin``: a dated contract's ``initial_date`` when it has
+one, else the run's ``start_date``. A numeric contract (no dates at all, clock
+rule 2026-10-26) counts from the run's start, so it books what its dated twin
+books when it is booked aged to that day.
 
 Records dated before ``start_date`` (decision 2): a knock-out, knock-in or
 coupon record whose date lies before the run, and that the caller did not

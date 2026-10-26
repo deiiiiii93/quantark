@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, fields, replace
-from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
@@ -27,7 +26,6 @@ from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, le
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.option_enums import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_zero
 
 from .autocallable import AutocallableLifecycleTracker, CalendarSchedule, DateResolver, drop_observed_residue
 from .events import LifecycleEvent, LifecycleEventType
@@ -256,16 +254,9 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         """V1's terminal timing: determined at the knocked-in contract's end."""
         contract = self.contract()
         schedule_env = self._schedule_resolution_env(contract, env)
+        # a dated contract's schedule 2 is dated (a REBASED one converts onto its generated dates), so its end is its
+        # last observation date; a numeric contract's is a time on its own clock
         end_date = _last_observation_date(contract.post_barrier_config.ko_observation_schedule)
-        base = self._schedule_two_base()
-        if end_date is None and self._uses_date_timing(contract) and base is not None:
-            # a dated contract's converted REBASED schedule 2 is numeric: its end is dated on the same clock as its
-            # records, the knock-in close plus the final offset (review finding C1: it was read off a numeric
-            # valuation point a dated contract never has)
-            end_time = float(contract.get_post_maturity_time(schedule_env))
-            end_date = self._date_resolver(
-                (base + timedelta(days=int(round(end_time * DAYS_PER_YEAR)))).normalize()
-            ).to_pydatetime()
         if end_date is not None and self._uses_date_timing(contract):
             return resolve_terminal_timing_at(
                 contract, schedule_env, determination_date=end_date, cashflow_id="ko_reset_v1_terminal"

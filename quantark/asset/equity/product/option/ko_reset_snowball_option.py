@@ -189,8 +189,9 @@ class KnockOutResetSnowballOption(SnowballOption):
         })
 
     def _validate_dated_rebased_end(self) -> None:
-        """A dated REBASED contract's latest end (the last generated date) is its ``exercise_date``: derived when only
-        ``maturity_date`` dates the contract, and a given one must not precede it."""
+        """A dated REBASED contract's latest end (the last generated date) is a floor on its ``exercise_date``: a
+        given one (or the one ``maturity_date`` supplies, as on every equity option) must not precede it; one still
+        missing takes the latest end."""
         if not self._dated_rebased():
             return
         ends = [dates[-1] for dates in self.rebased_extended_schedule.values() if dates]

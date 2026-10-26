@@ -72,9 +72,11 @@ def test_an_exercise_date_before_the_latest_end_is_refused():
     assert dated_rebased(exercise_date=datetime(2026, 10, 1)).exercise_date == datetime(2026, 10, 1)
 
 
-def test_the_exercise_date_is_derived_on_a_maturity_date_booking():
-    note = dated_rebased(exercise_date=None, maturity_date=LATEST_END)
-    assert note.exercise_date == LATEST_END
+def test_a_maturity_date_booking_supplies_the_exercise_date_floored_at_the_latest_end():
+    assert dated_rebased(exercise_date=None, maturity_date=LATEST_END).exercise_date == LATEST_END
+    assert dated_rebased(exercise_date=None, maturity_date=datetime(2026, 10, 1)).exercise_date == datetime(2026, 10, 1)
+    with pytest.raises(ValidationError, match="latest"):
+        dated_rebased(exercise_date=None, maturity_date=datetime(2026, 9, 5))
 
 
 def test_an_offset_that_is_not_a_whole_month_is_refused():
