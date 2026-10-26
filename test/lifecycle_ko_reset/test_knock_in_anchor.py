@@ -5,7 +5,7 @@ stored beside ``ki_date``; ``ki_date`` (the close) stays the reset's timing. A k
 copy embeds the anchor in each converted record's (still relative) period and in its ``post`` terminal.
 """
 import pickle
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -111,9 +111,9 @@ def test_a_non_accruing_rebased_contract_needs_no_anchor():
     """Dated, no initial_date, nothing annualized: the knock-in records carry NONE periods, so there is no anchor to
     resolve (knock_in_anchor_for gives None) and none is required."""
     p = ko_reset(M.REBASED, pre=dates(91, 182), ki=dates(91, 182, level=75.0),
-                 accrual=AccrualConfig(is_annualized=False), maturity=(182 + 270) / 365)
+                 accrual=AccrualConfig(is_annualized=False), exercise_date=datetime(2027, 4, 6))
     assert knock_in_anchor_for(p.barrier_config.ki_observation_schedule.records[0], 0) is None
-    converted = p.with_absolute_schedule_2(91 / 365, anchor=None)
+    converted = p.with_absolute_schedule_2(T0 + timedelta(days=91), anchor=None)
     assert ko_accrual_factor(converted, converted.post_barrier_config.ko_observation_schedule.records[0]) == 1.0
 
 
@@ -147,9 +147,9 @@ def test_the_converted_terminal_is_the_mc_routes():
 
 def test_a_dated_knock_in_plus_a_quoted_offset_in_the_converted_copy():
     p = ko_reset(M.REBASED, pre=dates(91, 182), ki=dates(91, 182, level=75.0), post=times(0.25, 0.5, level=100.0),
-                 initial_date=T0, maturity=(182 + 183) / 365)
+                 initial_date=T0, exercise_date=datetime(2027, 1, 6))
     ki = p.barrier_config.ki_observation_schedule.records[0]
-    converted = p.with_absolute_schedule_2(91 / 365, anchor=knock_in_anchor_for(ki, 0))
+    converted = p.with_absolute_schedule_2(T0 + timedelta(days=91), anchor=knock_in_anchor_for(ki, 0))
     first = converted.post_barrier_config.ko_observation_schedule.records[0]
     origin_to_fixing = calculate_year_fraction(T0, T0 + timedelta(days=91), DayCountConvention.ACT_365)
     assert ko_accrual_factor(converted, first) == pytest.approx(origin_to_fixing + 0.25, abs=1e-15)

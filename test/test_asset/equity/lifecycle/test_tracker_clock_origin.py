@@ -216,7 +216,8 @@ def test_the_ko_reset_calendar_never_fires_a_knock_in_before_the_run(form):
     schedule = t.resolve_calendar_schedule(dates, env(100.0, START))
     held = [-1] * dropped("ko_reset_rebased", form, 100) + list(schedule.ki_due_day)
     assert held == [-1, -1, -1, 22, 52, 82]
-    assert list(schedule.placement(82).ko_due_day) == [112, 143, 173]           # 182 + 30/61/91 - 100
+    # knock-in on 2026-03-28 (contract day 182): schedule 2 one, two and three calendar months later (31/61/92 days)
+    assert list(schedule.placement(82).ko_due_day) == [113, 143, 174]           # 182 + 31/61/92 - 100
 
 
 # -- the portfolio manager's run ledger values each flow on its own tracker's clock --------------------------------

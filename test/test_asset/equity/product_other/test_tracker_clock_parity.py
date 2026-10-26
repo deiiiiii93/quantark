@@ -41,6 +41,7 @@ from quantark.asset.equity.product.option.snowball_config import AccrualConfig, 
 from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import add_months
 from quantark.util.enum.option_enums import ObservationType, PostKOScheduleMode as M
 
 START = pd.Timestamp("2026-01-05")
@@ -105,19 +106,35 @@ def phoenix(annualized: bool, memory: bool = True) -> Callable:
     return build
 
 
+def _rebased_gaps(initial: pd.Timestamp) -> List[float]:
+    """The dated REBASED twin's schedule 2 after a knock-in on its last knock-in record (day 182, the record the
+    knock-in path fires), as offsets in years: the day gaps of ``add_months(knock-in date, k)``, k = 1..3."""
+    knock_in = on(initial, round(TIMES[5] * 365))
+    return [(add_months(knock_in, k) - knock_in).days / 365.0 for k in (1, 2, 3)]
+
+
 def ko_reset(mode: M) -> Callable:
     """Schedule 1 (KO 103, flat 15%) and the discrete KI (75) at k/12 for k = 1..6; schedule 2 (KO 95, flat 3%) at
-    k/12 for k = 7..12 (ABSOLUTE) or at offsets k/12, k = 1..3, from the knock-in (REBASED); 5% rebate."""
+    k/12 for k = 7..12 (ABSOLUTE) or k = 1..3 months after the knock-in (REBASED); 5% rebate.
+
+    REBASED (clock rule 2026-10-26): the dated form books its offsets as whole months (k/12 years) and generates its
+    schedule 2 as the knock-in date + k calendar months; the numeric form cannot vary its offsets by knock-in, so it
+    books the dated twin's day gaps for the knock-in the path fires (``_rebased_gaps``) -- the same contract on every
+    path this module walks."""
     pre = TIMES[:6]
     post = TIMES[6:] if mode == M.ABSOLUTE else TIMES[:3]
-    maturity = 1.0 if mode == M.ABSOLUTE else pre[-1] + post[-1]
 
     def build(form: str, initial: pd.Timestamp):
         dated = form == "dated"
         sched = (lambda times, level: dated_schedule(initial, times, level)) if dated else numeric_schedule
-        # a REBASED schedule 2 holds offsets from the knock-in: numeric in both forms
-        post_sched = sched(post, 95.0) if mode == M.ABSOLUTE else numeric_schedule(post, 95.0)
-        exercise = on(initial, 365) if dated and mode == M.ABSOLUTE else None
+        if mode == M.ABSOLUTE:
+            post_sched = sched(post, 95.0)
+            maturity, exercise = 1.0, on(initial, 365) if dated else None
+        else:
+            offsets = post if dated else _rebased_gaps(initial)
+            post_sched = numeric_schedule(offsets, 95.0)
+            maturity = pre[-1] + offsets[-1]
+            exercise = add_months(on(initial, round(pre[-1] * 365)), 3) if dated else None
         p = KnockOutResetSnowballOption(
             initial_price=100.0, strike=100.0, maturity=None if exercise is not None else maturity,
             initial_date=initial.to_pydatetime() if dated else None, exercise_date=exercise,

@@ -2,6 +2,7 @@
 Business day calendar for settlement date adjustments.
 """
 
+import calendar as _calendar
 from enum import Enum
 from datetime import datetime, timedelta
 from importlib import resources
@@ -456,6 +457,41 @@ class Calendar:
 
     def __repr__(self):
         return f"Calendar(name={self.name}, holidays={len(self.holidays)})"
+
+
+def add_months(
+    date: datetime,
+    months: int,
+    calendar: Optional[Calendar] = None,
+    convention: Optional[BusinessDayConvention] = None,
+) -> datetime:
+    """
+    The date ``months`` calendar months from ``date`` (the "+nM" of a schedule).
+
+    The day of month is kept and clamped to the month end (Jan 31 + 1M is Feb 28, or Feb 29 in a leap year); the
+    time of day is kept. With ``calendar`` and ``convention`` the result is then adjusted to a business day.
+
+    Args:
+        date: Start date
+        months: Whole number of months to add (may be negative)
+        calendar: Business-day calendar for the optional adjustment
+        convention: Business-day convention applied on ``calendar``
+
+    Raises:
+        ValidationError: If ``months`` is not a whole number, or a convention is given without a calendar
+    """
+    if isinstance(months, bool) or int(months) != months:
+        raise ValidationError(f"add_months needs a whole number of months, got {months}")
+    index = date.year * 12 + (date.month - 1) + int(months)
+    year, month = divmod(index, 12)
+    month += 1
+    day = min(date.day, _calendar.monthrange(year, month)[1])
+    shifted = date.replace(year=year, month=month, day=day)
+    if convention is None or convention == BusinessDayConvention.UNADJUSTED:
+        return shifted
+    if calendar is None:
+        raise ValidationError("add_months needs a calendar to apply a business-day convention")
+    return calendar.adjust_date(shifted, convention)
 
 
 def create_calendar(

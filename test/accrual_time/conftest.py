@@ -52,7 +52,7 @@ def ko_reset(mode=PostKOScheduleMode.ABSOLUTE, pre=None, ki=None, post=None, acc
     pre = pre if pre is not None else times(0.25, 0.5)
     ki = ki if ki is not None else times(0.25, 0.5, level=75.0)
     post = post if post is not None else times(0.25, 0.5, 0.75, level=100.0)
-    if maturity is None:
+    if maturity is None and not {"exercise_date", "maturity_date"} & kw.keys():
         maturity = 1.25 if mode is PostKOScheduleMode.REBASED else 0.75
     return KnockOutResetSnowballOption(
         initial_price=100.0, strike=100.0, barrier_config=barriers(pre, ki),

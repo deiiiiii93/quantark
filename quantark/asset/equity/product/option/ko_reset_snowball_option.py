@@ -11,9 +11,13 @@ The post-KI schedule can be applied in two modes:
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Union
+from types import MappingProxyType
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
+
+import numpy as np
 
 from quantark.asset.equity.settlement import SettlementConvention
+from quantark.util.calendar import add_months
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import (
     BarrierType,
@@ -24,6 +28,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 from .observation_schedule import (
     at_valuation_instant,
@@ -132,6 +137,89 @@ class KnockOutResetSnowballOption(SnowballOption):
     def validate(self, *, allow_zero_maturity: bool = False) -> None:
         self._validate_post_ko_mode()
         super().validate(allow_zero_maturity=allow_zero_maturity)
+        self._validate_dated_rebased_end()
+
+    # ------------------------------------------------------------------
+    # A REBASED contract on the date clock (ship spec 2026-10-26, Decision 6)
+    # ------------------------------------------------------------------
+
+    def _dated_rebased(self) -> bool:
+        from quantark.asset.clock import ProductClock, product_clock
+
+        return self.post_ko_mode == PostKOScheduleMode.REBASED and product_clock(self) is ProductClock.DATE
+
+    def _rebased_offset_months(self) -> List[int]:
+        """Schedule 2's offsets as whole calendar months: a dated REBASED offset is booked as ``k / 12`` years and
+        means ``k`` months (user decision 2026-10-26); any other offset, and a settlement offset (it has no date
+        form: the settlement follows the settlement convention), is refused."""
+        schedule = self.post_barrier_config.ko_observation_schedule
+        months: List[int] = []
+        for record in [] if schedule is None else schedule.records:
+            if record.settlement_time is not None:
+                raise ValidationError(
+                    "a dated REBASED KO-reset cannot book a schedule-2 settlement offset (settlement_time): it has no "
+                    "date form; the settlement follows the product's settlement convention"
+                )
+            scaled = float(record.observation_time) * 12.0
+            whole = round(scaled)
+            if not is_close(scaled, whole):
+                raise ValidationError(
+                    "a dated REBASED KO-reset's schedule-2 offsets are calendar months: each must be a whole number "
+                    f"of months (k / 12 years), got {record.observation_time}"
+                )
+            months.append(int(whole))
+        return months
+
+    def rebased_dates_after(self, knock_in_date: datetime) -> Tuple[datetime, ...]:
+        """The schedule-2 dates of a dated REBASED contract knocked in on ``knock_in_date``: ``add_months(date, k)``
+        for each offset's ``k`` months, unadjusted (the day of month kept, clamped at the month end)."""
+        return tuple(add_months(knock_in_date, k) for k in self._rebased_offset_months())
+
+    @property
+    def rebased_extended_schedule(self) -> Mapping[int, Tuple[datetime, ...]]:
+        """A dated REBASED contract's extended schedule, read-only: for each knock-in record (by its index in the
+        knock-in schedule), the schedule-2 dates a knock-in on that record's date places (``rebased_dates_after``).
+        Generated (and checked) at construction; empty for any other contract."""
+        if not self._dated_rebased():
+            return MappingProxyType({})
+        schedule = self.barrier_config.ki_observation_schedule
+        records = [] if schedule is None else schedule.records
+        return MappingProxyType({
+            index: self.rebased_dates_after(record.observation_date) for index, record in enumerate(records)
+        })
+
+    def _validate_dated_rebased_end(self) -> None:
+        """A dated REBASED contract's latest end (the last generated date) is its ``exercise_date``: derived when only
+        ``maturity_date`` dates the contract, and a given one must not precede it."""
+        if not self._dated_rebased():
+            return
+        ends = [dates[-1] for dates in self.rebased_extended_schedule.values() if dates]
+        if not ends:
+            return
+        latest = max(ends)
+        if self.exercise_date is None:
+            self.exercise_date = latest
+        elif self.exercise_date < latest:
+            raise ValidationError(
+                f"a dated REBASED KO-reset's exercise_date ({self.exercise_date:%Y-%m-%d}) precedes its latest end "
+                f"({latest:%Y-%m-%d}), the last schedule-2 date of a knock-in on its last knock-in date"
+            )
+
+    def rebased_schedule_two_times(
+        self, pricing_env: PricingEnv, ki_times: Sequence[float], ki_source_indices: Sequence[int],
+        offsets: np.ndarray,
+    ) -> List[np.ndarray]:
+        """Schedule 2's observation times for a knock-in on each knock-in record (``ki_times`` with their source
+        indices in the knock-in schedule), in years from the valuation date: ``t_ki + offsets`` on the numeric
+        clock, the resolved generated dates (``rebased_extended_schedule``) on the date clock."""
+        if not self._dated_rebased():
+            return [t_ki + offsets for t_ki in ki_times]
+        extended = self.rebased_extended_schedule
+        return [
+            np.array([ObservationRecord(observation_date=d).resolve_time(pricing_env) for d in extended[index]],
+                     dtype=float)
+            for index in ki_source_indices
+        ]
 
     def _validate_barrier_parameters(self) -> None:
         super()._validate_barrier_parameters()
@@ -295,9 +383,13 @@ class KnockOutResetSnowballOption(SnowballOption):
         return any(r.accrual is not None and r.accrual.kind is not AccrualKind.NONE for r in records)
 
     def with_absolute_schedule_2(
-        self, knock_in_time: float, *, anchor: Optional[KnockInAnchor]
+        self, knock_in_time: Union[float, datetime], *, anchor: Optional[KnockInAnchor]
     ) -> "KnockOutResetSnowballOption":
         """The ABSOLUTE contract a REBASED one becomes once knocked in at ``knock_in_time``.
+
+        On the date clock ``knock_in_time`` is the knock-in DATE: schedule 2 becomes the dated records on the
+        generated dates of that knock-in (``rebased_dates_after``) and the contract's ``exercise_date`` the last of
+        them (ship spec 2026-10-26, Decision 6). Below, the numeric clock.
 
         ``knock_in_time`` is TIMING: the knock-in close on this product's own clock (years from its numeric origin;
         negative for a knock-in before it). Every schedule-2 record is observed at ``knock_in_time + offset`` and the
@@ -329,6 +421,28 @@ class KnockOutResetSnowballOption(SnowballOption):
                 return replace(period, anchor=anchor, terms=None)
             return replace(period, terms=None)
 
+        dated = self._dated_rebased()
+        if dated != isinstance(knock_in_time, datetime):
+            raise ValidationError(
+                "a dated REBASED KO-reset converts on its knock-in date, a numeric one on its knock-in time; got "
+                f"{knock_in_time!r}"
+            )
+        if dated:
+            dates = self.rebased_dates_after(knock_in_time)
+            product = deepcopy(self)
+            product.post_barrier_config = replace(
+                self.post_barrier_config,
+                ko_observation_schedule=replace(schedule, records=[
+                    replace(record, observation_time=None, observation_date=date, accrual=embedded(record.accrual))
+                    for record, date in zip(schedule.records, dates)
+                ]),
+                ko_observation_dates=None,
+            )
+            product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
+            product.exercise_date = max(dates)
+            product.maturity = None
+            return self._with_converted_terminals(product, embedded)
+
         shift = float(knock_in_time)
         records = [
             replace(
@@ -349,6 +463,10 @@ class KnockOutResetSnowballOption(SnowballOption):
         )
         product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
         product.maturity = shift + max(float(record.observation_time) for record in schedule.records)
+        return self._with_converted_terminals(product, embedded)
+
+    def _with_converted_terminals(self, product: "KnockOutResetSnowballOption", embedded) -> \
+            "KnockOutResetSnowballOption":
         terminals = dict(getattr(self, "_terminal_accrual", None) or {})
         if "post" in terminals:
             terminals["post"] = embedded(terminals["post"])
@@ -505,6 +623,14 @@ class KnockOutResetSnowballOption(SnowballOption):
 
         if self.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
             post_max = max(post_times)
+        elif self._dated_rebased():
+            # the latest generated end of a knock-in still ahead
+            active = self.active_ki_source_indices(pricing_env)
+            extended = self.rebased_extended_schedule
+            ends = [extended[index][-1] for index in active if extended[index]]
+            post_max = (
+                ObservationRecord(observation_date=max(ends)).resolve_time(pricing_env) if ends else pre_maturity
+            )
         else:
             ki_profile = self.get_ki_observation_profile(pricing_env)
             ki_times = ki_profile["observation_times"]

@@ -1051,7 +1051,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             terminal_determination = np.where(
                 is_v0,
                 float(pre_maturity),
-                extra["ki_time"] + post_max_offset,
+                extra["post_end_time"],
             )
         _append_grouped_path_cashflows(
             ~is_ko,
@@ -1344,6 +1344,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
 
         post_mode = post_profile["mode"]
         post_indices_by_ki: Optional[List[np.ndarray]] = None
+        # REBASED: schedule 2's times for a knock-in on each knock-in record, t_ki + offset (numeric clock) or the
+        # generated dates (date clock, ship spec 2026-10-26 Decision 6)
+        post_times_by_ki: Optional[List[np.ndarray]] = None
         if post_mode == PostKOScheduleMode.ABSOLUTE:
             all_times_set |= set(post_times)
         else:
@@ -1358,9 +1361,11 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 raise ValidationError(
                     "Rebased post-KO schedule requires discrete KI monitoring."
                 )
-            for t_ki in ki_times:
-                for offset in post_times:
-                    all_times_set.add(t_ki + offset)
+            post_times_by_ki = product.rebased_schedule_two_times(
+                pricing_env, ki_times, ki_record_indices, post_times
+            )
+            for actual_times in post_times_by_ki:
+                all_times_set.update(actual_times)
 
         # An observation exactly at valuation is decided on the known spot, as in _build_time_grid: it
         # is no simulation node (a zero step is rejected) and maps to index -1, i.e. path column 0 under
@@ -1389,10 +1394,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             post_indices = indices_for(post_times)
         else:
             post_indices = np.array([], dtype=int)
-            post_indices_by_ki = []
-            for t_ki in ki_times:
-                actual_times = t_ki + post_times
-                post_indices_by_ki.append(indices_for(actual_times))
+            post_indices_by_ki = [indices_for(actual_times) for actual_times in post_times_by_ki]
 
         if ki_continuous:
             ki_indices = np.array([], dtype=int)
@@ -1425,6 +1427,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             "post_times": post_times,
             "post_indices": post_indices,
             "post_indices_by_ki": post_indices_by_ki,
+            "post_times_by_ki": post_times_by_ki,
             "ki_times": np.array(ki_times, dtype=float),
             "ki_indices": ki_indices,
             "ki_continuous": ki_continuous,
@@ -2058,6 +2061,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         pre_indices = grid["pre_indices"]
         post_indices = grid["post_indices"]
         post_indices_by_ki = grid["post_indices_by_ki"]
+        post_times_by_ki = grid["post_times_by_ki"]
         ki_times = grid["ki_times"]
         ki_indices = grid["ki_indices"]
         ki_continuous = grid["ki_continuous"]
@@ -2082,6 +2086,14 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             if post_mode == PostKOScheduleMode.ABSOLUTE
             else None
         )
+        # REBASED: row k holds schedule 2's times after a knock-in on ki_times[k]; ``post_last`` is its final
+        # record (the largest offset), the knocked-in end
+        post_table = (
+            np.vstack(post_times_by_ki)
+            if post_times_by_ki and len(post_times) > 0
+            else None
+        )
+        post_last = int(np.argmax(post_times)) if len(post_times) else -1
 
         # KO payoffs for pre schedule
         pre_payoffs, pre_settlement_times = self._compute_ko_schedule_payoffs(
@@ -2216,7 +2228,6 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                     first_post_idx[post_triggered] = first_idx_local
                     post_ko_time[post_triggered] = post_times[first_idx_local]
             else:
-                post_offsets = post_times
                 if post_indices_by_ki is None:
                     raise ValidationError("Missing post_indices_by_ki for rebased KO reset.")
                 eligible_idx = np.flatnonzero(post_allowed)
@@ -2242,9 +2253,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                         group_idx = np.flatnonzero(group_mask)[triggered]
                         post_ko_triggered[group_idx] = True
                         first_post_idx[group_idx] = first_local
-                        post_ko_time[group_idx] = (
-                            ki_time[group_idx] + post_offsets[first_local]
-                        )
+                        post_ko_time[group_idx] = post_table[ki_idx_val, first_local]
 
         is_pre_ko = pre_valid
         is_post_ko = post_ko_triggered & ~is_pre_ko
@@ -2307,7 +2316,6 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 ], dtype=float).reshape(len(anchors), len(post_records))
                 idx = np.flatnonzero(is_post_ko)
                 local_idx = first_post_idx[idx]
-                offsets = post_times[local_idx]
                 rates = post_rates[local_idx]
                 accrual = accrual_table[first_ki_idx[idx], local_idx]
                 coupon = (
@@ -2318,7 +2326,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 )
                 payoffs[idx] = principal_component + coupon
                 if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
-                    determination_times = ki_time[idx] + offsets
+                    determination_times = post_table[first_ki_idx[idx], local_idx]
                     settlement_times[idx] = self._resolve_payment_time_array(
                         product,
                         pricing_env,
@@ -2329,7 +2337,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                         cashflow_id="ko_reset_rebased",
                     )
                 else:
-                    determination_times = ki_time[idx] + post_max_offset
+                    determination_times = post_table[first_ki_idx[idx], post_last]
                     settlement_times[idx] = self._resolve_payment_time_array(
                         product,
                         pricing_env,
@@ -2400,6 +2408,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             else:
                 determination_times = (
                     ki_time[is_v1] + post_max_offset
+                    if post_table is None
+                    else post_table[first_ki_idx[is_v1], post_last]
                 )
                 settlement_times[is_v1] = self._resolve_payment_time_array(
                     product,
@@ -2429,9 +2439,17 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             stats["ko_time_sum"] = 0.0
             stats["ko_time_count"] = 0
 
+        # each path's knocked-in end under REBASED (inf where it never knocked in)
+        post_end_time = ki_time + post_max_offset
+        if post_mode != PostKOScheduleMode.ABSOLUTE and post_table is not None and not carried_knock_in:
+            knocked = first_ki_idx >= 0
+            post_end_time = np.full(num_paths, np.inf, dtype=float)
+            post_end_time[knocked] = post_table[first_ki_idx[knocked], post_last]
+
         extra = {
             "is_pre_ko": is_pre_ko,
             "is_post_ko": is_post_ko,
+            "post_end_time": post_end_time,
             "first_pre_idx": first_pre_idx,
             "first_post_idx": first_post_idx,
             "ki_triggered": ki_triggered,

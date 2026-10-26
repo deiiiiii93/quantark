@@ -10,6 +10,7 @@ from .business_calendar import (
     BusinessDayConvention,
     CalendarType,
     Calendar,
+    add_months,
     create_calendar
 )
 from .trading_clock import (
@@ -25,6 +26,7 @@ __all__ = [
     'BusinessDayConvention',
     'CalendarType',
     'Calendar',
+    'add_months',
     'create_calendar',
     'BusinessTimeMap',
     'TradingClock'

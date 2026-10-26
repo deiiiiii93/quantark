@@ -1,7 +1,7 @@
 """Follow-ups to the accrual-time final review (M1-M5) and its two "declined to judge" questions."""
 import math
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -18,11 +18,10 @@ from .conftest import T0, dates, env, ko_reset, phoenix, snowball, times
 
 def test_a_rebased_annualized_knock_in_tenor_needs_dated_knock_ins_to_have_an_initial_date():
     """Annualized KI on a REBASED contract reads its knock-in's accrual (spec §4.4): refused at construction (R5),
-    not at V1 pricing. settlement_date lets the legacy _validate_maturity_parameters rule through."""
+    not at V1 pricing. The dated contract ends at its latest generated date (2026-07-06 + 9 months)."""
     with pytest.raises(ValidationError, match="R5"):
         ko_reset(M.REBASED, pre=dates(91, 182), ki=dates(91, 182, level=75.0),
-                 accrual=AccrualConfig(is_annualized=False, is_annualized_ki=True), maturity=(182 + 270) / 365,
-                 settlement_date=T0 + timedelta(days=452))
+                 accrual=AccrualConfig(is_annualized=False, is_annualized_ki=True), exercise_date=datetime(2027, 4, 6))
 
 
 # -- M4: detaching a schedule copies it whole ---------------------------------------------------------------------

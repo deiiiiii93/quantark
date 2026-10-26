@@ -107,7 +107,11 @@ def snap_contract(product):
     """A deep copy of ``product`` with every numeric observation time and a numeric maturity snapped."""
     contract = deepcopy(product)
     moved = False
+    # a dated REBASED KO-reset's schedule-2 offsets are whole calendar months, a product term, not times to snap
+    dated_rebased = getattr(contract, "_dated_rebased", lambda: False)()
     for name in ("barrier_config", "post_barrier_config"):
+        if dated_rebased and name == "post_barrier_config":
+            continue
         config = getattr(contract, name, None)
         if config is not None:
             snapped = _snap_config(config)

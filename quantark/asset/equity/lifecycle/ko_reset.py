@@ -146,6 +146,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         origin = self.clock_origin
         if self.product.post_ko_mode != PostKOScheduleMode.REBASED or origin is None:
             return None
+        if self.product._dated_rebased():
+            return None         # its converted schedule 2 is dated (the generated dates): nothing to date from
         return origin.normalize()
 
     def knock_in_time(self) -> Optional[float]:
@@ -158,8 +160,12 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         return (pd.Timestamp(self.lifecycle.ki_date).normalize() - origin.normalize()).days / DAYS_PER_YEAR
 
     def contract(self) -> Any:
-        """The snapped contract, or the ABSOLUTE contract a knocked-in REBASED one has become."""
+        """The snapped contract, or the ABSOLUTE contract a knocked-in REBASED one has become (on the generated dates
+        of its knock-in date for a dated contract, ship spec 2026-10-26 Decision 6)."""
         if self.lifecycle.knocked_in and self.product.post_ko_mode == PostKOScheduleMode.REBASED:
+            if self.product._dated_rebased():
+                knock_in_date = pd.Timestamp(self.lifecycle.ki_date).normalize().to_pydatetime()
+                return self.product.with_absolute_schedule_2(knock_in_date, anchor=self.lifecycle.knock_in_anchor)
             knock_in_time = self.knock_in_time()
             if knock_in_time is None:
                 raise ValidationError("a knocked-in REBASED KO-reset needs start_date and its knock-in date")

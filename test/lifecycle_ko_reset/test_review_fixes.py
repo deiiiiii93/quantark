@@ -1,6 +1,6 @@
 """Final-review findings on the KO-reset lifecycle branch, each pinned by the case that exposed it."""
 import math
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -45,12 +45,15 @@ def test_quad_prices_a_knocked_in_rebased_copy_on_a_schedule_two_close():
 
 # -- C1: a REBASED contract on the date clock, and a mid-life run -------------------------------------------------
 
-def dated_rebased(offsets=(30, 60)):
-    """Schedule 1 and the KI on DATES (91 and 182 days after START), schedule 2 as REBASED offsets in days."""
+def dated_rebased(months=(1, 2)):
+    """Schedule 1 and the KI on DATES (91 and 182 days after START: 2026-04-06, 2026-07-06), schedule 2 as REBASED
+    offsets of whole months (clock rule 2026-10-26: a dated REBASED contract generates its schedule 2 as the
+    knock-in date + k calendar months). A knock-in on day 91 places schedule 2 on days 121 and 152; the latest end
+    (a knock-in on day 182, + 2 months) is 2026-09-06, the exercise date."""
     dated = lambda days, level: ObservationSchedule(records=[  # noqa: E731
         ObservationRecord(observation_date=(START + pd.Timedelta(days=d)).to_pydatetime(), barrier=level) for d in days])
     return KnockOutResetSnowballOption(
-        initial_price=100.0, strike=100.0, maturity=(182 + max(offsets)) * D, initial_date=START.to_pydatetime(),
+        initial_price=100.0, strike=100.0, exercise_date=datetime(2026, 9, 6), initial_date=START.to_pydatetime(),
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=dated((91, 182), 103.0), ki_barrier=75.0,
                                      ki_observation_type=ObservationType.DISCRETE,
@@ -58,7 +61,7 @@ def dated_rebased(offsets=(30, 60)):
         post_barrier_config=BarrierConfig(
             ko_barrier=95.0, ko_rate=0.03, ko_observation_type=ObservationType.DISCRETE,
             ko_observation_schedule=ObservationSchedule(records=[
-                ObservationRecord(observation_time=o * D, barrier=95.0) for o in offsets])),
+                ObservationRecord(observation_time=m / 12, barrier=95.0) for m in months])),
         accrual_config=AccrualConfig(is_annualized=False),
         payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=False), post_ko_mode=M.REBASED)
 
@@ -69,8 +72,8 @@ def test_a_dated_rebased_contract_knocks_out_on_schedule_two():
 
 
 def test_a_dated_rebased_contract_matures_at_its_knocked_in_end():
-    assert run(tracker(dated_rebased()), {91: 70.0, 121: 90.0, 150: 80.0, 151: 60.0})[-1] == (
-        151, E.MATURITY, "maturity")
+    assert run(tracker(dated_rebased()), {91: 70.0, 121: 90.0, 151: 80.0, 152: 60.0})[-1] == (
+        152, E.MATURITY, "maturity")
 
 
 @pytest.mark.parametrize("engine", [
@@ -210,7 +213,7 @@ def test_a_non_accruing_rebased_contract_matures_on_v1_without_a_tenor():
     product = _non_accruing_dated_rebased()
     assert {r.accrual.kind for r in product.barrier_config.ki_observation_schedule.records} == {AccrualKind.NONE}
     t = tracker(product)
-    assert run(t, {91: 70.0, 121: 90.0, 150: 80.0, 151: 60.0})[-1] == (151, E.MATURITY, "maturity")
+    assert run(t, {91: 70.0, 121: 90.0, 151: 80.0, 152: 60.0})[-1] == (152, E.MATURITY, "maturity")
     assert t.lifecycle.ledger.cashflows[-1].amount == pytest.approx(t.contract().get_maturity_payoff_v1(60.0, env(60.0)))
 
 
@@ -224,7 +227,7 @@ def test_a_non_accruing_rebased_contract_resolves_its_calendar_schedule():
     t = tracker(_non_accruing_dated_rebased())
     dates = pd.date_range(START, periods=200, freq="D")
     schedule = t.resolve_calendar_schedule(dates, env(date=START))
-    assert schedule.placement(91).final_due_day == 151
+    assert schedule.placement(91).final_due_day == 152
     assert math.isnan(schedule.placement(91).final_tenor) and math.isnan(schedule.pre_tenor)
 
 
@@ -237,19 +240,20 @@ def _issued_100_days_early(product):
 
 
 def test_a_dated_rebased_copy_issued_before_the_run_is_timed_like_its_events():
-    """Issued 100 days before the run, knocked in on run day 91, offsets 30 and 60: the knock-out falls due on run
-    day 121 and the contract ends on day 151, so the day-100 copy holds them 21 and 51 days ahead (it held 121/151)."""
+    """Issued 100 days before the run, knocked in on run day 91, offsets 1 and 2 months: the knock-out falls due on
+    run day 121 and the contract ends on day 152, the generated dates, whatever the issue date (on the date clock it
+    only moves the accrual)."""
     product = _issued_100_days_early(dated_rebased())
     t = tracker(product)
     run(t, {91: 70.0})
     copy = t.product_for_pricing(day(100), env(90.0, day(100)))
-    assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [
-        pytest.approx(21 * D), pytest.approx(51 * D)]
-    assert copy.maturity == pytest.approx(51 * D)
+    assert [r.observation_date for r in copy.post_barrier_config.ko_observation_schedule.records] == [
+        day(121).to_pydatetime(), day(152).to_pydatetime()]
+    assert copy.exercise_date == day(152).to_pydatetime()
     assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 96.0}) == [
         (91, E.KNOCK_IN, None), (121, E.KNOCK_OUT, "knock-out:ko2:0")]
-    assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 90.0, 150: 80.0, 151: 60.0})[-1] == (
-        151, E.MATURITY, "maturity")
+    assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 90.0, 151: 80.0, 152: 60.0})[-1] == (
+        152, E.MATURITY, "maturity")
 
 
 def test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events():

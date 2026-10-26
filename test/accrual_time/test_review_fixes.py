@@ -205,7 +205,7 @@ def test_a_dated_rebased_contract_without_initial_date_needs_no_anchor():
     """Review Focus 5 with NONE knock-in periods (dated, no initial_date, nothing annualized)."""
     from quantark.asset.equity.product.option.accrual import AccrualKind
     p = ko_reset(M.REBASED, pre=dates(91, 182), ki=dates(91, 182, level=75.0),
-                 accrual=AccrualConfig(is_annualized=False), maturity=(182 + 270) / 365)
+                 accrual=AccrualConfig(is_annualized=False), exercise_date=datetime(2027, 4, 6))
     assert {r.accrual.kind for r in p.barrier_config.ki_observation_schedule.records} == {AccrualKind.NONE}
     assert ko_accrual_factor(p, p.post_barrier_config.ko_observation_schedule.records[0]) == 1.0
     assert np.isfinite(float(SnowballMCEngine(params=MCParams(seed=3, num_paths=1024)).price(p, env())))
