@@ -167,10 +167,11 @@ def test_an_unanchored_contract_ages_without_losing_its_coupon():
     is right on its trade date and wrong from the first day onward.
     ``test/test_asset/equity/product_other/test_aged_accrual.py`` states the same invariant at the product
     level and across the autocallable family; this checks the simulation's
-    own ageing path carries it.
+    own ageing path carries it.  (The shared fixture is on the numeric clock
+    alone, so it has no ``initial_date`` to clear.)
     """
     anchorless = short_snowball(maturity_days=MATURITY_DAYS, ko_days=KO_DAYS, ki_days=KI_DAYS)
-    anchorless.initial_date = None
+    assert anchorless.initial_date is None
     pricer = _pricer(anchorless)
     base = _absolute(anchorless.get_ko_observation_profile(_env(START)), START)
     for d in PROBE_DAYS:

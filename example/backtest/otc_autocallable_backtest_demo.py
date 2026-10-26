@@ -334,6 +334,12 @@ def build_market_dataset(
 
 
 def create_demo_product(initial_spot: float, issue_date: pd.Timestamp):
+    """The demo note, struck on ``issue_date`` (the run's first market date).
+
+    It is booked on the numeric clock alone (a contract is all dates or all
+    floats, so it carries no ``initial_date``): its observation times count
+    from the run's start, which is ``issue_date``.
+    """
     product = create_standard_snowball(
         initial_price=float(initial_spot),
         strike=float(initial_spot),
@@ -345,7 +351,6 @@ def create_demo_product(initial_spot: float, issue_date: pd.Timestamp):
         num_observations=12,
         include_principal=True,
     )
-    product.initial_date = pd.Timestamp(issue_date).to_pydatetime()
     return product
 
 
@@ -466,13 +471,24 @@ def _append_param_rows(
         rows.append({"term": f"{prefix}.{key}", "value": _excel_value(value)})
 
 
+def _issue_date(config):
+    """The note's issue date: its ``initial_date`` when dated, else the run's first market date (a numeric note is
+    struck there, see ``create_demo_product``)."""
+    initial = getattr(config.product, "initial_date", None)
+    if initial is not None:
+        return initial
+    if len(config.market_data.dates):
+        return pd.Timestamp(config.market_data.dates[0]).to_pydatetime()
+    return config.start_date
+
+
 def _otc_contract_terms_frame(results) -> pd.DataFrame:
     config = results.config
     product = config.product
     barrier_config = getattr(product, "barrier_config", None)
     payoff_config = getattr(product, "payoff_config", None)
     accrual_config = getattr(product, "accrual_config", None)
-    issue_date = getattr(product, "initial_date", None) or config.start_date
+    issue_date = _issue_date(config)
     initial_price = _first_numeric(getattr(product, "initial_price", None))
     contract_multiplier = _first_numeric(getattr(product, "contract_multiplier", None))
     note_notional = None
@@ -677,9 +693,7 @@ def _observation_schedule_frame(results) -> pd.DataFrame:
     product = results.config.product
     barrier_config = getattr(product, "barrier_config", None)
     initial_price = _first_numeric(getattr(product, "initial_price", None))
-    issue_date = pd.Timestamp(
-        getattr(product, "initial_date", None) or results.config.start_date
-    )
+    issue_date = pd.Timestamp(_issue_date(results.config))
     if barrier_config is None:
         return pd.DataFrame()
 

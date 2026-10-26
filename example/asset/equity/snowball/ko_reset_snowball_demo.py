@@ -103,6 +103,10 @@ def main():
     initial_date = valuation_date
     bus_days_in_year = 244
     calendar = create_calendar(CalendarType.CHINA, year_range=(2025, 2031))
+    # The contract is booked on the date clock (its schedules are dated): a 4.0-year life on the
+    # 244-business-day clock ends 976 business days after the valuation date (2030-01-08), so the
+    # pricing maturity stays exactly 4.0.
+    exercise_date = calendar.add_business_days(valuation_date, 4 * bus_days_in_year)
 
     pre_ko_rate = 0.15
     post_ko_rate = 0.03
@@ -248,7 +252,7 @@ def main():
         payoff_config=payoff_config,
         accrual_config=accrual_config,
         contract_multiplier=contract_multiplier,
-        maturity=4.0,
+        exercise_date=exercise_date,
         initial_date=initial_date,
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
     )

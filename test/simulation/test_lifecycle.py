@@ -189,10 +189,12 @@ def test_the_schedule_carries_the_delays():
 # -- a contract issued before the run (tracker clock decisions A and 2, 2026-10-09) ----------------------------------
 
 def _issued_early(gap_days: int, **kwargs):
-    """``short_snowball`` issued ``gap_days`` before the run: its records fall ``gap_days`` earlier on the run
-    calendar, and a record dated before ``DATES[0]`` is never tested."""
+    """``short_snowball`` issued ``gap_days`` before the run, booked on the numeric clock alone (clock rule
+    2026-10-26: no ``initial_date`` on a numeric contract): aged ``gap_days`` to the run's start, so its records fall
+    ``gap_days`` earlier on the run calendar, a record before ``DATES[0]`` is dropped from the booking (never tested)
+    and a record due on ``DATES[0]`` is kept at time 0."""
     product = short_snowball(**kwargs)
-    product.initial_date = (DATES[0] - pd.Timedelta(days=gap_days)).to_pydatetime()
+    product.time_shift(gap_days / 365.0, DATES[0].to_pydatetime(), _env(DATES[0]), keep_landing=True)
     return product
 
 
@@ -211,12 +213,26 @@ def test_an_early_issued_contract_matches_the_tracker_day_by_day(gap, name, spot
         assert a == pytest.approx(e), f"{name} gap {gap} day {d}: {a} != {e}"
 
 
+def _hybrid_issued_early(gap_days: int, **kwargs):
+    """HYBRID (numeric contract + ``initial_date``, the pre-2026-10-26 booking), kept for one test only.
+
+    The pure-numeric rebooking (``_issued_early``) of the ledger-times test fails: the YEAR_FRACTION lag puts the
+    receivable's payment time an ulp past its payment close (``(o + 2/365) - o != 2/365`` for the aged record time
+    ``o``), the ledger's exact ``payment_time > point.time`` keeps it pending, and ``SettlementResolver.resolve_pending``
+    refuses it ("payment must be strictly after valuation"). The hybrid's times happen to land exactly. A tracker /
+    ledger fix (quantark code), not a test change, is what lets this test be rebooked."""
+    product = short_snowball(**kwargs)
+    product.initial_date = (DATES[0] - pd.Timedelta(days=gap_days)).to_pydatetime()
+    return product
+
+
 @pytest.mark.parametrize("gap", [1, 2])
 def test_an_early_issued_contract_books_the_trackers_ledger_times(gap):
-    """The numeric clock runs from ``initial_date``: the vector lifecycle's determination and payment times, and
-    the receivable it discounts, are the tracker ledger's. Gap 1 knocks out on its day-2 record (run day 1); gap 2
-    tests that record on the run's first close, below the barrier, and matures on contract day 6 (run day 4)."""
-    product = _issued_early(gap, settlement_lag_days=2)
+    """HYBRID booking (see ``_hybrid_issued_early``). The numeric clock runs from ``initial_date``: the vector
+    lifecycle's determination and payment times, and the receivable it discounts, are the tracker ledger's. Gap 1
+    knocks out on its day-2 record (run day 1); gap 2 tests that record on the run's first close, below the barrier,
+    and matures on contract day 6 (run day 4)."""
+    product = _hybrid_issued_early(gap, settlement_lag_days=2)
     spots = [SPOT, KO + 1.0, KO + 1.0, SPOT, SPOT, SPOT, SPOT, SPOT]
     tracker = _tracker(product)
     lifecycle_product = tracker.product_for_lifecycle()
@@ -238,8 +254,13 @@ def test_an_early_issued_contract_books_the_trackers_ledger_times(gap):
 
 
 def test_a_record_before_the_run_is_due_on_no_day():
-    schedule = _tracker(_issued_early(2)).resolve_calendar_schedule(DATES, _env(DATES[0]))
-    assert list(schedule.ki_due_day) == [-1, 1]          # KI days 1 and 3: day 1 lies before the run
-    assert list(schedule.ko_due_day) == [0, 3]           # KO days 2 and 5: day 2 is the run start
-    assert schedule.clock_origin == DATES[0] - pd.Timedelta(days=2)
-    assert VectorLifecycle.elapsed_time(schedule, 0) == 2 / 365.0
+    """Issued two days before the run: the aged booking no longer holds the KI record that lies before the run, so
+    no day tests it; the KO record due on the run's first day is kept (at time 0) and due on day 0."""
+    product = _issued_early(2)
+    ki_times = product.get_ki_observation_profile(_env(DATES[0]))["observation_times"]
+    assert list(ki_times) == pytest.approx([1 / 365.0])       # KI days 1 and 3: day 1 lies before the run
+    schedule = _tracker(product).resolve_calendar_schedule(DATES, _env(DATES[0]))
+    assert list(schedule.ki_due_day) == [1]               # KI day 3: run day 1
+    assert list(schedule.ko_due_day) == [0, 3]            # KO days 2 and 5: day 2 is the run start
+    assert schedule.clock_origin == DATES[0]
+    assert VectorLifecycle.elapsed_time(schedule, 0) == 0.0

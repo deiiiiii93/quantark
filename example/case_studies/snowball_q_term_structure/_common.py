@@ -849,7 +849,12 @@ def build_terms(
 
 
 def build_product(terms: SnowballTerms, s0: float, coupon: float):
-    """Standard snowball, barriers off the inception spot, one unit = notional."""
+    """Standard snowball, barriers off the inception spot, one unit = notional.
+
+    Booked on the numeric clock alone (a contract is all dates or all floats,
+    so it carries no ``initial_date``): its times are year fractions from the
+    inception, which is where every valuation and replay of this study starts.
+    """
     s0 = float(s0)
     if s0 <= 0.0:
         raise StudyDataError(f"s0 must be positive, got {s0}")
@@ -870,7 +875,6 @@ def build_product(terms: SnowballTerms, s0: float, coupon: float):
         rebate_rate=float(coupon),
         include_principal=False,
     )
-    product.initial_date = datetime.combine(terms.inception, datetime.min.time())
     return product
 
 

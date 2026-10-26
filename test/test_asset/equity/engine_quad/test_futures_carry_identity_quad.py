@@ -41,7 +41,8 @@ def test_worst_historical_date_closes_local_identity_while_preserving_secant_gap
         ki_observation_dates=[d / 365. for d in case["ki_days"]],
         ki_continuous=False, ki_observation_type=ObservationType.DISCRETE,
     )
-    original.initial_date = datetime.fromisoformat(case["inception"])
+    # On the numeric clock alone (clock rule 2026-10-26: no initial_date): the tracker starts on the inception, so the
+    # note's times count from it.
     context = CarryCurveContext(
         tuple(IndexFuturesQuote(**q) for q in case["quotes"]), case["spot"],
         FlatRateCurve(rate=case["rate"]), "flat_q", "CSI1000", case["valuation"],

@@ -47,7 +47,8 @@ def control_product():
         ki_observation_type=ObservationType.DISCRETE, ki_observation_dates=ki_times,
         rebate_rate=0.12, include_principal=False,
     )
-    product.initial_date = VALUATION
+    # Struck on VALUATION, on the numeric clock alone (clock rule 2026-10-26: no initial_date): its times count
+    # from the valuation date.
     return product
 
 

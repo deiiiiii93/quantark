@@ -1006,11 +1006,16 @@ def build_backtest_product(
     """The stage-11 term sheet, sized to ``notional`` and carrying the coupon.
 
     Mirrors ``stage11.build_snowball_product`` field for field; it differs
-    only in the three things a backtest needs and a pricing gate does not:
-    the position size (``contract_multiplier``), the solved coupon, and
-    ``initial_date`` (the lifecycle tracker resolves the observation schedule
-    from it).  ``test_stage12_backtest_runner.py`` asserts the two products
-    agree on every contractual field.
+    only in the two things a backtest needs and a pricing gate does not:
+    the position size (``contract_multiplier``) and the solved coupon.
+    ``test_stage12_backtest_runner.py`` asserts the two products agree on
+    every contractual field.
+
+    The note is booked on the numeric clock alone (a contract is all dates or
+    all floats, so it carries no ``initial_date``): its times count from the
+    valuation date / the run's start, and every replay starts on the
+    inception (``run_one``: the first market date of a window that opens on
+    it), so the lifecycle tracker resolves the schedule from the inception.
     """
     initial_spot = float(initial_spot)
     coupon = float(coupon)
@@ -1031,8 +1036,6 @@ def build_backtest_product(
         rebate_rate=coupon,
         include_principal=False,
     )
-    # The lifecycle tracker resolves the observation schedule off this date.
-    product.initial_date = datetime.combine(terms.inception, datetime.min.time())
     return product
 
 

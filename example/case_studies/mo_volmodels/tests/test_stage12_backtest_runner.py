@@ -72,9 +72,8 @@ def terms(calendar):
 def test_backtest_product_matches_gate_term_sheet(terms):
     """The backtest must price the SAME contract stage 11's gate certified.
 
-    Only three things may differ: position size, the solved coupon, and
-    initial_date (which the lifecycle tracker needs and a pricing gate does
-    not).  Everything contractual must be identical.
+    Only two things may differ: position size and the solved coupon.
+    Everything contractual must be identical.
     """
     s0 = 6733.97
     gate_product = s11.build_snowball_product(terms, s0)
@@ -120,9 +119,18 @@ def test_backtest_product_carries_the_solved_coupon(terms):
     assert product.payoff_config.rebate_rate == pytest.approx(0.1234)
 
 
-def test_backtest_product_sets_initial_date_for_the_lifecycle(terms):
+def test_backtest_product_is_on_the_numeric_clock_from_the_inception(terms):
+    """Clock rule 2026-10-26: a contract is all dates or all floats. The numeric
+    note carries no initial_date; a replay starting on the inception dates its
+    lifecycle from it."""
+    from quantark.asset.clock import clock_violations
+    from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
+
     product = s12.build_backtest_product(terms, initial_spot=6733.97, coupon=0.15)
-    assert product.initial_date.date() == terms.inception
+    assert product.initial_date is None
+    assert clock_violations(product) == []
+    origin = lifecycle_clock_origin(product, start_date=terms.inception)
+    assert origin.date() == terms.inception
 
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,31 @@ def _snowball(**kwargs):
     )
 
 
+def _on_dates(product):
+    """The same contract with a real anchor, which is the date clock (clock rule 2026-10-26: a contract is all dates
+    or all floats): struck on ``VALUATION``, every KO and KI record dated ``VALUATION + round(t * 365)`` days, expiring
+    a year later."""
+    from dataclasses import replace
+
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+
+    def dated(times, level):
+        return ObservationSchedule(records=[
+            ObservationRecord(observation_date=VALUATION + timedelta(days=round(t * 365.0)), barrier=level)
+            for t in times])
+
+    cfg = product.barrier_config
+    product.barrier_config = replace(
+        cfg, ko_observation_dates=None, ki_observation_dates=None,
+        ko_observation_schedule=dated(KO_TIMES, cfg.ko_barrier),
+        ki_observation_schedule=dated([182.0 / 365.0, 1.0], cfg.ki_barrier))
+    product.initial_date = VALUATION
+    product.maturity = None
+    product.exercise_date = VALUATION + timedelta(days=365)
+    product.validate()   # terms set on a built product: derive its accrual periods again
+    return product
+
+
 def _aged(product, shift=SHIFT):
     """``time_shift`` on a deep copy, the way every theta and ageing path does it."""
     aged = copy.deepcopy(product)
@@ -103,9 +128,8 @@ def test_the_lost_accrual_was_exactly_the_elapsed_period():
 
 
 def test_an_anchored_snowball_is_untouched_by_the_offset():
-    """A contract with a real anchor already ages correctly and must not move."""
-    product = _snowball()
-    product.initial_date = VALUATION
+    """A contract with a real anchor (the dated contract) already ages correctly and must not move."""
+    product = _on_dates(_snowball())
     base = _coupons(product, _env())
     aged = _coupons(_aged(product), _env(SHIFT))
     survivors = [(t, p) for t, p in base if t > SHIFT]
@@ -217,7 +241,7 @@ def test_an_annualized_rebate_is_worth_the_same_after_ageing(anchored):
     through, because it scaled by a tenor that had halved."""
     product = _rebating_snowball()
     if anchored:
-        product.initial_date = VALUATION
+        product = _on_dates(product)
     base = product.get_maturity_payoff_v0(SPOT, _env())
     aged = _aged(product, HALF).get_maturity_payoff_v0(SPOT, _env(HALF))
     assert aged == pytest.approx(base, rel=1e-12)

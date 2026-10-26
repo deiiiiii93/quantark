@@ -186,12 +186,25 @@ def test_receivables_pay_at_nominal_and_total_leg_cash_is_the_realized_flows(kin
     assert manager.leg_receivable_pv == 0.0
 
 
+def _dated_snowball():
+    """``_snowball`` on the date clock (clock rule 2026-10-26: only a dated contract has an initial date): struck on
+    START, knock-out records on START + 30 / 60 / 90 days, expiring on the last."""
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+
+    records = [ObservationRecord(observation_date=START + timedelta(days=d), barrier=103.0) for d in OBS]
+    return SnowballOption(initial_price=100.0, strike=100.0, initial_date=START,
+                          exercise_date=START + timedelta(days=OBS[-1]), contract_multiplier=1_000.0,
+                          barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15,
+                                                       ko_observation_schedule=ObservationSchedule(records=records),
+                                                       ki_barrier=75.0, ki_continuous=True))
+
+
 def test_mid_life_run_anchors_legs_on_the_contract_initial_date():
     """User ruling 2026-10-23: legs count from the contract's initial date (the tracker's clock); a run started 40
-    days later sees each flow's time to payment from its own start, and a flow paid before it is history."""
+    days later sees each flow's time to payment from its own start, and a flow paid before it is history. The note
+    is dated (only a dated contract has an initial date; clock rule 2026-10-26)."""
     run_start = START + timedelta(days=40)
-    product = _snowball()
-    product.initial_date = START
+    product = _dated_snowball()
     early = DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=100.0, payment_time=10 * D)   # history
     late = DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=250.0, payment_time=50 * D)
     legs = [early, late] + [l for l in _legs() if not isinstance(l, DeterministicLeg)]

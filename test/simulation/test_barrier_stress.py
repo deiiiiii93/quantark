@@ -40,9 +40,9 @@ def near_barrier_snowball(ko_days=(2, 5), ki_days=(1, 3)):
         ki_observation_type=ObservationType.DISCRETE,
         ki_observation_dates=[d / 365.0 for d in ki_days], include_principal=True,
     )
-    # The annualized KO coupon needs an inception to accrue from, or ageing
-    # would shift the observation time it uses as its accrual factor.
-    product.initial_date = INCEPTION
+    # On the numeric clock alone (clock rule 2026-10-26: no initial_date): struck on the run's first day
+    # (INCEPTION == DATES[0]), and ageing banks the elapsed time in the annualized KO coupon's accrual.
+    assert DATES[0] == INCEPTION
     return product
 SCALE = GateScale(unit_notional=SPOT, hands_per_unit_delta=5.0)
 VOL, Q = 0.22, 0.05

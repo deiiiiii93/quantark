@@ -249,6 +249,7 @@ def build_snowball_product(terms: SnowballTerms, s0: float, coupon: float):
     full 50mio book; the backtest then shorts one unit
     (``product_quantity = -1.0``).  ``coupon`` is the solved fair coupon,
     applied to both ``ko_rate`` and ``rebate_rate`` (standard snowball).
+    The note is on the numeric clock: its times count from the inception.
     """
     s0 = float(s0)
     if s0 <= 0.0:
@@ -270,9 +271,10 @@ def build_snowball_product(terms: SnowballTerms, s0: float, coupon: float):
         rebate_rate=float(coupon),
         include_principal=False,
     )
-    # Contractual fixing date: lets the lifecycle tracker resolve schedule
-    # dates from the inception instead of relying on the run start date.
-    product.initial_date = datetime.combine(terms.inception, datetime.min.time())
+    # Booked on the numeric clock alone (a contract is all dates or all
+    # floats, so it carries no initial_date): its times are year fractions from
+    # the inception, where the fleet's replays start.  A run starting later
+    # books the note aged to its start (``product.time_shift``).
     return product
 
 

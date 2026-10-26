@@ -160,20 +160,30 @@ def test_a_life_surface_over_max_steps_raises_naming_the_cap():
 # -- a contract issued before the run (tracker clock decision A, 2026-10-09) -----------------------------------------
 
 def _issued_early(gap_days: int):
+    """``short_snowball`` issued ``gap_days`` before the run, booked on the numeric clock alone (clock rule
+    2026-10-26: no ``initial_date`` on a numeric contract): aged ``gap_days`` to the run's start."""
+    from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+    from quantark.priceenv import PricingEnvironment
+
     product = short_snowball()
-    product.initial_date = (pd.Timestamp(DATES[0]) - pd.Timedelta(days=gap_days)).to_pydatetime()
+    start = pd.Timestamp(DATES[0]).to_pydatetime()
+    env = PricingEnvironment(spot_quote=SpotQuote(spot=SPOT, asset_name="CSI1000"),
+                             vol_surface=FlatVolSurface(volatility=0.22), rate_curve=FlatRateCurve(rate=RATE),
+                             valuation_date=start)
+    product.time_shift(gap_days / 365.0, start, env, keep_landing=True)
     return product
 
 
 def test_an_early_issued_surface_reads_the_trackers_clock():
-    """The surface's time axis starts at the contract's ``initial_date``, the tracker's clock origin: day 0 of a
-    run that opens two days after issue reads the column two days in."""
+    """The surface's time axis starts at the tracker's clock origin, which for the aged numeric booking is the run's
+    start: day 0 of a run that opens two days after issue reads the column at 0, and the surface still prices the
+    contract the exact engine prices on every day."""
     product = _issued_early(2)
     pricer = LifeSurfacePricer(
         product, engine_config=pde_engine_config(), start_date=DATES[0], dates=DATES, underlying="CSI1000",
         vol_step=0.0, q_step=0.0, surface_cache_bytes=200_000_000, gate=GATE)
-    assert pricer.elapsed(0) == 2 / 365.0
-    assert pricer.elapsed(1) == (2 + (DATES[1] - DATES[0]).days) / 365.0
+    assert pricer.elapsed(0) == 0.0
+    assert pricer.elapsed(1) == (DATES[1] - DATES[0]).days / 365.0
     exact = RepricingPricer(product, engine_config=pde_engine_config(), start_date=DATES[0], underlying="CSI1000",
                             cache=StateCache(CacheConfig(memory_bytes=8_000_000)))
     worst = 0.0

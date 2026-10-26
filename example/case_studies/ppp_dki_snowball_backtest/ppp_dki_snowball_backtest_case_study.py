@@ -618,6 +618,12 @@ def build_case_study_products(
     terms: CaseStudyTerms,
     coupons: Optional[dict[str, float]] = None,
 ) -> dict[str, SnowballOption]:
+    """The three case-study notes, struck on ``issue_date`` (the backtest's first market date).
+
+    Each is booked on the numeric clock alone (a contract is all dates or all
+    floats, so none carries an ``initial_date``): its times are year fractions
+    from ``issue_date``, which is where the valuation and every replay start.
+    """
     coupons = coupons or {}
     maturity = max(
         (pd.Timestamp(dates.iloc[-1]).normalize() - pd.Timestamp(issue_date).normalize()).days
@@ -635,7 +641,6 @@ def build_case_study_products(
             initial_price=float(initial_spot),
             strike=float(initial_spot),
             maturity=maturity,
-            initial_date=pd.Timestamp(issue_date).to_pydatetime(),
             contract_multiplier=multiplier,
             barrier_config=BarrierConfig(
                 ko_barrier=ko_barrier,
@@ -678,7 +683,6 @@ def build_case_study_products(
         protection_rate=terms.ppp_protection_rate,
         rebate_rate=float(coupons.get("PPP-EKI-Parachute", 0.0)),
     )
-    ppp_eki_parachute.initial_date = pd.Timestamp(issue_date).to_pydatetime()
 
     return {
         "PPP-DKI": make_dki("PPP-DKI", ProtectionType.PARTIAL),
