@@ -85,6 +85,22 @@ def test_a_shadowed_float_is_not_a_violation():
     assert clock_violations(fx) == []
 
 
+def test_a_float_list_beside_its_dates_is_shadowed():
+    """Both forms of the same observations given: the dates win (CP1 review)."""
+    asian = AsianOption(strike=100.0, exercise_date=EXPIRY, observation_times=[0.5, 1.0],
+                        observation_dates=OBS[1::2])
+    assert clock_violations(asian) == []
+    records = [ObservationRecord(observation_date=d, barrier=90.0) for d in OBS]
+    barrier = BarrierOption(strike=100.0, option_type=OptionType.PUT, barrier=90.0, barrier_type=BarrierType.DOWN_IN,
+                            exercise_date=EXPIRY, observation_type=ObservationType.DISCRETE,
+                            observation_schedule=ObservationSchedule(records=records))
+    barrier.observation_dates = [0.25, 0.5, 0.75, 1.0]
+    assert clock_violations(barrier) == []
+    note = _snowball()
+    note.barrier_config = replace(note.barrier_config, ko_observation_dates=[0.25, 0.5, 0.75, 1.0])
+    assert clock_violations(note) == []
+
+
 # --- a date field on the numeric clock ------------------------------------------------------------------------------
 
 def test_a_numeric_note_with_an_initial_date_is_partial():

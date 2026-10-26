@@ -27,8 +27,6 @@ _RECORD_DATE_FIELDS = (
     "observation_timestamp", "settlement_timestamp",
 )
 
-#: Products with their own clock rules (they already refuse mixed input).
-_OWN_RULE = ("DCNOption", "FxTargetRedemptionForward", "FxTargetRedemptionNote")
 
 DATE_FIELD = "a date field on the numeric clock"
 NUMERIC_TIME = "a numeric time on the date clock with no date for it"
@@ -39,6 +37,14 @@ class ProductClock(Enum):
 
     DATE = "date"
     NUMERIC = "numeric"
+
+
+def _has_own_rule(product: Any) -> bool:
+    """The DCN (date-only) and the FX target-redemption products enforce their own clock rule."""
+    from quantark.asset.equity.product.option.dcn_option import DCNOption
+    from quantark.asset.fx.product.option.target_redemption_base import TargetRedemptionProduct
+
+    return isinstance(product, (DCNOption, TargetRedemptionProduct))
 
 
 def _is_fx(product: Any) -> bool:
@@ -97,6 +103,12 @@ def _float_list(values: Any) -> bool:
     return not _is_date(first)
 
 
+def _all_dated(schedule: Any) -> bool:
+    """A non-empty schedule (or record list) whose every record has an ``observation_date``."""
+    records = getattr(schedule, "records", schedule) or ()
+    return bool(records) and all(getattr(record, "observation_date", None) is not None for record in records)
+
+
 def _date_list(values: Any) -> bool:
     if not values:
         return False
@@ -111,7 +123,7 @@ def clock_violations(product: Any) -> List[Tuple[str, str]]:
 
     Pure detection: nothing is changed.
     """
-    if type(product).__name__ in _OWN_RULE:
+    if _has_own_rule(product):
         return []
     found: List[Tuple[str, str]] = []
     if product_clock(product) is ProductClock.NUMERIC:
@@ -138,12 +150,20 @@ def clock_violations(product: Any) -> List[Tuple[str, str]]:
         config = getattr(product, config_name, None)
         if config is None or _is_rebased_schedule_two(product, config_name):
             continue
-        for name in ("ko_observation_dates", "ki_observation_dates"):
-            if getattr(config, name, None):
+        for name, schedule_name in (("ko_observation_dates", "ko_observation_schedule"),
+                                    ("ki_observation_dates", "ki_observation_schedule")):
+            if getattr(config, name, None) and not _all_dated(getattr(config, schedule_name, None)):
                 found.append((f"{config_name}.{name}", NUMERIC_TIME))
-    for name in ("observation_dates", "observation_times", "past_observations"):
-        if _float_list(getattr(product, name, None)):
-            found.append((name, NUMERIC_TIME))
+    dated_observations = (
+        _date_list(getattr(product, "observation_dates", None))
+        or _all_dated(getattr(product, "observation_schedule", None))
+        or _all_dated(getattr(product, "observation_records", None))
+    )
+    for name in ("observation_dates", "observation_times"):
+        if _float_list(getattr(product, name, None)) and not dated_observations:
+            found.append((name, NUMERIC_TIME))       # a float list beside its dates is shadowed: the dates win
+    if _float_list(getattr(product, "past_observations", None)):
+        found.append(("past_observations", NUMERIC_TIME))
     if _is_fx(product) and getattr(product, "delivery", None) is not None \
             and getattr(product, "delivery_date", None) is None:
         found.append(("delivery", NUMERIC_TIME))
