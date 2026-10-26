@@ -15,7 +15,7 @@ when the terminal fixing is unobserved and lands beyond the barrier).
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from quantark.util.enum import OptionType, ObservationType
 from quantark.util.exceptions import ValidationError
@@ -41,6 +41,8 @@ class FxSharkfinOption(DiscreteMonitoring):
         observation_times: Year-fraction fixing times for DISCRETE monitoring (numeric clock).
         observation_dates: Fixing dates for DISCRETE monitoring (date clock); beside
             ``observation_times`` the dates win.
+        observed_fixings: Realised spot of each dated fixing on or before the valuation date
+            (``{observation date: spot}``), for mid-life valuation.
     """
 
     def __init__(
@@ -61,6 +63,7 @@ class FxSharkfinOption(DiscreteMonitoring):
         delivery: Optional[float] = None,
         delivery_date: Optional[datetime] = None,
         observation_dates: Optional[List[datetime]] = None,
+        observed_fixings: Optional[Dict[datetime, float]] = None,
     ):
         super().__init__(
             currency_pair=currency_pair,
@@ -80,6 +83,7 @@ class FxSharkfinOption(DiscreteMonitoring):
         self.monitoring = monitoring
         self.observation_times = observation_times
         self.observation_dates = observation_dates
+        self.observed_fixings = None if observed_fixings is None else dict(observed_fixings)
         self.validate()
 
     def validate(self) -> None:

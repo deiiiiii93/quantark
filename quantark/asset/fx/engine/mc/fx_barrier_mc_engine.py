@@ -196,7 +196,10 @@ class FxBarrierMCEngine(BaseFxEngine):
         return _BarrierSim(paths, terminal, survival, None)
 
     def _discrete_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
-        obs = np.array(product.observation_times_at(fx_env), dtype=float)
+        hit_time, ahead = product.monitoring_state(fx_env)
+        if hit_time is not None or not ahead:
+            return self._decided_sim(fx_env, T, sigma, hit_time)
+        obs = np.array(ahead, dtype=float)
         times = obs if np.isclose(obs[-1], T) else np.concatenate([obs, [T]])
         obs_idx = np.arange(obs.size)
         gen = self._make_generator(
@@ -215,6 +218,19 @@ class FxBarrierMCEngine(BaseFxEngine):
         df_hit = np.array([fx_env.get_domestic_df(float(t)) for t in hit_time])
         first_hit_disc = np.where(hit_any, df_hit, 0.0)
         return _BarrierSim(paths, terminal, survival, first_hit_disc)
+
+    def _decided_sim(self, fx_env, T, sigma, hit_time) -> "_BarrierSim":
+        """No fixing left can decide the barrier: a past fixing breached it (``hit_time`` <= 0), which knocked every
+        path, or every fixing is behind unbreached. Only the terminal is simulated. A rebate at hit was paid at that
+        fixing: today's (``hit_time`` 0) is paid now, an earlier one is already paid."""
+        gen = self._make_generator(fx_env, fx_env.effective_spot(), sigma, np.array([T], dtype=float), use_bb=False)
+        paths, _ = gen.generate_paths()
+        terminal = paths[:, -1]
+        n = terminal.size
+        if hit_time is None:
+            return _BarrierSim(paths, terminal, np.ones(n), np.zeros(n))
+        paid_now = 1.0 if is_zero(hit_time) else 0.0
+        return _BarrierSim(paths, terminal, np.zeros(n), np.full(n, paid_now))
 
     def _bb_first_hit_discount(self, p, times, fx_env) -> np.ndarray:
         """Discretized rebate-at-detection: first-hit prob * DF(step time)."""
