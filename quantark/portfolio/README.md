@@ -150,13 +150,13 @@ accrual period keeps its full amount. Example: struck 2026-10-01, valued 2026-10
 returns the rolled position; `cash_legs_clock=LegClock.VALUATION` marks legs already on the valuation date (the
 lifecycle manager and the replay engine set it on the legs they roll), so they are not rolled twice.
 
-**A numeric note counts from its initial date too.** A Snowball / Phoenix / KO-reset with numeric observation times
-and an `initial_date` is aged to the valuation date before every position valuation (product and trade mode) by
-`elapsed − accrual_config.accrued_offset`, with the lifecycle tracker's own steps. A fresh booking prices like the
-tracker's copy for that day; a copy already aged that far (`accrued_offset` equal to the elapsed time) is left alone.
-Tools that read the note off a position take it the same way (`EquityPosition.on_valuation_clock`): the static
-PnL explain's `BookSnapshot.from_portfolio`, the trade Greeks' theta split and SIMM's vega tenor. A raw
-`engine.price(product, env)` prices the product exactly as given.
+**A product is all dates or all floats** (the clock rule, 2026-10-26). A dated note resolves its dates against the
+valuation date; a numeric note carries no `initial_date` (one is refused at construction) and counts from the day it
+is booked on, so a note struck N days ago is booked aged to today (`product.time_shift(N / 365, valuation_date, env,
+keep_landing=True)`), as the lifecycle trackers' copies are. Position valuation never ages the product:
+`EquityPosition.on_valuation_clock` only rolls a dated trade's `CONTRACT`-clock legs, and every tool that reads the
+note off a position (the static PnL explain's `BookSnapshot.from_portfolio`, the trade Greeks' theta split, SIMM's
+vega tenor) reads it as booked. A numeric trade's legs count from the valuation date.
 
 ## Export Formats
 

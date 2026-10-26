@@ -43,6 +43,16 @@ During 0.x the public API may still change between minor versions.
   piece of the GS–QuantLib gap (up to 0.79 per 100 face, on the demo bond); with `FORFEIT` the GS
   tree lands within 0.02 of QuantLib at 500 steps.
 
+- Mid-life valuation of discrete FX barriers and sharkfins: `observation_dates` (the date-clock form of
+  `observation_times`) and `observed_fixings` (`{observation date or time: realised spot}`). A recorded breach
+  decides the contract (a knock-out keeps only a rebate not yet paid; a knock-in is the vanilla); otherwise only the
+  fixings ahead are simulated. A past fixing without a record is decided at the current spot with one
+  `MissingFixingWarning`; theta records the fixings it steps over (`record_passed_fixings`), bump Greeks freeze the
+  base fill (`with_missing_fixings_filled`).
+- Accumulator `past_observations` as `(date, spot)` on a dated contract (a list mixing dates and times is refused).
+- `quantark.util.calendar.add_months(date, n, calendar=None, convention=None)`: the calendar's "+nM" (day of month
+  kept, clamped at the month end, optional business-day adjustment).
+
 ### Changed
 
 - Cash-leg times count from the trade's `initial_date` in every consumer, not only in multi-day runs. Point-in-time
@@ -55,15 +65,38 @@ During 0.x the public API may still change between minor versions.
   the valuation date now reprices — rebook its leg times from the initial date, or set
   `cash_legs_clock=LegClock.VALUATION` on it. Trades valued on their initial date, and products without
   `initial_date`, are unchanged.
-- A numeric Snowball / Phoenix / KO-reset note's observation times also count from its `initial_date` in
-  point-in-time valuation through `EquityPosition` (product and trade mode: `get_market_value`, `get_pnl`,
-  `get_greeks` and every trade method, hence the portfolio, static stress, VaR and SIMM). The note is aged by
-  `elapsed − accrual_config.accrued_offset` with the lifecycle tracker's own steps
-  (`AutocallableLifecycleTracker.age_copy`, via `quantark.asset.equity.lifecycle.ko_reset.age_note_to_valuation_date`),
-  so a fresh booking prices like the tracker's day copy and an already-aged copy (offset equal to the elapsed time)
-  is not aged again. Dated contracts are unchanged. **Rebooking needed:** an aged numeric note booked with times
-  counted from the valuation date and `accrued_offset = 0` now reprices — rebook its times from the initial date,
-  or set `accrued_offset` to the elapsed time. A raw `engine.price(product, env)` call is not aged.
+- **The date / numeric clock rule** (every equity and FX option; DCN, TARF and TARN keep their own, already
+  compliant, rules). A product is on the DATE clock (every time a date: `exercise_date` / `maturity_date`, FX
+  `expiry_date`) or the NUMERIC clock (every time a float, in years from the day it is booked on), never a mix.
+  Both forms complete: the dates win and the floats are dropped at construction (`maturity` beside a date,
+  `maturity_date` supplying `exercise_date`, FX `delivery` beside `delivery_date`), so `maturity` + `exercise_date`
+  and `maturity` + `expiry_date` are no longer refused. Partial or mixed input is refused with a `ValidationError`
+  naming the field: a date field on a numeric contract (`initial_date`, `settlement_date`, `maturity_date`, dated
+  records, FX `delivery_date`), or a float a dated contract needs with no date for it (a record with only
+  `observation_time`, legacy float observation lists, FX float `observation_times`, FX `delivery` alone, float
+  accumulator `past_observations`). Durations and counts stay clock-neutral (`tenor`, settlement lags in any unit,
+  accrual factors, schedule generators, REBASED offsets). Detection is `quantark.asset.clock.clock_violations`;
+  enforcement `enforce_clock`, first in every validate. Complete-clock contracts are bitwise unchanged.
+  This replaces the numeric-note-from-`initial_date` valuation of 2026-10-24: `age_note_to_valuation_date` is gone,
+  `EquityPosition.on_valuation_clock` only rolls a dated trade's `CONTRACT`-clock cash legs (it never changes the
+  product), and the PnL explain snapshot, trade theta split and SIMM vega tenor read the note as booked.
+  **Migration:** a numeric note with an `initial_date` no longer constructs. Book it either dated (give
+  `exercise_date` and dated records; keep `initial_date`), or numeric as seen from the day you book it: a note
+  struck N days ago is the original contract aged by `product.time_shift(N / 365, valuation_date, env,
+  keep_landing=True)` (records already past dropped, the elapsed time banked in `accrued_offset`), the form the
+  lifecycle trackers' copies already have. On the numeric clock the tracker's origin is the run's `start_date`.
+- A REBASED KO-reset on the date clock places schedule 2 in calendar months: its offsets (booked as `k / 12` years)
+  mean `k` months, and each knock-in record date generates schedule 2 as `add_months(date, k)`
+  (`rebased_extended_schedule`); the latest end is the `exercise_date` (derived on a `maturity_date` booking; a
+  given one may not precede it). Monte Carlo, the lifecycle tracker and the knocked-in conversion read the
+  generated dates. **Reprices:** a dated REBASED contract used to read its offsets as continuous years from the
+  knock-in time (`t_ki + k / 12`); it now lands on calendar months. Offsets that are not whole months, and
+  schedule-2 settlement offsets (no date form), are refused on a dated contract. Numeric REBASED is unchanged.
+- A DISCRETE FX barrier / sharkfin is observed only on its fixings: a spot beyond the barrier on a day without a
+  fixing no longer knocks it (the engines' inception shortcut used to apply the continuous rule). Continuous
+  monitoring is unchanged.
+- Asian `observation_dates` (legacy schedule) is now read: it resolves like a record's date and wins over
+  `observation_times`. It was validated but ignored (a uniform schedule was generated instead).
 - Static equity stress follows `EquityPortfolio.trade_value` (default product mode): a product-mode portfolio is
   valued with `get_market_value` / `get_greeks` again; `native_batch` runs on trade-value portfolios only. New
   result metadata `value_basis`.
@@ -98,12 +131,13 @@ During 0.x the public API may still change between minor versions.
 
 ### Fixed
 
-- Tools that start from an `EquityPosition` now see an aged numeric note as the portfolio values it
-  (`on_valuation_clock`). `BookSnapshot.from_portfolio` snapshotted the booked note, so a static PnL explain of a
-  numeric note with an `initial_date` refused the pair ("a float-maturity contract must be supplied rolled");
-  it now holds the note aged to each book date and explains the portfolio's PnL. The trade Greeks' theta split
-  (`convexity_theta` / `r_theta` / `q_theta`) and SIMM's vega option tenor read the aged maturity instead of the
-  booked one. A raw `engine.price(product, env)` still prices the product as given.
+- Theta of a numeric discrete FX barrier / sharkfin raised "times must be strictly increasing and positive":
+  `time_shift` aged the maturity but not the fixing times. The fixing times (and recorded fixings) now move with the
+  clock, so numeric theta equals its dated twin's.
+- (Superseded by the clock rule under Changed: a numeric note can no longer carry an `initial_date`, so there is
+  no aged note to route.) Tools that start from an `EquityPosition` — the static PnL explain's
+  `BookSnapshot.from_portfolio`, the trade Greeks' theta split and SIMM's vega option tenor — read the note as
+  booked, which is the note the portfolio values.
 - Parametric equity VaR understated vol and rate risk 100×, in both portfolio modes. An `EquityPosition`'s vega
   is per vol point and its rho per 1 %, but the `vol_change` / `rate_shift` factors are absolute changes;
   `ParametricVaREngine` now divides vega, rho and `dividend_rho` by 0.01 (TRS rho is per unit of rate already and
