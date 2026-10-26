@@ -47,8 +47,9 @@ def test_phoenix_two_legs():
     assert [p.get_coupon_payoff(i) for i in range(3)] == pytest.approx([1.0, 1.0, 1.0])
 
 
-def test_numeric_with_initial_date_accrues_the_quoted_fraction():
-    p = snowball(ko=times(0.25), maturity=0.25, initial_date=T0)
+def test_a_numeric_contract_accrues_the_quoted_fraction():
+    """Booked as seen from the valuation date (no initial_date on the numeric clock), whatever that date is."""
+    p = snowball(ko=times(0.25), maturity=0.25)
     assert ko_cash(p, env(T0 + timedelta(days=30))) == [100.0 + 100.0 * 0.12 * 0.25]
 
 

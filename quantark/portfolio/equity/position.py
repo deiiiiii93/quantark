@@ -148,34 +148,29 @@ class EquityPosition:
         return streams
 
     def on_valuation_clock(self, pricing_env: PricingEnvironment) -> "EquityPosition":
-        """This position seen from ``pricing_env``'s valuation date: its numeric note and its cash legs, whose times
-        count from the trade's initial date, aged to it (user decisions 2026-10-24).
+        """This position seen from ``pricing_env``'s valuation date: its cash legs, whose times count from a dated
+        trade's ``initial_date`` on the ``CONTRACT`` clock, rolled by whole days / 365 exactly as a multi-day run's
+        ``LegCashBook`` rolls them (``legs_seen_from``) — a flow paid strictly before the valuation date is history, a
+        flow due that day is kept at 0. A trade therefore has one value in the point-in-time tools and on a run's
+        first day.
 
-        - The note: a numeric Snowball / Phoenix / KO-reset ages by ``elapsed - accrued_offset`` with the lifecycle
-          tracker's own steps (``age_note_to_valuation_date``), so a fresh booking prices like the tracker's day copy
-          and a copy aged that far already is left alone.
-        - The legs, on the ``CONTRACT`` clock: rolled by whole days / 365 exactly as a multi-day run's
-          ``LegCashBook`` rolls them (``legs_seen_from``) — a flow paid strictly before the valuation date is
-          history, a flow due that day is kept at 0.
-
-        A trade therefore has one value in the point-in-time tools and on a run's first day. Returns ``self`` when
-        nothing moves (no ``initial_date``, a valuation on or before it, a dated note, legs already on the
-        ``VALUATION`` clock).
+        The product is never changed: a dated note resolves its dates against the environment, and a numeric note
+        (clock rule 2026-10-26: no ``initial_date``) is booked as seen from today, so its legs count from the
+        valuation date already. Returns ``self`` when nothing moves (no ``initial_date``, a valuation on or before
+        it, legs already on the ``VALUATION`` clock).
         """
-        from quantark.asset.equity.lifecycle.ko_reset import age_note_to_valuation_date
         from quantark.cashleg import legs_seen_from, run_time
 
-        product = age_note_to_valuation_date(self.product, pricing_env)
         legs, clock = self.cash_legs, self.cash_legs_clock
         origin = getattr(self.product, "initial_date", None)
         valuation_date = getattr(pricing_env, "valuation_date", None)
         if (legs and clock is LegClock.CONTRACT and origin is not None and valuation_date is not None
                 and run_time(origin, valuation_date) > 0.0):
             legs, clock = list(legs_seen_from(legs, origin, valuation_date)), LegClock.VALUATION
-        if product is self.product and clock is self.cash_legs_clock:
+        if clock is self.cash_legs_clock:
             return self
         aged = copy.copy(self)
-        aged.product, aged.cash_legs, aged.cash_legs_clock = product, legs, clock
+        aged.cash_legs, aged.cash_legs_clock = legs, clock
         return aged
 
     def get_trade_value(self, pricing_env: PricingEnvironment) -> float:

@@ -221,11 +221,9 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
         """
         # Check if product has maturity/expiry attribute
         if hasattr(position.product, 'get_maturity'):
-            # Get maturity from product (an aged numeric note's remaining time, on the valuation clock)
+            # Get maturity from product
             # Note: This is approximate - production code would get from pricing env
-            product = (position.on_valuation_clock(pricing_env).product
-                       if hasattr(position, "on_valuation_clock") else position.product)
-            maturity = product.get_maturity(pricing_env)
+            maturity = position.product.get_maturity(pricing_env)
             return float(maturity)
 
         # Default to 1 year if maturity not available

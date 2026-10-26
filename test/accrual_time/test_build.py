@@ -206,12 +206,10 @@ def test_annualized_rebate_without_dated_origin_is_refused():
                  payoff_config=PayoffConfig(rebate_rate=0.05))
 
 
-def test_setting_initial_date_on_a_numeric_contract_changes_no_period():
-    """A factory that takes no initial_date leaves callers setting it afterwards: numeric periods never read it."""
+def test_setting_initial_date_on_a_numeric_contract_is_refused():
+    """Clock rule (2026-10-26): a numeric contract carries no date; one set afterwards is refused when the copy is
+    validated, naming the field."""
     p = snowball()
-    before = periods(p.barrier_config.ko_observation_schedule)
     p.initial_date = T0
-    from quantark.asset.equity.product.option.accrual import ko_accrual_factor
-    assert [ko_accrual_factor(p, r) for r in p.barrier_config.ko_observation_schedule.records] == [1 / 12, 2 / 12, 3 / 12]
-    p.validate()
-    assert periods(p.barrier_config.ko_observation_schedule) == before
+    with pytest.raises(ValidationError, match="numeric clock .*initial_date"):
+        p.validate()

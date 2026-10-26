@@ -192,12 +192,12 @@ def test_theta_date_schedule_preserves_legacy_observation_dates():
         option_type=OptionType.CALL,
         barrier=110.0,
         barrier_type=BarrierType.UP_OUT,
-        maturity=1.0,
+        exercise_date=valuation + timedelta(days=365),
         rebate=0.0,
         observation_type=ObservationType.DISCRETE,
         observation_schedule=deepcopy(schedule),
     )
-    option.observation_dates = [0.5]  # Legacy field should remain unchanged
+    option.observation_dates = [0.5]  # Legacy field (shadowed by the dated schedule) should remain unchanged
 
     env = _pricing_env()
     calc = GreeksCalculator()

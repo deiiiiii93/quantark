@@ -8,9 +8,8 @@ dated twin.
 
 The clock rule (2026-10-26): a contract is all dates or all floats. A numeric contract struck N days before the run is
 booked aged N days to the run's start (``test_tracker_clock_parity``'s ``booking``), so a numeric contract whose
-maturity lies before the run cannot be booked at all (its maturity would be negative): the tests that need one are
-run on the dated form, and the numeric cases marked HYBRID book the numeric contract dated from an ``initial_date``
-(``_hybrid``) until the rule retires them.
+maturity lies before the run cannot be booked at all (its maturity would be negative), so the tests that need one
+run on the dated form only.
 """
 from __future__ import annotations
 
@@ -44,23 +43,6 @@ def _tracker(kind, form, gap, **kw):
     return tracker_for(product, quantity=1.0, start_date=START)
 
 
-def _hybrid(kind, gap):
-    """HYBRID: the numeric contract dated from an ``initial_date`` ``gap`` days before the run (the booking before
-    the clock rule), the only numeric form whose maturity can lie before the run."""
-    initial = START - pd.Timedelta(days=gap)
-    product = BUILDERS[kind]("numeric", initial)
-    product.initial_date = initial.to_pydatetime()
-    product.validate()
-    return product
-
-
-def _hybrid_tracker(kind, gap, **kw):
-    product = _hybrid(kind, gap)
-    for name, value in kw.items():
-        setattr(product, name, value)
-    return tracker_for(product, quantity=1.0, start_date=START)
-
-
 def _close(t, r, spot):
     day = START + pd.Timedelta(days=r)
     e = env(spot, day)
@@ -70,12 +52,11 @@ def _close(t, r, spot):
     return events + ([maturity] if maturity is not None else [])
 
 
-@pytest.mark.parametrize("form", FORMS)
 @pytest.mark.parametrize("kind", list(MATURITY_DAY))
-def test_a_contract_matured_before_the_run_books_nothing_and_warns(kind, form):
-    """The numeric cases are HYBRID (no numeric booking matured before the run exists on the numeric clock)."""
+def test_a_contract_matured_before_the_run_books_nothing_and_warns(kind):
+    """Dated only: no numeric booking matured before the run exists on the numeric clock."""
     gap = MATURITY_DAY[kind] + 1                                    # matured the day before the run
-    t = _tracker(kind, form, gap) if form == "dated" else _hybrid_tracker(kind, gap)
+    t = _tracker(kind, "dated", gap)
     with pytest.warns(_warning_class()) as caught:
         assert _close(t, 0, 90.0) == []
     assert len(caught) == 1
@@ -103,13 +84,14 @@ def test_a_maturity_on_the_run_start_is_settled_on_the_first_close(kind, form):
 @pytest.mark.parametrize("form", FORMS)
 def test_a_ko_reset_knocked_in_before_the_run_matures_at_its_knocked_in_end(form):
     """A carried knock-in makes the knocked-in end the maturity: ABSOLUTE schedule 2 ends on contract day 365. The
-    numeric contract matured before the run (``dead``) is HYBRID."""
+    contract matured before the run (``dead``) exists on the dated form only."""
     carried = {"_otc_lifecycle_knocked_in": True,
                "_otc_lifecycle_knock_in_date": (START - pd.Timedelta(days=300)).to_pydatetime()}
     alive = _tracker("ko_reset_absolute", form, 300, **carried)     # schedule 1 ended, knocked-in end ahead
     assert _close(alive, 0, 90.0) == [] and alive.lifecycle.alive
-    dead = (_tracker("ko_reset_absolute", form, 366, **carried) if form == "dated"
-            else _hybrid_tracker("ko_reset_absolute", 366, **carried))
+    if form == "numeric":
+        return
+    dead = _tracker("ko_reset_absolute", "dated", 366, **carried)
     with pytest.warns(_warning_class()):
         assert _close(dead, 0, 90.0) == []
     assert not dead.lifecycle.alive and not dead.lifecycle.ledger.cashflows
@@ -136,13 +118,11 @@ class _Book:
         del self.positions[position_id]
 
 
-@pytest.mark.parametrize("form", FORMS)
-def test_the_manager_drops_a_matured_position_with_no_cash(form):
-    """The numeric case is HYBRID."""
+def test_the_manager_drops_a_matured_position_with_no_cash():
+    """Dated only (a numeric booking cannot have matured before the run)."""
     from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
 
-    product = BUILDERS["snowball"]("dated", START - pd.Timedelta(days=400)) if form == "dated" \
-        else _hybrid("snowball", 400)
+    product = BUILDERS["snowball"]("dated", START - pd.Timedelta(days=400))
     book = _Book(product)
     manager = PortfolioLifecycleManager(base_date=START.to_pydatetime())
     with pytest.warns(_warning_class()):

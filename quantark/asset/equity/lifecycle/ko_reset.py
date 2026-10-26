@@ -636,34 +636,3 @@ def tracker_for(product: Any, **kwargs):
         return DCNLifecycleTracker(product=product, **kwargs)
     cls = KOResetLifecycleTracker if isinstance(product, KnockOutResetSnowballOption) else AutocallableLifecycleTracker
     return cls(product=product, **kwargs)
-
-
-def age_note_to_valuation_date(product: Any, pricing_env) -> Any:
-    """A booked numeric Snowball / Phoenix / KO-reset aged to ``pricing_env``'s valuation date (user decision
-    2026-10-24).
-
-    Its numeric times count from its ``initial_date`` (the trackers' clock), and ``accrual_config.accrued_offset``
-    says how far it has been aged already. The remainder ``elapsed - accrued_offset`` (``elapsed``: whole days from
-    ``initial_date`` / 365, as ``product_for_pricing`` counts them) ages a snapped copy with the tracker's own steps
-    (``age_copy``), before that day's close. A fresh booking therefore prices like the tracker's day copy, and that copy
-    (offset == elapsed) is not aged again. Returns ``product`` itself when nothing moves: not a Snowball / Phoenix, a
-    dated contract (``exercise_date`` set), no ``initial_date`` or valuation date, or a remainder not above zero (the
-    note is aged that far already, e.g. a theta bump's copy one day ahead).
-    """
-    from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
-    from quantark.asset.equity.product.option.snowball_option import SnowballOption
-
-    if not isinstance(product, (SnowballOption, PhoenixOption)) or getattr(product, "exercise_date", None) is not None:
-        return product
-    origin = getattr(product, "initial_date", None)
-    date = getattr(pricing_env, "valuation_date", None)
-    accrual = getattr(product, "accrual_config", None)
-    if origin is None or date is None or accrual is None:
-        return product
-    elapsed = max(0.0, (pd.Timestamp(date).normalize() - pd.Timestamp(origin).normalize()).days / 365.0)
-    remainder = elapsed - float(accrual.accrued_offset)
-    if remainder <= 0.0 or is_zero(remainder):
-        return product
-    tracker = tracker_for(product, quantity=1.0)
-    # the tracker's contract is a snapped deep copy (carried lifecycle attributes kept): age it in place
-    return tracker.age_copy(tracker.product, remainder, date, pricing_env, initial=True)

@@ -83,12 +83,14 @@ class MaturedBeforeRunWarning(UserWarning):
 
 
 def lifecycle_clock_origin(product: Any, start_date) -> Optional[pd.Timestamp]:
-    """The day a lifecycle measures every time from: ``product.initial_date`` when set, else ``start_date``.
+    """The day a lifecycle measures every time from: a dated contract's ``initial_date`` when set, else the run's
+    ``start_date``.
 
-    The tracker's one clock (decision A, 2026-10-09). Numeric records are dated from it, the pricing copy is aged by
-    the time since it, and a numeric valuation point, terminal and ledger entry read their times off it, so a numeric
-    contract is timed exactly like its dated twin. ``None`` when neither date is known. The value is returned as
-    given (not normalized): each consumer keeps its own day arithmetic.
+    The tracker's one clock (decision A, 2026-10-09). Under the clock rule (2026-10-26) a numeric contract carries no
+    date at all (its times count from the day it is booked on), so its origin is the run's start: its records are
+    dated from it, the pricing copy is aged by the time since it, and its valuation point, terminal and ledger entries
+    read their times off it. ``None`` when neither date is known. The value is returned as given (not normalized):
+    each consumer keeps its own day arithmetic.
     """
     initial = getattr(product, "initial_date", None)
     origin = initial if initial is not None else start_date
@@ -248,8 +250,7 @@ class AutocallableLifecycleTracker:
     ) -> Any:
         """Age the pricing copy ``product`` (mutated and returned) by ``elapsed`` years to ``date``: the maturity, the
         barrier schedules and the banked accrual, as ``product_for_pricing`` ages its copy. ``initial`` keeps a record
-        due on ``date`` at time 0 (before that day's close). Point-in-time valuation ages a booked numeric note with
-        these same steps (``age_note_to_valuation_date``; user decision 2026-10-24)."""
+        due on ``date`` at time 0 (before that day's close)."""
         if (
             getattr(product, "exercise_date", None) is None
             and getattr(product, "maturity", None) is not None

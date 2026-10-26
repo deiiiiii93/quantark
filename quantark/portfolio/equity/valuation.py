@@ -61,7 +61,7 @@ def trade_greeks(
     ``market_value`` is the value the caller reports for the position (the value path); without it the
     trade-risk base ``total["price"]`` is used, as on the batch path where both are the same solve.
     """
-    T = position.on_valuation_clock(env).product.get_maturity(env)     # an aged numeric note's remaining time
+    T = position.product.get_maturity(env)
     components = greeks_calculator.estimate_theta_components(
         total["theta"], total["rho"], total["dividend_rho"], env.get_rate(T), env.get_div_yield(T), T
     )

@@ -11,9 +11,8 @@ record is history (a memory coupon's was paid: no cash in the run, nothing memor
 The clock rule (2026-10-26): a contract is all dates or all floats. The numeric form of a contract struck N days
 before the run is booked on the numeric clock alone, aged N days to the run's start (``test_tracker_clock_parity``'s
 ``booking``): it no longer carries the records before the run, so its observation indices (and the ids built on them)
-are the contract's less the number dropped, and its clock origin is the run's start. The tests marked HYBRID check
-the numeric clock origin = ``initial_date`` itself; they book that hybrid explicitly (``_hybrid``) until the rule
-retires them.
+are the contract's less the number dropped, and its clock origin is the run's start. (A numeric contract dated from
+an ``initial_date`` -- the hybrid these tests once pinned -- is refused at construction.)
 """
 from __future__ import annotations
 
@@ -36,15 +35,6 @@ def _initial(gap):
 
 def _tracker(kind, form, gap, **kw):
     return tracker_for(booking(kind, form, gap)[0], quantity=1.0, start_date=START, **kw)
-
-
-def _hybrid(kind, gap):
-    """HYBRID: the numeric contract dated from an ``initial_date`` ``gap`` days before the run (the booking before
-    the clock rule). Only the tests that check that hybrid itself use it."""
-    product = BUILDERS[kind]("numeric", _initial(gap))
-    product.initial_date = _initial(gap).to_pydatetime()
-    product.validate()
-    return product
 
 
 def _index(index, kind, form, gap):
@@ -74,11 +64,13 @@ def test_the_clock_origin_is_the_initial_date_when_set():
 
 
 @pytest.mark.parametrize("gap", [30, 100])
-def test_the_valuation_point_runs_from_the_initial_date(gap):
-    """HYBRID: a numeric contract's times run from its ``initial_date``."""
-    t = tracker_for(_hybrid("snowball", gap), quantity=1.0, start_date=START)
-    assert t.clock_origin == _initial(gap)
-    assert t._valuation_point(START, t.product).time == gap / 365.0
+def test_the_valuation_point_runs_from_the_clock_origin(gap):
+    """A numeric contract's times run from the run's start (it is booked as seen from there); a dated contract's
+    from its ``initial_date``."""
+    numeric = _tracker("snowball", "numeric", gap)
+    assert numeric.clock_origin == START
+    assert numeric._valuation_point(START, numeric.product).time == 0.0
+    assert _tracker("snowball", "dated", gap).clock_origin == _initial(gap)
 
 
 @pytest.mark.parametrize("gap", [30, 100])
@@ -95,33 +87,25 @@ def test_the_pricing_copy_drops_a_record_on_the_close_that_books_it(gap):
     assert copy.maturity == pytest.approx((365 - 122) / 365.0)
 
 
-def test_an_initial_date_with_a_time_of_day_ages_the_copy_in_whole_days():
-    """HYBRID: a booking stamped 09:30 dates its records on whole days; the copy made after the close that books
-    record 3 must not hold it for one more day."""
-    product = _hybrid("snowball", 30)
-    product.initial_date = (_initial(30) + pd.Timedelta(hours=9, minutes=30)).to_pydatetime()
-    t = tracker_for(product, quantity=1.0, start_date=START)
-    for r in range(122 - 30 + 1):
-        _close(t, r, 100.0)
-    day = START + pd.Timedelta(days=122 - 30)
-    assert 3 in t.lifecycle.observed_ko_indices
-    assert t.product_for_pricing(day, env(100.0, day)).barrier_config.ko_observation_count == 8
-
-
 @pytest.mark.parametrize("gap", [30, 100])
 def test_the_numeric_terminal_falls_due_with_the_last_record(gap):
     events = walk("snowball", "numeric", gap, "quiet")["events"]
     assert events[-1][:2] == (365 - gap, "MATURITY")
 
 
-def test_a_rebased_knock_in_time_runs_from_the_initial_date():
-    """HYBRID: a numeric REBASED contract's knock-in time and schedule-2 base run from its ``initial_date``."""
-    t = tracker_for(_hybrid("ko_reset_rebased", 100), quantity=1.0, start_date=START)
+def test_a_rebased_knock_in_time_runs_from_the_clock_origin():
+    """A numeric REBASED contract struck 100 days before the run: its knock-in time and schedule-2 base run from the
+    run's start (its clock origin); a dated one converts on its generated dates and needs no numeric base."""
+    t = _tracker("ko_reset_rebased", "numeric", 100)
     for r in range(83):
         _close(t, r, 70.0 if r == 82 else 100.0)                                # record 5, contract day 182
     assert t.lifecycle.knocked_in
-    assert t.knock_in_time() == 182 / 365.0
-    assert t._schedule_two_base() == _initial(100)
+    assert t.knock_in_time() == 82 / 365.0
+    assert t._schedule_two_base() == START
+    dated = _tracker("ko_reset_rebased", "dated", 100)
+    for r in range(83):
+        _close(dated, r, 70.0 if r == 82 else 100.0)
+    assert dated.lifecycle.knocked_in and dated._schedule_two_base() is None
 
 
 # -- decision 2: records dated before the run --------------------------------------------------------------------------
@@ -235,13 +219,14 @@ class _Book:
 
 
 def test_the_manager_pays_a_numeric_flow_on_the_trackers_clock():
-    """HYBRID: N = 30 with a 2-day YEAR_FRACTION lag: record 0 knocks out on the first close and pays two days later.
-    The run ledger discounts it over 2 days and pays it on run day 2, not 30 days late."""
+    """Struck 30 days before the run with a 2-day YEAR_FRACTION lag (booked aged to the run's start): record 0 lands
+    on the first close (time 0 on its clock), knocks out and pays two days later. The run ledger discounts it over 2
+    days and pays it on run day 2."""
     from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
     from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
     from quantark.param import FlatRateCurve
 
-    product = _hybrid("snowball", 30)
+    product = booking("snowball", "numeric", 30)[0]
     product.settlement_convention = SettlementConvention(lag=2 / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION)
     product._validate_settlement_convention()
     book = _Book(product, 104.0)
@@ -249,7 +234,7 @@ def test_the_manager_pays_a_numeric_flow_on_the_trackers_clock():
     manager.register_positions(book)
     (event,) = [p.event for p in manager.process_day(book, 0, START.to_pydatetime())]
     amount = event.realized_cashflow.amount
-    assert event.realized_cashflow.determination_time == 30 / 365.0
+    assert event.realized_cashflow.determination_time == 0.0
     assert manager.pending_receivable_pv == pytest.approx(amount * FlatRateCurve(0.03).get_discount_factor(2 / 365.0))
     for r in (1, 2):
         day = START + pd.Timedelta(days=r)
@@ -259,16 +244,17 @@ def test_the_manager_pays_a_numeric_flow_on_the_trackers_clock():
 
 
 def test_the_pnl_explain_recorder_reads_a_numeric_ledger_on_the_trackers_clock():
-    """HYBRID: the recorder rebuilds a contract-time state's valuation point for each snapshot day: an autocallable's
-    from its contract's clock origin, any other tracker's (a barrier's) from the manager's base date."""
+    """The recorder rebuilds a contract-time state's valuation point for each snapshot day: an autocallable's from its
+    contract's clock origin (a numeric contract: the run's start), any other tracker's (a barrier's) from the
+    manager's base date."""
     from quantark.asset.equity.lifecycle.cashflows import ValuationPoint
     from quantark.asset.equity.lifecycle.state import BarrierLifecycleState
     from quantark.pnlexplain.equity.recorder import _state_point
 
-    product = _hybrid("snowball", 30)
+    product = booking("snowball", "numeric", 30)[0]
     day = (START + pd.Timedelta(days=5)).to_pydatetime()
-    state = AutocallableLifecycleState(valuation_point=ValuationPoint(time=35 / 365.0))
-    assert _state_point(state, day, START.to_pydatetime(), product).time == 35 / 365.0
+    state = AutocallableLifecycleState(valuation_point=ValuationPoint(time=5 / 365.0))
+    assert _state_point(state, day, START.to_pydatetime(), product).time == 5 / 365.0
     barrier = BarrierLifecycleState(valuation_point=ValuationPoint(time=5 / 365.0))
     assert _state_point(barrier, day, START.to_pydatetime(), product).time == 5 / 365.0
 
