@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 
 from ..currency_pair import CurrencyPair
 from .fx_range_accrual_config import (
@@ -71,6 +72,7 @@ class FxQuantoRangeAccrualOption(FxRangeAccrualOption):
 
     def validate(self) -> None:
         """Validate the quanto range accrual specification."""
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         super().validate()
         if self.quanto_fx_rate <= 0:
             raise ValidationError(

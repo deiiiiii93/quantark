@@ -19,6 +19,7 @@ from quantark.util.enum import (
     TouchType,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 
 
 @dataclass
@@ -117,6 +118,7 @@ class OneTouchOption(BaseEquityProduct):
         Raises:
             ValidationError: If parameters are invalid
         """
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         if self.barrier <= 0:
             raise ValidationError(f"Barrier must be positive, got {self.barrier}")
 

@@ -7,6 +7,7 @@ from typing import Optional
 
 from quantark.util.enum import FxPayoutCurrency, OptionType
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 from ..currency_pair import CurrencyPair
 from .fx_digital_option import FxDigitalOption
 
@@ -61,6 +62,7 @@ class FxQuantoDigitalOption(FxDigitalOption):
 
     def validate(self) -> None:
         """Validate quanto digital parameters."""
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         super().validate()
         if self.quanto_fx_rate <= 0:
             raise ValidationError(

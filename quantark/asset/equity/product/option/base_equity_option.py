@@ -16,6 +16,7 @@ from ..base_equity_product import BaseEquityProduct
 from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
+from quantark.asset.clock import enforce_clock
 
 
 class BaseEquityOption(BaseEquityProduct):
@@ -170,6 +171,7 @@ class BaseEquityOption(BaseEquityProduct):
         Raises:
             ValidationError: If any parameter is invalid
         """
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         self._validate_strike()
         self._validate_maturity_dates(allow_zero_maturity=allow_zero_maturity)
         self._validate_date_ordering()
@@ -219,8 +221,6 @@ class BaseEquityOption(BaseEquityProduct):
                 "Either maturity/tenor or exercise_date/maturity_date must be provided"
             )
 
-        if has_dates and has_maturity:
-            raise ValidationError("Cannot provide both maturity and exercise_date")
 
     def _validate_date_ordering(self) -> None:
         """Validate that dates are in proper chronological order."""

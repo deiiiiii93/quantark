@@ -170,6 +170,55 @@ def clock_violations(product: Any) -> List[Tuple[str, str]]:
     return _unique(found)
 
 
+def normalize_clock(product: Any) -> None:
+    """Make "dates win" hold for every reader: on a DATE product, rebind the product's OWN floats that a date shadows.
+
+    Equity: a ``maturity_date`` with no ``exercise_date`` supplies it (as the constructor does when ``maturity`` is
+    unset), then a ``maturity`` beside the exercise date is dropped. FX: ``maturity`` beside ``expiry_date`` and
+    ``delivery`` beside ``delivery_date`` are dropped. Only attributes of ``product`` itself are rebound; no record,
+    schedule or config is touched (QUAD V2 validates a shallow copy and relies on that). A complete-clock product has
+    nothing to drop and is unchanged.
+    """
+    if _has_own_rule(product):
+        return
+    if _is_fx(product):
+        if getattr(product, "expiry_date", None) is not None and getattr(product, "maturity", None) is not None:
+            product.maturity = None
+        if getattr(product, "delivery_date", None) is not None and getattr(product, "delivery", None) is not None:
+            product.delivery = None
+        return
+    if getattr(product, "exercise_date", None) is None and getattr(product, "maturity_date", None) is not None \
+            and getattr(product, "maturity", None) is not None:
+        product.exercise_date = product.maturity_date
+    if getattr(product, "exercise_date", None) is not None and getattr(product, "maturity", None) is not None:
+        product.maturity = None
+
+
+def enforce_clock(product: Any) -> None:
+    """The clock rule at construction (user ruling 2026-10-26): normalize the shadowed floats
+    (``normalize_clock``), then refuse partial or mixed input, naming the first offending field.
+
+    Raises:
+        ValidationError: ``product`` mixes the two clocks.
+    """
+    normalize_clock(product)
+    found = clock_violations(product)
+    if not found:
+        return
+    from quantark.util.exceptions import ValidationError
+
+    field, reason = found[0]
+    anchor = "expiry_date" if _is_fx(product) else "exercise_date"
+    if product_clock(product) is ProductClock.NUMERIC:
+        where, what = f"the numeric clock (no {anchor})", "is a date field"
+    else:
+        where, what = f"the date clock ({anchor} set)", "is a numeric time with no date for it"
+    raise ValidationError(
+        f"{type(product).__name__} is on {where}: {field} {what}; book every time as a float or every time as a "
+        "date (clock rule)"
+    )
+
+
 def _unique(found: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     seen = set()
     out = []

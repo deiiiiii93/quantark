@@ -27,6 +27,7 @@ from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero
+from quantark.asset.clock import enforce_clock
 
 from ..base_fx_product import BaseFxProduct
 from ..currency_pair import CurrencyPair
@@ -100,6 +101,7 @@ class FxRangeAccrualOption(BaseFxProduct):
 
     def validate(self) -> None:
         """Validate the range accrual specification."""
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         if self.notional <= 0:
             raise ValidationError(f"notional must be positive, got {self.notional}")
         if self.range_config is None:

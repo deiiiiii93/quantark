@@ -7,6 +7,7 @@ from typing import Optional
 
 from quantark.util.enum import FxPayoutCurrency, OptionType
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 from ..base_fx_product import BaseFxProduct
 from ..currency_pair import CurrencyPair
 
@@ -67,6 +68,7 @@ class FxDigitalOption(BaseFxProduct):
 
     def validate(self) -> None:
         """Validate digital option parameters."""
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
         if not isinstance(self.option_type, OptionType):

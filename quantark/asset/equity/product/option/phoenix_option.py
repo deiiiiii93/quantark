@@ -29,6 +29,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 
 from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor, leg_annualized
 from .accrual_build import build_contract_accrual
@@ -245,6 +246,7 @@ class PhoenixOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid
         """
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         self._validate_core_parameters()
         self._validate_maturity_parameters(allow_zero_maturity=allow_zero_maturity)
         super().validate(allow_zero_maturity=allow_zero_maturity)

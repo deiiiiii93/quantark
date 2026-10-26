@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 from ..base_fx_product import BaseFxProduct
 from ..currency_pair import CurrencyPair
 
@@ -46,6 +47,7 @@ class FxOneTouchOption(BaseFxProduct):
         self.validate()
 
     def validate(self) -> None:
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         if self.barrier <= 0:
             raise ValidationError(f"Barrier must be positive, got {self.barrier}")
         if self.payout <= 0:

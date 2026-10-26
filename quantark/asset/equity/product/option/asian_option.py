@@ -23,6 +23,7 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
+from quantark.asset.clock import enforce_clock
 
 from .base_equity_option import BaseEquityOption, maturity_reached
 
@@ -235,6 +236,7 @@ class AsianOption(BaseEquityOption):
         Raises:
             ValidationError: If any parameter is invalid
         """
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         # Skip strike validation for floating strike options
         if self.asian_strike_type == AsianStrikeType.FIXED:
             self._validate_strike()

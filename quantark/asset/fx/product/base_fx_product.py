@@ -29,8 +29,8 @@ class BaseFxProduct(ABC):
 
     Attributes:
         currency_pair: The currency pair of the product
-        maturity: Time to expiry in years (mutually exclusive with expiry_date)
-        expiry_date: Expiry date (mutually exclusive with maturity)
+        maturity: Time to expiry in years (shadowed by expiry_date: the date wins)
+        expiry_date: Expiry date (wins over maturity)
         delivery: Time to delivery/settlement in years (optional)
         delivery_date: Delivery/settlement date (optional)
     """
@@ -151,12 +151,8 @@ class BaseFxProduct(ABC):
         """Shared maturity validation for concrete products."""
         if self.maturity is None and self.expiry_date is None:
             raise ValidationError("Either maturity or expiry_date must be provided")
-        if self.maturity is not None and self.expiry_date is not None:
-            raise ValidationError("Cannot provide both maturity and expiry_date")
         if self.maturity is not None and self.maturity <= 0:
             raise ValidationError(f"Maturity must be positive, got {self.maturity}")
-        if self.delivery is not None and self.delivery_date is not None:
-            raise ValidationError("Cannot provide both delivery and delivery_date")
         if (
             self.delivery is not None
             and self.maturity is not None

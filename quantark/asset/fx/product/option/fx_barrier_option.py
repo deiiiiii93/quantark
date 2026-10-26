@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 from quantark.util.enum import OptionType, FxBarrierType, ObservationType
 from quantark.util.exceptions import ValidationError
+from quantark.asset.clock import enforce_clock
 from ..currency_pair import CurrencyPair
 from .discrete_monitoring import DiscreteMonitoring
 
@@ -73,6 +74,7 @@ class FxBarrierOption(DiscreteMonitoring):
         self.validate()
 
     def validate(self) -> None:
+        enforce_clock(self)   # the date / numeric clock rule first (dates win; mixed input refused)
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
         if self.barrier <= 0:

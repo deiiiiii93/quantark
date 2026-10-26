@@ -4,7 +4,8 @@ An equity or FX option is on the DATE clock (every time a date) or the NUMERIC c
 mixed. Both given completely: the dates win and the floats are ignored. Partial input is a construction error.
 
 This module checks the detection (``quantark.asset.clock``): which clock a product is on and which of its fields
-break the rule. Enforcement at construction is checked further down once it is wired.
+break the rule. Construction refuses a mixed product (``test_clock_enforcement``), so each case here builds a valid
+product and then breaks it, the way a post-construction edit would.
 """
 from dataclasses import replace
 from datetime import datetime
@@ -104,36 +105,46 @@ def test_a_float_list_beside_its_dates_is_shadowed():
 # --- a date field on the numeric clock ------------------------------------------------------------------------------
 
 def test_a_numeric_note_with_an_initial_date_is_partial():
-    assert _fields(_snowball(dated=False, initial_date=T0)) == {"initial_date"}
+    note = _snowball(dated=False)
+    note.initial_date = T0
+    assert _fields(note) == {"initial_date"}
+
+
+def _numeric_barrier():
+    records = [ObservationRecord(observation_time=t, barrier=90.0) for t in (0.5, 1.0)]
+    return BarrierOption(strike=100.0, option_type=OptionType.PUT, barrier=90.0, barrier_type=BarrierType.DOWN_IN,
+                         maturity=1.0, observation_type=ObservationType.DISCRETE,
+                         observation_schedule=ObservationSchedule(records=records))
 
 
 def test_a_numeric_contract_with_a_dated_record_is_mixed():
-    records = [ObservationRecord(observation_time=0.5, barrier=90.0), ObservationRecord(observation_date=OBS[2],
-                                                                                        barrier=90.0)]
-    barrier = BarrierOption(strike=100.0, option_type=OptionType.PUT, barrier=90.0, barrier_type=BarrierType.DOWN_IN,
-                            maturity=1.0, observation_type=ObservationType.DISCRETE,
-                            observation_schedule=ObservationSchedule(records=records))
+    barrier = _numeric_barrier()
+    barrier.observation_schedule = ObservationSchedule(records=[
+        ObservationRecord(observation_time=0.5, barrier=90.0), ObservationRecord(observation_date=OBS[2], barrier=90.0)])
     assert any("observation_date" in field for field in _fields(barrier))
 
 
 def test_a_numeric_fx_option_with_a_delivery_date_is_mixed():
-    fx = _fx_vanilla(strike=1.1, option_type=OptionType.CALL, maturity=1.0, delivery_date=EXPIRY)
+    fx = _fx_vanilla(strike=1.1, option_type=OptionType.CALL, maturity=1.0)
+    fx.delivery_date = EXPIRY
     assert _fields(fx) == {"delivery_date"}
 
 
 def test_a_numeric_asian_with_dated_observations_is_mixed():
-    asian = AsianOption(strike=100.0, maturity=1.0, observation_times=[0.5, 1.0], observation_dates=OBS[1::2])
+    asian = AsianOption(strike=100.0, maturity=1.0, observation_times=[0.5, 1.0])
+    asian.observation_dates = OBS[1::2]
     assert "observation_dates" in _fields(asian)
 
 
 # --- a numeric time on the date clock -------------------------------------------------------------------------------
 
 def test_a_dated_contract_with_a_time_only_record_is_partial():
-    records = [ObservationRecord(observation_date=OBS[0], barrier=90.0), ObservationRecord(observation_time=0.5,
-                                                                                           barrier=90.0)]
+    records = [ObservationRecord(observation_date=d, barrier=90.0) for d in OBS]
     barrier = BarrierOption(strike=100.0, option_type=OptionType.PUT, barrier=90.0, barrier_type=BarrierType.DOWN_IN,
                             exercise_date=EXPIRY, observation_type=ObservationType.DISCRETE,
                             observation_schedule=ObservationSchedule(records=records))
+    barrier.observation_schedule = ObservationSchedule(records=[
+        ObservationRecord(observation_date=OBS[0], barrier=90.0), ObservationRecord(observation_time=0.5, barrier=90.0)])
     assert any("observation_time" in field for field in _fields(barrier))
 
 
@@ -158,7 +169,9 @@ def test_a_settlement_lag_is_a_product_term_on_either_clock(unit, lag):
 def test_a_dated_fx_option_needing_float_times_is_partial():
     fx = FxBarrierOption(strike=1.1, barrier=1.2, is_up=True, knock_type=FxBarrierType.KNOCK_OUT,
                          option_type=OptionType.CALL, monitoring=ObservationType.DISCRETE,
-                         observation_times=[0.5, 1.0], expiry_date=EXPIRY)
+                         observation_dates=OBS, expiry_date=EXPIRY)
+    fx.observation_dates, fx.observation_times = None, [0.5, 1.0]
     assert "observation_times" in _fields(fx)
-    alone = _fx_vanilla(strike=1.1, option_type=OptionType.CALL, expiry_date=EXPIRY, delivery=1.01)
+    alone = _fx_vanilla(strike=1.1, option_type=OptionType.CALL, expiry_date=EXPIRY)
+    alone.delivery = 1.01
     assert _fields(alone) == {"delivery"}
