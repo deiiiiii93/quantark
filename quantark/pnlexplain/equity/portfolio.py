@@ -120,7 +120,11 @@ class BookSnapshot:
                        tombstones: Optional[Mapping[str, PositionSnapshot]] = None,
                        currency: Optional[str] = None) -> "BookSnapshot":
         """Snapshot the portfolio as it stands on `date` (post-event products; the alive
-        contracts travel in transitions). Environments must already be dated `date`."""
+        contracts travel in transitions). Environments must already be dated `date`.
+
+        A position's product is taken on the valuation clock (``on_valuation_clock``): a numeric
+        note whose times count from its ``initial_date`` is aged to `date`, as the portfolio
+        values it, so two dated snapshots hold the note rolled by the days between them."""
         from copy import deepcopy
         envs = {u: deepcopy(env) for u, env in portfolio.pricing_environments.items()}
         for u, env in envs.items():
@@ -129,7 +133,9 @@ class BookSnapshot:
         positions: Dict[str, PositionSnapshot] = {}
         for pid, pos in portfolio.positions.items():
             state = deepcopy(getattr(pos, "lifecycle_state", None))
-            snap = ValuationSnapshot(product=pos.product, engine=pos.engine, pricing_env=envs[pos.underlying],
+            env = envs[pos.underlying]
+            product = pos.on_valuation_clock(env).product if hasattr(pos, "on_valuation_clock") else pos.product
+            snap = ValuationSnapshot(product=product, engine=pos.engine, pricing_env=env,
                                      date=date, quantity=float(pos.quantity), lifecycle_state=state,
                                      currency=currency, label=pid)
             positions[pid] = PositionSnapshot(position_id=pid, underlying=pos.underlying, snapshot=snap)

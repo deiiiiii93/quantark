@@ -98,6 +98,12 @@ During 0.x the public API may still change between minor versions.
 
 ### Fixed
 
+- Tools that start from an `EquityPosition` now see an aged numeric note as the portfolio values it
+  (`on_valuation_clock`). `BookSnapshot.from_portfolio` snapshotted the booked note, so a static PnL explain of a
+  numeric note with an `initial_date` refused the pair ("a float-maturity contract must be supplied rolled");
+  it now holds the note aged to each book date and explains the portfolio's PnL. The trade Greeks' theta split
+  (`convexity_theta` / `r_theta` / `q_theta`) and SIMM's vega option tenor read the aged maturity instead of the
+  booked one. A raw `engine.price(product, env)` still prices the product as given.
 - Parametric equity VaR understated vol and rate risk 100×, in both portfolio modes. An `EquityPosition`'s vega
   is per vol point and its rho per 1 %, but the `vol_change` / `rate_shift` factors are absolute changes;
   `ParametricVaREngine` now divides vega, rho and `dividend_rho` by 0.01 (TRS rho is per unit of rate already and

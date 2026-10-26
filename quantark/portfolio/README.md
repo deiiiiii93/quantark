@@ -154,6 +154,9 @@ lifecycle manager and the replay engine set it on the legs they roll), so they a
 and an `initial_date` is aged to the valuation date before every position valuation (product and trade mode) by
 `elapsed − accrual_config.accrued_offset`, with the lifecycle tracker's own steps. A fresh booking prices like the
 tracker's copy for that day; a copy already aged that far (`accrued_offset` equal to the elapsed time) is left alone.
+Tools that read the note off a position take it the same way (`EquityPosition.on_valuation_clock`): the static
+PnL explain's `BookSnapshot.from_portfolio`, the trade Greeks' theta split and SIMM's vega tenor. A raw
+`engine.price(product, env)` prices the product exactly as given.
 
 ## Export Formats
 
