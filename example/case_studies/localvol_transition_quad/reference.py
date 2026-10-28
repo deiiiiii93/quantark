@@ -54,6 +54,7 @@ def cases(market) -> dict:
 
 
 PDE_SOURCES = ("adapters.py", "contract.py", "market.py")   # the production-PDE arm depends on these only
+QUAD_SOURCES = ("contract.py", "market.py", "grid.py", "kernels.py", "engine.py")   # and the QUAD arm on these
 
 
 def source_hashes(names=None) -> dict:
@@ -75,7 +76,7 @@ def fingerprint(arm: str, contract, config) -> str:
 
     A resumed row is kept only when its fingerprint matches; a missing one is stale.
     """
-    sources = source_hashes(PDE_SOURCES) if arm == "pde" else source_hashes()
+    sources = source_hashes(PDE_SOURCES if arm == "pde" else QUAD_SOURCES)
     fixture = hashlib.sha256(FIXTURE.read_bytes()).hexdigest()[:16]
     params = repr(pde_params(*config)) if arm == "pde" else repr(quad_config(*config))
     text = json.dumps([arm, repr(contract), params, fixture, sources], sort_keys=True)
