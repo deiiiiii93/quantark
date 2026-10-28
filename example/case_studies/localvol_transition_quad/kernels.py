@@ -31,6 +31,14 @@ class KernelKind(Enum):
     GAUSS_RICHARDSON = "gauss_richardson"    # moment-matched Euler Gaussian + Richardson (kernel B)
 
 
+MAX_PIECE = 1.0 / 252.0      # longest single time piece: sigma moves within a slab (resolution, not semantics)
+
+
+def pieces_for(length: float, minimum: int, max_piece: float) -> int:
+    """Equal pieces for a pillar-cut interval: at least ``minimum``, none longer than ``max_piece``."""
+    return max(minimum, math.ceil(length / max_piece - Tolerance.ZERO))
+
+
 def split_at_pillars(t0: float, t1: float, pillars: np.ndarray) -> list[tuple[float, float]]:
     """Sub-intervals of [t0, t1] cut at surface time pillars, so sigma**2 is smooth in t inside each."""
     points = [t0] + [float(p) for p in pillars if t0 < p < t1] + [t1]
@@ -193,10 +201,14 @@ class CTMCKernel(_ValidatingKernel):
     kind = KernelKind.CTMC
 
     def __init__(self, validate: bool = False, tolerance: float | None = None, series_tolerance: float = 1e-13,
-                 time_pieces: int = 1, backend: str = "contour", contour_nodes: int = 24):
+                 time_pieces: int = 1, backend: str = "contour", contour_nodes: int = 24,
+                 max_piece: float = MAX_PIECE):
         super().__init__(validate, tolerance)
         if not isinstance(time_pieces, int) or time_pieces < 1:
             raise ValueError("positive integer time_pieces required")
+        if not math.isfinite(max_piece) or max_piece <= 0:
+            raise ValueError("positive finite max_piece required")
+        self.max_piece = max_piece
         if backend not in ("chebyshev", "contour"):
             raise ValueError("backend must be 'chebyshev' or 'contour'")
         if not isinstance(contour_nodes, int) or contour_nodes < 8 or contour_nodes % 2:
@@ -290,9 +302,10 @@ class CTMCKernel(_ValidatingKernel):
 
     def propagate(self, values: np.ndarray, grid: LogGrid, market: Market, t0: float, t1: float) -> np.ndarray:
         out = values
-        for lo, hi in split_at_pillars(t0, t1, market.surface.time_grid):
-            step = (hi - lo) / self.time_pieces
-            for k in range(self.time_pieces - 1, -1, -1):     # backward: the latest piece acts first
+        for lo, hi in reversed(split_at_pillars(t0, t1, market.surface.time_grid)):   # latest piece first
+            pieces = pieces_for(hi - lo, self.time_pieces, self.max_piece)
+            step = (hi - lo) / pieces
+            for k in range(pieces - 1, -1, -1):               # backward: the latest piece acts first
                 a, b = lo + k * step, lo + (k + 1) * step
                 up, down = self.rates(grid, market, 0.5 * (a + b))
                 self.operators += 1
@@ -325,11 +338,13 @@ class GaussRichardsonKernel(_ValidatingKernel):
     kind = KernelKind.GAUSS_RICHARDSON
 
     def __init__(self, substeps: int = 1, richardson: bool = True, validate: bool = False,
-                 tolerance: float | None = None, n_sd: float = 8.0):
+                 tolerance: float | None = None, n_sd: float = 8.0, max_piece: float = MAX_PIECE):
         super().__init__(validate, tolerance)
         if not isinstance(substeps, int) or substeps < 1:
             raise ValueError("positive integer substeps required")
-        self.substeps, self.richardson, self.n_sd = substeps, richardson, n_sd
+        if not math.isfinite(max_piece) or max_piece <= 0:
+            raise ValueError("positive finite max_piece required")
+        self.substeps, self.richardson, self.n_sd, self.max_piece = substeps, richardson, n_sd, max_piece
 
     def step(self, grid: LogGrid, market: Market, t: float, dt: float):
         c = grid.centres
@@ -357,7 +372,8 @@ class GaussRichardsonKernel(_ValidatingKernel):
 
     def propagate(self, values: np.ndarray, grid: LogGrid, market: Market, t0: float, t1: float) -> np.ndarray:
         out = values
-        for a, b in split_at_pillars(t0, t1, market.surface.time_grid):
-            fine = self._advance(out, grid, market, a, b, 2 * self.substeps if self.richardson else self.substeps)
-            out = 2.0 * fine - self._advance(out, grid, market, a, b, self.substeps) if self.richardson else fine
+        for a, b in reversed(split_at_pillars(t0, t1, market.surface.time_grid)):     # latest piece first
+            m = pieces_for(b - a, self.substeps, self.max_piece)
+            fine = self._advance(out, grid, market, a, b, 2 * m if self.richardson else m)
+            out = 2.0 * fine - self._advance(out, grid, market, a, b, m) if self.richardson else fine
         return math.exp(-market.r * (t1 - t0)) * out

@@ -90,6 +90,28 @@ def test_ac1_forward_identity_over_the_life(kernel):
     assert v[0, grid.spot_index] == pytest.approx(math.exp(-Q * 1.0), rel=1e-6)
 
 
+@pytest.mark.parametrize("kernel,subdivide", [(lambda: CTMCKernel(time_pieces=4), 1),
+                                              (lambda: GaussRichardsonKernel(1), 3)], ids=["ctmc", "gauss"])
+def test_backward_propagation_applies_the_latest_pillar_piece_first(kernel, subdivide):
+    """One interval spanning surface pillars must equal the chain of its daily sub-intervals.
+
+    Regression: pillar-cut pieces were applied in increasing time, which is invisible on
+    daily intervals and on constant surfaces (commuting generators) but wrong over a long
+    interval on a term-structured surface.
+    """
+    m = load_fixture()
+    c = vanilla_contract(m.spot, 0.25, option="put")
+    grid = build_grid(c, 0.4, GridConfig(cells=200, half_width_std=6.0, subdivide=subdivide))
+    v = np.maximum(c.strike - np.exp(grid.centres), 0.0)[None, :] / m.spot
+    whole = kernel().propagate(v, grid, m, 0.0, 0.25)
+    chained, k = v, kernel()
+    times = np.linspace(0.0, 0.25, 64)
+    for left, right in zip(times[-2::-1], times[::-1]):
+        chained = k.propagate(chained, grid, m, float(left), float(right))
+    i = grid.spot_index
+    assert whole[0, i] == pytest.approx(chained[0, i], abs=2e-5)
+
+
 @pytest.mark.slow
 def test_ac3_gauss_validates_on_real_surface_when_resolved():
     m = load_fixture()
