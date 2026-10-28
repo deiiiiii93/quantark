@@ -1,0 +1,115 @@
+"""Local-vol kernels A (CTMC + exact exponential) and B (Gauss-Richardson): identities, refusals, PDE agreement."""
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pytest
+from scipy.linalg import expm
+from scipy.stats import norm
+
+from example.case_studies.localvol_transition_quad import adapters
+from example.case_studies.localvol_transition_quad.contract import (snowball_contract, up_out_contract,
+                                                                    vanilla_contract)
+from example.case_studies.localvol_transition_quad.engine import OUTPUTS, PV_BUDGET, LocalVolQuad
+from example.case_studies.localvol_transition_quad.grid import GridConfig, UnresolvedGrid, build_grid
+from example.case_studies.localvol_transition_quad.kernels import CTMCKernel, GaussRichardsonKernel
+from example.case_studies.localvol_transition_quad.market import Market, constant_surface, load_fixture
+
+S0, R, Q, SIGMA = 100.0, 0.03, 0.01, 0.25
+MARKET = Market(S0, R, Q, constant_surface(SIGMA))
+FLOORS = {"pv": PV_BUDGET, "delta": 1e-3, "gamma": 1e-2, "vega": 1e-4, "theta": 1e-5, "rho": 1e-5, "carry": 1e-5}
+
+
+def budget(key, ref):
+    return PV_BUDGET if key == "pv" else max(0.01 * abs(ref), FLOORS[key])
+
+
+def bs(option, k, t):
+    f = S0 * math.exp((R - Q) * t)
+    d1 = (math.log(f / k) + 0.5 * SIGMA ** 2 * t) / (SIGMA * math.sqrt(t))
+    d2 = d1 - SIGMA * math.sqrt(t)
+    sign = 1 if option == "call" else -1
+    return math.exp(-R * t) * sign * (f * norm.cdf(sign * d1) - k * norm.cdf(sign * d2))
+
+
+@pytest.mark.parametrize("backend", ["contour", "chebyshev"])
+@pytest.mark.parametrize("dt", [1 / 252, 1 / 12])
+def test_exponential_backends_match_dense_expm(backend, dt):
+    m = load_fixture()
+    c = snowball_contract(m.spot, 1.0, 12)
+    grid = build_grid(c, 0.3, GridConfig(cells=150, half_width_std=6.0))
+    kernel = CTMCKernel(backend=backend)
+    up, down = kernel.rates(grid, m, 0.01)
+    q = np.diag(-(up + down)) + np.diag(up[:-1], 1) + np.diag(down[1:], -1)
+    v = np.vstack((np.ones(grid.size), np.exp(grid.centres) / m.spot))
+    np.testing.assert_allclose(kernel.expm_apply(v, up, down, dt), v @ expm(dt * q).T, rtol=0, atol=1e-12)
+
+
+def test_ctmc_rates_match_forward_and_variance():
+    m = load_fixture()
+    c = snowball_contract(m.spot, 1.0, 12)
+    grid = build_grid(c, 0.3, GridConfig(cells=300))
+    up, down = CTMCKernel().rates(grid, m, 0.3)
+    x = grid.centres
+    hp, hm = np.diff(x)[1:], np.diff(x)[:-1]
+    sigma2 = m.surface.local_vol(np.exp(x[1:-1]), 0.3) ** 2
+    np.testing.assert_allclose(up[1:-1] * np.expm1(hp) + down[1:-1] * np.expm1(-hm), m.r - m.q, atol=1e-10)
+    np.testing.assert_allclose(up[1:-1] * hp ** 2 + down[1:-1] * hm ** 2, sigma2, rtol=1e-12)
+
+
+@pytest.mark.parametrize("kernel", [CTMCKernel, lambda: GaussRichardsonKernel(1)], ids=["ctmc", "gauss"])
+@pytest.mark.parametrize("option", ["put", "call"])
+def test_ac1_vanilla_black_scholes(kernel, option):
+    c = vanilla_contract(S0, 1.0, option=option)
+    pv = LocalVolQuad(kernel(), GridConfig(cells=400, half_width_std=6.0, subdivide=3)).price(c, MARKET)
+    assert pv["values"]["pv"] == pytest.approx(bs(option, S0, 1.0) / S0, abs=1e-5)
+
+
+@pytest.mark.slow
+def test_ac3_validation_mode_on_real_surface():
+    m = load_fixture()
+    c = snowball_contract(m.spot, 0.25, 3)
+    kernel = CTMCKernel()
+    LocalVolQuad(kernel, GridConfig(cells=400, half_width_std=6.0), validate=True).price(c, m)
+    tol = kernel.tolerance
+    assert tol == pytest.approx(1e-3 * PV_BUDGET / len(c.ki_times))
+    assert kernel.diagnostics and all(d["mass"] <= tol and d["forward"] <= tol and d["semigroup"] <= tol
+                                      for d in kernel.diagnostics)
+    assert len(kernel.diagnostics) == kernel.operators
+
+
+def test_ac3_ctmc_refuses_negative_rates():
+    m = Market(S0, 0.0, 0.5, constant_surface(0.01))
+    c = vanilla_contract(S0, 1.0)
+    with pytest.raises(UnresolvedGrid, match="negative Markov-chain rate"):
+        LocalVolQuad(CTMCKernel(), GridConfig(cells=16, half_width_std=400.0)).price(c, m)
+
+
+def test_ac3_gauss_refuses_coarse_grid_and_narrow_band():
+    c = vanilla_contract(S0, 1.0)
+    with pytest.raises(UnresolvedGrid, match="quantization"):
+        LocalVolQuad(GaussRichardsonKernel(1), GridConfig(cells=16, half_width_std=6.0)).price(
+            snowball_contract(S0, 1.0, 12), MARKET)
+    with pytest.raises(UnresolvedGrid):      # a 2-sd band is refused (mass or moment matching)
+        LocalVolQuad(GaussRichardsonKernel(1, n_sd=2.0), GridConfig(cells=400), validate=True).price(c, MARKET)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("contract", [vanilla_contract(S0, 1.0), up_out_contract(S0, 1.0, 12),
+                                      snowball_contract(S0, 1.0, 12), snowball_contract(S0, 2.0, 24)],
+                         ids=["put", "up_out", "snowball_1y", "snowball_2y"])
+def test_ac8_constant_vol_full_risk_matches_production_pde(contract):
+    from quantark.asset.equity.param import PDEParams
+    ours = LocalVolQuad(CTMCKernel(), GridConfig(cells=400, half_width_std=6.0, subdivide=3)).full_risk(
+        contract, MARKET)["values"]
+    pde = adapters.pde_full_risk(contract, MARKET, PDEParams(accuracy="high"))["values"]
+    for key in OUTPUTS:
+        assert abs(ours[key] - pde[key]) <= budget(key, pde[key]), (key, ours[key], pde[key])
+
+
+def test_full_risk_is_deterministic():
+    c = snowball_contract(S0, 0.25, 3)
+    engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=200))
+    a, b = engine.full_risk(c, MARKET)["values"], engine.full_risk(c, MARKET)["values"]
+    assert a == b

@@ -60,15 +60,20 @@ def readout(values: np.ndarray, grid: LogGrid) -> dict:
 
 
 def reference_vol(market: Market, c: Contract) -> float:
-    """Largest local vol seen at s0 across the surface's time pillars (grid width scale)."""
-    surface = market.surface
-    return float(max(surface.local_vol(c.s0, float(t)) for t in surface.time_grid))
+    """Root time-averaged local variance at s0 over the contract life (grid width scale)."""
+    return math.sqrt(float(market.surface.time_avg_var(c.s0, 0.0, c.maturity)))
+
+
+PV_BUDGET = 1e-4          # per unit notional (spec Contracts, Accuracy)
+THETA_DT = 1.0 / 365.0
+OUTPUTS = ("pv", "delta", "gamma", "vega", "theta", "rho", "carry")
 
 
 @dataclass
 class LocalVolQuad:
     kernel: object
     grid_config: GridConfig = field(default_factory=GridConfig)
+    validate: bool = False
 
     def grid(self, c: Contract, market: Market) -> LogGrid:
         return build_grid(c, reference_vol(market, c), self.grid_config)
@@ -76,6 +81,10 @@ class LocalVolQuad:
     def rollback(self, c: Contract, market: Market, grid: LogGrid | None = None) -> tuple[np.ndarray, LogGrid]:
         grid = self.grid(c, market) if grid is None else grid
         times = event_times(c)
+        if self.validate:
+            # spec D16: per-operator identities within 1e-3 of the PV budget spread over the intervals
+            self.kernel.validate = True
+            self.kernel.tolerance = 1e-3 * PV_BUDGET / len(times)
         values = apply_events(terminal_values(c, grid), c, grid, times[-1])
         for right, left in zip(times[::-1], (times[-2::-1] + [0.0])):
             values = self.kernel.propagate(values, grid, market, left, right)
@@ -90,3 +99,29 @@ class LocalVolQuad:
         values, grid = self.rollback(c, market)
         out = readout(values, grid)
         return dict(values=out, seconds=perf_counter() - start, cells=grid.size)
+
+    def full_risk(self, c: Contract, market: Market) -> dict:
+        """Eight valuations on ONE grid (spec D9): base (PV, native delta/gamma), vega+-, theta, rho+-, carry+-.
+
+        Units: PV per unit notional; delta = dPV/dS*S0; gamma = d2PV/dS2*S0**2; vega per +0.01
+        LV; theta per calendar day (production semantics, D8); rho and carry per +1bp.
+        """
+        timings: dict = {}
+
+        def timed(name, contract, m):
+            start = perf_counter()
+            values, _ = self.rollback(contract, m, grid)
+            timings[name] = perf_counter() - start
+            return values
+
+        start = perf_counter()
+        grid = self.grid(c, market)
+        timings["grid"] = perf_counter() - start
+        out = readout(timed("base", c, market), grid)
+        i = grid.spot_index
+        for kind in ("vega", "rho", "carry"):
+            up = timed(f"{kind}+", c, market.bumped(kind, 1))[0, i]
+            down = timed(f"{kind}-", c, market.bumped(kind, -1))[0, i]
+            out[kind] = float((up - down) / 2)
+        out["theta"] = float(timed("theta", c.shifted(THETA_DT), market)[0, i] - out["pv"])
+        return dict(values={k: out[k] for k in OUTPUTS}, timings=timings, cells=grid.size)

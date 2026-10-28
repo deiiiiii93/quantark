@@ -106,23 +106,39 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
         h = min(h, h_fit)
         stencil_lo, stencil_hi = x0 - (k + 0.5) * h, x0 + (k + 0.5) * h
     inner = x0 + h * (np.arange(-k, k + 2) - 0.5)            # 2k+2 edges of the readout block
-    left = sorted([lo] + [a for a in anchors if a < stencil_lo] + [stencil_lo])
-    right = sorted([stencil_hi] + [a for a in anchors if a > stencil_hi] + [hi])
     target = (hi - lo) / config.cells
+    # Each barrier gets a symmetric pair of equal cells: a Markov chain's effective
+    # threshold is the midpoint BETWEEN neighbouring centres, which is the barrier
+    # only when the two cells either side of it have the same width.
+    blocks = [inner]
+    for a in anchors:
+        # halve against other barriers and the domain ends; the readout block may abut the pair
+        half_width = min([target] + [abs(a - b) / 2 for b in anchors + [lo, hi] if b != a])
+        if a > stencil_hi:
+            half_width = min(half_width, a - stencil_hi)
+        if a < stencil_lo:
+            half_width = min(half_width, stencil_lo - a)
+        blocks.append(np.array([a - half_width, a, a + half_width]))
+    blocks.sort(key=lambda b: b[0])
 
-    def fill(points):
-        out = [points[0]]
-        for a, b in zip(points[:-1], points[1:]):
-            n = max(1, math.ceil((b - a) / target - 1e-9))
-            out.extend(a + (b - a) * np.arange(1, n + 1) / n)
-        return out
+    def fill(a, b):
+        n = max(1, math.ceil((b - a) / target - 1e-9))
+        return list(a + (b - a) * np.arange(1, n) / n)
 
-    left_edges = fill(left)[:-1]
-    right_edges = fill(right)[1:]
-    edges = np.concatenate((left_edges, inner, right_edges))
+    edges_list, cursor = [lo], lo
+    for block in blocks:
+        if block[0] < cursor - 1e-12:
+            raise UnresolvedGrid("overlapping grid blocks; contract levels too close for this grid")
+        if block[0] > cursor + 1e-12:
+            edges_list += fill(cursor, block[0]) + [block[0]]
+        edges_list += list(block[1:])
+        cursor = block[-1]
+    if hi > cursor + 1e-12:
+        edges_list += fill(cursor, hi) + [hi]
+    edges = np.array(edges_list)
     if np.any(np.diff(edges) <= 0):
         raise UnresolvedGrid("non-increasing grid edges")
-    spot_index = len(left_edges) + k
+    spot_index = int(np.argmin(np.abs(edges - inner[0]))) + k
     m = config.subdivide
     if m > 1:
         frac = np.arange(m) / m
