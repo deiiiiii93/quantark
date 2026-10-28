@@ -32,6 +32,42 @@ class KernelKind(Enum):
 
 
 MAX_PIECE = 1.0 / 252.0      # longest single time piece: sigma moves within a slab (resolution, not semantics)
+AUTO_MAX_TERMS = 64          # 'auto' backend: Chebyshev up to this many series terms, contour beyond (measured
+                             # per-operator crossover ~60-70 terms for 200-1200 cells, 4 rows)
+
+
+class SurfaceSampler:
+    """``LocalVolSurface.local_vol`` at fixed spots, with the per-pillar strike rows precomputed.
+
+    Reproduces the surface's scalar-t arithmetic ORDER exactly (strike interpolation
+    per pillar row first, then the linear time blend), so values are bitwise equal
+    to ``surface.local_vol(spots, t)``; only the per-call bracketing work is hoisted.
+    """
+
+    def __init__(self, surface, spots: np.ndarray):
+        self.surface = surface
+        k = surface.strike_grid
+        j0, j1, wk = surface._strike_weights(np.clip(np.asarray(spots, dtype=float).ravel(), k[0], k[-1]))
+        g = surface.lv_grid
+        self.rows = g[:, j0] * (1.0 - wk) + g[:, j1] * wk
+        self.times = surface.time_grid
+
+    def clamped_side(self, t: float):
+        """'lo'/'hi' when ``t`` lies in a flat-extrapolated (time-homogeneous) slab, else None."""
+        if self.times.size == 1 or t <= self.times[0]:
+            return "lo"
+        if t >= self.times[-1]:
+            return "hi"
+        return None
+
+    def __call__(self, t: float) -> np.ndarray:
+        tg = self.times
+        if tg.size == 1:
+            return self.rows[0]
+        t_val = float(np.clip(t, tg[0], tg[-1]))
+        i = int(np.clip(np.searchsorted(tg, t_val, side="right"), 1, tg.size - 1))
+        w = (t_val - tg[i - 1]) / (tg[i] - tg[i - 1])
+        return self.rows[i - 1] * (1.0 - w) + self.rows[i] * w
 
 
 def pieces_for(length: float, minimum: int, max_piece: float) -> int:
@@ -201,16 +237,19 @@ class CTMCKernel(_ValidatingKernel):
     kind = KernelKind.CTMC
 
     def __init__(self, validate: bool = False, tolerance: float | None = None, series_tolerance: float = 1e-13,
-                 time_pieces: int = 1, backend: str = "contour", contour_nodes: int = 24,
+                 time_pieces: int = 1, backend: str = "auto", contour_nodes: int = 24,
                  max_piece: float = MAX_PIECE):
         super().__init__(validate, tolerance)
+        self._geo_cache: dict = {}
+        self._sampler_cache: dict = {}
+        self._rate_cache: dict = {}
         if not isinstance(time_pieces, int) or time_pieces < 1:
             raise ValueError("positive integer time_pieces required")
         if not math.isfinite(max_piece) or max_piece <= 0:
             raise ValueError("positive finite max_piece required")
         self.max_piece = max_piece
-        if backend not in ("chebyshev", "contour"):
-            raise ValueError("backend must be 'chebyshev' or 'contour'")
+        if backend not in ("auto", "chebyshev", "contour"):
+            raise ValueError("backend must be 'auto', 'chebyshev' or 'contour'")
         if not isinstance(contour_nodes, int) or contour_nodes < 8 or contour_nodes % 2:
             raise ValueError("contour_nodes must be an even integer >= 8")
         self.series_tolerance = series_tolerance
@@ -230,21 +269,52 @@ class CTMCKernel(_ValidatingKernel):
         dz = n * (0.5017 * (cot - alpha * theta / np.sin(alpha * theta) ** 2) + 0.2645j)
         self._weights = 2.0 * (2 * np.pi / n) / (2j * np.pi) * np.exp(self._nodes) * dz
 
+    def _geometry(self, grid: LogGrid) -> dict:
+        key = grid.edges.tobytes()
+        geo = self._geo_cache.get(key)
+        if geo is None:
+            c = grid.centres
+            hp, hm = np.diff(c)[1:], np.diff(c)[:-1]
+            ep, em = np.expm1(hp), np.expm1(-hm)
+            geo = dict(key=key, c=c, hp2=hp ** 2, hm2=hm ** 2, ep=ep, em=em, det=ep * hm ** 2 - em * hp ** 2,
+                       end_lo=(c[1] - c[0]) ** 2, end_hi=(c[-1] - c[-2]) ** 2)
+            self._geo_cache = {key: geo}
+        return geo
+
+    def _sampler(self, grid: LogGrid, market: Market) -> "SurfaceSampler":
+        key = (grid.edges.tobytes(), id(market.surface))
+        sampler = self._sampler_cache.get(key)
+        if sampler is None or sampler.surface is not market.surface:
+            sampler = SurfaceSampler(market.surface, np.exp(grid.centres))
+            if len(self._sampler_cache) > 8:
+                self._sampler_cache.clear()
+            self._sampler_cache[key] = sampler
+        return sampler
+
     def rates(self, grid: LogGrid, market: Market, t: float) -> tuple[np.ndarray, np.ndarray]:
-        c = grid.centres
-        sigma2 = np.asarray(market.surface.local_vol(np.exp(c), t), dtype=float) ** 2
-        hp, hm = np.diff(c)[1:], np.diff(c)[:-1]
-        ep, em = np.expm1(hp), np.expm1(-hm)
-        det = ep * hm ** 2 - em * hp ** 2
+        geo = self._geometry(grid)
+        sampler = self._sampler(grid, market)
+        clamped = sampler.clamped_side(t)
+        cache_key = None
+        if clamped is not None:            # time-homogeneous slab: the rates do not change with t
+            cache_key = (geo["key"], id(market.surface), market.r, market.q, clamped)
+            hit = self._rate_cache.get(cache_key)
+            if hit is not None and hit[0] is market.surface:
+                return hit[1], hit[2]
+        sigma2 = sampler(t) ** 2
         carry = market.r - market.q
         s2 = sigma2[1:-1]
-        up, down = np.zeros(c.size), np.zeros(c.size)
-        up[1:-1] = (carry * hm ** 2 - s2 * em) / det
-        down[1:-1] = (s2 * ep - carry * hp ** 2) / det
-        up[0] = sigma2[0] / (c[1] - c[0]) ** 2
-        down[-1] = sigma2[-1] / (c[-1] - c[-2]) ** 2
+        up, down = np.zeros(sigma2.size), np.zeros(sigma2.size)
+        up[1:-1] = (carry * geo["hm2"] - s2 * geo["em"]) / geo["det"]
+        down[1:-1] = (s2 * geo["ep"] - carry * geo["hp2"]) / geo["det"]
+        up[0] = sigma2[0] / geo["end_lo"]
+        down[-1] = sigma2[-1] / geo["end_hi"]
         if np.any(up < 0) or np.any(down < 0):
             raise UnresolvedGrid("negative Markov-chain rate (drift-dominated cell); refine the grid")
+        if cache_key is not None:
+            if len(self._rate_cache) > 32:
+                self._rate_cache.clear()
+            self._rate_cache[cache_key] = (market.surface, up, down)
         return up, down
 
     def series_terms(self, z: float) -> np.ndarray:
@@ -259,7 +329,12 @@ class CTMCKernel(_ValidatingKernel):
 
     def expm_apply(self, values: np.ndarray, up: np.ndarray, down: np.ndarray, dt: float) -> np.ndarray:
         """exp(dt Q) applied to the rows of ``values`` (channels x cells)."""
-        if self.backend == "contour":
+        backend = self.backend
+        if backend == "auto":
+            # Chebyshev costs ~sqrt(nu) cheap matvecs; the contour a fixed N/2 tridiagonal solves.
+            nu = dt * 2.0 * float(np.max(up + down))
+            backend = "chebyshev" if self.series_terms(0.5 * nu).size <= AUTO_MAX_TERMS else "contour"
+        if backend == "contour":
             return self._contour_apply(values, up, down, dt)
         return self._chebyshev_apply(values, up, down, dt)
 

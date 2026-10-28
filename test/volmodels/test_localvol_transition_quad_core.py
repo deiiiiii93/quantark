@@ -79,6 +79,8 @@ def test_ac6_levels_on_edges_and_spot_on_centre(seed):
     k = 3
     w = grid.widths[grid.spot_index - k:grid.spot_index + k + 1]
     np.testing.assert_allclose(w, w[0], rtol=1e-10)
+    widths = grid.widths
+    assert np.min(widths) >= np.median(widths) / 3, "sliver cell (it would set the operator stiffness)"
     block = (grid.edges[grid.spot_index - k], grid.edges[grid.spot_index + k + 1])
     if not block[0] < math.log(c.strike) < block[1]:
         assert np.min(np.abs(grid.edges - math.log(c.strike))) < 1e-12

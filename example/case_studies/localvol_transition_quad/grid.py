@@ -77,6 +77,29 @@ def contract_levels(c: Contract) -> list[float]:
     return levels
 
 
+def _pair_half_width(a: float, anchors: list[float], stencil_lo: float, stencil_hi: float, lo: float, hi: float,
+                     target: float) -> float:
+    """Half-width of the symmetric cell pair around barrier ``a``.
+
+    Room on each side runs to the readout block, to the midpoint with a neighbouring
+    barrier, or to the domain end. A leftover gap narrower than half a cell would
+    become a sliver whose width sets the operator's stiffness (measured: a 3e-4
+    cell made every daily operator 2.7x dearer), so the pair grows or shrinks to
+    close such gaps: the largest width up to 1.5 cells leaving each side either
+    closed or at least half a cell open.
+    """
+    left = max([lo] + ([stencil_hi] if a > stencil_hi else []) + [(a + b) / 2 for b in anchors if b < a])
+    right = min([hi] + ([stencil_lo] if a < stencil_lo else []) + [(a + b) / 2 for b in anchors if b > a])
+    room_l, room_r = a - left, right - a
+    candidates = {target, room_l, room_r} | {room / n for room in (room_l, room_r) for n in (2, 3)}
+
+    def clean(w):
+        return all(abs(room - w) <= EPS or room - w >= target / 2 for room in (room_l, room_r))
+
+    feasible = [w for w in candidates if EPS < w <= min(room_l, room_r) + EPS and w <= 1.5 * target and clean(w)]
+    return max(feasible) if feasible else min(target, room_l, room_r)
+
+
 def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig()) -> LogGrid:
     """Domain ln s0 +/- half_width_std * sigma_ref * sqrt(T); anchors on edges; s0 a centre.
 
@@ -101,7 +124,8 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
     strike = math.log(c.strike)
     if stencil_lo - EPS < strike < stencil_hi + EPS:
         anchors.remove(strike)
-    if any(stencil_lo - EPS < a < stencil_hi + EPS for a in anchors):
+    # a barrier within one cell of the readout block would leave a sliver between them: refit h
+    if any(stencil_lo - h - EPS < a < stencil_hi + h + EPS for a in anchors):
         nearest = min(abs(a - x0) for a in anchors)
         # shrink the stencil spacing so the nearest level sits beyond it
         h_fit = nearest / (k + 0.5 + 1)
@@ -116,19 +140,17 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
     # only when the two cells either side of it have the same width.
     blocks = [inner]
     for a in anchors:
-        # halve against other barriers and the domain ends; the readout block may abut the pair
-        half_width = min([target] + [abs(a - b) / 2 for b in anchors + [lo, hi] if b != a])
-        if a > stencil_hi:
-            half_width = min(half_width, a - stencil_hi)
-        if a < stencil_lo:
-            half_width = min(half_width, stencil_lo - a)
-        blocks.append(np.array([a - half_width, a, a + half_width]))
+        w = _pair_half_width(a, anchors, stencil_lo, stencil_hi, lo, hi, target)
+        blocks.append(np.array([a - w, a, a + w]))
     blocks.sort(key=lambda b: b[0])
 
     def fill(a, b):
         n = max(1, math.ceil((b - a) / target - EPS))
         return list(a + (b - a) * np.arange(1, n) / n)
 
+    # the domain ends are free: move them rather than leave a sliver cell at either end
+    if 0 < blocks[0][0] - lo < target / 2:
+        lo = blocks[0][0] - target
     edges_list, cursor = [lo], lo
     for block in blocks:
         if block[0] < cursor - EPS:
@@ -137,6 +159,8 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
             edges_list += fill(cursor, block[0]) + [block[0]]
         edges_list += list(block[1:])
         cursor = block[-1]
+    if 0 < hi - cursor < target / 2:
+        hi = cursor + target
     if hi > cursor + EPS:
         edges_list += fill(cursor, hi) + [hi]
     edges = np.array(edges_list)
