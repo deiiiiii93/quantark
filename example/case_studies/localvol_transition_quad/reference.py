@@ -29,7 +29,7 @@ from .contract import snowball_contract, up_out_contract, vanilla_contract
 from .engine import OUTPUTS, PV_BUDGET, LocalVolQuad
 from .grid import GridConfig, UnresolvedGrid
 from .kernels import CTMCKernel
-from .market import load_fixture
+from .market import FIXTURE, load_fixture
 
 HERE = Path(__file__).resolve().parent
 OUT_DIR = HERE.parents[2] / "docs/research/localvol_transition_quad"
@@ -66,6 +66,22 @@ def pde_params(points: int, steps_per_day: int) -> PDEParams:
                                                    max_points=20000, max_steps=200000))
 
 
+def quad_config(cells: int, subdivide: int) -> GridConfig:
+    return GridConfig(cells=cells, half_width_std=HALF_WIDTH_STD, subdivide=subdivide)
+
+
+def fingerprint(arm: str, contract, config) -> str:
+    """Everything a row's numbers depend on: contract terms, engine parameters, fixture bytes, sources.
+
+    A resumed row is kept only when its fingerprint matches; a missing one is stale.
+    """
+    sources = source_hashes(PDE_SOURCES) if arm == "pde" else source_hashes()
+    fixture = hashlib.sha256(FIXTURE.read_bytes()).hexdigest()[:16]
+    params = repr(pde_params(*config)) if arm == "pde" else repr(quad_config(*config))
+    text = json.dumps([arm, repr(contract), params, fixture, sources], sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
 def run_pde(contract, market, points, spd) -> dict:
     start = perf_counter()
     out = adapters.pde_full_risk(contract, market, pde_params(points, spd))
@@ -74,19 +90,28 @@ def run_pde(contract, market, points, spd) -> dict:
 
 def run_quad(contract, market, cells, subdivide) -> dict:
     start = perf_counter()
-    engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=cells, half_width_std=HALF_WIDTH_STD, subdivide=subdivide))
-    out = engine.full_risk(contract, market)
+    try:
+        out = LocalVolQuad(CTMCKernel(), quad_config(cells, subdivide)).full_risk(contract, market)
+    except UnresolvedGrid as exc:                # recorded, never fatal (spec D16)
+        return dict(status="refused", reason=str(exc))
     return dict(values=out["values"], seconds=perf_counter() - start, timings=out["timings"], cells=out["cells"])
 
 
-def assess(case: dict) -> dict:
+def _ordered(rows: dict, ladder) -> list[dict]:
+    """Priced rungs in LADDER order (coarse to fine), whatever order they were computed in."""
+    keys = [f"{a}x{b}" for a, b in ladder]
+    return [rows[k] for k in keys if k in rows and "values" in rows[k]]
+
+
+def assess(case: dict, name: str | None = None) -> dict:
     """Reference = finest PDE; converged if the last PDE step and the QUAD cross-check are within 1/5 budget."""
-    pde = case.get("pde", {})
-    quad = case.get("quad", {})
+    pde_ladder = PDE_LADDER.get(name) if name else None
+    pde = _ordered(case.get("pde", {}), pde_ladder) if pde_ladder else list(case.get("pde", {}).values())
+    quad_rows = _ordered(case.get("quad", {}), QUAD_LADDER) if name else list(case.get("quad", {}).values())
+    quad = {i: row for i, row in enumerate(quad_rows)}
     if len(pde) < 2:
         return {}
-    keys = list(pde)
-    finest, previous = pde[keys[-1]]["values"], pde[keys[-2]]["values"]
+    finest, previous = pde[-1]["values"], pde[-2]["values"]
     verdict = {"reference": finest, "pde_step": {}, "quad_gap": {}, "budget": {}}
     for k in OUTPUTS:
         b = budget(k, finest[k])
@@ -147,47 +172,48 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     path = Path(args.out)
     path.parent.mkdir(parents=True, exist_ok=True)
-    hashes = {"pde": source_hashes(PDE_SOURCES), "quad": source_hashes()}
+    market = load_fixture()
+    all_cases = cases(market)
     data: dict = {"cases": {}}
     if args.resume and path.exists():
         data = json.loads(path.read_text())
-        old = data.get("sources", {})
-        for arm in ("pde", "quad"):
-            if old.get(arm) not in (None, hashes[arm]):
-                # results of an arm whose sources changed are stale: drop them, never mix
-                for case in data["cases"].values():
-                    case[arm] = {}
-    data["sources"] = hashes
+        # keep only rows whose fingerprint still matches (missing fingerprint = stale); never mix
+        for name, case in data.get("cases", {}).items():
+            for arm, ladder in (("pde", PDE_LADDER.get(name, [])), ("quad", QUAD_LADDER)):
+                rows = case.get(arm, {})
+                case[arm] = {f"{a}x{b}": rows[f"{a}x{b}"] for a, b in ladder
+                             if name in all_cases and f"{a}x{b}" in rows
+                             and rows[f"{a}x{b}"].get("fingerprint") == fingerprint(arm, all_cases[name], (a, b))}
+        dupire_key = fingerprint("quad", "dupire", (600, 3))
+        if data.get("dupire_gap_fingerprint") != dupire_key:
+            data.pop("dupire_gap", None)
+    data["sources"] = {"pde": source_hashes(PDE_SOURCES), "quad": source_hashes()}
     data["environment"] = {"python": sys.version.split()[0], "numpy": np.__version__,
                            "machine": platform.machine(),
                            "fixture": "test/golden/modelvalidation/data/iv_surface_20240208.json"}
-    market = load_fixture()
     data["market"] = {"spot": market.spot, "r": market.r, "q": market.q}
     if args.arm in ("dupire", "all"):
         data["dupire_gap"] = dupire_gap(market)
+        data["dupire_gap_fingerprint"] = fingerprint("quad", "dupire", (600, 3))
         path.write_text(json.dumps(data, indent=1))
-        if args.arm == "dupire":
-            return 0
-    for name, contract in cases(market).items():
-        if args.cases and name not in args.cases:
+    for name, contract in all_cases.items():
+        if args.arm == "dupire" or (args.cases and name not in args.cases):
             continue
         case = data["cases"].setdefault(name, {"pde": {}, "quad": {}})
-        if args.arm in ("pde", "all"):
-            for points, spd in PDE_LADDER[name]:
-                key = f"{points}x{spd}"
-                if key not in case["pde"]:
-                    case["pde"][key] = run_pde(contract, market, points, spd)
-                    print(name, "pde", key, f"{case['pde'][key]['seconds']:.1f}s", flush=True)
+        for arm, ladder, runner in (("pde", PDE_LADDER[name], run_pde), ("quad", QUAD_LADDER, run_quad)):
+            if args.arm not in (arm, "all"):
+                continue
+            for config in ladder:
+                key = f"{config[0]}x{config[1]}"
+                if key not in case[arm]:
+                    row = runner(contract, market, *config)
+                    row["fingerprint"] = fingerprint(arm, contract, config)
+                    case[arm][key] = row
+                    print(name, arm, key, row.get("status", "priced"), f"{row.get('seconds', 0):.1f}s", flush=True)
                     path.write_text(json.dumps(data, indent=1))
-        if args.arm in ("quad", "all"):
-            for cells, sub in QUAD_LADDER:
-                key = f"{cells}x{sub}"
-                if key not in case["quad"]:
-                    case["quad"][key] = run_quad(contract, market, cells, sub)
-                    print(name, "quad", key, f"{case['quad'][key]['seconds']:.1f}s", flush=True)
-                    path.write_text(json.dumps(data, indent=1))
-        case["assessment"] = assess(case)
-        path.write_text(json.dumps(data, indent=1))
+    for name, case in data["cases"].items():          # every case, so no stale assessment survives
+        case["assessment"] = assess(case, name)
+    path.write_text(json.dumps(data, indent=1))
     return 0
 
 

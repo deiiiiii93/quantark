@@ -38,6 +38,18 @@ def test_auto_backend_matches_both_exact_backends():
         assert pvs["auto"][key] == pytest.approx(pvs["contour"][key], abs=tol)
 
 
+def test_auto_backend_switches_to_the_contour_on_stiff_operators():
+    """A fine grid makes the daily series long (> AUTO_MAX_TERMS): auto must use both backends."""
+    m = load_fixture()
+    c = snowball_contract(m.spot, 0.25, 3)
+    kernel = CTMCKernel(backend="auto")
+    auto = LocalVolQuad(kernel, GridConfig(cells=300, half_width_std=6.0, subdivide=9)).price(c, m)["values"]
+    assert kernel.solves > 0 and kernel.matvecs > 0
+    cheb = LocalVolQuad(CTMCKernel(backend="chebyshev"), GridConfig(cells=300, half_width_std=6.0, subdivide=9)
+                        ).price(c, m)["values"]
+    assert auto["pv"] == pytest.approx(cheb["pv"], abs=1e-11)
+
+
 @pytest.mark.parametrize("cells", [300, 400, 500])
 @pytest.mark.parametrize("half_width", [6.0, 8.0])
 def test_no_sliver_cells_on_the_headline_grids(cells, half_width):
@@ -49,6 +61,8 @@ def test_no_sliver_cells_on_the_headline_grids(cells, half_width):
         engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=cells, half_width_std=half_width))
         widths = engine.grid(c, m).widths
         assert np.min(widths) >= np.median(widths) / 3
+        inner = widths[1:-1]
+        assert not np.any((inner < 0.5 * widths[:-2]) & (inner < 0.5 * widths[2:]))
 
 
 def test_homogeneous_slab_rates_are_cached_and_identical():

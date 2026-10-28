@@ -88,16 +88,29 @@ def _pair_half_width(a: float, anchors: list[float], stencil_lo: float, stencil_
     close such gaps: the largest width up to 1.5 cells leaving each side either
     closed or at least half a cell open.
     """
-    left = max([lo] + ([stencil_hi] if a > stencil_hi else []) + [(a + b) / 2 for b in anchors if b < a])
-    right = min([hi] + ([stencil_lo] if a < stencil_lo else []) + [(a + b) / 2 for b in anchors if b > a])
+    above = a > stencil_hi             # which side of the readout block the barrier sits on
+    same_side = [b for b in anchors if b != a and (b > stencil_hi) == above]
+    left = max([lo] + ([stencil_hi] if above else []) + [(a + b) / 2 for b in same_side if b < a])
+    right = min([hi] + ([stencil_lo] if not above else []) + [(a + b) / 2 for b in same_side if b > a])
     room_l, room_r = a - left, right - a
-    candidates = {target, room_l, room_r} | {room / n for room in (room_l, room_r) for n in (2, 3)}
+
+    def leftover(w):
+        return min(room - w if room - w > EPS else math.inf for room in (room_l, room_r))
 
     def clean(w):
-        return all(abs(room - w) <= EPS or room - w >= target / 2 for room in (room_l, room_r))
+        return leftover(w) >= target / 2
 
-    feasible = [w for w in candidates if EPS < w <= min(room_l, room_r) + EPS and w <= 1.5 * target and clean(w)]
-    return max(feasible) if feasible else min(target, room_l, room_r)
+    if clean(target) and target <= min(room_l, room_r) + EPS:
+        return target
+    candidates = {room_l, room_r} | {room / n for room in (room_l, room_r) for n in (2, 3)}
+    feasible = [w for w in candidates if EPS < w <= min(room_l, room_r) + EPS and w <= 1.5 * target]
+    if not feasible:
+        raise UnresolvedGrid("no room for a barrier cell pair; contract levels too close for this grid")
+    clean_ones = [w for w in feasible if clean(w)]
+    if clean_ones:
+        return max(clean_ones)
+    # nothing leaves every side closed or half a cell open: keep the widest leftover relative to the pair
+    return max(feasible, key=lambda w: leftover(w) / w)
 
 
 def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig()) -> LogGrid:
