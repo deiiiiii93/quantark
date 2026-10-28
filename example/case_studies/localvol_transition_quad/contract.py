@@ -13,7 +13,10 @@ import math
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from quantark.util.numerical import Tolerance
+
 KI_PER_YEAR = 252
+EPS = Tolerance.ZERO          # year-fraction coincidence of a daily date with maturity
 
 
 @dataclass(frozen=True)
@@ -81,9 +84,9 @@ class Contract:
 
 def ki_schedule(maturity: float, per_year: int = KI_PER_YEAR) -> tuple[float, ...]:
     """Daily KI dates k/per_year up to maturity, plus maturity if it is off that grid."""
-    count = int(math.floor(maturity * per_year + 1e-9))
+    count = int(math.floor(maturity * per_year + EPS))
     times = [k / per_year for k in range(1, count + 1)]
-    if not times or abs(times[-1] - maturity) > 1e-12:
+    if not times or abs(times[-1] - maturity) > EPS:
         times.append(maturity)
     else:
         times[-1] = maturity

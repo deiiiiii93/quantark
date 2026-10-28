@@ -13,7 +13,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from quantark.util.numerical import Tolerance
+
 from .contract import Contract
+
+EPS = Tolerance.ZERO          # log-space coincidence of grid points and levels
 
 
 class UnresolvedGrid(ValueError):
@@ -57,11 +61,11 @@ class LogGrid:
 
     def below(self, level: float) -> np.ndarray:
         """Cells lying entirely at or below ``level`` (an edge)."""
-        return self.edges[1:] <= math.log(level) + 1e-12
+        return self.edges[1:] <= math.log(level) + EPS
 
     def above(self, level: float) -> np.ndarray:
         """Cells lying entirely at or above ``level`` (an edge)."""
-        return self.edges[:-1] >= math.log(level) - 1e-12
+        return self.edges[:-1] >= math.log(level) - EPS
 
 
 def contract_levels(c: Contract) -> list[float]:
@@ -95,9 +99,9 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
     # strike sits on the s0 centre). Discontinuities (KO, KI) always are edges.
     stencil_lo, stencil_hi = x0 - (k + 0.5) * h, x0 + (k + 0.5) * h
     strike = math.log(c.strike)
-    if stencil_lo - 1e-12 < strike < stencil_hi + 1e-12:
+    if stencil_lo - EPS < strike < stencil_hi + EPS:
         anchors.remove(strike)
-    if any(stencil_lo - 1e-12 < a < stencil_hi + 1e-12 for a in anchors):
+    if any(stencil_lo - EPS < a < stencil_hi + EPS for a in anchors):
         nearest = min(abs(a - x0) for a in anchors)
         # shrink the stencil spacing so the nearest level sits beyond it
         h_fit = nearest / (k + 0.5 + 1)
@@ -122,18 +126,18 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
     blocks.sort(key=lambda b: b[0])
 
     def fill(a, b):
-        n = max(1, math.ceil((b - a) / target - 1e-9))
+        n = max(1, math.ceil((b - a) / target - EPS))
         return list(a + (b - a) * np.arange(1, n) / n)
 
     edges_list, cursor = [lo], lo
     for block in blocks:
-        if block[0] < cursor - 1e-12:
+        if block[0] < cursor - EPS:
             raise UnresolvedGrid("overlapping grid blocks; contract levels too close for this grid")
-        if block[0] > cursor + 1e-12:
+        if block[0] > cursor + EPS:
             edges_list += fill(cursor, block[0]) + [block[0]]
         edges_list += list(block[1:])
         cursor = block[-1]
-    if hi > cursor + 1e-12:
+    if hi > cursor + EPS:
         edges_list += fill(cursor, hi) + [hi]
     edges = np.array(edges_list)
     if np.any(np.diff(edges) <= 0):
@@ -145,5 +149,5 @@ def build_grid(c: Contract, sigma_ref: float, config: GridConfig = GridConfig())
         edges = np.append((edges[:-1, None] + np.diff(edges)[:, None] * frac[None, :]).ravel(), edges[-1])
         spot_index = spot_index * m + m // 2
     grid = LogGrid(edges, spot_index)
-    assert abs(grid.centres[spot_index] - x0) < 1e-12
+    assert abs(grid.centres[spot_index] - x0) < EPS
     return grid

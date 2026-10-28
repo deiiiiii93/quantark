@@ -17,6 +17,8 @@ import numpy as np
 from scipy.linalg.lapack import zgtsv
 from scipy.special import ive, ndtr
 
+from quantark.util.numerical import Tolerance
+
 from .grid import LogGrid, UnresolvedGrid
 from .market import Market
 
@@ -134,7 +136,7 @@ class BSMExactKernel:
 
     def matrix(self, grid: LogGrid, market: Market, t0: float, t1: float) -> np.ndarray:
         h = t1 - t0
-        key = (id(grid), h, market.r, market.q, self._sigma(market))
+        key = (grid.edges.tobytes(), h, market.r, market.q, self._sigma(market))
         cached = self._cache.get(key)
         if cached is None:
             sigma = key[-1]
@@ -170,7 +172,7 @@ class _ValidatingKernel:
     def _identities(grid: LogGrid, market: Market, apply, dt: float, sd: float) -> dict:
         s = np.exp(grid.centres)
         moved = apply(np.vstack((np.ones_like(s), s)))
-        rows = interior_rows(grid, max(sd, 1e-12))
+        rows = interior_rows(grid, max(sd, Tolerance.ZERO))
         mass = float(np.max(np.abs(moved[0, rows] - 1.0)))
         forward = float(np.max(np.abs(moved[1, rows] / (s[rows] * math.exp((market.r - market.q) * dt)) - 1.0)))
         return dict(mass=mass, forward=forward, rows=int(rows.sum()))
@@ -256,7 +258,9 @@ class CTMCKernel(_ValidatingKernel):
         rhs = np.ascontiguousarray(values.T, dtype=complex)
         out = np.zeros(values.shape[::-1])
         for z, w in zip(self._nodes, self._weights):
-            x = zgtsv(lower.astype(complex), base + z, upper.astype(complex), rhs)[3]
+            _, _, _, x, info = zgtsv(lower.astype(complex), base + z, upper.astype(complex), rhs)
+            if info != 0:
+                raise UnresolvedGrid(f"singular contour resolvent (zgtsv info={info})")
             out += (w * x).real
         self.solves += self._nodes.size
         return np.ascontiguousarray(out.T)

@@ -11,7 +11,8 @@ from scipy.stats import norm
 from example.case_studies.localvol_transition_quad import adapters
 from example.case_studies.localvol_transition_quad.contract import (snowball_contract, up_out_contract,
                                                                     vanilla_contract)
-from example.case_studies.localvol_transition_quad.engine import OUTPUTS, PV_BUDGET, LocalVolQuad
+from example.case_studies.localvol_transition_quad.engine import (IDENTITY_FRACTION, OUTPUTS, PV_BUDGET,
+                                                                  LocalVolQuad, call_from_put)
 from example.case_studies.localvol_transition_quad.grid import GridConfig, UnresolvedGrid, build_grid
 from example.case_studies.localvol_transition_quad.kernels import CTMCKernel, GaussRichardsonKernel
 from example.case_studies.localvol_transition_quad.market import Market, constant_surface, load_fixture
@@ -66,14 +67,67 @@ def test_ac1_vanilla_black_scholes(kernel, option):
     assert pv["values"]["pv"] == pytest.approx(bs(option, S0, 1.0) / S0, abs=1e-5)
 
 
+@pytest.mark.parametrize("kernel", [CTMCKernel, lambda: GaussRichardsonKernel(1)], ids=["ctmc", "gauss"])
+def test_ac1_parity_route_matches_direct_call(kernel):
+    engine = LocalVolQuad(kernel(), GridConfig(cells=400, half_width_std=6.0, subdivide=3))
+    put = engine.price(vanilla_contract(S0, 1.0, option="put"), MARKET)["values"]["pv"]
+    call = engine.price(vanilla_contract(S0, 1.0, option="call"), MARKET)["values"]["pv"]
+    via_parity = call_from_put(put, vanilla_contract(S0, 1.0), MARKET)
+    assert via_parity == pytest.approx(bs("call", S0, 1.0) / S0, abs=1e-5)
+    assert via_parity == pytest.approx(call, abs=1e-5)
+
+
+@pytest.mark.parametrize("kernel", [CTMCKernel, lambda: GaussRichardsonKernel(1)], ids=["ctmc", "gauss"])
+def test_ac1_forward_identity_over_the_life(kernel):
+    """Daily propagation of S/S0 over one year returns the discounted forward e^{-qT} at s0."""
+    c = vanilla_contract(S0, 1.0)
+    grid = build_grid(c, SIGMA, GridConfig(cells=400, half_width_std=6.0, subdivide=3))
+    k = kernel()
+    v = np.exp(grid.centres - grid.centres[grid.spot_index])[None, :]
+    times = [d / 252 for d in range(253)]
+    for left, right in zip(times[-2::-1], times[::-1]):
+        v = k.propagate(v, grid, MARKET, left, right)
+    assert v[0, grid.spot_index] == pytest.approx(math.exp(-Q * 1.0), rel=1e-6)
+
+
+@pytest.mark.slow
+def test_ac3_gauss_validates_on_real_surface_when_resolved():
+    m = load_fixture()
+    c = snowball_contract(m.spot, 0.25, 3)
+    kernel = GaussRichardsonKernel(1)
+    out = LocalVolQuad(kernel, GridConfig(cells=400, half_width_std=6.0, subdivide=9), validate=True).price(c, m)
+    tol = out["diagnostics"]["tolerance"]
+    assert kernel.diagnostics
+    assert all(d["mass"] <= tol and d["forward"] <= tol for d in kernel.diagnostics)
+    assert out["diagnostics"]["forward"] <= tol and out["diagnostics"]["mass"] <= tol
+    assert kernel.validate is False             # validate is scoped to the call
+
+
+def test_ac3_timed_mode_checks_identities_every_interval():
+    """D16: timed mode carries [1, S/S0] through every interval; a broken forward is refused."""
+
+    class LeakyKernel(CTMCKernel):
+        def propagate(self, values, grid, market, t0, t1):
+            out = super().propagate(values, grid, market, t0, t1)
+            out[-1] *= 1.0 + 1e-6                 # a forward-identity defect on the S probe
+            return out
+
+    c = snowball_contract(S0, 0.25, 3)
+    out = LocalVolQuad(CTMCKernel(), GridConfig(cells=300)).price(c, MARKET)
+    assert out["diagnostics"]["intervals"] == len(c.ki_times)
+    assert out["diagnostics"]["forward"] <= out["diagnostics"]["tolerance"]
+    with pytest.raises(UnresolvedGrid, match="identity residual"):
+        LocalVolQuad(LeakyKernel(), GridConfig(cells=300)).price(c, MARKET)
+
+
 @pytest.mark.slow
 def test_ac3_validation_mode_on_real_surface():
     m = load_fixture()
     c = snowball_contract(m.spot, 0.25, 3)
     kernel = CTMCKernel()
-    LocalVolQuad(kernel, GridConfig(cells=400, half_width_std=6.0), validate=True).price(c, m)
-    tol = kernel.tolerance
-    assert tol == pytest.approx(1e-3 * PV_BUDGET / len(c.ki_times))
+    out = LocalVolQuad(kernel, GridConfig(cells=400, half_width_std=6.0), validate=True).price(c, m)
+    tol = out["diagnostics"]["tolerance"]
+    assert tol == pytest.approx(IDENTITY_FRACTION * PV_BUDGET / len(c.ki_times))
     assert kernel.diagnostics and all(d["mass"] <= tol and d["forward"] <= tol and d["semigroup"] <= tol
                                       for d in kernel.diagnostics)
     assert len(kernel.diagnostics) == kernel.operators
