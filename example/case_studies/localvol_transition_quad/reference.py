@@ -27,7 +27,7 @@ from quantark.asset.equity.param import PDEParams
 from . import adapters
 from .contract import snowball_contract, up_out_contract, vanilla_contract
 from .engine import OUTPUTS, PV_BUDGET, LocalVolQuad
-from .grid import GridConfig
+from .grid import GridConfig, UnresolvedGrid
 from .kernels import CTMCKernel
 from .market import load_fixture
 
@@ -39,7 +39,7 @@ PDE_LADDER = {"snowball_1y": [(800, 8), (1600, 16), (3200, 32), (6400, 64)],
               "put_1y": [(800, 8), (1600, 16), (3200, 32)],
               "up_out_1y": [(800, 8), (1600, 16), (3200, 32)]}
 QUAD_LADDER = [(400, 1), (400, 3), (400, 9), (400, 27)]
-HALF_WIDTH_STD = 6.0
+HALF_WIDTH_STD = 8.0     # reference domain: the ATM-scaled width must also cover the steep short-dated wings
 
 
 def budget(key: str, ref: float) -> float:
@@ -114,11 +114,16 @@ def dupire_gap(market, moneyness=(0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15)) -> lis
     even in the continuum limit, so the gap has a non-zero floor.
     """
     rows = []
-    engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=400, half_width_std=HALF_WIDTH_STD, subdivide=3))
+    # short maturities on a steep-winged surface need a wider domain than the ATM-scaled default
+    engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=600, half_width_std=10.0, subdivide=3))
     for t in market.surface.time_grid[1:]:
         for m in moneyness:
             c = vanilla_contract(market.spot, float(t), strike_m=m, option="put")
-            quad = engine.price(c, market)["values"]["pv"]
+            try:
+                quad = engine.price(c, market)["values"]["pv"]
+            except UnresolvedGrid as exc:            # the harness records refusals (spec D16)
+                rows.append(dict(maturity=float(t), moneyness=m, refused=str(exc)))
+                continue
             iv = float(market.iv_surface.get_vol(c.strike, float(t), market.spot))
             bs = black_scholes_put(market.spot, c.strike, float(t), market.r, market.q, iv) / market.spot
             rows.append(dict(maturity=float(t), moneyness=m, implied_vol=iv, quad=quad, black_scholes=bs,
