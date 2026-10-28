@@ -1,0 +1,41 @@
+{
+ "title": "Local-vol transition QUAD: 4.3x (1y) and 5.9x faster than the production PDE on the Snowball full risk run, at matched accuracy",
+ "as_of": "2026-10-28",
+ "verdict": "On the headline daily-KI Snowball, the CTMC transition QUAD runs the full risk run (PV, native delta/gamma, parallel LV vega, theta, rho, carry: eight valuations) in **0.45 s (1y) and 0.74 s (2y)** against **1.93 s and 4.34 s** for the production `LocalVolSnowballPDESolver`, each engine at its own cheapest configuration that meets the budget (PV within 1bp, every Greek within 1% or its floor) against a reference two independent methods agree on. PV binds for both engines. On event-free products the advantage disappears: the vanilla put and the monthly up-and-out are a tie or a loss (0.90x and 0.76x). The production MC never meets the budget within 2^20 paths (gamma 36-53x over). Independently of speed, QUAD is now a second, differently built check on the local-vol PDE: they agree within 2% of the budget on every output of every case.",
+ "method": [
+  "Kernel: a continuous-time Markov chain on a finite-volume grid in ln S (Mijatovic-Pistorius; Zhang-Li grid design). Each row's up and down rates make the discounted stock a martingale of the chain and match the local variance, so mass and the forward hold by construction. Between observation dates the chain advances by an exact matrix exponential of the generator at the piece midpoint (Magnus 2, pieces cut at surface pillars and at one trading day), evaluated by a Chebyshev-Bessel series or, for stiff pieces, a Weideman-Talbot contour; there is no time-stepping error. KO and KI are cell edges with a symmetric cell pair around each; s0 is a cell centre, so native delta and gamma come off a uniform stencil. Every interval carries [1, S/S0] probes and refuses the grid if mass or forward drift.",
+  "Protocol: the reference is the production PDE refined to 6400x64 (3200x32 for the put and up-out), accepted only because its last refinement step and the refined QUAD both sit within 1/5 of the budget. Each engine then climbs a fixed ladder and keeps its cheapest configuration whose worst output is inside the budget; MC must clear |bias| + 2 SE. Timing: one process window, single-threaded BLAS, an untimed warm-up, three cold repeats with the engine order alternated, fresh engine objects and empty caches every time."
+ ],
+ "findings": [
+  {"title": "Where the speed comes from",
+   "body": "Not from a cheaper transition: on the event-free put and up-out the production PDE at 100 points x 1 step/day is as fast or faster. The Snowball PDE costs about 6.8x the European PDE at the same grid (1.36 s vs 0.20 s, eight valuations) because of its 252 daily KI events; QUAD pays for those events only as whole-cell masks (0.46 s vs 0.22 s). The 2y result is not an artefact of the flat-extrapolated slab beyond the last pillar (57% of the life): switching QUAD's slab rate cache off costs 5% (0.725 to 0.761 s), so the 2y speedup is still ~5.7x."},
+  {"title": "Kernel bake-off: the Markov chain wins",
+   "body": "The CTMC with a Chebyshev exponential meets the budget at 400 cells in 0.058 s per base solve. The moment-matched Euler-Gaussian kernel with Richardson extrapolation, the most independent of the PDE, needs 3609 cells and 49.9 s and refuses three of four grids (forward-identity residuals). Analytic density expansions (Pagliarani-Pascucci, Ait-Sahalia) were excluded up front: the production surface is only piecewise bilinear, and an expansion is an approximation by construction."},
+  {"title": "Two bugs the gates caught",
+   "body": "A **time-ordering** error (pillar pieces applied earliest-first in backward induction) was invisible on daily-event Snowballs and on constant surfaces and was caught only by the European self-convergence check against the production PDE (1.25e-3 off; 2e-6 after the fix). A **sliver cell** between the readout block and the KO pair set the Gershgorin bound and made every operator 2.7x dearer; the grid now refits rather than leave a cell under half its neighbours."},
+  {"title": "The Dupire surface does not reprice its input",
+   "body": "European puts on the production `LocalVolSurface` sit **+1.2 to +10.8 vol points** above Black-Scholes at the input implied vol, worst at the shortest maturity. PDE and QUAD agree on these prices, so the gap is in the surface: its first Dupire row (ATM local vol 0.485 against an implied 0.285 at 8 days) is clamped flat back to t=0, and linear-in-vol time interpolation misses the implied forward variances by up to 0.04 between pillars. Every local-vol engine in the repository inherits this; it is reported here, not changed."},
+  {"title": "Monte Carlo cannot meet the budget",
+   "body": "With central +/-1% spot bumps on common random numbers, the production LV MC's gamma standard error at 2^20 paths is still 36-53x the 0.035 budget, and theta's is above its 1e-5 floor; scaling the 2^20 result (36x over) by 1/sqrt(paths), gamma alone would need ~2^30 paths. MC is reported at its best achieved accuracy, not timed against the claim."}
+ ],
+ "limitations": [
+  "One surface: the 2024-02-08 CSI1000 crash-bottom Dupire fixture with flat r = 2% and flat q (parity-implied at the longest pillar). Calmer surfaces were not run.",
+  "Flat r and q in the QUAD engine; no term structure, no continuous KI, no Phoenix / step-down / lifecycle (valuation before the first remaining observation only).",
+  "Parallel local-vol vega only (a +0.01 shift of the grid, surface never rebuilt); bucketed vega, where operator reuse would matter most, is not measured.",
+  "The cheapest qualifying QUAD configurations sit close to the budget (0.65 of it on the 1y Snowball, 0.94 on the 2y); the PDE's sit at 0.32 and 0.87. Requiring QUAD to sit within half the budget (350 cells for 1y at 0.40 of it, 400 cells for 2y at 0.27) still leaves it 4.0x / 4.7x faster (single-shot tuning timings against the benchmarked PDE).",
+  "The baselines are the production engines through their public API; a PDE rewritten to amortise its per-event cost could narrow the gap. Timings were taken on a shared Apple-silicon machine with one foreign process active; all arms ran alternated in the same window (spread < 3%).",
+  "No compiled kernel: the CTMC is NumPy-bound (about 6 us per tridiagonal matvec, overhead-dominated); a C kernel is an open lever."
+ ],
+ "reproduce": [
+  "python -m pytest -n0 test/volmodels/test_localvol_transition_quad_*.py",
+  "python -m example.case_studies.localvol_transition_quad.reference --arm all --resume",
+  "python -m example.case_studies.localvol_transition_quad.bakeoff --repeats 3",
+  "python -m example.case_studies.localvol_transition_quad.benchmark tune --resume",
+  "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 python -m example.case_studies.localvol_transition_quad.benchmark time --repeats 3",
+  "python docs/research/localvol_transition_quad/render_report.py"
+ ],
+ "notes": {
+  "REF": "Two independent deterministic methods agree: the production PDE's last refinement step and the refined QUAD both sit within 1/5 of the budget on every output.",
+  "BENCH": "warm_moved re-runs QUAD with retained kernels at s0 x 1.005; the grid re-anchors there and KO sits closer to s0, so the readout spacing refits smaller and the run is slightly slower: it measures reuse-free steady state, not a cache benefit."
+ }
+}
