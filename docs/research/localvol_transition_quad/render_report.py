@@ -769,7 +769,7 @@ def section_benchmark(narr, bench) -> str:
         + table(["case", "engine", "timed config", "cold s", "warm s", "QUAD ×", "err/bud", "binding", "RSS MB"],
                 rows,
                 f"cold s = median cold full-risk seconds (hover for the individual runs); warm s = warm-moved "
-                f"median (a distinct spot per repeat);QUAD × = this engine's median cold / QUAD median cold; err/bud = worst |err|/budget at the "
+                f"median (a distinct spot per repeat); QUAD × = this engine's median cold / QUAD median cold; err/bud = worst |err|/budget at the "
                 f"timed config, red if over budget; RSS = peak process RSS after the arm. Repeats: "
                 f"{html.escape(str(bench.get('repeats', DASH)))}. {envs}")
         + ('<h3 class="sub">In-window QUAD arms</h3>' + arms if arms else "")

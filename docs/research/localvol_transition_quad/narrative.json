@@ -25,8 +25,8 @@
   "Flat r and q in the QUAD engine; no term structure, no continuous KI, no Phoenix / step-down / lifecycle (valuation before the first remaining observation only).",
   "Parallel local-vol vega only (a +0.01 shift of the grid, surface never rebuilt); bucketed vega, where operator reuse would matter most, is not measured.",
   "The baselines are the production engines through their public API; a PDE rewritten to amortise its per-event cost could narrow the gap.",
-  "Timings: a shared Apple-silicon machine with foreign processes active (one using ~25% of a core); all arms ran alternated in the same window. Repeat spread is <= 6% except one PDE up-out repeat (18%); medians are reported.",
-  "No compiled kernel: the CTMC is NumPy-bound (a 24-term daily operator at 405 cells costs ~180 us, about 7.6 us per series term, overhead-dominated); a C kernel is an open lever."
+  "Timings: a shared Apple-silicon machine with foreign processes active; all arms ran alternated in the same window. Repeat spread is <= 6% except one PDE up-out repeat (18%); medians are reported.",
+  "No compiled kernel: the CTMC runs in NumPy, one vectorised tridiagonal matvec per series term on a few hundred cells; a C kernel is an open lever whose gain is not measured here."
  ],
  "reproduce": [
   "python -m pytest -n0 test/volmodels/test_localvol_transition_quad_*.py",
