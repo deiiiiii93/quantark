@@ -1,0 +1,395 @@
+{
+ "reference": {
+  "pv": 0.9154373325901106,
+  "delta": 0.59131865008073,
+  "gamma": -3.509824490998362,
+  "vega": -0.0017482383820885928,
+  "rho": -2.13398694735068e-06,
+  "carry": -3.529589364681065e-05,
+  "theta": 0.000641996244190178
+ },
+ "rows": [
+  {
+   "arm": "ctmc_contour",
+   "cells_base": 200,
+   "subdivide": 1,
+   "status": "priced",
+   "seconds": 0.08077479200437665,
+   "seconds_all": [
+    0.08082725014537573,
+    0.08018116699531674,
+    0.08077479200437665
+   ],
+   "cells": 208,
+   "values": {
+    "pv": 0.9157932048965001,
+    "delta": 0.5906697251817555,
+    "gamma": -3.514217280868204
+   },
+   "diagnostics": {
+    "mass": 5.551115123125783e-14,
+    "forward": 3.084199562408685e-13,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 0.00035587230638944867,
+    "delta": -0.0006489248989745011,
+    "gamma": -0.004392789869842151
+   },
+   "meets_budget": false
+  },
+  {
+   "arm": "ctmc_chebyshev",
+   "cells_base": 200,
+   "subdivide": 1,
+   "status": "priced",
+   "seconds": 0.05151862488128245,
+   "seconds_all": [
+    0.051962874829769135,
+    0.05140050011686981,
+    0.05151862488128245
+   ],
+   "cells": 208,
+   "values": {
+    "pv": 0.91579320489427,
+    "delta": 0.5906697251889389,
+    "gamma": -3.5142172808548024
+   },
+   "diagnostics": {
+    "mass": 1.3367085216486885e-13,
+    "forward": 3.360645095540349e-13,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 0.0003558723041593437,
+    "delta": -0.0006489248917911361,
+    "gamma": -0.004392789856440427
+   },
+   "meets_budget": false
+  },
+  {
+   "arm": "gauss_richardson",
+   "cells_base": 400,
+   "subdivide": 1,
+   "status": "refused",
+   "reason": "interval identity residual (mass 2.22e-16, forward 3.58e-06) exceeds 3.97e-09 over 0.003968y; refine the grid"
+  },
+  {
+   "arm": "gauss_richardson",
+   "cells_base": 400,
+   "subdivide": 3,
+   "status": "refused",
+   "reason": "interval identity residual (mass 4.44e-16, forward 4.32e-09) exceeds 3.97e-09 over 0.003968y; refine the grid"
+  },
+  {
+   "arm": "ctmc_chebyshev",
+   "cells_base": 300,
+   "subdivide": 1,
+   "status": "priced",
+   "seconds": 0.05616658297367394,
+   "seconds_all": [
+    0.05616658297367394,
+    0.05609858292154968,
+    0.05628537503071129
+   ],
+   "cells": 307,
+   "values": {
+    "pv": 0.9155842131504224,
+    "delta": 0.5910401962930323,
+    "gamma": -3.5107634895744875
+   },
+   "diagnostics": {
+    "mass": 1.3367085216486885e-13,
+    "forward": 1.3344880755994382e-13,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 0.00014688056031175734,
+    "delta": -0.0002784537876977522,
+    "gamma": -0.0009389985761254493
+   },
+   "meets_budget": false
+  },
+  {
+   "arm": "ctmc_contour",
+   "cells_base": 300,
+   "subdivide": 1,
+   "status": "priced",
+   "seconds": 0.11185145797207952,
+   "seconds_all": [
+    0.11185145797207952,
+    0.11037224996834993,
+    0.11192362499423325
+   ],
+   "cells": 307,
+   "values": {
+    "pv": 0.9155842131526537,
+    "delta": 0.5910401962857222,
+    "gamma": -3.510763489497703
+   },
+   "diagnostics": {
+    "mass": 5.284661597215745e-14,
+    "forward": 5.4289905904170155e-14,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 0.00014688056254308357,
+    "delta": -0.00027845379500779366,
+    "gamma": -0.0009389984993410927
+   },
+   "meets_budget": false
+  },
+  {
+   "arm": "ctmc_contour",
+   "cells_base": 400,
+   "subdivide": 1,
+   "status": "priced",
+   "seconds": 0.14194366708397865,
+   "seconds_all": [
+    0.14194366708397865,
+    0.1404267919715494,
+    0.14431829215027392
+   ],
+   "cells": 405,
+   "values": {
+    "pv": 0.9155022914746762,
+    "delta": 0.5911582789588326,
+    "gamma": -3.509948232136611
+   },
+   "diagnostics": {
+    "mass": 5.3734794391857577e-14,
+    "forward": 5.340172748447003e-14,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 6.495888456559129e-05,
+    "delta": -0.0001603711218974846,
+    "gamma": -0.00012374113824886734
+   },
+   "meets_budget": true
+  },
+  {
+   "arm": "ctmc_chebyshev",
+   "cells_base": 400,
+   "subdivide": 1,
+   "status": "priced",
+   "seconds": 0.06309129181317985,
+   "seconds_all": [
+    0.06309129181317985,
+    0.06305524986237288,
+    0.06351700006052852
+   ],
+   "cells": 405,
+   "values": {
+    "pv": 0.9155022914724606,
+    "delta": 0.5911582789664046,
+    "gamma": -3.5099482321184516
+   },
+   "diagnostics": {
+    "mass": 1.3378187446733136e-13,
+    "forward": 1.3344880755994382e-13,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 6.495888235003022e-05,
+    "delta": -0.0001603711143254305,
+    "gamma": -0.00012374112008961546
+   },
+   "meets_budget": true
+  },
+  {
+   "arm": "gauss_richardson",
+   "cells_base": 300,
+   "subdivide": 9,
+   "status": "refused",
+   "reason": "interval identity residual (mass 6.66e-16, forward 4.12e-08) exceeds 3.97e-09 over 0.003968y; refine the grid"
+  },
+  {
+   "arm": "gauss_richardson",
+   "cells_base": 400,
+   "subdivide": 9,
+   "status": "priced",
+   "seconds": 49.611999332904816,
+   "seconds_all": [
+    49.3826001661364,
+    50.16353741590865,
+    49.611999332904816
+   ],
+   "cells": 3645,
+   "values": {
+    "pv": 0.9154105919969585,
+    "delta": 0.5911995756167542,
+    "gamma": -3.4836716463851354
+   },
+   "diagnostics": {
+    "mass": 1.887379141862766e-15,
+    "forward": 3.494557754279981e-09,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": -2.6740593152108083e-05,
+    "delta": -0.00011907446397585453,
+    "gamma": 0.026152844613226645
+   },
+   "meets_budget": true
+  },
+  {
+   "arm": "ctmc_chebyshev",
+   "cells_base": 200,
+   "subdivide": 3,
+   "status": "priced",
+   "seconds": 0.2007741250563413,
+   "seconds_all": [
+    0.20099070807918906,
+    0.2007741250563413,
+    0.20012741698883474
+   ],
+   "cells": 624,
+   "values": {
+    "pv": 0.915477307373191,
+    "delta": 0.5912480726478643,
+    "gamma": -3.5100016599224513
+   },
+   "diagnostics": {
+    "mass": 1.908473379330644e-13,
+    "forward": 1.894040480010517e-13,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 3.99747830803765e-05,
+    "delta": -7.057743286575935e-05,
+    "gamma": -0.0001771689240892549
+   },
+   "meets_budget": true
+  },
+  {
+   "arm": "ctmc_contour",
+   "cells_base": 200,
+   "subdivide": 3,
+   "status": "priced",
+   "seconds": 0.23170400015078485,
+   "seconds_all": [
+    0.23347774986177683,
+    0.2304077500011772,
+    0.23170400015078485
+   ],
+   "cells": 624,
+   "values": {
+    "pv": 0.9154773073769586,
+    "delta": 0.5912480726351624,
+    "gamma": -3.510001659840275
+   },
+   "diagnostics": {
+    "mass": 5.81756864903582e-14,
+    "forward": 5.81756864903582e-14,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 3.997478684802935e-05,
+    "delta": -7.057744556759893e-05,
+    "gamma": -0.00017716884191276705
+   },
+   "meets_budget": true
+  },
+  {
+   "arm": "ctmc_contour",
+   "cells_base": 300,
+   "subdivide": 3,
+   "status": "priced",
+   "seconds": 0.3239808331709355,
+   "seconds_all": [
+    0.3239808331709355,
+    0.3227769590448588,
+    0.32489320798777044
+   ],
+   "cells": 921,
+   "values": {
+    "pv": 0.915451808836916,
+    "delta": 0.591277924411155,
+    "gamma": -3.5097955835020263
+   },
+   "diagnostics": {
+    "mass": 5.950795411990839e-14,
+    "forward": 5.88418203051333e-14,
+    "intervals": 252,
+    "tolerance": 3.968253968253969e-09
+   },
+   "error": {
+    "pv": 1.4476246805394943e-05,
+    "delta": -4.072566957502577e-05,
+    "gamma": 2.890749633577272e-05
+   },
+   "meets_budget": true
+  }
+ ],
+ "decision": {
+  "matrix": {
+   "ctmc_contour": {
+    "cheapest_meeting": {
+     "cells_base": 400,
+     "subdivide": 1,
+     "cells": 405,
+     "seconds": 0.14194366708397865,
+     "error": {
+      "pv": 6.495888456559129e-05,
+      "delta": -0.0001603711218974846,
+      "gamma": -0.00012374113824886734
+     }
+    },
+    "refused_configs": 0,
+    "independence": "shares the PDE's semi-discrete generator family (finite differences in ln S); differs in time (exact exponential, no stepping) and in grid/event placement"
+   },
+   "ctmc_chebyshev": {
+    "cheapest_meeting": {
+     "cells_base": 400,
+     "subdivide": 1,
+     "cells": 405,
+     "seconds": 0.06309129181317985,
+     "error": {
+      "pv": 6.495888235003022e-05,
+      "delta": -0.0001603711143254305,
+      "gamma": -0.00012374112008961546
+     }
+    },
+    "refused_configs": 0,
+    "independence": "as ctmc_contour"
+   },
+   "gauss_richardson": {
+    "cheapest_meeting": {
+     "cells_base": 400,
+     "subdivide": 9,
+     "cells": 3645,
+     "seconds": 49.611999332904816,
+     "error": {
+      "pv": -2.6740593152108083e-05,
+      "delta": -0.00011907446397585453,
+      "gamma": 0.026152844613226645
+     }
+    },
+    "refused_configs": 3,
+    "independence": "integral kernel; shares no spatial operator with the PDE (most independent)"
+   }
+  },
+  "winner": "ctmc_chebyshev"
+ },
+ "sources": {
+  "__init__.py": "e3b0c44298fc1c14",
+  "adapters.py": "3e98f6779f4d2055",
+  "bakeoff.py": "8fd50da21338b27a",
+  "contract.py": "83efb48684337cb4",
+  "engine.py": "9353ac8c3eb997c0",
+  "grid.py": "090d1f6b69d51204",
+  "kernels.py": "a47ab0511720f0ad",
+  "market.py": "6b1dbba8c5aa7323",
+  "reference.py": "8eb5af6f8eb13a19"
+ }
+}
