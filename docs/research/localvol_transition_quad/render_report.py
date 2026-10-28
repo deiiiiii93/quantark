@@ -32,6 +32,8 @@ MINUS = "−"
 ENGINES = ("quad", "pde", "mc")
 ENGINE_NAME = {"quad": "QUAD", "pde": "PDE", "mc": "MC"}
 SLOT = {"quad": "var(--s1)", "pde": "var(--s2)", "mc": "var(--s3)"}
+ARMS = (("quad", "tuned", "speedup_vs_pde"), ("quad_margin", "within ½ budget", "speedup_margin_vs_pde"),
+        ("quad_no_slab_cache", "slab cache off", "speedup_no_slab_cache_vs_pde"))
 ARM_SLOTS = ("var(--s1)", "var(--s2)", "var(--s3)")
 QUANTITIES = ("pv", "delta", "gamma", "vega", "theta", "rho", "carry")
 CASE_ORDER = ("snowball_1y", "snowball_2y", "put_1y", "up_out_1y")
@@ -726,6 +728,38 @@ def section_benchmark(narr, bench) -> str:
     vtable = table(["case", "engine"] + [k.upper() for k in vkeys],
                    [[c, e] + [secs(d.get(k)) for k in vkeys] for c, e, d in vrows],
                    "Seconds per valuation, median over repeats (base solve + bumped solves of the full-risk run).")
+    arm_rows = []
+    for n in names:
+        pde = (cases[n].get("pde") or {}).get("median_cold")
+        for arm, label, key in ARMS:
+            r = cases[n].get(arm)
+            if not isinstance(r, dict):
+                continue
+            acc = r.get("accuracy") or {}
+            cold = " / ".join(secs(x) for x in r.get("cold", []))
+            sp = cases[n].get(key)
+            arm_rows.append([case_title(n), label, html.escape(config_label("quad", r.get("config"))),
+                             f'<span title="cold runs: {cold}">{secs(r.get("median_cold"))}</span>', secs(pde),
+                             f"{sp:.2f}×" if _ok(sp) else DASH, ratio(acc.get("worst")),
+                             str(acc.get("binding", DASH)).upper()])
+    arms = table(["case", "QUAD arm", "config", "cold s", "PDE cold s", "PDE ×", "err/bud", "binding"], arm_rows,
+                 "QUAD arms timed in the same window as the PDE. Within ½ budget = first QUAD rung whose worst "
+                 "|err|/budget is at most 0.5; slab cache off = rates recomputed on every piece past the last surface "
+                 "pillar (Snowballs only). PDE × = PDE median cold / arm median cold.") if arm_rows else ""
+    val_rows = []
+    for n in names:
+        v = (cases[n].get("quad") or {}).get("validation")
+        if not isinstance(v, dict):
+            continue
+        eng, ker = v.get("engine") or {}, v.get("kernel_max") or {}
+        val_rows.append([case_title(n), str(eng.get("intervals", DASH))]
+                        + [sig(x, 2) for x in (eng.get("mass"), eng.get("forward"), eng.get("tolerance"),
+                                               ker.get("mass"), ker.get("forward"), ker.get("semigroup"))])
+    vals = table(["case", "intervals", "probe mass", "probe forward", "tolerance", "kernel mass", "kernel forward",
+                  "semigroup"], val_rows,
+                 "Untimed validation-mode pass of each timed QUAD configuration: worst [1, S/S0] probe drift over the "
+                 "intervals against the per-interval tolerance, and the kernel's worst identity residuals."
+                 ) if val_rows else ""
     env = bench.get("environment", {})
     envs = " · ".join(f"{html.escape(str(k))} {html.escape(str(v))}" for k, v in env.items())
     return section(6, "BENCH", "Full-risk benchmark", note_for(narr, "BENCH") + figure(
@@ -734,10 +768,12 @@ def section_benchmark(narr, bench) -> str:
         f"(s0 +0.5%, re-anchored grid).{' Log scale: the engines differ by more than 20×.' if log_scale else ''}")
         + table(["case", "engine", "timed config", "cold s", "warm s", "QUAD ×", "err/bud", "binding", "RSS MB"],
                 rows,
-                f"cold s = median cold full-risk seconds (hover for the individual runs); warm s = QUAD warm-moved "
-                f"median; QUAD × = this engine's median cold / QUAD median cold; err/bud = worst |err|/budget at the "
+                f"cold s = median cold full-risk seconds (hover for the individual runs); warm s = warm-moved "
+                f"median (a distinct spot per repeat);QUAD × = this engine's median cold / QUAD median cold; err/bud = worst |err|/budget at the "
                 f"timed config, red if over budget; RSS = peak process RSS after the arm. Repeats: "
                 f"{html.escape(str(bench.get('repeats', DASH)))}. {envs}")
+        + ('<h3 class="sub">In-window QUAD arms</h3>' + arms if arms else "")
+        + ('<h3 class="sub">Validation residuals</h3>' + vals if vals else "")
         + '<h3 class="sub">Per-valuation timings</h3>' + vtable)
 
 

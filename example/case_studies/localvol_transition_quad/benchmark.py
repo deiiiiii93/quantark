@@ -5,16 +5,21 @@
 
 ``tune`` runs a fixed configuration ladder per engine and case against the D12
 reference and keeps the cheapest configuration whose WORST output is within
-budget (the binding quantity is recorded). ``time`` re-times the tuned
-configurations: an untimed process warm-up, then per repeat a COLD workload
-(fresh engine objects, empty operator caches) for every engine with the order
-alternated, plus a ``warm_moved`` row at s0*(1+0.5%) on retained QUAD kernels
-(re-anchored grid, so no operator cache can hit). Identical-input replay is not
-timed. Run with OPENBLAS/OMP/VECLIB_*_NUM_THREADS=1 on a quiet machine.
+budget (the binding quantity is recorded); ``--resume`` keeps only rows whose
+fingerprint (terms, config, sources, reference) still matches. ``time`` re-times
+the tuned configurations in ONE window: an untimed warm-up on tuned configs and an
+untimed validation-mode pass of the QUAD config, then per repeat a COLD workload
+(fresh engine objects, empty operator caches) for every arm with the order
+alternated. Arms: the tuned QUAD and PDE, QUAD at the first rung within half the
+budget, and (Snowballs past the last pillar) QUAD with the flat-slab rate cache
+off. ``warm_moved`` re-runs QUAD with retained kernels and the PDE as shipped at a
+distinct re-anchored spot per repeat (s0 x 1.005/1.006/1.007), so no cache can
+hit. Identical-input replay is not timed. Run with OPENBLAS/OMP/VECLIB_*_NUM_THREADS=1.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import resource
@@ -30,7 +35,7 @@ import scipy
 from quantark.asset.equity.engine.pde.grid.config import GridConfig as PDEGrid
 from quantark.asset.equity.param import PDEParams
 
-from . import adapters
+from . import adapters, kernels
 from .engine import OUTPUTS, LocalVolQuad
 from .grid import GridConfig, UnresolvedGrid
 from .kernels import CTMCKernel
@@ -39,11 +44,23 @@ from .reference import OUT_DIR, budget, cases, source_hashes
 
 QUAD_LADDER = [(c, hw) for hw in (6.0, 8.0) for c in (200, 250, 300, 350, 400, 500, 600)]
 PDE_LADDER = [(100, 1), (150, 1), (200, 1), (150, 2), (200, 2), (300, 2), (200, 4), (300, 4), (400, 4)]
-# Measured at 2^15 paths: gamma SE ~1-2 (budget 0.035) and theta SE ~1.8e-4 (budget 1e-5) need ~2^28 / ~2^25
-# paths, beyond D13's 2^22 cap; the ladder stops at 2^20 and the report extrapolates the paths required.
+# Gamma SE alone (not bias) at 2^20 paths is 13-20x its budget; 2 SE <= budget would need ~2^29.4 (1y) /
+# ~2^30.7 (2y) paths, far beyond D13's 2^22 cap: the ladder stops at 2^20.
 MC_LADDER = [(1, 2 ** 16), (1, 2 ** 18), (1, 2 ** 20), (4, 2 ** 16)]
 MC_BATCH = 2 ** 14
-MOVE = 0.005
+MOVES = (0.005, 0.006, 0.007)     # warm_moved: a DISTINCT moved spot per repeat, so no cache can hit
+MARGIN = 0.5                      # in-window QUAD row at the first rung within half the budget
+PDE_SOURCES = ("adapters.py", "contract.py", "market.py")
+QUAD_SOURCES = ("contract.py", "market.py", "grid.py", "kernels.py", "engine.py")
+
+
+def row_fingerprint(engine: str, contract, config, reference_case: dict) -> str:
+    """Contract terms, engine config, the sources the numbers depend on and the reference they are scored
+    against. A resumed row is kept only when this matches (missing = stale)."""
+    names = QUAD_SOURCES if engine == "quad" else PDE_SOURCES
+    text = json.dumps([engine, repr(contract), list(config), source_hashes(names),
+                       reference_case["assessment"]["reference"]], sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def quad_engine(cells, half_width):
@@ -66,6 +83,18 @@ def full_risk(engine: str, config, contract, market) -> dict:
     return adapters.mc_full_risk(contract, market, mc_config(*config))
 
 
+def timed_arm(engine: str, config, contract, market) -> dict:
+    """A cold full risk run; ``quad_no_slab_cache`` disables the flat-slab rate cache (D14 slab ablation)."""
+    if engine != "quad_no_slab_cache":
+        return full_risk(engine, config, contract, market)
+    original = kernels.SurfaceSampler.clamped_side
+    kernels.SurfaceSampler.clamped_side = lambda self, t: None
+    try:
+        return full_risk("quad", config, contract, market)
+    finally:
+        kernels.SurfaceSampler.clamped_side = original
+
+
 def score(values: dict, ref: dict, stderr: dict | None = None) -> dict:
     """Worst error as a fraction of budget; MC adds 2 SE (spec D13)."""
     ratio = {k: (abs(values[k] - ref[k]) + (2 * stderr[k] if stderr else 0.0)) / budget(k, ref[k]) for k in OUTPUTS}
@@ -79,11 +108,18 @@ def ladder(engine: str):
 
 def tune(args) -> int:
     path = OUT_DIR / "tuning.json"
-    data = json.loads(path.read_text()) if args.resume and path.exists() else {"cases": {}}
-    data["sources"] = source_hashes()
     refs = json.loads((OUT_DIR / "reference.json").read_text())["cases"]
     market = load_fixture()
-    for name, contract in cases(market).items():
+    all_cases = cases(market)
+    data = json.loads(path.read_text()) if args.resume and path.exists() else {"cases": {}}
+    for name, case in data.get("cases", {}).items():          # drop stale rows, never mix provenance
+        for engine in ("quad", "pde", "mc"):
+            if engine in case and name in all_cases:
+                case[engine] = {k: r for k, r in case[engine].items()
+                                if r.get("fingerprint") == row_fingerprint(engine, all_cases[name],
+                                                                           r["config"], refs[name])}
+    data["sources"] = {"quad": source_hashes(QUAD_SOURCES), "pde_mc": source_hashes(PDE_SOURCES)}
+    for name, contract in all_cases.items():
         if args.cases and name not in args.cases:
             continue
         ref = refs[name]["assessment"]["reference"]
@@ -105,6 +141,7 @@ def tune(args) -> int:
                     rows[key] = dict(config=list(config), status="priced", seconds=perf_counter() - start,
                                      values=out["values"], stderr=out.get("stderr"),
                                      **score(out["values"], ref, out.get("stderr")))
+                rows[key]["fingerprint"] = row_fingerprint(engine, contract, config, refs[name])
                 print(name, engine, key, rows[key]["status"], f"{rows[key].get('seconds', 0):.2f}s",
                       f"worst {rows[key].get('worst', float('nan')):.3f} ({rows[key].get('binding')})", flush=True)
                 path.write_text(json.dumps(data, indent=1))
@@ -127,45 +164,73 @@ def time_runs(args) -> int:
     result = dict(sources=source_hashes(), repeats=args.repeats, environment=dict(
         python=sys.version.split()[0], numpy=np.__version__, scipy=scipy.__version__, machine=platform.machine(),
         processor=platform.processor(), threads="OPENBLAS/OMP/VECLIB_MAXIMUM_THREADS=1"), cases={})
-    # untimed process warm-up: imports, BLAS/LAPACK first calls, surface loading
+    # untimed process warm-up on TUNED configurations: imports, BLAS/LAPACK first calls, surface loading
     warm = all_cases["put_1y"]
-    quad_engine(200, 6.0).price(warm, market)
-    adapters.pde_full_risk(warm, market, pde_params(100, 1))
+    quad_engine(*tuning["put_1y"]["quad_chosen"]).price(warm, market)
+    adapters.pde_full_risk(warm, market, pde_params(*tuning["put_1y"]["pde_chosen"]))
     for name in args.cases or list(all_cases):
         contract = all_cases[name]
-        chosen = {e: tuning[name].get(f"{e}_chosen") for e in ("quad", "pde", "mc")}
-        engines = [e for e in ("quad", "pde", "mc") if chosen[e] is not None]
-        if "mc" in engines and not args.with_mc:
-            engines.remove("mc")
-        rows = {e: dict(config=chosen[e], cold=[], valuations=[]) for e in engines}
-        for rep in range(args.repeats):
-            order = engines if rep % 2 == 0 else engines[::-1]
-            for e in order:
-                start = perf_counter()
-                out = full_risk(e, tuple(chosen[e]), contract, market)
-                rows[e]["cold"].append(perf_counter() - start)
-                rows[e]["valuations"].append(out["timings"])
-                rows[e]["values"] = out["values"]
-                rows[e]["peak_rss_after"] = _peak_rss()
-        if "quad" in engines:                   # warm_moved: retained kernel, re-anchored grid
-            engine = quad_engine(*chosen["quad"])
-            engine.full_risk(contract, market)
-            moved_market = replace(market, spot=market.spot * (1 + MOVE))
-            moved = replace(contract, s0=market.spot * (1 + MOVE))
-            times = []
-            for _ in range(args.repeats):
-                start = perf_counter()
-                engine.full_risk(moved, moved_market)
-                times.append(perf_counter() - start)
-            rows["quad"]["warm_moved"] = times
         ref = refs[name]["assessment"]["reference"]
-        for e, row in rows.items():
+        chosen = {e: tuning[name].get(f"{e}_chosen") for e in ("quad", "pde", "mc")}
+        arms = {e: (e, tuple(chosen[e])) for e in ("quad", "pde", "mc") if chosen[e] is not None}
+        if "mc" in arms and not args.with_mc:
+            del arms["mc"]
+        # in-window companions for every ratio the report publishes
+        margin = sorted((r for r in tuning[name]["quad"].values() if r.get("meets") and r["worst"] <= MARGIN),
+                        key=lambda r: r["seconds"])
+        if margin:
+            arms["quad_margin"] = ("quad", tuple(margin[0]["config"]))
+        if contract.kind == "snowball" and contract.maturity > float(market.surface.time_grid[-1]):
+            arms["quad_no_slab_cache"] = ("quad_no_slab_cache", tuple(chosen["quad"]))
+        if "quad" in arms:                       # D16: the timed configuration once in validation mode, untimed
+            kernel = CTMCKernel()
+            out = LocalVolQuad(kernel, GridConfig(cells=chosen["quad"][0], half_width_std=chosen["quad"][1]),
+                               validate=True).price(contract, market)
+            validation = dict(engine=out["diagnostics"], kernel_max={
+                k: max(d[k] for d in kernel.diagnostics) for k in ("mass", "forward", "semigroup")})
+        rows = {a: dict(config=list(cfg), cold=[], valuations=[]) for a, (_, cfg) in arms.items()}
+        names = list(arms)
+        for rep in range(args.repeats):
+            for a in (names if rep % 2 == 0 else names[::-1]):
+                engine, cfg = arms[a]
+                start = perf_counter()
+                out = timed_arm(engine, cfg, contract, market)
+                rows[a]["cold"].append(perf_counter() - start)
+                rows[a]["valuations"].append(out["timings"])
+                rows[a]["values"] = out["values"]
+                rows[a]["peak_rss_after"] = _peak_rss()
+        # warm_moved: retained QUAD kernel / PDE as shipped, a distinct re-anchored spot per repeat
+        for a in ("quad", "pde"):
+            if a not in arms:
+                continue
+            engine_obj = quad_engine(*chosen["quad"]) if a == "quad" else None
+            if engine_obj is not None:
+                engine_obj.full_risk(contract, market)
+            times = []
+            for move in MOVES[:args.repeats]:
+                moved_market = replace(market, spot=market.spot * (1 + move))
+                moved = replace(contract, s0=market.spot * (1 + move))
+                start = perf_counter()
+                if engine_obj is not None:
+                    engine_obj.full_risk(moved, moved_market)
+                else:
+                    adapters.pde_full_risk(moved, moved_market, pde_params(*chosen["pde"]))
+                times.append(perf_counter() - start)
+            rows[a]["warm_moved"] = times
+            rows[a]["warm_moves"] = list(MOVES[:args.repeats])
+        for a, row in rows.items():
             row["median_cold"] = statistics.median(row["cold"])
             row["accuracy"] = score(row["values"], ref)
-        if "quad" in rows and "pde" in rows:
-            rows["speedup_vs_pde"] = rows["pde"]["median_cold"] / rows["quad"]["median_cold"]
-        if "quad" in rows and "mc" in rows:
-            rows["speedup_vs_mc"] = rows["mc"]["median_cold"] / rows["quad"]["median_cold"]
+        if "quad" in rows:
+            rows["quad"]["validation"] = validation
+        for a in ("pde", "mc"):
+            if "quad" in rows and a in rows:
+                rows[f"speedup_vs_{a}"] = rows[a]["median_cold"] / rows["quad"]["median_cold"]
+        if "quad_margin" in rows and "pde" in rows:
+            rows["speedup_margin_vs_pde"] = rows["pde"]["median_cold"] / rows["quad_margin"]["median_cold"]
+        if "quad_no_slab_cache" in rows and "pde" in rows:
+            rows["speedup_no_slab_cache_vs_pde"] = (rows["pde"]["median_cold"]
+                                                    / rows["quad_no_slab_cache"]["median_cold"])
         result["cases"][name] = rows
         print(name, {e: round(r["median_cold"], 3) for e, r in rows.items() if isinstance(r, dict)},
               {k: round(v, 2) for k, v in rows.items() if k.startswith("speedup")}, flush=True)

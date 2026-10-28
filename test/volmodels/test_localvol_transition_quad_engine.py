@@ -54,7 +54,7 @@ def test_auto_backend_switches_to_the_contour_on_stiff_operators():
 @pytest.mark.parametrize("half_width", [6.0, 8.0])
 def test_no_sliver_cells_on_the_headline_grids(cells, half_width):
     """Regression: 400 cells / 6 sd left a 3.3e-4 cell beside the KO pair (median 6.6e-3); its
-    stiffness pushed every operator onto the contour and made the risk run 2.7x slower."""
+    stiffness pushed every operator onto the contour and made the risk run 2.6x slower (0.175 -> 0.068 s per valuation)."""
     m = load_fixture()
     for maturity, months in ((1.0, 12), (2.0, 24)):
         c = snowball_contract(m.spot, maturity, months)

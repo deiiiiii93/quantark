@@ -132,7 +132,18 @@ def black_scholes_put(spot, strike, t, r, q, vol) -> float:
     return strike * math.exp(-r * t) * ndtr(-d2) - spot * math.exp(-q * t) * ndtr(-d1)
 
 
-def dupire_gap(market, moneyness=(0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15)) -> list[dict]:
+DUPIRE_GRID = GridConfig(cells=600, half_width_std=10.0, subdivide=3)
+DUPIRE_MONEYNESS = (0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15)
+
+
+def dupire_fingerprint() -> str:
+    """The Dupire table depends on its own grid and strikes, the QUAD sources and this driver."""
+    text = json.dumps([repr(DUPIRE_GRID), DUPIRE_MONEYNESS, hashlib.sha256(FIXTURE.read_bytes()).hexdigest()[:16],
+                       source_hashes(QUAD_SOURCES + ("reference.py",))], sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def dupire_gap(market, moneyness=DUPIRE_MONEYNESS) -> list[dict]:
     """QUAD European puts on the Dupire surface versus BS(input iv, flat r, flat q), per unit notional.
 
     Reported, not gated (spec AC4): a 6 x 33 finite-difference Dupire surface with
@@ -141,7 +152,7 @@ def dupire_gap(market, moneyness=(0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15)) -> lis
     """
     rows = []
     # short maturities on a steep-winged surface need a wider domain than the ATM-scaled default
-    engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=600, half_width_std=10.0, subdivide=3))
+    engine = LocalVolQuad(CTMCKernel(), DUPIRE_GRID)
     for t in market.surface.time_grid[1:]:
         for m in moneyness:
             c = vanilla_contract(market.spot, float(t), strike_m=m, option="put")
@@ -185,17 +196,16 @@ def main(argv=None) -> int:
                 case[arm] = {f"{a}x{b}": rows[f"{a}x{b}"] for a, b in ladder
                              if name in all_cases and f"{a}x{b}" in rows
                              and rows[f"{a}x{b}"].get("fingerprint") == fingerprint(arm, all_cases[name], (a, b))}
-        dupire_key = fingerprint("quad", "dupire", (600, 3))
-        if data.get("dupire_gap_fingerprint") != dupire_key:
+        if data.get("dupire_gap_fingerprint") != dupire_fingerprint():
             data.pop("dupire_gap", None)
-    data["sources"] = {"pde": source_hashes(PDE_SOURCES), "quad": source_hashes()}
+    data["sources"] = {"pde": source_hashes(PDE_SOURCES), "quad": source_hashes(QUAD_SOURCES)}
     data["environment"] = {"python": sys.version.split()[0], "numpy": np.__version__,
                            "machine": platform.machine(),
                            "fixture": "test/golden/modelvalidation/data/iv_surface_20240208.json"}
     data["market"] = {"spot": market.spot, "r": market.r, "q": market.q}
-    if args.arm in ("dupire", "all"):
+    if args.arm in ("dupire", "all") and "dupire_gap" not in data:
         data["dupire_gap"] = dupire_gap(market)
-        data["dupire_gap_fingerprint"] = fingerprint("quad", "dupire", (600, 3))
+        data["dupire_gap_fingerprint"] = dupire_fingerprint()
         path.write_text(json.dumps(data, indent=1))
     for name, contract in all_cases.items():
         if args.arm == "dupire" or (args.cases and name not in args.cases):

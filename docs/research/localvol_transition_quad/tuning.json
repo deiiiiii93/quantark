@@ -30,7 +30,8 @@
      },
      "worst": 1.9630405671999807,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "3c96922e40111de6"
     },
     "250x6.0": {
      "config": [
@@ -60,7 +61,8 @@
      },
      "worst": 1.1013862133046892,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "ab98e24cb14d75e9"
     },
     "300x6.0": {
      "config": [
@@ -90,7 +92,8 @@
      },
      "worst": 0.6528738137234757,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "121823901ec091de"
     },
     "350x6.0": {
      "config": [
@@ -120,7 +123,8 @@
      },
      "worst": 0.3953863690886461,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "b695efdad5dcb959"
     },
     "400x6.0": {
      "config": [
@@ -150,7 +154,8 @@
      },
      "worst": 0.1798033528566112,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "80b7cb6c9c456b0c"
     },
     "500x6.0": {
      "config": [
@@ -180,7 +185,8 @@
      },
      "worst": 0.04489037168764476,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "a84267f567baa062"
     },
     "600x6.0": {
      "config": [
@@ -210,7 +216,8 @@
      },
      "worst": 0.050485804394817535,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "4b4ca2cce999e262"
     },
     "200x8.0": {
      "config": [
@@ -240,7 +247,8 @@
      },
      "worst": 3.5587230415934368,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "a03f67649821a812"
     },
     "250x8.0": {
      "config": [
@@ -270,7 +278,8 @@
      },
      "worst": 2.313684348438372,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "9b896d6f6accbc38"
     },
     "300x8.0": {
      "config": [
@@ -300,7 +309,8 @@
      },
      "worst": 1.4688056031175734,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "e96b62e871a8cb15"
     },
     "350x8.0": {
      "config": [
@@ -330,7 +340,8 @@
      },
      "worst": 0.9913529064775606,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "4c7b17b1b2c3a294"
     },
     "400x8.0": {
      "config": [
@@ -360,7 +371,8 @@
      },
      "worst": 0.6495888235003022,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "41b4b1e7d13f98cb"
     },
     "500x8.0": {
      "config": [
@@ -390,7 +402,8 @@
      },
      "worst": 0.2814954179675144,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "32aab6639f80020a"
     },
     "600x8.0": {
      "config": [
@@ -420,7 +433,8 @@
      },
      "worst": 0.03830468374044216,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "3263dca8a8ace478"
     }
    },
    "quad_chosen": [
@@ -456,7 +470,8 @@
      },
      "worst": 1.6629193727091263,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "008da1ec229527a9"
     },
     "150x1": {
      "config": [
@@ -486,7 +501,8 @@
      },
      "worst": 1.2907383341209666,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "37a5b285ec20808b"
     },
     "200x1": {
      "config": [
@@ -516,7 +532,8 @@
      },
      "worst": 1.1844530602367342,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "f34abf5d6e89cfdc"
     },
     "150x2": {
      "config": [
@@ -546,7 +563,8 @@
      },
      "worst": 0.4315707546043157,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "dac7ee081f2f6c73"
     },
     "200x2": {
      "config": [
@@ -576,7 +594,8 @@
      },
      "worst": 0.32281951351076366,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "9cc2bbdb90baeef3"
     },
     "300x2": {
      "config": [
@@ -606,7 +625,8 @@
      },
      "worst": 0.25882243222419277,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "79d374e36687e939"
     },
     "200x4": {
      "config": [
@@ -636,7 +656,8 @@
      },
      "worst": 0.13491499793572004,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "4b05328972be210a"
     },
     "300x4": {
      "config": [
@@ -666,7 +687,8 @@
      },
      "worst": 0.07081439316047877,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "b781fc7a7c6bcb0d"
     },
     "400x4": {
      "config": [
@@ -696,7 +718,8 @@
      },
      "worst": 0.05271892028257952,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "f7a60a9d96f8c64c"
     }
    },
    "pde_chosen": [
@@ -740,7 +763,8 @@
      },
      "worst": 128.1273422324748,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "091c752b29b2a0fc"
     },
     "1x262144": {
      "config": [
@@ -778,7 +802,8 @@
      },
      "worst": 45.071798849569724,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "7acab43ecbc78bf8"
     },
     "1x1048576": {
      "config": [
@@ -816,7 +841,8 @@
      },
      "worst": 36.03632273739378,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "a74439d06a4810b1"
     },
     "4x65536": {
      "config": [
@@ -854,7 +880,8 @@
      },
      "worst": 174.12131770524647,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "fa11444ee1191919"
     }
    },
    "mc_chosen": null
@@ -889,7 +916,8 @@
      },
      "worst": 2.5444397621454673,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "8aebdbadf7b0063c"
     },
     "250x6.0": {
      "config": [
@@ -919,7 +947,8 @@
      },
      "worst": 1.64157573988577,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "fe0cbb4da37b7a3c"
     },
     "300x6.0": {
      "config": [
@@ -949,7 +978,8 @@
      },
      "worst": 0.9375383291876371,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "19f04fef5a4e0bb1"
     },
     "350x6.0": {
      "config": [
@@ -979,7 +1009,8 @@
      },
      "worst": 0.5221688514800427,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "9347f95793c8d0cb"
     },
     "400x6.0": {
      "config": [
@@ -1009,7 +1040,8 @@
      },
      "worst": 0.2671383688923612,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "05a8e1ec2bd73e0a"
     },
     "500x6.0": {
      "config": [
@@ -1039,7 +1071,8 @@
      },
      "worst": 0.06075926707982404,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "28fe247a8320d30a"
     },
     "600x6.0": {
      "config": [
@@ -1069,7 +1102,8 @@
      },
      "worst": 0.3014773806297999,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "64b70b27415cec42"
     },
     "200x8.0": {
      "config": [
@@ -1099,7 +1133,8 @@
      },
      "worst": 4.750923231652271,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "4de66d7772f8edf7"
     },
     "250x8.0": {
      "config": [
@@ -1129,7 +1164,8 @@
      },
      "worst": 3.006198975179508,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "c06969236194fbb3"
     },
     "300x8.0": {
      "config": [
@@ -1159,7 +1195,8 @@
      },
      "worst": 1.9247160218005543,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "e8043e3416a88a79"
     },
     "350x8.0": {
      "config": [
@@ -1189,7 +1226,8 @@
      },
      "worst": 1.3373030836305588,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "1887e0598d2a05bb"
     },
     "400x8.0": {
      "config": [
@@ -1219,7 +1257,8 @@
      },
      "worst": 0.8978740684484343,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "c799f68c92b5f682"
     },
     "500x8.0": {
      "config": [
@@ -1249,7 +1288,8 @@
      },
      "worst": 0.34092309646016616,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "03041a72ff8d25bc"
     },
     "600x8.0": {
      "config": [
@@ -1279,7 +1319,8 @@
      },
      "worst": 0.036391715136918634,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "7293ad99d31242de"
     }
    },
    "quad_chosen": [
@@ -1315,7 +1356,8 @@
      },
      "worst": 0.8648857148463307,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "024b227c5b353d43"
     },
     "150x1": {
      "config": [
@@ -1345,7 +1387,8 @@
      },
      "worst": 0.6969910499654564,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "bde939ea9e09cc6d"
     },
     "200x1": {
      "config": [
@@ -1375,7 +1418,8 @@
      },
      "worst": 0.6522364122329982,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "40b8686919500d92"
     },
     "150x2": {
      "config": [
@@ -1405,7 +1449,8 @@
      },
      "worst": 0.212305125313339,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "14b649501d3e6185"
     },
     "200x2": {
      "config": [
@@ -1435,7 +1480,8 @@
      },
      "worst": 0.16742977341444032,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "d685f8d16eb6fb77"
     },
     "300x2": {
      "config": [
@@ -1465,7 +1511,8 @@
      },
      "worst": 0.1400191411393692,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "10ef862a7122ece8"
     },
     "200x4": {
      "config": [
@@ -1495,7 +1542,8 @@
      },
      "worst": 0.04619484072265756,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "8aa413b1168aa457"
     },
     "300x4": {
      "config": [
@@ -1525,7 +1573,8 @@
      },
      "worst": 0.025950752000085557,
      "binding": "delta",
-     "meets": true
+     "meets": true,
+     "fingerprint": "fbb59c21597aaae8"
     },
     "400x4": {
      "config": [
@@ -1555,7 +1604,8 @@
      },
      "worst": 0.03338885493644503,
      "binding": "gamma",
-     "meets": true
+     "meets": true,
+     "fingerprint": "499c3a90ebb5b711"
     }
    },
    "pde_chosen": [
@@ -1599,7 +1649,8 @@
      },
      "worst": 301.905865511452,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "cbb02f2ef9980b22"
     },
     "1x262144": {
      "config": [
@@ -1637,7 +1688,8 @@
      },
      "worst": 138.1502663916504,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "e41d6f9187f13b48"
     },
     "1x1048576": {
      "config": [
@@ -1675,7 +1727,8 @@
      },
      "worst": 52.99731311514931,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "a95c856b2cccf306"
     },
     "4x65536": {
      "config": [
@@ -1713,7 +1766,8 @@
      },
      "worst": 193.99391260986496,
      "binding": "gamma",
-     "meets": false
+     "meets": false,
+     "fingerprint": "a03e7d93df2c0460"
     }
    },
    "mc_chosen": null
@@ -1726,7 +1780,8 @@
       6.0
      ],
      "status": "refused",
-     "reason": "interval identity residual (mass 1.01e-11, forward 1.64e-06) exceeds 1e-06 over 1.000000y; refine the grid"
+     "reason": "interval identity residual (mass 1.01e-11, forward 1.64e-06) exceeds 1e-06 over 1.000000y; refine the grid",
+     "fingerprint": "3f4e5717c091e1b5"
     },
     "250x6.0": {
      "config": [
@@ -1734,7 +1789,8 @@
       6.0
      ],
      "status": "refused",
-     "reason": "interval identity residual (mass 9.75e-12, forward 1.35e-06) exceeds 1e-06 over 1.000000y; refine the grid"
+     "reason": "interval identity residual (mass 9.75e-12, forward 1.35e-06) exceeds 1e-06 over 1.000000y; refine the grid",
+     "fingerprint": "e9122ac042af1524"
     },
     "300x6.0": {
      "config": [
@@ -1742,7 +1798,8 @@
       6.0
      ],
      "status": "refused",
-     "reason": "interval identity residual (mass 9.65e-12, forward 1.18e-06) exceeds 1e-06 over 1.000000y; refine the grid"
+     "reason": "interval identity residual (mass 9.65e-12, forward 1.18e-06) exceeds 1e-06 over 1.000000y; refine the grid",
+     "fingerprint": "c0bc387e1dac4355"
     },
     "350x6.0": {
      "config": [
@@ -1750,7 +1807,8 @@
       6.0
      ],
      "status": "refused",
-     "reason": "interval identity residual (mass 1.01e-11, forward 1.07e-06) exceeds 1e-06 over 1.000000y; refine the grid"
+     "reason": "interval identity residual (mass 1.01e-11, forward 1.07e-06) exceeds 1e-06 over 1.000000y; refine the grid",
+     "fingerprint": "2cde421ed776b495"
     },
     "400x6.0": {
      "config": [
@@ -1758,7 +1816,8 @@
       6.0
      ],
      "status": "refused",
-     "reason": "interval identity residual (mass 1.06e-11, forward 1e-06) exceeds 1e-06 over 1.000000y; refine the grid"
+     "reason": "interval identity residual (mass 1.06e-11, forward 1e-06) exceeds 1e-06 over 1.000000y; refine the grid",
+     "fingerprint": "7c8085fea43ebf8b"
     },
     "500x6.0": {
      "config": [
@@ -1788,7 +1847,8 @@
      },
      "worst": 0.1153205911014199,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "b0268f97b1cdd988"
     },
     "600x6.0": {
      "config": [
@@ -1818,7 +1878,8 @@
      },
      "worst": 0.07121419348249391,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "cc37f9f6fed53ca3"
     },
     "200x8.0": {
      "config": [
@@ -1848,7 +1909,8 @@
      },
      "worst": 1.3771582741961552,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "ea9c9279be36f517"
     },
     "250x8.0": {
      "config": [
@@ -1878,7 +1940,8 @@
      },
      "worst": 0.8112751110925243,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "3464d835c07563a9"
     },
     "300x8.0": {
      "config": [
@@ -1908,7 +1971,8 @@
      },
      "worst": 0.5311081819525665,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "8e77b35cb3a84099"
     },
     "350x8.0": {
      "config": [
@@ -1938,7 +2002,8 @@
      },
      "worst": 0.37653881862803606,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "abb1c494581457bb"
     },
     "400x8.0": {
      "config": [
@@ -1968,7 +2033,8 @@
      },
      "worst": 0.29957498753480083,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "b50ec65286a07901"
     },
     "500x8.0": {
      "config": [
@@ -1998,7 +2064,8 @@
      },
      "worst": 0.18875630598019777,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "cd0ab5372eba67ec"
     },
     "600x8.0": {
      "config": [
@@ -2028,7 +2095,8 @@
      },
      "worst": 0.13711209503913802,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "8001fd06dc171d20"
     }
    },
    "quad_chosen": [
@@ -2064,7 +2132,8 @@
      },
      "worst": 0.4107567664227152,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "d1305d2fa4e1c089"
     },
     "150x1": {
      "config": [
@@ -2094,7 +2163,8 @@
      },
      "worst": 0.11812135967292914,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "4dc77ebd67c7a454"
     },
     "200x1": {
      "config": [
@@ -2124,7 +2194,8 @@
      },
      "worst": 0.031794319552969075,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "ab1958257e984c93"
     },
     "150x2": {
      "config": [
@@ -2154,7 +2225,8 @@
      },
      "worst": 0.14317946179231988,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "03eb8f18869c7c89"
     },
     "200x2": {
      "config": [
@@ -2184,7 +2256,8 @@
      },
      "worst": 0.05685750956802016,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "d5346e6a3b8bf9dd"
     },
     "300x2": {
      "config": [
@@ -2214,7 +2287,8 @@
      },
      "worst": 0.019190350221421786,
      "binding": "gamma",
-     "meets": true
+     "meets": true,
+     "fingerprint": "39bdb8f309920ac2"
     },
     "200x4": {
      "config": [
@@ -2244,7 +2318,8 @@
      },
      "worst": 0.05464219962753036,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "21e0573049f85977"
     },
     "300x4": {
      "config": [
@@ -2274,7 +2349,8 @@
      },
      "worst": 0.021112899916123806,
      "binding": "gamma",
-     "meets": true
+     "meets": true,
+     "fingerprint": "aa3a1e83b38555df"
     },
     "400x4": {
      "config": [
@@ -2304,7 +2380,8 @@
      },
      "worst": 0.019021558484606616,
      "binding": "gamma",
-     "meets": true
+     "meets": true,
+     "fingerprint": "4fc2bf987fc1c527"
     }
    },
    "pde_chosen": [
@@ -2342,7 +2419,8 @@
      },
      "worst": 0.5472533185837437,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "98252c1a362eeb0d"
     },
     "250x6.0": {
      "config": [
@@ -2372,7 +2450,8 @@
      },
      "worst": 0.3497276998276795,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "8d05c681654ab134"
     },
     "300x6.0": {
      "config": [
@@ -2402,7 +2481,8 @@
      },
      "worst": 0.2336291349733753,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "f00e0825160b78e4"
     },
     "350x6.0": {
      "config": [
@@ -2432,7 +2512,8 @@
      },
      "worst": 0.17249751826401913,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "55f61b1a420ca28c"
     },
     "400x6.0": {
      "config": [
@@ -2462,7 +2543,8 @@
      },
      "worst": 0.1301332196561658,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "409fdd1eff789e2b"
     },
     "500x6.0": {
      "config": [
@@ -2492,7 +2574,8 @@
      },
      "worst": 0.08376586748544759,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "8177facedf41f433"
     },
     "600x6.0": {
      "config": [
@@ -2522,7 +2605,8 @@
      },
      "worst": 0.05650605713083262,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "ecdf6cf2b018fbb2"
     },
     "200x8.0": {
      "config": [
@@ -2552,7 +2636,8 @@
      },
      "worst": 1.0251511873481978,
      "binding": "pv",
-     "meets": false
+     "meets": false,
+     "fingerprint": "fae103a6291721a9"
     },
     "250x8.0": {
      "config": [
@@ -2582,7 +2667,8 @@
      },
      "worst": 0.600413145035953,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "39156e303ffd41c5"
     },
     "300x8.0": {
      "config": [
@@ -2612,7 +2698,8 @@
      },
      "worst": 0.41326591340382424,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "54bacd5c194e0afb"
     },
     "350x8.0": {
      "config": [
@@ -2642,7 +2729,8 @@
      },
      "worst": 0.2986743336082058,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "a077b6dee7da63cd"
     },
     "400x8.0": {
      "config": [
@@ -2672,7 +2760,8 @@
      },
      "worst": 0.23344852177838507,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "367ca29157bcbdd6"
     },
     "500x8.0": {
      "config": [
@@ -2702,7 +2791,8 @@
      },
      "worst": 0.1468063274146815,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "2b2eac2b4889a6e9"
     },
     "600x8.0": {
      "config": [
@@ -2732,7 +2822,8 @@
      },
      "worst": 0.10418172821029942,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "171cbedbee722ae8"
     }
    },
    "quad_chosen": [
@@ -2768,7 +2859,8 @@
      },
      "worst": 0.22943294210429552,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "b34feebd2e141645"
     },
     "150x1": {
      "config": [
@@ -2798,7 +2890,8 @@
      },
      "worst": 0.06477386880400504,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "e6804074b13cfa3e"
     },
     "200x1": {
      "config": [
@@ -2828,7 +2921,8 @@
      },
      "worst": 0.017379791824919527,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "f9bbf2a91932524b"
     },
     "150x2": {
      "config": [
@@ -2858,7 +2952,8 @@
      },
      "worst": 0.06681404570522617,
      "binding": "pv",
-     "meets": true
+     "meets": true,
+     "fingerprint": "b137304782f7931d"
     },
     "200x2": {
      "config": [
@@ -2888,7 +2983,8 @@
      },
      "worst": 0.026037378330995172,
      "binding": "theta",
-     "meets": true
+     "meets": true,
+     "fingerprint": "92e2c80c11838b0c"
     },
     "300x2": {
      "config": [
@@ -2918,7 +3014,8 @@
      },
      "worst": 0.01028617301858731,
      "binding": "theta",
-     "meets": true
+     "meets": true,
+     "fingerprint": "988610735789931c"
     },
     "200x4": {
      "config": [
@@ -2948,7 +3045,8 @@
      },
      "worst": 0.028188051277079768,
      "binding": "theta",
-     "meets": true
+     "meets": true,
+     "fingerprint": "30fd715c62b47980"
     },
     "300x4": {
      "config": [
@@ -2978,7 +3076,8 @@
      },
      "worst": 0.012436790543077126,
      "binding": "theta",
-     "meets": true
+     "meets": true,
+     "fingerprint": "689c61b8e381712f"
     },
     "400x4": {
      "config": [
@@ -3008,7 +3107,8 @@
      },
      "worst": 0.01539986763828576,
      "binding": "theta",
-     "meets": true
+     "meets": true,
+     "fingerprint": "62084ee6bd98bddd"
     }
    },
    "pde_chosen": [
@@ -3018,15 +3118,18 @@
   }
  },
  "sources": {
-  "__init__.py": "e3b0c44298fc1c14",
-  "adapters.py": "3e98f6779f4d2055",
-  "bakeoff.py": "8fd50da21338b27a",
-  "benchmark.py": "e0a38f7649c8413b",
-  "contract.py": "83efb48684337cb4",
-  "engine.py": "9353ac8c3eb997c0",
-  "grid.py": "ca348ba543460bb8",
-  "kernels.py": "81c5926205fad0c0",
-  "market.py": "6b1dbba8c5aa7323",
-  "reference.py": "0417e9e9e883e200"
- }
+  "quad": {
+   "contract.py": "83efb48684337cb4",
+   "market.py": "6b1dbba8c5aa7323",
+   "grid.py": "ca348ba543460bb8",
+   "kernels.py": "81c5926205fad0c0",
+   "engine.py": "9353ac8c3eb997c0"
+  },
+  "pde_mc": {
+   "adapters.py": "3e98f6779f4d2055",
+   "contract.py": "83efb48684337cb4",
+   "market.py": "6b1dbba8c5aa7323"
+  }
+ },
+ "provenance": "rows produced at 43fd869; fingerprints backfilled after verifying no change to contract/market/grid/kernels/engine/adapters.py or reference.json since"
 }

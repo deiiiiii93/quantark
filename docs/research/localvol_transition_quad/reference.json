@@ -914,16 +914,11 @@
    "market.py": "6b1dbba8c5aa7323"
   },
   "quad": {
-   "__init__.py": "e3b0c44298fc1c14",
-   "adapters.py": "3e98f6779f4d2055",
-   "bakeoff.py": "8fd50da21338b27a",
-   "benchmark.py": "c8c7a7a1072992d1",
    "contract.py": "83efb48684337cb4",
-   "engine.py": "9353ac8c3eb997c0",
+   "market.py": "6b1dbba8c5aa7323",
    "grid.py": "ca348ba543460bb8",
    "kernels.py": "81c5926205fad0c0",
-   "market.py": "6b1dbba8c5aa7323",
-   "reference.py": "0417e9e9e883e200"
+   "engine.py": "9353ac8c3eb997c0"
   }
  },
  "environment": {
@@ -937,7 +932,7 @@
   "r": 0.02,
   "q": 0.06316996793679942
  },
- "dupire_gap_fingerprint": "bd29fc04bcb15e18",
+ "dupire_gap_fingerprint": "5fe645f0561043ec",
  "dupire_gap": [
   {
    "maturity": 0.09863013698630137,
