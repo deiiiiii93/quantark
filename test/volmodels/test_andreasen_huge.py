@@ -169,3 +169,59 @@ class _RawGrid:
 def test_config_validation(kw):
     with pytest.raises(ValidationError):
         AndreasenHugeConfig(**kw)
+
+
+# ---------------------------------------------------------------------------- sampled view (T2)
+
+def test_package_exports_the_construction():
+    import quantark.volmodels.localvol as lv
+
+    for name in ("AndreasenHugeConfig", "AndreasenHugeLocalVol", "AHCalibrationRecord", "LocalVolConstruction",
+                 "calibrate_andreasen_huge", "build_andreasen_huge_local_vol"):
+        assert name in lv.__all__ and hasattr(lv, name)
+
+
+def test_sampled_surface_equals_the_lazy_object_at_its_nodes(fixture_ah):
+    from quantark.volmodels.localvol import LocalVolSurface
+
+    ah, grid, spot, _ = fixture_ah
+    surf = ah.to_local_vol_surface()
+    assert isinstance(surf, LocalVolSurface)
+    for k in range(0, surf.time_grid.size, 37):
+        lazy = ah.local_vol(surf.strike_grid, float(surf.time_grid[k]))
+        assert np.allclose(surf.lv_grid[k], lazy, rtol=1e-14, atol=0.0)
+
+
+def test_sampled_rows_hold_each_expiry_and_its_right_limit(fixture_ah):
+    ah, grid, _, _ = fixture_ah
+    surf = ah.to_local_vol_surface()
+    t = surf.time_grid
+    assert t[0] == 0.0
+    for i, e in enumerate(grid.maturities):
+        assert np.any(np.isclose(t, float(e), rtol=0, atol=1e-15))
+        if i < len(grid.maturities) - 1:
+            assert np.any(np.isclose(t, float(e) + ah.config.jump_width, rtol=0, atol=1e-15))
+    rows = ah.config.rows_per_segment
+    assert t.size == 1 + rows * len(grid.maturities) + (len(grid.maturities) - 1)
+
+
+def test_sampled_surface_is_well_formed_and_bumpable(fixture_ah):
+    ah, _, _, _ = fixture_ah
+    lv = ah.to_local_vol_surface().lv_grid
+    assert np.all(np.isfinite(lv)) and float(lv.min()) > 0.01
+
+
+def test_builder_is_the_sampled_calibration():
+    from quantark.volmodels.localvol import build_andreasen_huge_local_vol
+
+    grid, spot, q = _fixture()
+    a = build_andreasen_huge_local_vol(grid, spot, FlatRateCurve(R), lambda t: q)
+    b = calibrate_andreasen_huge(grid, spot, FlatRateCurve(R), lambda t: q).to_local_vol_surface()
+    assert np.array_equal(a.lv_grid, b.lv_grid) and np.array_equal(a.time_grid, b.time_grid)
+
+
+@pytest.mark.parametrize("rows", [0, -1, 2.5])
+def test_sampled_rows_validation(fixture_ah, rows):
+    ah, _, _, _ = fixture_ah
+    with pytest.raises(ValidationError):
+        ah.to_local_vol_surface(rows)
