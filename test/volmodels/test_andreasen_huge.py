@@ -225,3 +225,55 @@ def test_sampled_rows_validation(fixture_ah, rows):
     ah, _, _, _ = fixture_ah
     with pytest.raises(ValidationError):
         ah.to_local_vol_surface(rows)
+
+
+# ---------------------------------------------------------------------------- CP1: read-out vs finite difference
+
+@pytest.mark.parametrize("side", ["call", "put"])
+def test_local_vol_readout_matches_a_finite_difference_of_the_partial_step(side):
+    """D8: sigma^2 = 2 (c_t + mu c_y) / (G c), with c_t from the exact derivative of the partial step.
+
+    Long segments (here 2y -> 5y) expose any mistake in the boundary terms of the c_t solve.
+    """
+    from quantark.volmodels.localvol.andreasen_huge import _Stencils
+
+    grid, spot, q = _fixture()
+    iv = np.asarray(grid.iv_grid, dtype=float)
+    long = GridVolSurface(list(grid.strikes), [0.5, 1.0, 2.0, 5.0], iv[[2, 3, 4, 5]])
+    ah = calibrate_andreasen_huge(long, spot, FlatRateCurve(R), lambda t: q)
+    model = ah._sides[side]
+    i, t_start = 3, 2.0
+    tau = 1.5
+    t = t_start + tau
+    th = model.thetas[i]
+    mu = ah._mu[i]
+    h = 1e-5
+
+    def c_at(dt):
+        return model.step(th, mu, model.starts[i], t + dt, tau + dt)[0]
+
+    c = c_at(0.0)
+    ct = (c_at(h) - c_at(-h)) / (2.0 * h)
+    gc = _Stencils.apply(ah._stencils.g, c)
+    cy = _Stencils.apply(ah._stencils.dy, c)
+    num = 2.0 * (ct[1:-1] + mu * cy)
+    read = (gc > 1e-6 * gc.max()) & (num > 0)
+    otm = (ah._y[1:-1] < math.log(ah.forward(t) / spot)) == (side == "put")
+    sel = read & otm
+    assert sel.sum() > 50
+    fd = np.sqrt(num[sel] / gc[sel])
+    got = model.sigma_nodes(i, t, tau)[0][1:-1][sel]
+    assert np.max(np.abs(got - fd)) < 1e-5, float(np.max(np.abs(got - fd)))
+
+
+def test_a_quote_without_vega_raises_a_numerical_error_not_a_scipy_error():
+    grid = GridVolSurface([50.0, 100.0, 200.0], [0.01, 0.5], np.full((2, 3), 0.05))
+    with pytest.raises(NumericalError, match="no vega"):
+        calibrate_andreasen_huge(grid, 100.0, FlatRateCurve(0.0), lambda t: 0.0)
+
+
+def test_unreadable_counts_only_nodes_on_the_side_read(fixture_ah):
+    ah, _, _, _ = fixture_ah
+    ah.to_local_vol_surface()
+    assert isinstance(ah.unreadable, int)
+    assert 0 <= ah.unreadable < ah._y.size - 2

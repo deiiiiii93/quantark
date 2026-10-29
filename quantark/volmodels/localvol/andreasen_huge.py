@@ -46,10 +46,14 @@ from scipy.optimize import least_squares
 from scipy.special import ndtr
 
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import is_zero
 from quantark.volmodels.localvol.surface import LocalVolSurface
 
 TAIL_GROWTH = 1.04          # geometric growth of the tail cells beyond the outer quoted strikes
 TAIL_CELL_CAP = 0.05        # largest tail cell in y before the M-matrix cap
+LSQ_TOLERANCE = 1e-15       # xtol/ftol/gtol of the per-expiry least-squares fit (exactness is gated separately)
+LSQ_MAX_EVALUATIONS = 200   # residual evaluations per expiry and side before the fit stops
+CACHE_MAX_TIMES = 50000     # local-vol node vectors kept per object (keyed on t) before the cache is reset
 _SQRT_2PI = math.sqrt(2.0 * math.pi)
 _SIDES = ("call", "put")
 
@@ -81,7 +85,7 @@ class AndreasenHugeConfig:
     cells_per_gap: int = 8
     rows_per_segment: int = 64
     domain_log_width: float = math.log(8.0)
-    theta_bounds: tuple = (0.05, 5.0)
+    theta_bounds: tuple[float, float] = (0.05, 5.0)
     exact_tol: float = 1e-10
     max_abs_d: Optional[float] = None
     density_floor: float = 1e-10
@@ -261,6 +265,11 @@ class _Side:
             idx = o._knot_idx[active]
             weights = _interp_matrix(o._y, y_act)
             tgt, vg = target[active], vega[active]
+            flat = ~(np.isfinite(vg) & (vg > 0.0))
+            if np.any(flat):
+                raise NumericalError(
+                    f"expiry {t:.6f}: quote at strike {o.strikes[active][int(np.argmax(flat))]:.6g} has no "
+                    "vega in double precision; it cannot be fitted — opt into the max_abs_d quote rule")
             guess = iv_grid[i][active] if prev_nodes is None else np.interp(y_act, o._y, prev_nodes)
             lo, hi = cfg.theta_bounds
             start = c
@@ -278,7 +287,8 @@ class _Side:
                 return full[idx] / vg[:, None]
 
             sol = least_squares(resid, np.clip(guess, lo, hi), jac=jac, bounds=(lo, hi), method="trf",
-                                xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=200)
+                                xtol=LSQ_TOLERANCE, ftol=LSQ_TOLERANCE, gtol=LSQ_TOLERANCE,
+                                max_nfev=LSQ_MAX_EVALUATIONS)
             err = np.abs(sol.fun)
             worst = float(err.max())
             self.records.append(AHCalibrationRecord(expiry=t, side=self.side, worst_vol_error=worst,
@@ -298,19 +308,20 @@ class _Side:
             prev_nodes, t_prev = nodes, t
 
     # repricing local vol on the grid (calibration coordinates)
-    def sigma_nodes(self, i: int, t: float, tau: float) -> np.ndarray:
+    def sigma_nodes(self, i: int, t: float, tau: float) -> tuple:
+        """(local vol at every node, readable mask) at time t = T_{i-1} + tau of segment i."""
         o = self.o
         th = self.thetas[i]
         if tau <= 0.0:
-            return th.copy()
+            return th.copy(), np.ones(th.size, dtype=bool)
         mu = o._mu[i]
         c, gen, ab = self.step(th, mu, self.starts[i], t, tau)
-        lc = _Stencils.apply(gen, c)
-        b_lo, b_hi = self.boundary(t)
+        # d/dtau of [I - tau A] c = c_start + tau b g(t):  [I - tau A] c_t = (A c + b g) + tau b g'(t).
+        # The full-vector stencil already includes the boundary column b g; only tau b g' is added.
+        rhs = _Stencils.apply(gen, c)
         db_lo, db_hi = self.boundary_rate(t, mu)
-        rhs = lc.copy()
-        rhs[0] += gen[0][0] * b_lo + tau * gen[0][0] * db_lo
-        rhs[-1] += gen[2][-1] * b_hi + tau * gen[2][-1] * db_hi
+        rhs[0] += tau * gen[0][0] * db_lo
+        rhs[-1] += tau * gen[2][-1] * db_hi
         ct = solve_banded((1, 1), ab, rhs)
         gc = _Stencils.apply(o._stencils.g, c)
         cy = _Stencils.apply(o._stencils.dy, c)
@@ -321,8 +332,9 @@ class _Side:
             raise NumericalError(f"Andreasen-Huge {self.side} local vol unreadable at t={t:.6f}")
         inner = np.sqrt(num[valid] / gc[valid])
         filled = np.interp(np.arange(gc.size), valid, inner)     # linear across holes, flat beyond
-        o.unreadable[self.side] = max(o.unreadable[self.side], int(gc.size - valid.size))
-        return np.concatenate((filled[:1], filled, filled[-1:]))
+        sigma = np.concatenate((filled[:1], filled, filled[-1:]))
+        readable = np.concatenate(([False], ok, [False]))
+        return sigma, readable
 
 
 # ---------------------------------------------------------------------------- public objects
@@ -336,7 +348,8 @@ class AndreasenHugeLocalVol:
         strikes: quoted strikes.
         config: the ``AndreasenHugeConfig`` used.
         report: one ``AHCalibrationRecord`` per expiry and side.
-        unreadable: largest number of nodes per side whose local vol came from the fill rule.
+        unreadable: largest number of interior nodes, on the OTM side actually read, whose local vol
+            came from the fill rule at any time evaluated so far (far tails included).
     """
 
     def __init__(self, iv_surface, spot: float, rate_curve, div_yield: Callable[[float], float],
@@ -358,7 +371,7 @@ class AndreasenHugeLocalVol:
         self._y_knots = np.log(strikes / self.spot)
         theta_min = self.config.theta_bounds[0]
         mu_max = float(np.max(np.abs(self._mu)))
-        h_cap = math.inf if mu_max == 0.0 else theta_min ** 2 / (2.0 * mu_max)
+        h_cap = math.inf if is_zero(mu_max) else theta_min ** 2 / (2.0 * mu_max)
         gaps = np.diff(self._y_knots) / self.config.cells_per_gap
         if np.any(gaps > h_cap):
             j = int(np.argmax(gaps > h_cap))
@@ -369,7 +382,7 @@ class AndreasenHugeLocalVol:
                                               self.config.domain_log_width, min(TAIL_CELL_CAP, h_cap))
         self._k_over_s0 = np.exp(self._y)
         self._stencils = _Stencils.on(self._y)
-        self.unreadable = {"call": 0, "put": 0}
+        self.unreadable = 0
         self._cache: dict = {}
         self._sides = {s: _Side(s, self, iv) for s in _SIDES}
         self.report = tuple(r for i in range(expiries.size) for s in _SIDES for r in [self._sides[s].records[i]])
@@ -404,9 +417,12 @@ class AndreasenHugeLocalVol:
         if hit is None:
             i, _, tau = self._segment(t)
             below = self._y < math.log(self.forward(t) / self.spot)
-            hit = np.where(below, self._sides["put"].sigma_nodes(i, t, tau),
-                           self._sides["call"].sigma_nodes(i, t, tau))
-            if len(self._cache) > 50000:
+            put, put_ok = self._sides["put"].sigma_nodes(i, t, tau)
+            call, call_ok = self._sides["call"].sigma_nodes(i, t, tau)
+            hit = np.where(below, put, call)
+            read = np.where(below, put_ok, call_ok)[1:-1]          # interior nodes on the side read
+            self.unreadable = max(self.unreadable, int(read.size - read.sum()))
+            if len(self._cache) > CACHE_MAX_TIMES:
                 self._cache.clear()
             self._cache[t] = hit
         return hit

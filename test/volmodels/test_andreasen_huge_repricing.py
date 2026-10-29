@@ -2,8 +2,8 @@
 
 Each quoted European put is priced by ``LocalVolPDESolver`` on the sampled AH surface and inverted to
 Black–Scholes implied vol (zero rates at the option's maturity); the gap to the quoted vol must stay
-within 0.05 vol points. The PDE grid is the one T0 measured as converged (one more refinement moves
-no gap by more than 0.005 vol points).
+within 0.05 vol points. The PDE grid (3200x32) is the one T0 measured: every quote's |gap| plus its
+change under one more refinement (6400x64) stays within 0.05 (worst 0.0456; 0.0398 at 6400x64).
 """
 import math
 from datetime import datetime
