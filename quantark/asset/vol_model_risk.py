@@ -13,7 +13,13 @@ from quantark.priceenv import FxPricingEnvironment, PricingEnvironment
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.volmodels.curves import forward_carry_on_grid, forward_rates_on_grid
 from quantark.volmodels.heston import HestonParams, MarketOption, calibrate_heston
-from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
+from quantark.volmodels.localvol import (
+    AndreasenHugeConfig,
+    LocalVolConstruction,
+    LocalVolSurface,
+    build_andreasen_huge_local_vol,
+    build_dupire_local_vol,
+)
 from quantark.volmodels.risk import (
     HestonCalibrationSpec,
     MarketVegaRequest,
@@ -42,10 +48,23 @@ class BaseVolModelRiskCalculator:
         is_fx: bool,
         heston_calibration_spec: Optional[HestonCalibrationSpec] = None,
         slv_calibration_spec: Optional[SlvCalibrationSpec] = None,
+        local_vol_construction: LocalVolConstruction = LocalVolConstruction.DUPIRE,
+        andreasen_huge_config: Optional[AndreasenHugeConfig] = None,
     ) -> None:
+        if not isinstance(local_vol_construction, LocalVolConstruction):
+            raise ValidationError("local_vol_construction must be a LocalVolConstruction")
+        if andreasen_huge_config is not None:
+            if local_vol_construction is not LocalVolConstruction.ANDREASEN_HUGE:
+                raise ValidationError("andreasen_huge_config requires LocalVolConstruction.ANDREASEN_HUGE")
+            if not isinstance(andreasen_huge_config, AndreasenHugeConfig):
+                raise ValidationError("andreasen_huge_config must be an AndreasenHugeConfig")
         self._is_fx = is_fx
         self.heston_calibration_spec = heston_calibration_spec or HestonCalibrationSpec()
         self.slv_calibration_spec = slv_calibration_spec or SlvCalibrationSpec()
+        # Builder for every local-vol surface this calculator constructs (market vega, SLV market vega and
+        # model risk on engines without a prebuilt surface). Engines' own price() keep their builder.
+        self.local_vol_construction = local_vol_construction
+        self.andreasen_huge_config = andreasen_huge_config
 
     def calculate_model_risk(
         self, product, env, engine, request: Optional[ModelRiskRequest] = None
@@ -123,15 +142,21 @@ class BaseVolModelRiskCalculator:
 
     def _build_local_vol(self, env, surface: GridVolSurface) -> LocalVolSurface:
         if self._is_fx:
-            return build_dupire_local_vol(
-                surface,
-                spot=float(env.effective_spot()),
-                rate_curve=env.domestic_curve,
-                div_yield=env.get_foreign_rate,
+            spot, rate_curve, div_yield = (
+                float(env.effective_spot()), env.domestic_curve, env.get_foreign_rate
             )
-        return build_dupire_local_vol(
-            surface, spot=float(env.spot), rate_curve=env.rate_curve, div_yield=env.get_div_yield
-        )
+        else:
+            spot, rate_curve, div_yield = float(env.spot), env.rate_curve, env.get_div_yield
+        if self.local_vol_construction is LocalVolConstruction.ANDREASEN_HUGE:
+            return build_andreasen_huge_local_vol(
+                surface, spot, rate_curve, div_yield, config=self.andreasen_huge_config
+            )
+        return build_dupire_local_vol(surface, spot=spot, rate_curve=rate_curve, div_yield=div_yield)
+
+    def _local_model_name(self) -> str:
+        if self.local_vol_construction is LocalVolConstruction.ANDREASEN_HUGE:
+            return "andreasen_huge_local_vol"
+        return "dupire_local_vol"
 
     def _resolve_local_vol(self, env, engine) -> LocalVolSurface:
         prebuilt = getattr(engine, "_prebuilt", None)
@@ -228,7 +253,7 @@ class BaseVolModelRiskCalculator:
                     request.allow_one_sided,
                 )
             )
-        return VolRiskResult(base_price, tuple(points), {"model": "dupire_local_vol"})
+        return VolRiskResult(base_price, tuple(points), {"model": self._local_model_name()})
 
     def _heston_model_risk(
         self, product, env, engine, request: ModelRiskRequest
@@ -489,7 +514,7 @@ class BaseVolModelRiskCalculator:
                     ),
                 )
             )
-        return VolRiskResult(base_price, tuple(points), {"model": "dupire_local_vol"})
+        return VolRiskResult(base_price, tuple(points), {"model": self._local_model_name()})
 
     def _heston_market_vega(
         self, product, env, engine, request: MarketVegaRequest
