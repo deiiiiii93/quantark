@@ -530,7 +530,7 @@ from quantark.volmodels.localvol import (
 
 lv = build_andreasen_huge_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
                                     div_yield=env.get_div_yield)          # a LocalVolSurface
-engine = LocalVolPDESolver(params=params, local_vol_surface=lv)           # any LV engine
+engine = LocalVolPDESolver(params=params, local_vol_surface=lv)           # any LV engine (MC: sub-daily steps early)
 
 ah = calibrate_andreasen_huge(env.vol_surface, env.spot, env.rate_curve, env.get_div_yield)
 ah.report                     # per expiry and side: worst implied-vol error, quotes fitted / excluded

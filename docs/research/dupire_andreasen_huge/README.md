@@ -4,6 +4,14 @@ Code: `quantark/volmodels/localvol/andreasen_huge.py`. Tests: `test/volmodels/te
 Data next to this note:
 - `t0_pde_ladder.json`: all 198 fixture puts on the production PDE ladder.
 - `production_numbers.json`: AC2, AC7 and AC8 figures from the shipped module.
+- `demo_pde_3200x32.log`: the standalone demo's PDE run (every 4th strike). It backs the §1 table and the two §3 rows marked ‡.
+
+Provenance. These figures are console output of the standalone demo and were not saved:
+- the fixed-spot root-cause numbers in §1 (+20.0 / …, ATM 0.484, 0.08 against 0.06);
+- the case-study QUAD comparison;
+- the §3 rows marked †.
+
+They are reproducible from the shipped module with the PDE recipe in `test/volmodels/test_andreasen_huge_repricing.py`. §4 and §5 are fully backed by the JSON files.
 
 ## 1. The problem
 
@@ -41,14 +49,14 @@ The demo was runtime-patched, with no `quantark/` edits. Gaps are in vol pts on 
 
 | First-segment sub-steps | Rows / segment | Cells / gap | PDE | 8d mean / max | 36d max |
 |---|---|---|---|---|---|
-| 1 (pure AH) | 16 | 4 | 3200 × 32 | −0.076 / 0.237 | 0.026 |
-| 1 | 256 | 4 | 3200 × 32 | −0.003 / 0.136 | 0.007 |
-| 1 | 64 | **8** | 3200 × 32 | **−0.003 / 0.043** | **0.009** |
-| 1 | 256 | 16 | 3200 × 32 | −0.018 / 0.030 | 0.013 |
-| 64 | 16 | 4 | 3200 × 32 | +0.311 / 0.906 | 0.011 |
-| 64 | 256 | 4 | 1600 × 8 | +0.085 / 0.310 | 0.030 |
-| 256 | 16 | 4 | 3200 × 32 | +0.068 / 0.223 | 0.019 |
-| 256 | 16 | 8 / 16 | 3200 × 32 | +0.087 / 0.247, +0.088 / 0.248 (plateau) | 0.020 / 0.021 |
+| 1 (pure AH) ‡ | 16 | 4 | 3200 × 32 | −0.076 / 0.237 | 0.026 |
+| 1 † | 256 | 4 | 3200 × 32 | −0.003 / 0.136 | 0.007 |
+| 1 † | 64 | **8** | 3200 × 32 | **−0.003 / 0.043** | **0.009** |
+| 1 † | 256 | 16 | 3200 × 32 | −0.018 / 0.030 | 0.013 |
+| 64 ‡ | 16 | 4 | 3200 × 32 | +0.311 / 0.906 | 0.011 |
+| 64 † | 256 | 4 | 1600 × 8 | +0.085 / 0.310 | 0.030 |
+| 256 † | 16 | 4 | 3200 × 32 | +0.068 / 0.223 | 0.019 |
+| 256 † | 16 | 8 / 16 | 3200 × 32 | +0.087 / 0.247, +0.088 / 0.248 (plateau) | 0.020 / 0.021 |
 
 **Adopted: pure AH** (one step per expiry), with 64 rows per segment and 8 cells per gap.
 
@@ -66,11 +74,11 @@ Three findings shaped the design:
 
 | PDE grid | 8d | 36d | 71d | 134d | 225d | 316d | Worst |
 |---|---|---|---|---|---|---|---|
-| 1600 × 8 | 0.098 | 0.026 | 0.019 | 0.011 | 0.007 | 0.005 | 0.098 |
-| 3200 × 32 (105 s) | 0.043 | 0.010 | 0.002 | 0.005 | 0.003 | 0.002 | 0.0427 |
-| 6400 × 64 (415 s) | 0.040 | 0.006 | 0.009 | 0.001 | 0.002 | 0.002 | 0.0398 |
+| 1600 × 8 | 0.0979 | 0.0262 | 0.0190 | 0.0108 | 0.0070 | 0.0049 | 0.0979 |
+| 3200 × 32 (105 s) | 0.0427 | 0.0096 | 0.0015 | 0.0045 | 0.0028 | 0.0017 | 0.0427 |
+| 6400 × 64 (415 s) | 0.0398 | 0.0055 | 0.0087 | 0.0014 | 0.0016 | 0.0017 | 0.0398 |
 
-Each cell is the max |gap| in vol pts.
+Each cell is the max |gap| in vol pts (4 decimals, from `t0_pde_ladder.json`).
 
 - The largest change from 3200 × 32 to 6400 × 64 is 0.0074 (71d).
 - Quote by quote, |gap| plus its refinement change is at most 0.0456.
@@ -107,7 +115,16 @@ These are identical to the demo at T0.
 - **Unreadable nodes** (AH density below 1e-10 of its maximum, or σ² ≤ 0) are filled linearly in node index between readable nodes, and flat beyond them. The count is reported in `unreadable`.
 - **The call/put seam at the forward.** The two sides are calibrated separately and differ at the forward by about 1e-7 (parity noise of the discrete schemes).
 - **Exact by default.** A quote that is not fitted raises `NumericalError`. The |d| quote rule is opt-in and reported.
-- **Not covered:** engines that build their own local vol keep Dupire (opt in by passing the AH `LocalVolSurface`); sub-stepped segments; regularisation; bucketed AH vega beyond `SurfaceBump`.
+- **Monte Carlo needs sub-daily steps on the first segment.** The AH local vol changes fast in the first day. `LocalVolMCEngine` with left-point vol sampling gave these 8d put gaps in the final review's spot check:
+  - about 8 steps (roughly daily): +0.9 to +1.4 vol pts;
+  - 64 steps: +0.08 to +0.29.
+
+  At 134d with 268 steps the gaps are ≤ 0.007. The 0.05 bar above is shown on the PDE.
+- **Risk labels follow the calculator switch.** `metadata["model"]` reflects the calculator's switch, not the surface's origin. A prebuilt AH surface under the default calculator is labelled `dupire_local_vol`, and the label in that path is unchanged from before.
+- **Not covered:**
+  - Engines that build their own local vol keep Dupire. To opt in, pass the AH `LocalVolSurface`.
+  - The bucketed-Greeks facade builds its `VolModelRiskCalculator` without the switch, so its MARKET_IV_VEGA stays Dupire.
+  - Sub-stepped segments, regularisation, and bucketed AH vega beyond `SurfaceBump`.
 
 ## 7. Reproduce
 

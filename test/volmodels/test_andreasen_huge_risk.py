@@ -124,6 +124,10 @@ def test_switch_on_without_prebuilt_prices_model_risk_on_andreasen_huge():
     assert result.metadata["model"] == "andreasen_huge_local_vol"
     ah_surface = build_andreasen_huge_local_vol(grid, spot, FlatRateCurve(R), lambda t: q)
     assert result.base_price == pytest.approx(engine._price_with_surface(product, _env(), ah_surface), rel=1e-12)
+    bump = SurfaceBump.parallel(0.01)
+    up = engine._price_with_surface(product, _env(), bump_local_vol_surface(ah_surface, bump, 1))
+    down = engine._price_with_surface(product, _env(), bump_local_vol_surface(ah_surface, bump, -1))
+    assert result.points[0].pnl == pytest.approx(0.5 * (up - down), rel=1e-12)
 
 
 def test_fx_calculator_routes_the_switch_to_the_andreasen_huge_builder(monkeypatch):

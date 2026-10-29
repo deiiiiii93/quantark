@@ -10,7 +10,17 @@ from quantark.volmodels.risk import HestonCalibrationSpec, SlvCalibrationSpec
 
 
 class FxVolModelRiskCalculator(BaseVolModelRiskCalculator):
-    """Calculate FX model-factor risk and fully recalibrated market-IV vega."""
+    """Calculate FX model-factor risk and fully recalibrated market-IV vega.
+
+    Args:
+        heston_calibration_spec: Heston recalibration settings for market vega.
+        slv_calibration_spec: SLV leverage-calibration settings.
+        local_vol_construction: builder for every local-vol surface this calculator constructs
+            (market vega, SLV market vega, model risk on engines without a prebuilt surface).
+            ``ANDREASEN_HUGE`` (opt-in) reprices the quotes; with it, model-risk ``base_price`` is
+            the AH price even though the engine's own ``price()`` still builds Dupire.
+        andreasen_huge_config: ``AndreasenHugeConfig``; only with ``ANDREASEN_HUGE``.
+    """
 
     def __init__(
         self,

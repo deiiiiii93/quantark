@@ -1,0 +1,4 @@
+PDE 3200 points x 32 steps/day
+current                |    8d mean +19.303 max 23.925 |   36d mean  +8.716 max 11.408 |   71d mean  +4.961 max  6.820 |  134d mean  +5.097 max  5.266 |  225d mean  +2.245 max  2.610 |  316d mean  +1.547 max  1.760   (27s)
+ah_rows16_first1       |    8d mean  -0.076 max  0.237 |   36d mean  -0.010 max  0.026 |   71d mean  +0.000 max  0.003 |  134d mean  -0.003 max  0.004 |  225d mean  -0.000 max  0.002 |  316d mean  +0.001 max  0.002   (27s)
+ah_rows16_first64      |    8d mean  +0.311 max  0.906 |   36d mean  -0.004 max  0.011 |   71d mean  +0.002 max  0.003 |  134d mean  -0.002 max  0.003 |  225d mean  +0.000 max  0.002 |  316d mean  +0.002 max  0.003   (27s)

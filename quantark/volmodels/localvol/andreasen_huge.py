@@ -53,7 +53,8 @@ TAIL_GROWTH = 1.04          # geometric growth of the tail cells beyond the oute
 TAIL_CELL_CAP = 0.05        # largest tail cell in y before the M-matrix cap
 LSQ_TOLERANCE = 1e-15       # xtol/ftol/gtol of the per-expiry least-squares fit (exactness is gated separately)
 LSQ_MAX_EVALUATIONS = 200   # residual evaluations per expiry and side before the fit stops
-CACHE_MAX_TIMES = 50000     # local-vol node vectors kept per object (keyed on t) before the cache is reset
+CACHE_MAX_TIMES = 2048      # local-vol node vectors kept per object (keyed on t) before the cache is reset;
+                            # ~4 KB each on a 500-node grid, so at most ~8 MB per object
 _SQRT_2PI = math.sqrt(2.0 * math.pi)
 _SIDES = ("call", "put")
 
