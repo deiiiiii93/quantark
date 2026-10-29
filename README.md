@@ -514,6 +514,40 @@ risk.total                    # trade greeks; DRILLDOWN adds risk.product, risk.
   2D Heston Snowball PDE, which marches one knock-out schedule (its cash cannot bind).
 - The execution kernel takes the same switch: `TradeState(..., fold_mode=FoldMode.TOTAL)`.
 
+### Andreasen–Huge local vol (unreleased, opt-in)
+
+`build_dupire_local_vol` evaluates Dupire only at the quoted maturities and interpolates in
+between, so its surface does not reprice its own input: on the 2024-02-08 CSI1000 fixture the
+production LV PDE overprices the 8-day quotes by about +19 vol points and the 316-day quotes by
++1.5. `build_andreasen_huge_local_vol` takes the same arguments and reprices every quote
+(Andreasen & Huge, "Volatility interpolation", 2011): one implicit forward-Dupire step per
+expiry, calibrated exactly, with the local vol read as Dupire on the resulting price surface.
+
+```python
+from quantark.volmodels.localvol import (
+    AndreasenHugeConfig, build_andreasen_huge_local_vol, calibrate_andreasen_huge,
+)
+
+lv = build_andreasen_huge_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
+                                    div_yield=env.get_div_yield)          # a LocalVolSurface
+engine = LocalVolPDESolver(params=params, local_vol_surface=lv)           # any LV engine
+
+ah = calibrate_andreasen_huge(env.vol_surface, env.spot, env.rate_curve, env.get_div_yield)
+ah.report                     # per expiry and side: worst implied-vol error, quotes fitted / excluded
+ah.local_vol(spot_grid, t)    # lazy reference local vol at any t; ah.to_local_vol_surface() samples it
+```
+
+- Exact by default: a quote not repriced to 1e-10 in implied vol raises `NumericalError`. Quotes
+  with no usable vega (far wings of short, thin-tailed smiles) can be excluded with the opt-in
+  `AndreasenHugeConfig(max_abs_d=4.0)`; exclusions are counted in `report`.
+- Rates and dividends may be term structures; engines see the local vol through forward
+  moneyness, so their own curve forward reproduces the calibrated law.
+- On the fixture all 198 quotes reprice within 0.043 vol points on `LocalVolPDESolver`
+  (`docs/research/dupire_andreasen_huge/README.md`).
+- Risk: `VolModelRiskCalculator(local_vol_construction=LocalVolConstruction.ANDREASEN_HUGE)`
+  makes market vega bump the quotes and recalibrate AH (and model risk run on AH); a prebuilt
+  AH surface already works with model risk's local-vol bump. The default stays Dupire.
+
 ## RQMC Target Std Scaling (MC Benchmarking)
 
 Randomized QMC uses a target standard error for adaptive batching. For large
