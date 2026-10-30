@@ -84,6 +84,13 @@ def richardson_pair_price(
             f"{coarse_seed!r}: the combined std_error assumes independent draw "
             "streams. Give each substep factor its own seed in the factory."
         )
+    if any(getattr(engine, "max_sde_step_days", None) is not None
+           for engine in (coarse_engine, fine_engine)):
+        raise ValidationError(
+            "richardson_pair_price legs must not set max_sde_step_days: a capped "
+            "interval is split max(s, ceil(dt/cap)) times, so the 2s leg does not "
+            "halve every step and the extrapolation is not order 2"
+        )
     coarse_price = float(coarse_engine.price(product, pricing_env))
     fine_price = float(fine_engine.price(product, pricing_env))
 

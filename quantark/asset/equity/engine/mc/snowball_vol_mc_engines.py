@@ -25,7 +25,7 @@ from quantark.util.enum.engine_enums import (
     MonteCarloMethod,
 )
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
-from quantark.util.numerical import safe_log
+from quantark.util.numerical import Tolerance, safe_log
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.slv import BinMethod
@@ -52,6 +52,22 @@ def _validate_substeps_per_interval(substeps) -> int:
             "substeps_per_interval must be a positive integer"
         )
     return int(substeps)
+
+
+def _validate_max_sde_step_days(value) -> Optional[float]:
+    """None, or a finite positive number of business days (bool refused), returned as float."""
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float, np.integer, np.floating))
+        or not math.isfinite(float(value))
+        or float(value) <= 0.0
+    ):
+        raise ValidationError(
+            f"max_sde_step_days must be None or a finite positive number, got {value!r}"
+        )
+    return float(value)
 
 
 def _effective_path_count(num_paths: int, use_antithetic: bool) -> int:
@@ -222,29 +238,84 @@ class _SubstepRefinementMixin:
     kernels, event stats, and RQMC batching) stay on the contractual grid —
     the same contract as ``HestonDCNMCEngine.substeps_per_interval``. The
     default factor 1 is bitwise-identical to unrefined stepping.
+
+    ``max_sde_step_days`` (opt-in) caps every SDE step at that many business
+    days: interval i is split into ``max(substeps_per_interval,
+    ceil(dt_i / cap))`` equal steps, so a grid with few contractual nodes (a
+    knock-in observed only at maturity) is no longer integrated in one Euler
+    step. Intervals the cap does not split keep the uniform path, bit for bit.
+    Supported on PSEUDO with the plain estimator only: the quasi-random
+    methods, their conditioning and the one-step-survival estimator assume a
+    uniform factor and refuse a cap.
     """
 
     substeps_per_interval: int = 1
+    max_sde_step_days: Optional[float] = None
+    # per-interval SDE step counts of the last refinement; None = uniform
+    _substep_counts: Optional[np.ndarray] = None
+
+    def _validate_step_cap_combination(self) -> None:
+        """Refuse a step cap on the routes that assume a uniform substep factor."""
+        if self.max_sde_step_days is None:
+            return
+        if getattr(self, "method", MonteCarloMethod.PSEUDO) != MonteCarloMethod.PSEUDO:
+            raise ValidationError(
+                "max_sde_step_days supports MonteCarloMethod.PSEUDO only "
+                f"(got {self.method.name}): quasi-random draws assume a uniform substep factor"
+            )
+        if getattr(self, "estimator", "plain") != "plain":
+            raise ValidationError(
+                "max_sde_step_days does not support "
+                f"estimator={self.estimator!r} (it assumes a uniform substep factor)"
+            )
+
+    def _step_cap_counts(self, dt: np.ndarray) -> Optional[np.ndarray]:
+        """SDE steps per contractual interval under the cap, or None when the
+        cap splits nothing beyond the uniform factor."""
+        if self.max_sde_step_days is None:
+            return None
+        self._validate_step_cap_combination()
+        env, _ = self._term_ctx
+        cap = self.max_sde_step_days / float(env.bus_days_in_year)
+        counts = np.maximum(
+            self.substeps_per_interval, np.ceil(dt / cap - Tolerance.ZERO)
+        ).astype(int)
+        if np.all(counts == self.substeps_per_interval):
+            return None
+        return counts
 
     def _refined_dt_array(self, dt_array: np.ndarray) -> np.ndarray:
         """Refine every contractual interval into ``substeps_per_interval``
-        equal SDE steps (identity, bitwise, at the default factor 1)."""
+        equal SDE steps (identity, bitwise, at the default factor 1), or into
+        the per-interval counts a step cap requires."""
+        counts = self._step_cap_counts(np.asarray(dt_array, dtype=float))
+        self._substep_counts = counts
+        if counts is not None:
+            return np.repeat(np.asarray(dt_array, dtype=float) / counts, counts)
         n = self.substeps_per_interval
         if n <= 1:
             return dt_array
         return np.repeat(np.asarray(dt_array, dtype=float) / n, n)
 
+    def _contractual_columns(self):
+        """Fine-grid columns of the contractual nodes: a slice under a uniform
+        factor, an index array under per-interval counts."""
+        if self._substep_counts is not None:
+            return np.concatenate([[0], np.cumsum(self._substep_counts)])
+        return slice(None, None, self.substeps_per_interval)
+
     def _make_path_generator(self, simulate, n_eff: int, batch_id):
         """Wrap ``simulate`` so recorded nodes stay contractual: with
-        refinement active, every n-th fine column is a contractual node."""
-        n = self.substeps_per_interval
-        if n <= 1:
+        refinement active, the fine column closing each contractual interval
+        is its node."""
+        if self._substep_counts is None and self.substeps_per_interval <= 1:
             return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        cols = self._contractual_columns()
 
         def simulate_contractual(batch_id=None, seed=None):
             generated = simulate(batch_id=batch_id, seed=seed)
             if not isinstance(generated, tuple):
-                return generated[:, ::n]
+                return generated[:, cols]
             paths, aux = generated
             aux = dict(aux or {})
             if aux.pop("_paths_are_contractual", False):
@@ -255,10 +326,16 @@ class _SubstepRefinementMixin:
                 and control.ndim == 2
                 and control.shape[1] == paths.shape[1]
             ):
-                aux["control_paths"] = control[:, ::n]
-            return paths[:, ::n], aux
+                aux["control_paths"] = control[:, cols]
+            return paths[:, cols], aux
 
         return _ArrayPathGenerator(simulate_contractual, n_eff, batch_id=batch_id)
+
+    def _rqmc_scheme_label(self) -> str:
+        label = super()._rqmc_scheme_label()
+        if self.max_sde_step_days is not None:
+            label = f"{label}+cap:{self.max_sde_step_days}"
+        return label
 
     def _rqmc_substep_factor(self) -> int:
         return self.substeps_per_interval
@@ -303,7 +380,10 @@ class _SubstepRefinementMixin:
         """
         if fine is not None:
             n = self.substeps_per_interval
-            if n > 1:
+            if self._substep_counts is not None:
+                starts = np.concatenate([[0], np.cumsum(self._substep_counts)[:-1]])
+                fine = np.add.reduceat(fine, starts, axis=1)
+            elif n > 1:
                 fine = fine.reshape(fine.shape[0], -1, n).sum(axis=2)
         self._bridge_variance_store()[threading.get_ident()] = fine
 
@@ -364,7 +444,9 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
         rqmc_spot_bridge_strata: int = 1,
         rqmc_spot_bridge_dimensions: int = 1,
         ki_bridge_nodes_per_day: int = 1,
+        max_sde_step_days: Optional[float] = None,
     ):
+        self.max_sde_step_days = _validate_max_sde_step_days(max_sde_step_days)
         if not isinstance(rqmc_affine_spot_factor, bool):
             raise ValidationError("rqmc_affine_spot_factor must be bool")
         if not isinstance(rqmc_heston_conditional_control, bool):
@@ -479,6 +561,7 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
             num_batches=num_batches,
             ki_bridge_nodes_per_day=ki_bridge_nodes_per_day,
         )
+        self._validate_step_cap_combination()
 
     def _uses_qmc(self) -> bool:
         return self.method in _QMC_METHODS
@@ -689,6 +772,7 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
                     "estimator='one_step_survival' does not support antithetic "
                     "sampling (survival conditioning is not sign-symmetric)"
                 )
+        self._validate_step_cap_combination()
 
     def _rqmc_scheme_label(self) -> str:
         label = super()._rqmc_scheme_label()

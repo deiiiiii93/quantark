@@ -18,6 +18,7 @@ from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
     _qmc_normals,
     _qmc_uniforms,
     _resolve_heston_scheme,
+    _validate_max_sde_step_days,
     _validate_substeps_per_interval,
 )
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
@@ -52,10 +53,12 @@ class _VolModelPhoenixMCBase(_SubstepRefinementMixin, PhoenixMCEngine):
         num_batches: int = 4,
         substeps_per_interval: int = 1,
         ki_bridge_nodes_per_day: int = 1,
+        max_sde_step_days: Optional[float] = None,
     ):
         self.substeps_per_interval = _validate_substeps_per_interval(
             substeps_per_interval
         )
+        self.max_sde_step_days = _validate_max_sde_step_days(max_sde_step_days)
         super().__init__(
             params=params,
             method=method,
@@ -63,6 +66,7 @@ class _VolModelPhoenixMCBase(_SubstepRefinementMixin, PhoenixMCEngine):
             num_batches=num_batches,
             ki_bridge_nodes_per_day=ki_bridge_nodes_per_day,
         )
+        self._validate_step_cap_combination()
 
     def _uses_qmc(self) -> bool:
         return self.method in _QMC_METHODS
