@@ -268,6 +268,31 @@ class _SubstepRefinementMixin:
                 "max_sde_step_days does not support "
                 f"estimator={self.estimator!r} (it assumes a uniform substep factor)"
             )
+        # The spot-factor conditioning routes index their contractual nodes by a
+        # uniform factor and hand back paths marked contractual -- reachable on
+        # PSEUDO through the bridge stratification (CP1 2026-10-30).
+        conditioning = {
+            "rqmc_affine_spot_factor": bool(getattr(self, "rqmc_affine_spot_factor", False)),
+            "rqmc_heston_conditional_control": bool(
+                getattr(self, "rqmc_heston_conditional_control", False)
+            ),
+            "rqmc_frozen_leverage_conditional_control": bool(
+                getattr(self, "rqmc_frozen_leverage_conditional_control", False)
+            ),
+            "rqmc_conditional_control_only": bool(
+                getattr(self, "rqmc_conditional_control_only", False)
+            ),
+            "rqmc_spot_strata": int(getattr(self, "rqmc_spot_strata", 1)) > 1,
+            "rqmc_spot_antithetic": bool(getattr(self, "rqmc_spot_antithetic", False)),
+            "rqmc_spot_bridge_strata": int(getattr(self, "rqmc_spot_bridge_strata", 1)) > 1,
+            "rqmc_qe_draw_provider": getattr(self, "rqmc_qe_draw_provider", None) is not None,
+        }
+        active = [name for name, on in conditioning.items() if on]
+        if active:
+            raise ValidationError(
+                f"max_sde_step_days does not support {', '.join(active)} "
+                "(the conditioning routes assume a uniform substep factor)"
+            )
 
     def _step_cap_counts(self, dt: np.ndarray) -> Optional[np.ndarray]:
         """SDE steps per contractual interval under the cap, or None when the

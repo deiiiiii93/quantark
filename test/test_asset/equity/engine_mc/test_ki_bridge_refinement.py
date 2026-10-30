@@ -239,6 +239,32 @@ def test_step_cap_refuses_quasi_methods(method):
         LocalVolPhoenixMCEngine(params, method=method, max_sde_step_days=1)
 
 
+@pytest.mark.parametrize("flags", [
+    dict(rqmc_affine_spot_factor=True),
+    dict(rqmc_heston_conditional_control=True),
+    dict(rqmc_heston_conditional_control=True, rqmc_spot_bridge_strata=2),
+    dict(rqmc_heston_conditional_control=True, rqmc_frozen_leverage_conditional_control=True,
+         rqmc_conditional_control_only=True),
+    dict(rqmc_heston_conditional_control=True, rqmc_spot_strata=2),
+    dict(rqmc_heston_conditional_control=True, rqmc_spot_antithetic=True),
+])
+def test_step_cap_refuses_rqmc_conditioning_flags(flags):
+    """CP1: on PSEUDO, the SLV-QE bridge-stratified route returned fine-grid paths marked contractual
+    under a cap -- a silent wrong price. Every conditioning flag refuses a cap at construction."""
+    strikes = np.array(list(100.0 * np.exp(np.linspace(-0.8, 0.8, 11))))
+    lev = LeverageSurface(time_grid=np.linspace(0.0, 1.0, 4), strike_grid=strikes,
+                          leverage_grid=np.ones((4, strikes.size)))
+    for make in (lambda **kw: HestonSnowballMCEngine(HESTON, MCParams(use_antithetic=False), **kw),
+                 lambda **kw: HestonSLVQESnowballMCEngine(HESTON, params=MCParams(use_antithetic=False),
+                                                          leverage_surface=lev, **kw)):
+        try:
+            make(**flags)
+        except ValidationError:
+            continue                      # the flag set alone is invalid on this engine
+        with pytest.raises(ValidationError, match="max_sde_step_days"):
+            make(**flags, max_sde_step_days=1)
+
+
 def test_step_cap_refuses_one_step_survival():
     with pytest.raises(ValidationError, match="max_sde_step_days"):
         LocalVolSnowballMCEngine(MCParams(), estimator="one_step_survival", max_sde_step_days=1)
