@@ -51,6 +51,7 @@ class _VolModelPhoenixMCBase(_SubstepRefinementMixin, PhoenixMCEngine):
         use_dask: bool = False,
         num_batches: int = 4,
         substeps_per_interval: int = 1,
+        ki_bridge_nodes_per_day: int = 1,
     ):
         self.substeps_per_interval = _validate_substeps_per_interval(
             substeps_per_interval
@@ -60,6 +61,7 @@ class _VolModelPhoenixMCBase(_SubstepRefinementMixin, PhoenixMCEngine):
             method=method,
             use_dask=use_dask,
             num_batches=num_batches,
+            ki_bridge_nodes_per_day=ki_bridge_nodes_per_day,
         )
 
     def _uses_qmc(self) -> bool:

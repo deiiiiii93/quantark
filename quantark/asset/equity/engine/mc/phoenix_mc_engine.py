@@ -36,6 +36,10 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.engine.mc.ki_bridge import (
+    continuous_ki_step_count,
+    validate_ki_bridge_nodes_per_day,
+)
 from quantark.asset.equity.engine.mc.snowball_mc_engine import _FoldedPayoffMixin
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
@@ -102,7 +106,14 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
         method: Union[str, MonteCarloMethod, tuple, None] = None,
         use_dask: bool = False,
         num_batches: int = 4,
+        *,
+        ki_bridge_nodes_per_day: int = 1,
     ):
+        """``ki_bridge_nodes_per_day``: continuous-KI monitoring nodes per business
+        day, as in ``SnowballMCEngine`` (opt-in; default 1 is the historical grid)."""
+        self.ki_bridge_nodes_per_day = validate_ki_bridge_nodes_per_day(
+            ki_bridge_nodes_per_day
+        )
         if params is None:
             params = MCParams()
 
@@ -261,7 +272,15 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
         fingerprint (code-gate finding 2026-07-16)."""
         scheme = getattr(self, "scheme", None)
         suffix = f"-{scheme.name.lower()}" if hasattr(scheme, "name") else ""
-        return f"{type(self).__qualname__}{suffix}/rqmc-native/v1"
+        label = f"{type(self).__qualname__}{suffix}/rqmc-native/v1"
+        # opt-in grid refinements name themselves; the default label is unchanged
+        if self._ki_bridge_nodes_per_day() != 1:
+            label = f"{label}+kib:{self._ki_bridge_nodes_per_day()}"
+        return label
+
+    def _ki_bridge_nodes_per_day(self) -> int:
+        """Continuous-KI nodes per business day (1 for engines built before the keyword existed)."""
+        return getattr(self, "ki_bridge_nodes_per_day", 1)
 
     def build_rqmc_session_spec(self, product, pricing_env):
         """Execution-framework seam: the price() preamble plus the RQMC run
@@ -517,7 +536,9 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
 
         if product.has_ki_barrier:
             if ki_continuous:
-                num_ki_steps = int(pricing_env.bus_days_in_year * T) + 1
+                num_ki_steps = continuous_ki_step_count(
+                    pricing_env.bus_days_in_year, T, self._ki_bridge_nodes_per_day()
+                )
                 ki_times = np.linspace(0, T, num_ki_steps + 1)[1:]
             else:
                 ki_profile = product.get_ki_observation_profile(pricing_env)

@@ -53,6 +53,10 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
+from quantark.asset.equity.engine.mc.ki_bridge import (
+    continuous_ki_step_count,
+    validate_ki_bridge_nodes_per_day,
+)
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import DayCountConvention
@@ -276,6 +280,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         method: Union[str, MonteCarloMethod, tuple, None] = None,
         use_dask: bool = False,
         num_batches: int = 4,
+        *,
+        ki_bridge_nodes_per_day: int = 1,
     ):
         """
         Initialize Snowball Monte Carlo engine.
@@ -289,10 +295,19 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 - None: defaults to MonteCarloMethod.PSEUDO
             use_dask: Enable Dask parallel processing (requires Dask installed)
             num_batches: Number of batches for parallel processing
+            ki_bridge_nodes_per_day: Continuous-KI monitoring nodes per business
+                day (opt-in; default 1 is the historical grid, bit for bit).
+                The nodes are contractual: the SDE steps on them and the
+                Brownian bridge runs between them, so a larger value shrinks
+                the bridge interval -- needed under local/stochastic vol, where
+                the one-day bridge is biased (see ``ki_bridge``).
 
         Raises:
             ValidationError: If method is invalid or params are invalid
         """
+        self.ki_bridge_nodes_per_day = validate_ki_bridge_nodes_per_day(
+            ki_bridge_nodes_per_day
+        )
         if params is None:
             params = MCParams()
 
@@ -623,7 +638,15 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         fingerprint (code-gate finding 2026-07-16)."""
         scheme = getattr(self, "scheme", None)
         suffix = f"-{scheme.name.lower()}" if hasattr(scheme, "name") else ""
-        return f"{type(self).__qualname__}{suffix}/rqmc-native/v1"
+        label = f"{type(self).__qualname__}{suffix}/rqmc-native/v1"
+        # opt-in grid refinements name themselves; the default label is unchanged
+        if self._ki_bridge_nodes_per_day() != 1:
+            label = f"{label}+kib:{self._ki_bridge_nodes_per_day()}"
+        return label
+
+    def _ki_bridge_nodes_per_day(self) -> int:
+        """Continuous-KI nodes per business day (1 for engines built before the keyword existed)."""
+        return getattr(self, "ki_bridge_nodes_per_day", 1)
 
     def build_rqmc_session_spec(self, product, pricing_env):
         """Execution-framework seam: the price() preamble plus the RQMC run
@@ -1200,7 +1223,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         if product.has_ki_barrier:
             if ki_continuous:
                 # Generate fine grid for continuous monitoring
-                num_ki_steps = int(pricing_env.bus_days_in_year * T) + 1
+                num_ki_steps = continuous_ki_step_count(
+                    pricing_env.bus_days_in_year, T, self._ki_bridge_nodes_per_day()
+                )
                 ki_times = list(np.linspace(0, T, num_ki_steps + 1)[1:])
             else:
                 ki_profile = product.get_ki_observation_profile(pricing_env)
@@ -1287,7 +1312,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             pass
         elif ki_continuous:
             ki_horizon = pre_maturity
-            num_ki_steps = int(pricing_env.bus_days_in_year * ki_horizon) + 1
+            num_ki_steps = continuous_ki_step_count(
+                pricing_env.bus_days_in_year, ki_horizon, self._ki_bridge_nodes_per_day()
+            )
             ki_times = list(np.linspace(0, ki_horizon, num_ki_steps + 1)[1:])
         else:
             ki_profile = product.get_ki_observation_profile(pricing_env)

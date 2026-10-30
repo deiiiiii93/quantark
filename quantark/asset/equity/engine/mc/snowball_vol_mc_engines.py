@@ -363,6 +363,7 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
         rqmc_spot_antithetic: bool = False,
         rqmc_spot_bridge_strata: int = 1,
         rqmc_spot_bridge_dimensions: int = 1,
+        ki_bridge_nodes_per_day: int = 1,
     ):
         if not isinstance(rqmc_affine_spot_factor, bool):
             raise ValidationError("rqmc_affine_spot_factor must be bool")
@@ -476,6 +477,7 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
             method=method,
             use_dask=use_dask,
             num_batches=num_batches,
+            ki_bridge_nodes_per_day=ki_bridge_nodes_per_day,
         )
 
     def _uses_qmc(self) -> bool:
