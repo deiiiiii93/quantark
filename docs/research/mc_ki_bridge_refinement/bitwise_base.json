@@ -1,0 +1,42 @@
+{
+ "defaults": {
+  "bsm_ko_reset": "96.67228162881354",
+  "bsm_phoenix": "-5.289209413768985",
+  "bsm_snowball": "96.74917092374871",
+  "bsm_snowball_discrete": "97.38756581168496",
+  "heston_eulerlog_snowball": "96.69972103278835",
+  "heston_phoenix": "-5.628200744816843",
+  "heston_qe_snowball": "96.76638892105122",
+  "heston_qem_snowball": "96.76640125089527",
+  "lv_ko_reset": "96.89614775673435",
+  "lv_phoenix": "-5.301734026776895",
+  "lv_snowball": "97.0348525788731",
+  "lv_snowball_discrete": "97.78779927199034",
+  "lv_snowball_quasi": "96.8927771569237",
+  "lv_snowball_rqmc": "96.95213093687356",
+  "qe_standalone_snowball": "96.76638892105122",
+  "slv_phoenix": "-5.83207399706961",
+  "slv_qe_snowball": "96.62046929013923",
+  "slv_snowball": "96.59542183135375"
+ },
+ "explicit_defaults": {
+  "bsm_ko_reset": "unsupported: SnowballMCEngine.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "bsm_phoenix": "unsupported: PhoenixMCEngine.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "bsm_snowball": "unsupported: SnowballMCEngine.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "bsm_snowball_discrete": "unsupported: SnowballMCEngine.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "heston_eulerlog_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "heston_phoenix": "unsupported: _VolModelPhoenixMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "heston_qe_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "heston_qem_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "lv_ko_reset": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "lv_phoenix": "unsupported: _VolModelPhoenixMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "lv_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "lv_snowball_discrete": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "lv_snowball_quasi": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "lv_snowball_rqmc": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "qe_standalone_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "slv_phoenix": "unsupported: _VolModelPhoenixMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "slv_qe_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'",
+  "slv_snowball": "unsupported: _VolModelSnowballMCBase.__init__() got an unexpected keyword argument 'ki_bridge_nodes_per_day'"
+ }
+}
