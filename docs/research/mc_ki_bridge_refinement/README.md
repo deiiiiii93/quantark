@@ -69,8 +69,9 @@ by ±1–2 bp between rungs, so their gates use the bridge-free reference instea
 
 Rejected along the way (`evidence/confirm_demo.json`): a front-loaded fine window is non-monotone
 in its parameters (AH A1: −0.96 / −0.56 / −4.17 at 32/64/128 steps in 10 days); a uniform floor
-on total steps refines the SDE only. `time_sampling="integrated"` was worse and 30–300× slower on
-the sampled AH surface.
+on total steps refines the SDE only. `time_sampling="integrated"` was no substitute on the sampled AH surface
+(`evidence/kernel_time_sampling.json`, 8d puts): further off at coarse steps (−18.6 vs −6.1 vol
+points at one step, 0.85 moneyness) and 62× (one step) to 2.5× (128 steps) slower.
 
 ## 5. What shipped
 

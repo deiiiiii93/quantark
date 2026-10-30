@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, "/Users/fuxinyao/quant-ark/test/volmodels")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[4] / "test" / "volmodels"))
 sys.path.insert(0, str(Path(__file__).parent))
 import test_andreasen_huge_repricing as rep  # noqa: E402
 from diagnose_gap import pde_params, snowball  # noqa: E402

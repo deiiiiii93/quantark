@@ -554,7 +554,8 @@ The snowball / phoenix / KO-reset MC engines monitor a continuous knock-in on on
 business day, with a Brownian-bridge crossing probability between nodes. Under local or
 stochastic vol that one-day bridge is biased, and `substeps_per_interval` does not help: it
 refines the SDE, not the bridge interval. Near-KI two-week trades are off by +4 to −7 bp of
-notional (local vol), +4 (Heston), +5 (SLV) against a PDE or bridge-free reference.
+notional (local vol, against the LV PDE) and +2.4 (Heston), +4.2 (SLV) against a bridge-free
+MC reference.
 
 ```python
 engine = LocalVolSnowballMCEngine(params, local_vol_surface=lv,

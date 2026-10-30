@@ -15,6 +15,7 @@ import json
 import math
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
@@ -35,7 +36,8 @@ from quantark.volmodels.slv.leverage import LeverageSurface
 T_A1 = 14 / 365
 T_B = 30 / 365
 HESTON = HestonParams(v0=0.06, kappa=2.0, theta=0.06, sigma=0.5, rho=-0.7)
-FIXTURE = "test/golden/modelvalidation/data/iv_surface_20240208.json"
+FIXTURE = str(Path(__file__).resolve().parents[3] / "test" / "golden" / "modelvalidation" / "data"
+              / "iv_surface_20240208.json")
 R_FIXTURE = 0.02
 SEEDS_A = (11, 23, 37, 53, 71, 89, 101, 131)
 BRIDGE_FREE_DATES = (240, 960, 1920)

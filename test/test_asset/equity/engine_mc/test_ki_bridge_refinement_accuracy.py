@@ -4,7 +4,9 @@ Seeded, deterministic Monte Carlo against deterministic references, in bp of not
   - local vol (AH and Dupire on the iv_surface_20240208 fixture): the LV PDE at 3200x64;
   - Heston / SLV: the frozen bridge-free MC reference in docs/research/mc_ki_bridge_refinement/
     references.json (dense discrete KI extrapolated to continuous monitoring; reference.py rebuilds it).
-Every gate also checks that today's default misses, so the gate measures the refinement, not luck.
+Where today's default misses the bar (snowball and phoenix on AH, Heston, SLV, the one-interval contract)
+the gate also checks that miss, so it measures the refinement, not luck; the Dupire snowball default
+happens to sit inside the bar, and the Dupire phoenix carries a non-bridge offset (relative gate).
 """
 import importlib.util
 import json

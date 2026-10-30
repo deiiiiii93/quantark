@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, "/Users/fuxinyao/quant-ark/test/volmodels")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[4] / "test" / "volmodels"))
 import test_andreasen_huge_repricing as rep  # noqa: E402
 
 from quantark.asset.equity.engine.mc import LocalVolSnowballMCEngine, SnowballMCEngine  # noqa: E402

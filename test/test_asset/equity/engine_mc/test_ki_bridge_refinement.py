@@ -380,6 +380,25 @@ def test_non_uniform_counts_read_contractual_nodes_and_fold_variance():
         np.stack([variance[:, 0], variance[:, 1:4].sum(axis=1), variance[:, 4:6].sum(axis=1)], axis=1))
 
 
+def test_refined_ko_reset_and_capped_continuous_ki_price_end_to_end():
+    """Final review: priced paths through a refined KO-reset knock-in horizon, and a cap that splits
+    continuous-KI intervals (the reduceat bridge fold on real recorded variance)."""
+    env = _skew_env()
+    lv = build_dupire_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
+                                div_yield=env.get_div_yield)
+    p = MCParams(num_paths=2048, seed=5, use_antithetic=True)
+    for engine in (SnowballMCEngine(p, ki_bridge_nodes_per_day=4),
+                   LocalVolSnowballMCEngine(p, local_vol_surface=lv, ki_bridge_nodes_per_day=4)):
+        assert np.isfinite(engine.price(_ko_reset(), env))
+    capped = LocalVolSnowballMCEngine(p, local_vol_surface=lv, max_sde_step_days=0.5)
+    price = capped.price(_snowball(), env)
+    # daily intervals split in two; the short ones around the merged KO dates stay whole: non-uniform
+    assert capped._substep_counts is not None
+    assert set(np.unique(capped._substep_counts)) == {1, 2}
+    assert np.isfinite(price)
+    assert abs(price - LocalVolSnowballMCEngine(p, local_vol_surface=lv).price(_snowball(), env)) < 2.0
+
+
 def test_refined_dt_array_counts_follow_the_cap():
     env = _skew_env()
     engine = LocalVolSnowballMCEngine(MCParams(), substeps_per_interval=2, max_sde_step_days=1)
