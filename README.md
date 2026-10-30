@@ -548,6 +548,31 @@ ah.local_vol(spot_grid, t)    # lazy reference local vol at any t; ah.to_local_v
   makes market vega bump the quotes and recalibrate AH (and model risk run on AH); a prebuilt
   AH surface already works with model risk's local-vol bump. The default stays Dupire.
 
+### Continuous-KI bridge refinement (unreleased, opt-in)
+
+The snowball / phoenix / KO-reset MC engines monitor a continuous knock-in on one node per
+business day, with a Brownian-bridge crossing probability between nodes. Under local or
+stochastic vol that one-day bridge is biased, and `substeps_per_interval` does not help: it
+refines the SDE, not the bridge interval. Near-KI two-week trades are off by +4 to −7 bp of
+notional (local vol), +4 (Heston), +5 (SLV) against a PDE or bridge-free reference.
+
+```python
+engine = LocalVolSnowballMCEngine(params, local_vol_surface=lv,
+                                  ki_bridge_nodes_per_day=16,   # bridge on 16 nodes per business day
+                                  max_sde_step_days=1.0)        # no SDE step longer than one business day
+```
+
+- `ki_bridge_nodes_per_day` (every snowball / phoenix MC engine, BSM included) multiplies the
+  continuous-KI node density; at 16 the near-KI cells land within 2 bp of the reference. Cost:
+  about 6–8× on two-week trades, about 16× on one-year trades (steps scale with the nodes).
+- `max_sde_step_days` (LV / Heston / SLV snowball and phoenix) splits only the contractual
+  intervals longer than the cap: a one-month contract observed only at maturity moves from
+  +105 bp (one Euler step) to −2 bp at a one-day cap. PSEUDO with the plain estimator only;
+  quasi-random methods, RQMC conditioning, `one_step_survival` and `richardson_pair_price`
+  refuse a cap.
+- Defaults are unchanged bit for bit. Evidence and the rejected alternatives (barrier-local
+  bridge variance, front-loaded grids): `docs/research/mc_ki_bridge_refinement/README.md`.
+
 ## RQMC Target Std Scaling (MC Benchmarking)
 
 Randomized QMC uses a target standard error for adaptive batching. For large
