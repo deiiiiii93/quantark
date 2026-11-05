@@ -47,6 +47,11 @@ from .curve import (
     BondQuote,
     FuturesQuote,
     OptionPairQuote,
+    BootstrapConfig,
+    bootstrap_discount_curve,
+    bootstrap_projection_curve,
+    build_carry_curve,
+    reprice_quotes,
 )
 
 __all__ = [
@@ -63,6 +68,11 @@ __all__ = [
     "BondQuote",
     "FuturesQuote",
     "OptionPairQuote",
+    "BootstrapConfig",
+    "bootstrap_discount_curve",
+    "bootstrap_projection_curve",
+    "build_carry_curve",
+    "reprice_quotes",
     "SpotQuote",
     "BlackImpliedVolSurface",
     "VolatilitySurface",

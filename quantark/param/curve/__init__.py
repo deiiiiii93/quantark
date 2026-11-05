@@ -29,8 +29,28 @@ from .strip import (
     SwapStrip,
     build_strip,
 )
+from .bootstrap import (
+    PILLAR_MAXITER,
+    PILLAR_RTOL,
+    PILLAR_XTOL,
+    SWEEP_TOLERANCE,
+    BootstrapConfig,
+    bootstrap_discount_curve,
+    bootstrap_projection_curve,
+    build_carry_curve,
+    reprice_quotes,
+)
 
 __all__ = [
+    "PILLAR_MAXITER",
+    "PILLAR_RTOL",
+    "PILLAR_XTOL",
+    "SWEEP_TOLERANCE",
+    "BootstrapConfig",
+    "bootstrap_discount_curve",
+    "bootstrap_projection_curve",
+    "build_carry_curve",
+    "reprice_quotes",
     "CurveInterpolation",
     "LongEndRule",
     "TermInterpolator",
