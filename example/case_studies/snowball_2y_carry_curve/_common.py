@@ -25,13 +25,35 @@ import hashlib
 import io
 import json
 import sqlite3
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
+
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import PDEParams, QuadParams
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.param import (
+    CarryCurve,
+    ContinuousDividendYield,
+    FlatRateCurve,
+    FlatVolSurface,
+    FuturesQuote,
+    OptionPairQuote,
+    SpotQuote,
+    build_carry_curve,
+)
+from quantark.param.div.dividend_yield import DividendYield
+from quantark.param.extrapolation import CarryExtrapolation
 from quantark.param.vol.marketquotes import implied_vol_black
-from quantark.util.exceptions import MarketDataError
-from quantark.util.numerical import safe_exp
+from quantark.priceenv.pricing_environment import PricingEnvironment
+from quantark.util.calendar import CalendarType, create_calendar
+from quantark.util.enum import ObservationType
+from quantark.util.exceptions import MarketDataError, ValidationError
+from quantark.util.numerical import is_close, safe_exp
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -243,3 +265,265 @@ def read_json(path: Path) -> Any:
 def load_snapshot(path: Optional[Path] = None) -> Dict[str, Any]:
     """The frozen market snapshot (``01_snapshot.py`` writes it)."""
     return read_json(SNAPSHOT_PATH if path is None else path)
+
+
+# ---------------------------------------------------------------------------
+# Term sheet (decision 8)
+# ---------------------------------------------------------------------------
+
+NOTIONAL = 10_000_000.0
+KO_PCT = 1.00
+KI_PCT = 0.75
+LOCKOUT_MONTHS = 3
+MATURITY_MONTHS = 24
+#: |PV| tolerance of the coupon solve, as a fraction of notional (decision 9).
+COUPON_PV_TOL_FRACTION = 1e-6
+COUPON_PROBES = (0.05, 0.25)
+
+#: Tail conventions (decision 6): study key → (CarryExtrapolation, short label).
+TAILS: Dict[str, Tuple[CarryExtrapolation, str]] = {
+    "hold_forward": (CarryExtrapolation.FLAT_FORWARD_CARRY, "hold forward carry"),
+    "hold_yield": (CarryExtrapolation.FLAT_CARRY_YIELD, "hold zero carry yield"),
+    "zero_carry": (CarryExtrapolation.ZERO_FORWARD_CARRY, "zero carry past last node"),
+}
+COUPON_TAIL = "hold_forward"
+
+#: Mark variants for the sensitivity rows (decision 2): key → description.
+MARKS: Dict[str, str] = {
+    "base": "spot + IM closes, MO settlement",
+    "mo_close": "spot + IM closes, MO close",
+    "all_settle": "IM + MO settlements, spot close (mark-inconsistent)",
+}
+
+#: QUAD readout everywhere (decision 11): removes the legacy_linear spot staircase.
+QUAD_READOUT = "transition"
+
+
+def add_months(d: date, months: int) -> date:
+    """Same day-of-month ``months`` later, clipped to the month end."""
+    import calendar as _cal
+
+    y, m = divmod(d.month - 1 + months, 12)
+    year, month = d.year + y, m + 1
+    return date(year, month, min(d.day, _cal.monthrange(year, month)[1]))
+
+
+@dataclass(frozen=True)
+class Terms:
+    """The 2Y schedule on the SSE calendar, ACT/365F from the valuation date."""
+
+    maturity_date: date
+    maturity_years: float
+    ko_dates: Tuple[date, ...]
+    ko_times: Tuple[float, ...]
+    ki_times: Tuple[float, ...]
+
+
+def build_terms() -> Terms:
+    """KO on month anniversaries 3..24 rolled to the next SSE trading day (last =
+    maturity); KI on every SSE trading day in (valuation date, maturity]."""
+    cal = create_calendar(CalendarType.CHINA_SSE)
+
+    def is_trading(d: date) -> bool:
+        return cal.is_business_day(datetime(d.year, d.month, d.day))
+
+    def next_trading(d: date) -> date:
+        while not is_trading(d):
+            d += timedelta(days=1)
+        return d
+
+    maturity = next_trading(add_months(VALUATION_DATE, MATURITY_MONTHS))
+    ko_dates = sorted({min(next_trading(add_months(VALUATION_DATE, m)), maturity)
+                       for m in range(LOCKOUT_MONTHS, MATURITY_MONTHS + 1)})
+    if ko_dates[-1] != maturity:
+        raise StudyDataError("last KO observation must be the maturity date")
+    ki_dates = []
+    d = VALUATION_DATE + timedelta(days=1)
+    while d <= maturity:
+        if is_trading(d):
+            ki_dates.append(d)
+        d += timedelta(days=1)
+    return Terms(
+        maturity_date=maturity,
+        maturity_years=year_fraction(maturity),
+        ko_dates=tuple(ko_dates),
+        ko_times=tuple(year_fraction(x) for x in ko_dates),
+        ki_times=tuple(year_fraction(x) for x in ki_dates),
+    )
+
+
+def build_product(coupon: float, s0: float, terms: Optional[Terms] = None):
+    """Standard snowball off ``s0`` (one unit = ``NOTIONAL``), booked numeric."""
+    terms = terms or build_terms()
+    return create_standard_snowball(
+        initial_price=s0,
+        strike=s0,
+        maturity=terms.maturity_years,
+        contract_multiplier=NOTIONAL / s0,
+        ko_barrier=KO_PCT * s0,
+        ko_rate=float(coupon),
+        ki_barrier=KI_PCT * s0,
+        num_observations=len(terms.ko_times),
+        is_reverse=False,
+        ko_observation_dates=list(terms.ko_times),
+        ki_continuous=False,
+        ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_dates=list(terms.ki_times),
+        rebate_rate=float(coupon),
+        include_principal=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Market objects (decisions 3, 5, 6, 7)
+# ---------------------------------------------------------------------------
+
+
+def rate_curve() -> FlatRateCurve:
+    return FlatRateCurve(RATE)
+
+
+def carry_quotes(snap: Dict[str, Any], mark: str = "base") -> List[Any]:
+    """Four IM ``FuturesQuote`` + one MO ``OptionPairQuote`` under a mark variant."""
+    if mark not in MARKS:
+        raise ValidationError(f"unknown mark {mark!r}")
+    quotes: List[Any] = []
+    for f in snap["futures"]:
+        price = f["settle"] if mark == "all_settle" else f["price"]
+        quotes.append(FuturesQuote(price=price, tenor_years=year_fraction(date.fromisoformat(f["expiry"])),
+                                   label=f["contract"]))
+    pair = snap["option_pair"]
+    use_close = mark == "mo_close"
+    quotes.append(OptionPairQuote(
+        strike=pair["strike"],
+        call_price=pair["call_close"] if use_close else pair["call_settle"],
+        put_price=pair["put_close"] if use_close else pair["put_settle"],
+        tenor_years=year_fraction(date.fromisoformat(pair["expiry"])),
+        label=f"{pair['series']} C-P",
+    ))
+    return quotes
+
+
+def pillar_labels(snap: Dict[str, Any]) -> List[str]:
+    return [f["contract"] for f in snap["futures"]] + [f"{snap['option_pair']['series']} C-P"]
+
+
+def lot_multipliers(snap: Dict[str, Any]) -> List[float]:
+    """IM: 200 CNY/pt per lot; MO pillar: one C−P pair = 100·DF(T5) per point of F."""
+    t5 = year_fraction(date.fromisoformat(snap["option_pair"]["expiry"]))
+    return [IM_MULTIPLIER] * len(snap["futures"]) + [MO_MULTIPLIER * float(safe_exp(-RATE * t5))]
+
+
+def build_curve(snap: Dict[str, Any], tail: str, mark: str = "base") -> CarryCurve:
+    return build_carry_curve(snap["spot"], carry_quotes(snap, mark), rate_curve(), extrapolation=TAILS[tail][0])
+
+
+def flat_q(curve: CarryCurve, maturity: float) -> float:
+    """The flat model's yield: the curve's own q at the trade maturity (decision 7)."""
+    return float(curve.to_dividend_yield(rate_curve()).get_yield(maturity))
+
+
+def make_env(snap: Dict[str, Any], div_yield: DividendYield, spot: Optional[float] = None) -> PricingEnvironment:
+    return PricingEnvironment(
+        rate_curve=rate_curve(),
+        valuation_date=datetime(VALUATION_DATE.year, VALUATION_DATE.month, VALUATION_DATE.day),
+        spot_quote=SpotQuote(spot=snap["spot"] if spot is None else spot),
+        vol_surface=FlatVolSurface(volatility=snap["vol"]["value"]),
+        div_yield=div_yield,
+    )
+
+
+def curve_env(snap: Dict[str, Any], tail: str, mark: str = "base") -> PricingEnvironment:
+    return make_env(snap, build_curve(snap, tail, mark).to_dividend_yield(rate_curve()))
+
+
+def flat_env(snap: Dict[str, Any], tail: str, maturity: float, mark: str = "base") -> PricingEnvironment:
+    return make_env(snap, ContinuousDividendYield(flat_q(build_curve(snap, tail, mark), maturity)))
+
+
+def quad_engine(grid_points: Optional[int] = None) -> SnowballQuadEngine:
+    kwargs: Dict[str, Any] = {"readout": QUAD_READOUT}
+    if grid_points is not None:
+        kwargs["grid_points"] = int(grid_points)
+    return SnowballQuadEngine(params=QuadParams(**kwargs))
+
+
+def resolved_quad_grid(engine: SnowballQuadEngine, product, env: PricingEnvironment) -> int:
+    """The grid the QUAD engine actually uses (``max(requested, required)``)."""
+    times = sorted(set(product.barrier_config.ko_observation_dates)
+                   | set(product.barrier_config.ki_observation_dates))
+    vol = float(env.get_vol(product.strike, product.maturity))
+    return int(engine._resolve_grid_points(product.maturity, vol, times))  # noqa: SLF001 (diagnostic)
+
+
+def pde_engine() -> PDEEngine:
+    return PDEEngine(params=PDEParams(accuracy="high"))
+
+
+# ---------------------------------------------------------------------------
+# Coupon solve (decision 9) and event statistics
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CouponSolution:
+    coupon: float
+    pv: float
+    annuity: float  # dPV/dcoupon (PV is affine in the coupon)
+    tolerance: float
+
+
+def solve_coupon(pv_at: Callable[[float], float], notional: float = NOTIONAL) -> CouponSolution:
+    """PV is affine in the coupon (no trigger reads it): two probes, one root, one
+    re-price check against ``COUPON_PV_TOL_FRACTION·notional`` (fails closed)."""
+    c0, c1 = COUPON_PROBES
+    v0, v1 = float(pv_at(c0)), float(pv_at(c1))
+    annuity = (v1 - v0) / (c1 - c0)
+    if not annuity > 0.0:
+        raise ValidationError(f"PV not increasing in the coupon (dPV/dc = {annuity})")
+    coupon = c0 - v0 / annuity
+    pv = float(pv_at(coupon))
+    tol = COUPON_PV_TOL_FRACTION * notional
+    if abs(pv) > tol:
+        raise ValidationError(f"coupon {coupon:.6f} re-prices to {pv:.4f} > tol {tol:.4f}: PV not affine?")
+    return CouponSolution(coupon=coupon, pv=pv, annuity=annuity, tolerance=tol)
+
+
+def event_summary(stats, maturity: float) -> Dict[str, Any]:
+    """P(KO), P(KI ever), P(KI and survive), expected life from QUAD event stats."""
+    ko_p = np.asarray(stats.ko_probability, dtype=float)
+    ko_t = np.asarray(stats.ko_times, dtype=float)
+    p_ko = float(ko_p.sum())
+    return {
+        "p_ko_total": p_ko,
+        "p_ko_first_year": float(ko_p[ko_t <= 1.0].sum()),
+        "p_ki_ever": float(stats.ki_ever_probability),
+        "p_ki_survive": float(stats.ki_survive_knocked_in_probability),
+        "expected_life_years": float((ko_p * ko_t).sum() + (1.0 - p_ko) * maturity),
+        "ko_probability_by_obs": [float(x) for x in ko_p],
+        "ko_times": [float(x) for x in ko_t],
+    }
+
+
+def bp(value: float, notional: float = NOTIONAL) -> float:
+    """CNY → basis points of notional."""
+    return 1e4 * value / notional
+
+
+def tail_leverage(curve: CarryCurve, maturity: float, h: float = 1e-6) -> List[float]:
+    """``∂B(T_mat)/∂B_i`` per node (central difference; exact for the linear rules)."""
+    out = []
+    nodes = curve.nodes
+    for i, (t, b) in enumerate(nodes):
+        up = list(nodes)
+        dn = list(nodes)
+        up[i], dn[i] = (t, b + h), (t, b - h)
+        out.append((float(curve.with_nodes(up).carry(maturity)) - float(curve.with_nodes(dn).carry(maturity))) / (2 * h))
+    return out
+
+
+def flat_forward_matches(curve: CarryCurve, q: float, maturity: float, spot: float) -> bool:
+    """AC8: the flat model and the curve agree on F(T_mat)."""
+    f_curve = float(curve.forward(spot, maturity))
+    f_flat = spot * float(safe_exp((RATE - q) * maturity))
+    return is_close(f_curve, f_flat, rel_tol=1e-12)

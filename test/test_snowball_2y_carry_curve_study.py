@@ -120,3 +120,60 @@ def test_committed_snapshot_matches_fixture_values(common):
     assert snap["spot"] == 6650.1383
     assert [f["price"] for f in snap["futures"]] == [6647.2, 6605.0, 6456.0, 6286.4]
     assert snap["option_pair"]["call_settle"] == 464.6 and snap["option_pair"]["put_settle"] == 840.0
+
+
+# --------------------------------------------------------------------------- T4 pricing (AC8, AC9)
+
+
+def test_terms_schedule(common):
+    terms = common.build_terms()
+    assert terms.maturity_date.isoformat() == "2028-11-06"       # 2028-11-05 is a Sunday
+    assert len(terms.ko_times) == 22                              # months 3..24
+    assert terms.ko_dates[0].isoformat() == "2027-02-15"          # 2027-02-05 falls in the Spring Festival closure
+    assert terms.ko_times[-1] == terms.maturity_years
+    assert terms.ki_times[0] == 1.0 / 365.0 and terms.ki_times[-1] == terms.maturity_years
+    assert all(b > a for a, b in zip(terms.ki_times, terms.ki_times[1:]))
+
+
+def test_solve_coupon_affine_and_fails_closed(common):
+    sol = common.solve_coupon(lambda c: 3.0e6 * (c - 0.2))
+    assert sol.coupon == pytest.approx(0.2, abs=1e-14) and sol.annuity == pytest.approx(3.0e6)
+    with pytest.raises(common.ValidationError):
+        common.solve_coupon(lambda c: 3.0e6 * (c - 0.2) + 1e6 * c * c)   # not affine
+
+
+def test_tails_share_nodes_flat_matches_forward_and_leverage(common):
+    snap = common.load_snapshot()
+    T = common.build_terms().maturity_years
+    curves = {t: common.build_curve(snap, t) for t in common.TAILS}
+    nodes = curves["hold_forward"].nodes
+    for curve in curves.values():
+        assert curve.nodes == nodes
+        q = common.flat_q(curve, T)
+        assert common.flat_forward_matches(curve, q, T, snap["spot"])
+    lev = {t: common.tail_leverage(c, T) for t, c in curves.items()}
+    t4, t5 = nodes[3][0], nodes[4][0]
+    assert lev["hold_forward"][3] == pytest.approx(-(T - t5) / (t5 - t4), rel=1e-6)
+    assert lev["hold_forward"][4] == pytest.approx(1.0 + (T - t5) / (t5 - t4), rel=1e-6)
+    assert lev["hold_yield"][4] == pytest.approx(T / t5, rel=1e-6)
+    assert lev["zero_carry"][4] == pytest.approx(1.0, rel=1e-6)
+
+
+def test_pricing_results_meet_acceptance(common):
+    res = common.read_json(common.RESULTS_DIR / "pricing.json")
+    assert abs(res["coupon"]["pv"]) <= 1e-6 * res["notional"]                        # AC8
+    eng = res["engine"]
+    assert eng["quad_readout"] == "transition"
+    assert eng["quad_grid_fine_resolved"] >= 2 * eng["quad_grid_resolved"]          # AC9: really doubled
+    assert set(res["tails"]) == set(common.TAILS)
+    for tail in res["tails"].values():
+        assert tail["flat_forward_matches_curve"] is True                            # AC8
+        for model in ("curve", "flat"):
+            cell = tail[model]
+            assert abs(cell["pv_bp_fine_grid"] - cell["pv_bp"]) <= 1.0               # AC9
+            assert abs(cell["pv_bp_pde"] - cell["pv_bp"]) <= 5.0
+            ev = cell["events"]
+            assert 0.0 <= ev["p_ko_total"] <= 1.0 and 0.0 <= ev["p_ki_ever"] <= 1.0
+            assert 0.0 < ev["expected_life_years"] <= res["terms"]["maturity_years"]
+        assert abs(tail["gap_bp_pde"] - tail["gap_bp"]) <= 2.0
+    assert set(res["marks"]) == {"mo_close", "all_settle"}
