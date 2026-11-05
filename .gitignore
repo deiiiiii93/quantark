@@ -37,3 +37,4 @@ docs/modelvalidation/certificates/*/*/evidence/
 # Root-anchored, so a package named "archive" elsewhere in the tree is
 # unaffected.
 /archive
+example/output/

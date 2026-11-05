@@ -9,6 +9,21 @@ During 0.x the public API may still change between minor versions.
 
 ### Added
 
+- Curve construction (`quantark.param.curve`, re-exported from `quantark.param`): `ZeroCurve` and `CarryCurve` on one
+  shared term interpolator with five schemes (`CurveInterpolation.LINEAR_ZERO`, `LOG_LINEAR_DF`, `CUBIC_ZERO`,
+  `LOG_CUBIC_DF`, Hagan–West `MONOTONE_CONVEX`) and the existing `RateExtrapolation` / `CarryExtrapolation` long-end
+  rules; instrument quotes (`DepositQuote`, `SwapQuote`, `BondQuote`, `FuturesQuote`, `OptionPairQuote`) in numeric
+  (`tenor_years`) or dated (dates + `valuation_date`, calendar ACT/365F) mode, never mixed; an iterative sequential
+  bootstrap — `bootstrap_discount_curve` (deposits, par swaps, bonds), `bootstrap_projection_curve` (dual-curve, one
+  `RateIndex` off a given discount curve), `build_carry_curve` (index futures or call/put pairs, with a live
+  `to_dividend_yield(rate_curve)` view) — and `reprice_quotes` for the round-trip residuals. Dated swaps and bonds are
+  built as the repo's own `InterestRateSwap` / `FixedBond`, so bootstrapped curves reprice through
+  `IRSDiscountEngine` and `BondDiscountEngine` by construction; a QuantLib cross-check (skipped when QuantLib is
+  absent) agrees within 1e-10. `key_rate_bumped_zero_curve` uses `with_pillars` when the curve has it. Guide:
+  `docs/curve-construction.md`; demo: `example/param/curve_construction_demo.py`.
+- `simple_forward_rate(curve, t_start, t_end, dcf=None)` (`quantark.param.rrf.projection`): the simple forward over a
+  window on a rate curve, with the running-period (`t_start < 0`) rule; the single projection call site for the rate
+  engines, the FRN and the bootstrap strips.
 - Trade-value portfolios: `EquityPortfolio(trade_value=True)` values every `EquityPosition` at its full trade
   value (product × signed quantity + cash legs), with bump Greeks from `get_trade_risk` and PnL against the new
   `EquityPosition.entry_trade_value`. VaR (historical, Monte Carlo incl. attribution, parametric), SIMM via the
@@ -55,6 +70,20 @@ During 0.x the public API may still change between minor versions.
 
 ### Changed
 
+- **Floating-rate projection convention** (IRS `FloatingLeg`, `FloatingRateBond`, `FRAEngine`, `CapFloorEngine`,
+  the `SwaptionEngine` zero-annuity fallback). A projected coupon is now the simple forward on the projection curve
+  over the window the index covers, in the leg's own day count: `L = (P(t_a)/P(t_b) − 1)/dcf` over the accrual period
+  for in-advance and overnight-compounded flows, over `[t_fix, t_fix + tenor]` for a term index reset in arrears (no
+  convexity adjustment). A running period uses the pro-rata spot rate `(1/P(t_e) − 1)/(dcf·t_e/(t_e − t_s))`; a
+  still-payable coupon whose accrual has fully elapsed with no stored fixing raises `MarketDataError` instead of being
+  valued at today's rate; the `t1 < 0 → 0` clamps in the FRA and cap/floor engines are gone. The previous code plugged
+  the continuously-compounded forward over `[t_fix, t_fix + tenor]` (overnight: the zero rate at the fixing date) into
+  `N·L·dcf`. **Values move:** on a term index quoted on the axis day count (ACT/365) by the compounding convexity
+  `≈ f²τ/2` (≈ 1 bp at 3 %/3M); on an ACT/360 index the day-count basis term `≈ −f·5/365` dominates (−3.8 bp at
+  5 %/3M: +3.1 bp convexity, −6.9 bp basis); on an overnight-compounded leg the move is first-order in the curve slope
+  (≈ 200 bp on a 10Y quarterly coupon with `z(t) = 2 % + 0.2 %·t`). Equity, FX, credit and bond-discount outputs and
+  all goldens have no floating projection and are bitwise unchanged; two rate tests that encoded the shortcut were
+  reconciled to the exact formulas.
 - Cash-leg times count from the trade's `initial_date` in every consumer, not only in multi-day runs. Point-in-time
   trade valuation (`EquityPosition.get_trade_value` / `get_trade_value_breakdown` / `get_trade_greeks` /
   `get_trade_risk`, hence trade-value portfolios, static stress, VaR and SIMM) rolls the legs from the initial date to

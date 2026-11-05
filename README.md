@@ -574,6 +574,43 @@ engine = LocalVolSnowballMCEngine(params, local_vol_surface=lv,
 - Defaults are unchanged bit for bit. Evidence and the rejected alternatives (barrier-local
   bridge variance, front-loaded grids): `docs/research/mc_ki_bridge_refinement/README.md`.
 
+### Curve construction (unreleased)
+
+Rate and carry term structures built from market instruments, with the interpolation and
+extrapolation chosen per curve. Guide: `docs/curve-construction.md`. Demo:
+`python example/param/curve_construction_demo.py` (writes `example/output/curve_construction_report.html`).
+
+```python
+from quantark.param import (BootstrapConfig, CurveInterpolation, DepositQuote, SwapQuote, BondQuote,
+                            FuturesQuote, bootstrap_discount_curve, bootstrap_projection_curve,
+                            build_carry_curve, reprice_quotes)
+from quantark.param.index import SHIBOR_3M
+from quantark.util.enum import PaymentFrequency
+
+quotes = [DepositQuote(rate=0.019, tenor_years=0.25), DepositQuote(rate=0.0205, tenor_years=0.5),
+          SwapQuote(fixed_rate=0.022, index=SHIBOR_3M, tenor_years=1.0),
+          SwapQuote(fixed_rate=0.0262, index=SHIBOR_3M, tenor_years=3.0),
+          BondQuote(coupon_rate=0.03, clean_price=100.9, payment_frequency=PaymentFrequency.SEMI_ANNUAL, tenor_years=5.0)]
+cfg = BootstrapConfig(interpolation=CurveInterpolation.MONOTONE_CONVEX)   # LINEAR_ZERO, LOG_LINEAR_DF (default),
+discount = bootstrap_discount_curve(quotes, cfg)                           # CUBIC_ZERO, LOG_CUBIC_DF, MONOTONE_CONVEX
+assert max(abs(r) for r in reprice_quotes(quotes, discount)) < 1e-12      # round trip
+
+projection = bootstrap_projection_curve(quotes[:4], discount_curve=ois_curve, config=cfg)   # dual-curve
+carry = build_carry_curve(spot, FuturesQuote.from_index_futures_curve(futures), discount)  # futures / option pairs
+q = carry.to_dividend_yield(discount)       # live view q(T) = r(T) − B(T)/T for any PricingEnvironment
+```
+
+`ZeroCurve` is a `RateCurve` and `CarryImpliedDividendYield` a `DividendYield`, so every engine, the key-rate
+buckets and the risk stack take them unchanged. Quotes are numeric (`tenor_years`) or dated (dates plus a
+`valuation_date`, calendar ACT/365F), never mixed; dated swaps and bonds are built as the repo's own
+`InterestRateSwap` / `FixedBond`, so bootstrapped curves reprice through `IRSDiscountEngine` and
+`BondDiscountEngine` by construction, and a QuantLib cross-check (`PiecewiseLogLinearDiscount`,
+`PiecewiseLinearZero`) agrees within 1e-10 when QuantLib is installed.
+
+**Engine change:** every floating projection (IRS, FRN, FRA, cap/floor, swaption fallback) is now the simple forward
+`(P(t_a)/P(t_b) − 1)/dcf` over the index window in the leg's own day count, via `simple_forward_rate`; the old
+continuously-compounded shortcut is gone. See the guide for the size of the move per index type.
+
 ## RQMC Target Std Scaling (MC Benchmarking)
 
 Randomized QMC uses a target standard error for adaptive batching. For large
