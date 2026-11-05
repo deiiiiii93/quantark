@@ -36,6 +36,12 @@ def key_rate_bumped_zero_curve(curve, pillar_tenor: float, bump: float):
         (t, r + float(bump)) if j == i else (t, r)
         for j, (t, r) in enumerate(pillars)
     ]
+    # Curves that know how to rebuild themselves keep their configuration
+    # (interpolation / extrapolation / clock anchor); the legacy pillar classes
+    # take the constructor path unchanged.
+    with_pillars = getattr(curve, "with_pillars", None)
+    if callable(with_pillars):
+        return with_pillars(new_pillars)
     return type(curve)(
         new_pillars,
         node_roles=getattr(curve, "node_roles", None),

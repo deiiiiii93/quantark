@@ -37,11 +37,18 @@ from .index import (
     LIBOR_3M,
     LIBOR_6M,
 )
+from .curve import (
+    CurveInterpolation,
+    ZeroCurve,
+)
 
 __all__ = [
     'NodeRole',
     'NodeRoleInfo',
     'resolve_node_roles',
+    # Curve construction
+    "CurveInterpolation",
+    "ZeroCurve",
     "SpotQuote",
     "BlackImpliedVolSurface",
     "VolatilitySurface",

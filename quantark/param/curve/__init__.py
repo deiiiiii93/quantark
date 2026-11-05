@@ -8,10 +8,12 @@ from .interpolation import (
     TermInterpolator,
     long_end_rule,
 )
+from .zero_curve import ZeroCurve
 
 __all__ = [
     "CurveInterpolation",
     "LongEndRule",
     "TermInterpolator",
     "long_end_rule",
+    "ZeroCurve",
 ]
