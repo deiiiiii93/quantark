@@ -110,9 +110,20 @@ class TestCapFloorEnginePricing(unittest.TestCase):
         cap_price = engine.price(cap)
         floor_price = engine.price(floor)
 
-        # For ATM (F ≈ K): cap ≈ floor
-        # Cap - Floor = PV of (F - K) for each period (should be near zero for flat curve)
-        self.assertAlmostEqual(cap_price, floor_price, delta=cap_price * 0.1 + 100)
+        # Black put-call parity, exactly: Cap - Floor = sum_k N * dcf_k * DF(t_pay_k) * (F_k - K).
+        # F_k is the SIMPLE ACT/360 forward over each accrual period (4.962% on this flat 5%
+        # continuously-compounded ACT/365 curve), so the 5% strike is not ATM and cap != floor;
+        # the earlier "cap ≈ floor" form of this test encoded the pre-fix shortcut F = 5%.
+        details = engine.full_analysis(cap).caplet_details
+        caplets = cap.get_future_caplets(self.valuation_date)
+        self.assertEqual(len(details), len(caplets))
+        parity = 0.0
+        for detail, caplet in zip(details, caplets):
+            t_pay = (caplet.payment_date - self.valuation_date).days / 365.0
+            df = self.rate_curve.get_discount_factor(t_pay)
+            parity += 10_000_000 * caplet.day_count_fraction * df * (detail.forward_rate - 0.05)
+        self.assertAlmostEqual(cap_price - floor_price, parity, delta=1e-6)
+        self.assertLess(cap_price, floor_price)  # forwards below the strike
 
     def test_higher_vol_higher_price(self):
         """Higher volatility should increase both cap and floor prices."""

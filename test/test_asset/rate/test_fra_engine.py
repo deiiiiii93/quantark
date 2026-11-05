@@ -33,13 +33,43 @@ class TestFRAEnginePricing(unittest.TestCase):
         )
 
     def test_at_market_fra_near_zero(self):
-        """FRA priced at the forward rate should have ~zero NPV."""
-        engine = FRAEngine(self.pricing_env)
+        """FRA struck at the engine's forward has zero NPV; a 5% strike is off-market.
 
-        # For a flat curve at 5%, forward rate ≈ 5%
-        # FRA with fixed_rate = 5% should have NPV near zero
-        npv = engine.price(self.fra)
-        self.assertAlmostEqual(npv, 0.0, delta=100)  # Within $100
+        The projection is the SIMPLE forward over the accrual period in the FRA's
+        ACT/360 basis. On a flat 5% continuously-compounded ACT/365 curve that is
+        (DF(t1)/DF(t2) - 1)/dcf = 4.962%, not 5%: the 360/365 basis change and the
+        cc -> simple conversion together move it 3.8 bp. The previous version of this
+        test encoded the pre-fix shortcut (cc forward plugged into an ACT/360 coupon).
+        """
+        engine = FRAEngine(self.pricing_env)
+        vd = self.valuation_date
+        t1 = (self.fra.accrual_start - vd).days / 365.0
+        t2 = (self.fra.accrual_end - vd).days / 365.0
+        dcf = self.fra.day_count_fraction()
+        expected_fwd = (
+            self.rate_curve.get_discount_factor(t1) / self.rate_curve.get_discount_factor(t2) - 1.0
+        ) / dcf
+        fwd = engine.forward_rate(self.fra)
+        self.assertAlmostEqual(fwd, expected_fwd, places=14)
+
+        at_market = create_fra(
+            trade_date=datetime(2024, 1, 15),
+            settlement_date=datetime(2024, 4, 15),
+            tenor_months=3,
+            notional=10_000_000,
+            fixed_rate=fwd,
+            index=SOFR_3M,
+        )
+        self.assertAlmostEqual(engine.price(at_market), 0.0, delta=1e-6)
+
+        # the 5% FRA: N * dcf * (F - K) / (1 + F * dcf), discounted from settlement
+        t_settle = self.fra.time_to_settlement(vd)
+        expected_npv = (
+            10_000_000 * dcf * (fwd - 0.05) / (1.0 + fwd * dcf)
+            * self.rate_curve.get_discount_factor(t_settle)
+        )
+        self.assertAlmostEqual(engine.price(self.fra), expected_npv, delta=1e-6)
+        self.assertLess(engine.price(self.fra), -500.0)  # ~3.8 bp off-market on 10mm
 
     def test_forward_rate_flat_curve(self):
         """Forward rate on flat curve should equal the curve rate."""

@@ -26,6 +26,7 @@ from typing import Optional
 from quantark.asset.rate.product.fra import ForwardRateAgreement
 from quantark.priceenv import PricingEnvironment
 from quantark.param.rrf import RateCurve
+from quantark.param.rrf.projection import simple_forward_rate
 from quantark.util.exceptions import ValidationError, MarketDataError
 from quantark.util.numerical import safe_divide
 
@@ -259,23 +260,23 @@ class FRAEngine:
         """
         Calculate the forward rate for the FRA accrual period.
 
-        Uses the projection curve to compute the forward rate between
-        the accrual start and accrual end dates.
+        The simple forward on the projection curve over the accrual period in the
+        FRA's own day-count basis — the rate the settlement formula
+        ``N·dcf·(L − K)/(1 + L·dcf)`` expects. A FRA whose accrual has already
+        started is projected from the valuation date over the remaining window
+        (``simple_forward_rate``'s ``t_start < 0`` branch); the engine does not
+        consult the FRA's fixing store.
 
         Args:
             fra: Forward Rate Agreement
             valuation_date: Valuation date
 
         Returns:
-            Forward rate
+            Simple forward rate
         """
         t1 = (fra.accrual_start - valuation_date).days / 365.0
         t2 = (fra.accrual_end - valuation_date).days / 365.0
-
-        if t1 < 0:
-            t1 = 0.0
-
-        return self.projection_curve.get_forward_rate(t1, t2)
+        return simple_forward_rate(self.projection_curve, t1, t2, fra.day_count_fraction())
 
     def __repr__(self):
         return (

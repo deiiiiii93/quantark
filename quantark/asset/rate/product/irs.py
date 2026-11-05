@@ -30,6 +30,7 @@ from quantark.asset.bond.schedule.cashflow import (
 )
 from quantark.param.index import RateIndex, IndexFixingStore
 from quantark.param.rrf import RateCurve
+from quantark.param.rrf.projection import missing_fixing_message, project_floating_rate
 from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
@@ -39,7 +40,7 @@ from quantark.util.calendar import (
     calculate_day_count_fraction,
 )
 from quantark.util.enum import PaymentFrequency, StubType, ResetConvention
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import MarketDataError, ValidationError
 
 
 class SwapDirection(Enum):
@@ -648,19 +649,28 @@ class FloatingLeg(SwapLeg):
         if self._cached_schedule is None:
             self._cached_schedule = self._generate_schedule()
 
+        in_arrears = self.reset_convention == ResetConvention.IN_ARREARS
         for cf in self._cached_schedule:
-            if cf.is_projected:
-                time_to_fixing = (cf.fixing_date - valuation_date).days / 365.0
-
-                if time_to_fixing < 0:
-                    time_to_fixing = 0.0
-
-                if self.index.is_overnight:
-                    cf.forward_rate = forward_curve.get_rate(time_to_fixing)
-                else:
-                    t1 = time_to_fixing
-                    t2 = t1 + self.index.tenor_years
-                    cf.forward_rate = forward_curve.get_forward_rate(t1, t2)
+            if not cf.is_projected or cf.payment_date <= valuation_date:
+                continue  # fixed, or already paid: never priced
+            if cf.accrual_end_date <= valuation_date:
+                # payable but fully determined by a historical fixing we do not have
+                raise MarketDataError(
+                    missing_fixing_message(
+                        self.index.name, cf.fixing_date, cf.accrual_start_date, cf.accrual_end_date
+                    )
+                )
+            cf.forward_rate = project_floating_rate(
+                forward_curve,
+                valuation_date,
+                cf.accrual_start_date,
+                cf.accrual_end_date,
+                cf.fixing_date,
+                cf.day_count_fraction,
+                self.index.tenor_years,
+                self.index.is_overnight,
+                in_arrears,
+            )
 
     def add_fixing(self, fixing_date: datetime, rate: float) -> None:
         """Add a historical fixing for the index."""

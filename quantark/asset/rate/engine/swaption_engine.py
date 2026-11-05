@@ -36,6 +36,7 @@ from dateutil.relativedelta import relativedelta
 from quantark.asset.rate.product.swaption import Swaption, SwaptionType
 from quantark.priceenv import PricingEnvironment
 from quantark.param.rrf import RateCurve
+from quantark.param.rrf.projection import simple_forward_rate
 from quantark.util.calendar import calculate_day_count_fraction
 from quantark.util.exceptions import ValidationError, MarketDataError
 from quantark.util.numerical import safe_log, safe_sqrt, safe_divide, is_zero
@@ -485,8 +486,8 @@ class SwaptionEngine:
         annuity = self._annuity(swaption, valuation_date)
 
         if is_zero(annuity):
-            # Fallback: use simple forward rate
-            return self.projection_curve.get_forward_rate(t_start, t_end)
+            # Degenerate annuity: the simple forward over the swap's life
+            return simple_forward_rate(self.projection_curve, t_start, t_end)
 
         # Numerator must include notional to match annuity (which is notional-weighted)
         return safe_divide(

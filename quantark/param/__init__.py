@@ -4,7 +4,7 @@ Market data parameters for derivative pricing.
 
 from .quote import SpotQuote
 from .vol import BlackImpliedVolSurface, VolatilitySurface, FlatVolSurface, TermStructureVolSurface, GridVolSurface
-from .rrf import RateCurve, FlatRateCurve
+from .rrf import RateCurve, FlatRateCurve, simple_forward_rate
 from .div import (
     DividendYield,
     ContinuousDividendYield,
@@ -61,6 +61,7 @@ __all__ = [
     "GridVolSurface",
     "RateCurve",
     "FlatRateCurve",
+    "simple_forward_rate",
     "DividendYield",
     "ContinuousDividendYield",
     "NoDividend",

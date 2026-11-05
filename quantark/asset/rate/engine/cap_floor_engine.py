@@ -30,6 +30,7 @@ from scipy.stats import norm
 from quantark.asset.rate.product.cap_floor import CapFloor, CapFloorType, Caplet, Collar
 from quantark.priceenv import PricingEnvironment
 from quantark.param.rrf import RateCurve
+from quantark.param.rrf.projection import missing_fixing_message, simple_forward_rate
 from quantark.util.exceptions import ValidationError, MarketDataError
 from quantark.util.numerical import safe_log, safe_sqrt, safe_divide, is_zero
 
@@ -457,18 +458,33 @@ class CapFloorEngine:
     def _get_forward_rate(
         self, caplet: Caplet, valuation_date: datetime
     ) -> float:
-        """Get forward rate for a caplet's accrual period."""
+        """Simple forward on the projection curve over the caplet's accrual period.
+
+        A fixed caplet returns its fixing. A projected caplet whose accrual has
+        already ended is determined by a historical fixing the store does not
+        have and raises ``MarketDataError``; a running period is projected from
+        the valuation date over the remaining window.
+        """
         # If already fixed, use the fixing
         if not caplet.is_projected and caplet.index_fixing is not None:
             return caplet.index_fixing
 
+        if caplet.accrual_end <= valuation_date:
+            raise MarketDataError(
+                missing_fixing_message(
+                    self.cap_floor_index_name(caplet), caplet.fixing_date,
+                    caplet.accrual_start, caplet.accrual_end,
+                )
+            )
+
         t1 = (caplet.accrual_start - valuation_date).days / 365.0
         t2 = (caplet.accrual_end - valuation_date).days / 365.0
+        return simple_forward_rate(self.projection_curve, t1, t2, caplet.day_count_fraction)
 
-        if t1 < 0:
-            t1 = 0.0
-
-        return self.projection_curve.get_forward_rate(t1, t2)
+    @staticmethod
+    def cap_floor_index_name(caplet: Caplet) -> str:
+        """Index label for error messages (caplets do not carry their index)."""
+        return getattr(caplet, "index_name", None) or "floating index"
 
     def _get_vol(
         self, caplet: Caplet, forward_rate: float, time_to_fixing: float
