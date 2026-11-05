@@ -371,10 +371,13 @@ def sec_zero(d: dict) -> str:
     rows = [[num(t, 2)] + [pct(S[n]["table_zero"][i]) for n in SCHEME_NAMES] for i, t in enumerate(TABLE_GRID)]
     tbl = table_html(["T"] + SCHEME_NAMES, rows, "Continuously compounded zero rate. Grid 0.01 to 12 years; the last "
                                                   "pillar is 10 years, so 12 years is extrapolated (flat forward).")
+    stack = np.array([S[n]["grid_zero"] for n in SCHEME_NAMES])
+    spread_bp = (stack.max(axis=0) - stack.min(axis=0)) * 1e4
+    k = int(np.argmax(spread_bp))
     return section(3, "ZERO", "Zero rates on a dense grid", f"""
 <p class="lead">Zero rates are close: the curves share nine pillars and the zero is an average of the forward, so
-the schemes stay within about 0.2 bp of each other on this grid. The forward chart is where they
-separate.</p>
+the schemes stay within {num(float(spread_bp[k]), 1)} bp of each other on this grid (widest at T = {num(float(GRID[k]), 2)}).
+The forward chart is where they separate.</p>
 {figure(chart, "Zero rate z(T) by scheme", "Ticks under the axis mark the pillars.", tbl)}
 """)
 
@@ -430,11 +433,14 @@ def sec_carry(d: dict) -> str:
                      "The last futures node is 2 years; the rows at 2.5 to 4 years are extrapolated.")
     pillar_rows = [[html.escape(q.label), num(q.tenor_years, 2), num(q.price, 4), num(b, 6), pct(y, 4), sci(abs(r))]
                    for q, b, y, r in zip(d["futures"], c_ff["carry"], c_ff["yield"], c_ff["residuals"])]
+    tail_ff = c_ff["grid_yield"][CARRY_GRID > c_ff["T"][-1]]
     return section(6, "CARRY", "Carry curve from index futures", f"""
 <p class="lead">Spot {num(SPOT, 0)}; futures priced from a flat dividend yield of {pct(FLAT_Q, 2)} on the discount curve, so
 the carry curve's implied yield returns {pct(FLAT_Q, 2)} at every futures tenor. Beyond the last node the carry
-extrapolation decides the yield: FLAT_FORWARD_CARRY keeps the last forward carry so <code>q</code> stays near
-{pct(FLAT_Q, 2)}; ZERO_FORWARD_CARRY freezes the cumulative carry, so <code>q</code> drifts up toward <code>r</code>.</p>
+extrapolation decides the yield: FLAT_FORWARD_CARRY keeps the last forward carry, so <code>q</code> follows the
+discount curve's shape from {pct(float(tail_ff.min()), 2)} to {pct(float(tail_ff.max()), 2)} out to
+{num(float(CARRY_GRID[-1]), 0)} years; ZERO_FORWARD_CARRY freezes the cumulative carry, so <code>q</code> drifts up
+toward <code>r</code>.</p>
 {table_html(["future", "T", "price", "carry B", "implied q", "|residual|"], pillar_rows,
             f"Residual: spot·exp(B) minus the quoted futures price; max {sci(c_ff['max_resid'])}.")}
 {figure(chart, "Implied dividend yield q(T) and r(T)", "Ticks under the axis mark the futures nodes.", tbl)}
@@ -581,6 +587,7 @@ const label=()=>{btn.querySelector('b').textContent=current()==='dark'?'LIGHT':'
 btn.addEventListener('click',()=>{const next=current()==='dark'?'light':'dark';root.dataset.theme=next;
   try{localStorage.setItem('qa-theme',next)}catch(e){}label()});
 os.addEventListener('change',label);label();
+const bar=document.querySelector('.top'),pad=()=>{root.style.scrollPaddingTop=(bar.offsetHeight+8)+'px'};pad();addEventListener('resize',pad);
 
 const links=[...document.querySelectorAll('#menu a')];
 const io=new IntersectionObserver(es=>es.forEach(en=>{if(!en.isIntersecting)return;

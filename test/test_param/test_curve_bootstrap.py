@@ -247,10 +247,20 @@ def test_carry_curve_from_option_pairs_and_futures():
 def test_failure_modes():
     with pytest.raises(NumericalError):
         bootstrap_discount_curve(AC7_QUOTES, BootstrapConfig(max_sweeps=1))
+    assert "≥ 2" in BootstrapConfig.__doc__ or ">= 2" in BootstrapConfig.__doc__
     with pytest.raises(ValidationError):
         bootstrap_discount_curve([])
     with pytest.raises(ValidationError):
         DepositQuote(rate=-3.0, tenor_years=1.0)
+
+
+def test_non_finite_residual_raises_numerical_error(monkeypatch):
+    # CP2 #2: a NaN/inf residual at a bracket end must not slip into brentq
+    from quantark.param.curve import strip as strip_mod
+
+    monkeypatch.setattr(strip_mod.DepositStrip, "residual", lambda self, d, p: float("nan"))
+    with pytest.raises(NumericalError, match="non-finite residual"):
+        bootstrap_discount_curve(DEPOSITS[:1])
 
 
 # --------------------------------------------------------------------------- AC11 (curve anchors) and dated runs

@@ -167,8 +167,18 @@ class CarryCurve:
         s = float(shift)
         return self.with_nodes([(t, b - s * t) for t, b in self._nodes])
 
+    def _check_clock(self, rate_curve: RateCurve) -> None:
+        """Two curves carrying different non-None ``valuation_date`` anchors never combine."""
+        other = getattr(rate_curve, "valuation_date", None)
+        if self.valuation_date is not None and other is not None and other != self.valuation_date:
+            raise ValidationError(
+                f"carry curve anchored at {self.valuation_date:%Y-%m-%d} but the rate curve at "
+                f"{other:%Y-%m-%d}: one clock per run"
+            )
+
     def to_dividend_yield(self, rate_curve) -> "CarryImpliedDividendYield":
         """Live ``DividendYield`` view ``q(T) = r(T) - B(T)/T`` over this curve and ``rate_curve``."""
+        self._check_clock(rate_curve)
         return CarryImpliedDividendYield(self, rate_curve)
 
     def __repr__(self) -> str:
@@ -199,10 +209,15 @@ class CarryImpliedDividendYield(DividendYield):
         self.last_observable_tenor = carry_curve.last_observable_tenor
 
     def _rates(self, times: np.ndarray) -> np.ndarray:
-        """``r(T)`` for every entry, through the curve's own array path when it has one."""
+        """``r(T)`` for every entry, through the curve's own array path when it has one.
+
+        Only a dispatch failure (a scalar-only ``get_rate`` choking on the array:
+        ``TypeError`` / ``ValueError``) falls back to per-element scalar calls;
+        any other exception is a genuine error and propagates.
+        """
         try:
             out = np.asarray(self.rate_curve.get_rate(times), dtype=float)
-        except Exception:
+        except (TypeError, ValueError):
             out = None
         if out is not None and out.shape == times.shape:
             return out

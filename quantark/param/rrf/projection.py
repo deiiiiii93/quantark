@@ -9,8 +9,13 @@ covers, ``L = (P(t_a)/P(t_b) − 1) / dcf_w`` on the projection curve ``P``. The
 rate engines (IRS / FRN legs, FRA, cap/floor, the swaption fallback) and the
 curve bootstrapper all call :func:`simple_forward_rate`, so a curve bootstrapped
 from swap quotes reprices those swaps through the engines by construction.
-The former code plugged the continuously-compounded forward into the simple
-formula; the gap is ``O(f²·τ/2)``, about 1 bp at 3 % / 3M.
+The former code plugged the continuously-compounded forward over
+``[t_fix, t_fix + tenor]`` (overnight: the zero rate at the fixing date) into
+the simple formula. The move depends on the index: compounding convexity only
+(``≈ f²τ/2``, about 1 bp at 3 % / 3M) for a term index on the axis day count;
+the day-count basis term (``≈ −f·5/365``) dominates on ACT/360 indices
+(−3.8 bp at 5 % / 3M); overnight-compounded legs move first-order in the
+curve slope (≈ 200 bp on a 10Y quarterly coupon with ``z(t) = 2 % + 0.2 %·t``).
 
 Time axis: calendar ACT/365F from the valuation date, ``(date − valuation).days / 365``,
 the convention every rate engine uses.

@@ -67,6 +67,7 @@ class Caplet:
     day_count_fraction: float
     is_projected: bool
     index_fixing: Optional[float] = None
+    index_name: Optional[str] = None  # the cap's RateIndex name, for error messages
 
     def __repr__(self):
         status = "projected" if self.is_projected else f"fixed={self.index_fixing:.4%}"
@@ -213,6 +214,7 @@ class CapFloor:
                 day_count_fraction=dcf,
                 is_projected=fixing is None,
                 index_fixing=fixing,
+                index_name=self.index.name,
             )
 
             caplets.append(caplet)

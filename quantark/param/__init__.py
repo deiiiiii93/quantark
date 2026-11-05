@@ -39,6 +39,7 @@ from .index import (
 )
 from .curve import (
     CurveInterpolation,
+    LongEndRule,
     ZeroCurve,
     CarryCurve,
     CarryImpliedDividendYield,
@@ -60,6 +61,7 @@ __all__ = [
     'resolve_node_roles',
     # Curve construction
     "CurveInterpolation",
+    "LongEndRule",
     "ZeroCurve",
     "CarryCurve",
     "CarryImpliedDividendYield",

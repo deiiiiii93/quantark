@@ -74,9 +74,11 @@ zc.with_pillars([...])        # same configuration, node roles and anchor
 zc.parallel_shifted(1e-4)     # exact DF·exp(−sT)
 ```
 
-`ZeroCurve` is a `RateCurve`: every engine, `TradingClockRateCurve`, the
-key-rate bucketing (`key_rate_bumped_zero_curve` now calls `with_pillars` when
-the curve has it) and the risk stack accept it unchanged. Pillars at `T = 0`
+`ZeroCurve` is a `RateCurve`: every pricing engine, `TradingClockRateCurve`,
+the key-rate bucketing (`key_rate_bumped_zero_curve` now calls `with_pillars`
+when the curve has it) and every consumer that bumps a curve through
+`parallel_shifted` accept it unchanged. The parts of the risk stack that
+type-check for `InterpolatedRateCurve` do **not** yet (see Open items). Pillars at `T = 0`
 are rejected (`DF(0) = 1` is implicit); `T < 0` raises `ValidationError`.
 
 `parallel_shifted` returns a pillar-shifted `ZeroCurve` for the four linear
@@ -245,10 +247,30 @@ shortcut and were reconciled to the exact formulas.
 
 ## Open items
 
+- **`ZeroCurve` and the `InterpolatedRateCurve`-only risk paths.** Eight sites
+  type-check for `InterpolatedRateCurve` and therefore reject or bypass a
+  bootstrapped curve: `quantark/sacva/exposure/asof.py` silently skips the
+  forward-curve roll-down for a `ZeroCurve` (with `include_ir_delta=False`,
+  SA-CVA future-date exposures on a sloped bootstrapped curve are discounted
+  on the un-rolled curve — the first one to fix); the stress applicators
+  (`stresstest/stress/stress_applicator.py`, `stresstest/fx/fx_stress_applicator.py`,
+  `stresstest/credit/credit_stress_applicator.py`), `var/fx/revaluation.py`,
+  `sacva/exposure/curves.py` and `sacva/sacva_engine.py` raise `ValidationError`
+  (the SA-CVA engine with a misleading "flat curve" message). Convert a
+  `ZeroCurve` to `InterpolatedRateCurve(pillars)` for those paths until they
+  accept any `RateCurve` with `with_pillars`.
 - `FRAEngine` never consults `fra.fixing_store`; a FRA whose accrual has
   started is projected from the curve (`t_start < 0` branch).
+- `SwaptionEngine.forward_swap_rate` on a swaption whose underlying swap has
+  already ended returns 0.0 (it used to return a number from the old
+  shortcut); `price` is unaffected (`is_expired` returns 0 first). The
+  swaption par-rate numerator (`notional·(DF_start − DF_end)`) is untouched.
+- `FloatingRateBond` discount-margin pricing still reads `get_rate(0.25)` as
+  its reference-rate heuristic (pre-existing; not a projection).
+- A term index reset in arrears is projected without convexity adjustment;
+  the omitted term is roughly `F²σ²Tτ/(1 + Fτ)`: sub-bp short-dated, several
+  bp on long-dated in-arrears legs.
 - `create_calendar` holiday files cover 2020–2030; dated examples keep
   maturities ≤ 2030 or use `CalendarType.NONE`.
 - Monotone-convex forward continuity at a knot with exactly equal consecutive
   discrete forwards (see above).
-- A term index reset in arrears is projected without convexity adjustment.

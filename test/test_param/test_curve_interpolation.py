@@ -156,6 +156,24 @@ def test_monotone_convex_forward_positive_when_discrete_forwards_positive():
     assert np.all(interp.forward(grid) >= 0.0)
 
 
+def test_monotone_convex_steep_curve_clip_is_active_and_forward_stays_positive():
+    # CP1 #5: discrete forwards 0.01 / 0.10 / 0.01 — the unclipped node forwards
+    # would be negative at the shoulders; the positivity clip must fire and the
+    # interpolated forward must stay >= 0 everywhere while pillars are reproduced
+    knots = np.array([0.0, 1.0, 2.0, 3.0])
+    fd = np.array([0.01, 0.10, 0.01])
+    raw = np.array([fd[0] - 0.5 * (0.055 - fd[0]), 0.055, 0.055, fd[2] - 0.5 * (0.055 - fd[2])])
+    clipped = mc_node_forwards(knots, fd)
+    assert raw[0] < 0.0 and raw[3] < 0.0  # the clip has something to do
+    assert np.all(clipped >= 0.0) and clipped[1] <= 2.0 * 0.01 and clipped[2] <= 2.0 * 0.01
+    cum = np.cumsum(fd * np.diff(knots))
+    pillars = [(t, y / t) for t, y in zip(knots[1:], cum)]
+    interp = make(CurveInterpolation.MONOTONE_CONVEX, pillars=pillars)
+    grid = np.linspace(0.0, 3.0, 3001)
+    assert np.all(interp.forward(grid) >= -1e-16)
+    assert np.max(np.abs(interp.cumulative(knots[1:]) - cum)) <= 1e-15
+
+
 @pytest.mark.parametrize("level", [0.03, -0.01])
 @pytest.mark.parametrize("rule", RULES)
 def test_monotone_convex_flat_input_is_flat_output(level, rule):

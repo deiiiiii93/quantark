@@ -477,6 +477,8 @@ class SwaptionEngine:
         t_start = (swaption.swap_start_date - valuation_date).days / 365.0
         t_end = (swaption.swap_end_date - valuation_date).days / 365.0
 
+        if t_end <= 0.0:
+            return 0.0  # the underlying swap has ended: no forward exists (CP2 #8)
         if t_start < 0:
             t_start = 0.0
 

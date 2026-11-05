@@ -165,6 +165,48 @@ def test_arrays_equal_scalar_calls_exactly(rate_curve, scheme):
     assert view.get_yield(grid.reshape(3, 3)).shape == (3, 3)
 
 
+class _ScalarOnlyCurve(FlatRateCurve):
+    """A rate curve whose get_rate takes floats only (array dispatch raises TypeError)."""
+
+    def get_rate(self, time_to_maturity):
+        if np.ndim(time_to_maturity) != 0:
+            raise TypeError("scalar only")
+        return 0.03 + 0.001 * float(time_to_maturity)
+
+
+class _BrokenCurve(FlatRateCurve):
+    def get_rate(self, time_to_maturity):
+        if np.ndim(time_to_maturity) != 0:
+            raise RuntimeError("genuine failure")
+        return 0.03
+
+
+def test_to_dividend_yield_refuses_two_different_anchors():
+    from datetime import datetime
+
+    dated = CarryCurve(NODES, valuation_date=datetime(2026, 11, 5))
+    rc_same = ZeroCurve(RATE_PILLARS, valuation_date=datetime(2026, 11, 5))
+    rc_other = ZeroCurve(RATE_PILLARS, valuation_date=datetime(2026, 11, 6))
+    dated.to_dividend_yield(rc_same)            # same anchor: fine
+    dated.to_dividend_yield(FlatRateCurve(0.03))  # attribute-less curve: passes
+    CarryCurve(NODES).to_dividend_yield(rc_other)  # numeric carry curve: passes
+    with pytest.raises(ValidationError, match="one clock per run"):
+        dated.to_dividend_yield(rc_other)
+
+
+def test_view_scalar_only_rate_curve_falls_back_per_element_and_real_errors_propagate():
+    # CP2 #5: only a dispatch failure (TypeError/ValueError) triggers the per-element
+    # fallback, which is then bit-identical to the scalar calls; anything else propagates
+    cc = CarryCurve(NODES)
+    grid = np.array([0.5, 1.0, 1.7, 5.0])
+    view = cc.to_dividend_yield(_ScalarOnlyCurve(0.03))
+    ys = view.get_yield(grid)
+    for t, y in zip(grid, ys):
+        assert view.get_yield(float(t)) == y
+    with pytest.raises(RuntimeError, match="genuine failure"):
+        cc.to_dividend_yield(_BrokenCurve(0.03)).get_yield(grid)
+
+
 @pytest.mark.parametrize("scheme", SCHEMES)
 def test_view_parallel_shift_flat_forward_carry_is_node_shift(scheme):
     rc = ZeroCurve(RATE_PILLARS)

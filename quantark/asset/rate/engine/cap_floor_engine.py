@@ -472,7 +472,7 @@ class CapFloorEngine:
         if caplet.accrual_end <= valuation_date:
             raise MarketDataError(
                 missing_fixing_message(
-                    self.cap_floor_index_name(caplet), caplet.fixing_date,
+                    self._caplet_index_name(caplet), caplet.fixing_date,
                     caplet.accrual_start, caplet.accrual_end,
                 )
             )
@@ -482,9 +482,9 @@ class CapFloorEngine:
         return simple_forward_rate(self.projection_curve, t1, t2, caplet.day_count_fraction)
 
     @staticmethod
-    def cap_floor_index_name(caplet: Caplet) -> str:
-        """Index label for error messages (caplets do not carry their index)."""
-        return getattr(caplet, "index_name", None) or "floating index"
+    def _caplet_index_name(caplet: Caplet) -> str:
+        """The cap's index name stamped on the caplet, for error messages."""
+        return caplet.index_name or "floating index"
 
     def _get_vol(
         self, caplet: Caplet, forward_rate: float, time_to_fixing: float

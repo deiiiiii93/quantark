@@ -67,7 +67,13 @@ _CurvePair = Callable[[ZeroCurve], Tuple[RateCurve, RateCurve]]
 
 @dataclass(frozen=True)
 class BootstrapConfig:
-    """Interpolation, long-end rule and sweep cap of a rate-curve bootstrap."""
+    """Interpolation, long-end rule and sweep cap of a rate-curve bootstrap.
+
+    ``max_sweeps`` counts every sweep including the truncated-sequential first
+    one; convergence is only *declared* by a later sweep whose largest pillar
+    change is ≤ ``SWEEP_TOLERANCE``, so ``max_sweeps=1`` always raises
+    ``NumericalError`` (the AC14 failure mode) and a converging run needs ≥ 2.
+    """
 
     interpolation: CurveInterpolation = CurveInterpolation.LOG_LINEAR_DF
     extrapolation: RateExtrapolation = RateExtrapolation.FLAT_FORWARD_RATE
@@ -155,7 +161,13 @@ def _solve_pillars(
         lo, hi = _BRACKET
         f_lo, f_hi = residual(lo), residual(hi)
         widenings = 0
-        while f_lo * f_hi > 0.0:
+        while True:
+            if not (np.isfinite(f_lo) and np.isfinite(f_hi)):
+                raise NumericalError(
+                    f"non-finite residual for {_label(strips[i].quote)} at the zero-rate bracket [{lo}, {hi}]"
+                )
+            if not f_lo * f_hi > 0.0:
+                break
             if widenings >= _BRACKET_WIDENINGS:
                 raise NumericalError(
                     f"no sign change for {_label(strips[i].quote)} in the zero-rate bracket [{lo}, {hi}]"

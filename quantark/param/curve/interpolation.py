@@ -110,6 +110,9 @@ def mc_node_forwards(knots: np.ndarray, discrete_forwards: np.ndarray) -> np.nda
             f[i] = fd[i - 1] + w * (fd[i] - fd[i - 1])
         f[0] = fd[0] - 0.5 * (f[1] - fd[0])
         f[n] = fd[n - 1] - 0.5 * (f[n - 1] - fd[n - 1])
+    # Exact "> 0.0" is deliberate: the clip applies only where the bounding
+    # discrete forwards are strictly positive (a zero forward keeps the
+    # interval non-empty and leaves f_i alone); no tolerance.
     for i in range(1, n):
         if fd[i - 1] > 0.0 and fd[i] > 0.0:
             f[i] = min(max(f[i], 0.0), 2.0 * min(fd[i - 1], fd[i]))
@@ -129,6 +132,9 @@ def mc_region(g0: float, g1: float) -> Tuple[int, float, float]:
     """
     g0 = float(g0)
     g1 = float(g1)
+    # Exact float comparisons are deliberate: the regions partition the plane
+    # and only exact zeros / exact boundaries select the limit formulas. Do not
+    # add a tolerance here (it would double-count or drop a region).
     if g0 == 0.0 and g1 == 0.0:
         return 0, 0.0, 0.0
     if (g0 > 0.0 and -0.5 * g0 >= g1 >= -2.0 * g0) or (
@@ -155,26 +161,31 @@ def mc_g(x: ArrayLike, g0: float, g1: float) -> ArrayLike:
     scalar = arr.ndim == 0
     xx = arr.reshape(-1)
     region, eta, A = mc_region(g0, g1)
-    if region == 0:
-        out = np.zeros_like(xx)
-    elif region == 1:
-        out = g0 * (1.0 - 4.0 * xx + 3.0 * xx * xx) + g1 * (-2.0 * xx + 3.0 * xx * xx)
-    elif region == 2:
-        right = g0 + (g1 - g0) * ((xx - eta) / (1.0 - eta)) ** 2
-        out = np.where(xx <= eta, g0, right)
-    elif region == 3:
-        left = g1 + (g0 - g1) * ((eta - xx) / eta) ** 2
-        out = np.where(xx < eta, left, g1)
-    else:
-        if eta > 0.0:
-            left = A + (g0 - A) * ((eta - xx) / eta) ** 2
+    with np.errstate(divide="ignore", invalid="ignore"):  # np.where evaluates both arms
+        if region == 0:
+            out = np.zeros_like(xx)
+        elif region == 1:
+            out = g0 * (1.0 - 4.0 * xx + 3.0 * xx * xx) + g1 * (-2.0 * xx + 3.0 * xx * xx)
+        elif region == 2:
+            u = (xx - eta) / (1.0 - eta)
+            right = g0 + (g1 - g0) * (u * u)
+            out = np.where(xx <= eta, g0, right)
+        elif region == 3:
+            u = (eta - xx) / eta
+            left = g1 + (g0 - g1) * (u * u)
+            out = np.where(xx < eta, left, g1)
         else:
-            left = np.full_like(xx, A)  # never selected: x < 0 is impossible
-        if eta < 1.0:
-            right = A + (g1 - A) * ((xx - eta) / (1.0 - eta)) ** 2
-        else:
-            right = np.full_like(xx, g1)  # selected only at x == 1: the limit g(1) = g1
-        out = np.where(xx < eta, left, right)
+            if eta > 0.0:
+                u = (eta - xx) / eta
+                left = A + (g0 - A) * (u * u)
+            else:
+                left = np.full_like(xx, A)  # never selected: x < 0 is impossible
+            if eta < 1.0:
+                u = (xx - eta) / (1.0 - eta)
+                right = A + (g1 - A) * (u * u)
+            else:
+                right = np.full_like(xx, g1)  # selected only at x == 1: the limit g(1) = g1
+            out = np.where(xx < eta, left, right)
     return _as_output(out, scalar, arr.shape)
 
 
@@ -184,28 +195,34 @@ def mc_G(x: ArrayLike, g0: float, g1: float) -> ArrayLike:
     scalar = arr.ndim == 0
     xx = arr.reshape(-1)
     region, eta, A = mc_region(g0, g1)
-    if region == 0:
-        out = np.zeros_like(xx)
-    elif region == 1:
-        out = g0 * (xx - 2.0 * xx * xx + xx ** 3) + g1 * (-xx * xx + xx ** 3)
-    elif region == 2:
-        right = g0 * xx + (g1 - g0) * (xx - eta) ** 3 / (3.0 * (1.0 - eta) ** 2)
-        out = np.where(xx <= eta, g0 * xx, right)
-    elif region == 3:
-        left = g1 * xx + (g0 - g1) * (eta ** 3 - (eta - xx) ** 3) / (3.0 * eta * eta)
-        right = g1 * xx + (g0 - g1) * eta / 3.0
-        out = np.where(xx < eta, left, right)
-    else:
-        if eta > 0.0:
-            left = A * xx + (g0 - A) * (eta ** 3 - (eta - xx) ** 3) / (3.0 * eta * eta)
+    with np.errstate(divide="ignore", invalid="ignore"):  # np.where evaluates both arms
+        if region == 0:
+            out = np.zeros_like(xx)
+        elif region == 1:
+            xx3 = xx * xx * xx
+            out = g0 * (xx - 2.0 * xx * xx + xx3) + g1 * (-xx * xx + xx3)
+        elif region == 2:
+            d = xx - eta
+            right = g0 * xx + (g1 - g0) * (d * d * d) / (3.0 * (1.0 - eta) * (1.0 - eta))
+            out = np.where(xx <= eta, g0 * xx, right)
+        elif region == 3:
+            e = eta - xx
+            left = g1 * xx + (g0 - g1) * (eta * eta * eta - e * e * e) / (3.0 * eta * eta)
+            right = g1 * xx + (g0 - g1) * eta / 3.0
+            out = np.where(xx < eta, left, right)
         else:
-            left = A * xx  # never selected
-        base = A * xx + (g0 - A) * eta / 3.0
-        if eta < 1.0:
-            right = base + (g1 - A) * (xx - eta) ** 3 / (3.0 * (1.0 - eta) ** 2)
-        else:
-            right = base  # only x == 1, where (x - eta) == 0
-        out = np.where(xx < eta, left, right)
+            if eta > 0.0:
+                e = eta - xx
+                left = A * xx + (g0 - A) * (eta * eta * eta - e * e * e) / (3.0 * eta * eta)
+            else:
+                left = A * xx  # never selected
+            base = A * xx + (g0 - A) * eta / 3.0
+            if eta < 1.0:
+                d = xx - eta
+                right = base + (g1 - A) * (d * d * d) / (3.0 * (1.0 - eta) * (1.0 - eta))
+            else:
+                right = base  # only x == 1, where (x - eta) == 0
+            out = np.where(xx < eta, left, right)
     return _as_output(out, scalar, arr.shape)
 
 

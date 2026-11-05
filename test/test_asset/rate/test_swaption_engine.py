@@ -170,6 +170,8 @@ class TestSwaptionEnginePricing(unittest.TestCase):
         engine = SwaptionEngine(self.pricing_env, vol=self.vol)
         price = engine.price(swaption, valuation_date=datetime(2025, 1, 1))
         self.assertEqual(price, 0.0)
+        # CP2 #8: once the underlying swap has ended there is no forward either
+        self.assertEqual(engine.forward_swap_rate(swaption, valuation_date=datetime(2030, 6, 1)), 0.0)
 
     def test_price_scales_with_notional(self):
         """Price should scale linearly with notional."""

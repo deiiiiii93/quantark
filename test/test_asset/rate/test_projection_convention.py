@@ -241,7 +241,7 @@ def test_caplet_elapsed_unpaid_without_fixing_raises():
     assert elapsed.payment_date == datetime(2025, 10, 20)
     vd = datetime(2025, 10, 19)
     assert elapsed.accrual_end <= vd < elapsed.payment_date and elapsed.is_projected
-    with pytest.raises(MarketDataError):
+    with pytest.raises(MarketDataError, match=cap.index.name):  # CP2 #6: the message names the index
         CapFloorEngine(_env(TERM, vd), vol=0.20).full_analysis(cap)
 
 

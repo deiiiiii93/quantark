@@ -600,8 +600,10 @@ carry = build_carry_curve(spot, FuturesQuote.from_index_futures_curve(futures), 
 q = carry.to_dividend_yield(discount)       # live view q(T) = r(T) − B(T)/T for any PricingEnvironment
 ```
 
-`ZeroCurve` is a `RateCurve` and `CarryImpliedDividendYield` a `DividendYield`, so every engine, the key-rate
-buckets and the risk stack take them unchanged. Quotes are numeric (`tenor_years`) or dated (dates plus a
+`ZeroCurve` is a `RateCurve` and `CarryImpliedDividendYield` a `DividendYield`, so every pricing engine,
+`TradingClockRateCurve`, the key-rate buckets and everything that bumps through `parallel_shifted` take them
+unchanged. The stress applicators, FX VaR revaluation and SA-CVA exposure curves still accept only
+`InterpolatedRateCurve` (they raise `ValidationError` on a `ZeroCurve`; see the guide's open items). Quotes are numeric (`tenor_years`) or dated (dates plus a
 `valuation_date`, calendar ACT/365F), never mixed; dated swaps and bonds are built as the repo's own
 `InterestRateSwap` / `FixedBond`, so bootstrapped curves reprice through `IRSDiscountEngine` and
 `BondDiscountEngine` by construction, and a QuantLib cross-check (`PiecewiseLogLinearDiscount`,
