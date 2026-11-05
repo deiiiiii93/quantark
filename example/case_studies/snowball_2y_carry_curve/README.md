@@ -26,7 +26,7 @@ tail conventions.
 From `results/pricing.json` and `results/greeks.json` (bp of notional; `04_report.py`
 prints this table):
 
-| tail | curve PV | flat PV | gap | flat-desk coupon | q_flat | Δ curve / flat (CNY/pt) | parallel rho curve / flat (bp per +1% q) | rho beyond last quote |
+| tail | curve PV | flat PV | gap | flat-desk coupon shift | q_flat | Δ curve / flat (CNY/pt) | parallel rho curve / flat (bp per +1% q) | rho beyond last quote |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | hold forward carry | 0.00 bp | 44.18 bp | +44.18 bp | −1.30% p.a. | 7.15% | 976.2 / 952.3 | −83.59 / −79.60 | 43.9% |
 | hold zero carry yield | −125.46 bp | −117.90 bp | +7.56 bp | −0.23% p.a. | 9.12% | 1,082.6 / 1,079.0 | −85.66 / −84.95 | 41.7% |

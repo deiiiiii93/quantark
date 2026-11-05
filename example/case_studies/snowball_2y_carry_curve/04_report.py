@@ -488,9 +488,9 @@ def section_price(d: Dict[str, Any]) -> str:
 the curve; a flat-q desk would solve a coupon {num(100 * abs(h["coupon_equiv"]), 2)}% p.a.
 {"lower" if h["gap_bp"] > 0 else "higher"}. The gap has the same sign under every tail
 ({", ".join(snum(g, 1) for g in gaps)} bp) but its size depends on the tail.</p>
-{table(["tail", "curve PV, bp", "flat PV, bp", "gap flat − curve, bp", "flat-desk coupon, % p.a.", "q_flat"], rows,
-       note="PV of the note holder in bp of notional. Flat-desk coupon: the coupon change that zeroes the gap, "
-            "gap / ∂PV_curve/∂coupon (that tail's own annuity).")}
+{table(["tail", "curve PV, bp", "flat PV, bp", "gap flat − curve, bp", "flat-desk coupon shift, % p.a.", "q_flat"], rows,
+       note="PV of the note holder in bp of notional. Flat-desk coupon shift: the coupon change that zeroes the "
+            "gap, −gap / ∂PV_curve/∂coupon (that tail's own annuity).")}
 <h3 class="sub">Validation: QUAD grid doubling and PDE</h3>
 {table(["tail", "model", f"QUAD {eng['quad_grid_resolved']}", f"QUAD {eng['quad_grid_fine_resolved']}", "Δ grid",
         f"PDE {eng['pde_accuracy']}", "Δ PDE"], val_rows,
@@ -793,7 +793,8 @@ def masthead(d: Dict[str, Any]) -> Tuple[str, str]:
     dd_hf, dr_hf = total_diffs(d, "hold_forward")
     kpis = [
         (signed(h["gap_bp"], 1), "BP", "Flat − curve PV · hold-forward tail"),
-        (signed(-100 * h["coupon_equiv"], 2), "% P.A.", "Coupon a flat-q desk would solve"),
+        (signed(-100 * h["coupon_equiv"], 2), "% P.A.",
+         f"Coupon shift a flat-q desk would solve (to {pct(h['coupon'] - h['coupon_equiv'], 2)})"),
         (pct(h["tail_share"], 0), "", "Parallel rho beyond the last quote"),
         (num(h["pv_spread"], 0), "BP", "Curve PV range across tail conventions"),
     ]
@@ -816,8 +817,8 @@ def masthead(d: Dict[str, Any]) -> Tuple[str, str]:
   <div class="kicker">SNOWBALL · CARRY CURVE · 2Y</div>
   <h1>A flat q misprices the 2Y snowball, and hides where its carry risk sits.</h1>
   <p class="answer">On the {esc(snap["valuation_date"])} CSI 1000 chain the flat q(T_mat) values the note
-  <b>{snum(h["gap_bp"], 1)} bp</b> of notional above the curve (a coupon {num(100 * abs(h["coupon_equiv"]), 2)}% p.a.
-  lower). Delta and rho totals differ by only {num(dd_hf, 1)}% and {num(dr_hf, 1)}%, but
+  <b>{snum(h["gap_bp"], 1)} bp</b> of notional {"above" if h["gap_bp"] > 0 else "below"} the curve (a coupon
+  {num(100 * abs(h["coupon_equiv"]), 2)}% p.a. {"lower" if h["gap_bp"] > 0 else "higher"}). Delta and rho totals differ by only {num(dd_hf, 1)}% and {num(dr_hf, 1)}%, but
   <b>{pct(h["tail_share"], 0)}</b> of the rho sits beyond the last quote, and the
   unquoted tail convention alone moves the PV by <b>{num(h["pv_spread"], 0)} bp</b>.</p>
 </div>
@@ -1020,7 +1021,7 @@ def headline_markdown(d: Dict[str, Any]) -> str:
     """The README's headline table, printed by ``main`` so the README copies the results."""
     pr, gk = d["pr"], d["gk"]
     c = d["c"]
-    lines = ["| tail | curve PV | flat PV | gap | flat-desk coupon | q_flat | Δ curve / flat (CNY/pt) "
+    lines = ["| tail | curve PV | flat PV | gap | flat-desk coupon shift | q_flat | Δ curve / flat (CNY/pt) "
              "| parallel rho curve / flat (bp per +1% q) | rho beyond last quote |",
              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for tail in TAIL_ORDER:
