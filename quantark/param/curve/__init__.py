@@ -8,7 +8,7 @@ from .interpolation import (
     TermInterpolator,
     long_end_rule,
 )
-from .zero_curve import ZeroCurve
+from .zero_curve import AnchoredParallelShiftRateCurve, ZeroCurve
 from .carry_curve import CarryCurve, CarryImpliedDividendYield
 from .quotes import (
     PERIOD_COUNT_ATOL,
@@ -56,6 +56,7 @@ __all__ = [
     "TermInterpolator",
     "long_end_rule",
     "ZeroCurve",
+    "AnchoredParallelShiftRateCurve",
     "CarryCurve",
     "CarryImpliedDividendYield",
     "PERIOD_COUNT_ATOL",

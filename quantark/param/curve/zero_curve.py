@@ -30,6 +30,34 @@ from quantark.util.exceptions import ValidationError
 ArrayLike = Union[float, np.ndarray]
 
 
+class AnchoredParallelShiftRateCurve(ParallelShiftRateCurve):
+    """:class:`ParallelShiftRateCurve` that keeps the base curve's ``valuation_date``
+    anchor (so the one-clock-per-run check still fires on a bumped dated curve) and
+    accepts arrays of times (the scalar path is the 1-element array path)."""
+
+    def __init__(self, base_curve: RateCurve, shift: float, valuation_date: Optional[datetime]):
+        super().__init__(base_curve, shift)
+        self.valuation_date = valuation_date
+
+    def get_discount_factor(self, time_to_maturity):  # type: ignore[override]
+        t = np.asarray(time_to_maturity, dtype=float)
+        if np.any(t < 0):
+            raise ValidationError(f"Time to maturity must be non-negative, got {time_to_maturity}")
+        df = np.asarray(self.base_curve.get_discount_factor(t), dtype=float) * np.exp(-self.shift * t)
+        return float(df) if np.ndim(time_to_maturity) == 0 else df
+
+    def get_rate(self, time_to_maturity):  # type: ignore[override]
+        t = np.asarray(time_to_maturity, dtype=float)
+        rate = np.asarray(self.base_curve.get_rate(t), dtype=float) + self.shift
+        return float(rate) if np.ndim(time_to_maturity) == 0 else rate
+
+    def parallel_shifted(self, shift: float) -> RateCurve:
+        return AnchoredParallelShiftRateCurve(self.base_curve, self.shift + float(shift), self.valuation_date)
+
+    def __repr__(self) -> str:
+        return f"AnchoredParallelShiftRateCurve(shift={self.shift:.2%}, base={self.base_curve!r})"
+
+
 class ZeroCurve(RateCurve):
     """Pillar zero curve: ``(T_i, z_i)`` + interpolation scheme + long-end rule.
 
@@ -150,10 +178,11 @@ class ZeroCurve(RateCurve):
         commute with a level shift) the pillar shift is exact, so a ``ZeroCurve``
         with shifted pillars is returned. Monotone convex clips node forwards
         and is not linear in the pillars, so it returns the exact
-        :class:`ParallelShiftRateCurve` wrapper instead.
+        :class:`AnchoredParallelShiftRateCurve` wrapper instead (same
+        ``valuation_date`` anchor, array-aware).
         """
         if self.interpolation is CurveInterpolation.MONOTONE_CONVEX:
-            return ParallelShiftRateCurve(self, shift)
+            return AnchoredParallelShiftRateCurve(self, float(shift), self.valuation_date)
         s = float(shift)
         return self.with_pillars([(t, z + s) for t, z in self._pillars])
 

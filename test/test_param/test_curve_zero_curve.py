@@ -183,6 +183,25 @@ def test_parallel_shift_monotone_convex_wraps():
         )
 
 
+def test_parallel_shift_monotone_convex_keeps_anchor_and_takes_arrays():
+    # CP2 #1: the wrapper must carry the run's clock, or a bumped dated curve
+    # would pass the builders' anchor check in a numeric run (AC11)
+    vd = datetime(2026, 11, 5)
+    base = ZeroCurve(PILLARS, interpolation=CurveInterpolation.MONOTONE_CONVEX, valuation_date=vd)
+    up = base.parallel_shifted(1e-4)
+    assert up.valuation_date == vd
+    assert ZeroCurve(PILLARS, interpolation=CurveInterpolation.MONOTONE_CONVEX).parallel_shifted(1e-4).valuation_date is None
+    # CP1 minor #2: array-aware, bit-identical to the scalar calls (AC5)
+    ts = np.array([0.0, 0.1, 0.7, 3.3, 12.0])
+    dfs = up.get_discount_factor(ts)
+    rates = up.get_rate(ts)
+    assert dfs.shape == ts.shape and rates.shape == ts.shape
+    for i, T in enumerate(ts):
+        assert dfs[i] == up.get_discount_factor(float(T))
+        assert rates[i] == up.get_rate(float(T))
+    assert up.get_rate(0.0) == pytest.approx(base.get_rate(0.0) + 1e-4, abs=1e-16)
+
+
 def test_with_pillars_keeps_configuration():
     vd = datetime(2026, 11, 5)
     base = ZeroCurve(PILLARS, interpolation=CurveInterpolation.CUBIC_ZERO,
