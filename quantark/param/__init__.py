@@ -42,6 +42,11 @@ from .curve import (
     ZeroCurve,
     CarryCurve,
     CarryImpliedDividendYield,
+    DepositQuote,
+    SwapQuote,
+    BondQuote,
+    FuturesQuote,
+    OptionPairQuote,
 )
 
 __all__ = [
@@ -53,6 +58,11 @@ __all__ = [
     "ZeroCurve",
     "CarryCurve",
     "CarryImpliedDividendYield",
+    "DepositQuote",
+    "SwapQuote",
+    "BondQuote",
+    "FuturesQuote",
+    "OptionPairQuote",
     "SpotQuote",
     "BlackImpliedVolSurface",
     "VolatilitySurface",
