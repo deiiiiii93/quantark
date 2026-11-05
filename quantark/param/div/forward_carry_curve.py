@@ -52,6 +52,14 @@ class ForwardCarryCurve:
             if extrapolation is not None
             else CarryExtrapolation.FLAT_FORWARD_CARRY
         )
+        if self.extrapolation not in (
+            CarryExtrapolation.FLAT_FORWARD_CARRY,
+            CarryExtrapolation.ZERO_FORWARD_CARRY,
+        ):
+            raise ValidationError(
+                "ForwardCarryCurve implements FLAT_FORWARD_CARRY and ZERO_FORWARD_CARRY "
+                f"only, got {self.extrapolation!r}; use quantark.param.CarryCurve"
+            )
 
     @property
     def nodes(self) -> List[Tuple[float, float]]:

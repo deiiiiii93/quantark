@@ -9,6 +9,10 @@ During 0.x the public API may still change between minor versions.
 
 ### Added
 
+- `CarryExtrapolation.FLAT_CARRY_YIELD`: a third carry long-end rule that holds the zero carry yield `B(T)/T` at the
+  last node's value (flat `q` under a flat rate curve). `CarryImpliedDividendYield.parallel_shifted` shifts nodes
+  exactly under it; the legacy `ForwardCarryCurve` rejects it. Existing rules and defaults are unchanged.
+
 - Curve construction (`quantark.param.curve`, re-exported from `quantark.param`): `ZeroCurve` and `CarryCurve` on one
   shared term interpolator with five schemes (`CurveInterpolation.LINEAR_ZERO`, `LOG_LINEAR_DF`, `CUBIC_ZERO`,
   `LOG_CUBIC_DF`, Hagan–West `MONOTONE_CONVEX`) and the existing `RateExtrapolation` / `CarryExtrapolation` long-end

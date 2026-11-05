@@ -14,7 +14,7 @@ Sections:
   D  dual curve: a SHIBOR_3M projection curve bootstrapped off a discount curve
      shifted by -50 bp, with the basis per pillar
   E  the carry curve from index futures, the implied dividend-yield view at the
-     pillars and under both carry extrapolations beyond the last node
+     pillars and under the three carry extrapolations beyond the last node
 
 Also writes a self-contained Bloomberg x Swiss HTML report (frozen navigator,
 light/dark switcher, inline SVG charts with a table under each chart) to
@@ -420,16 +420,19 @@ discounted on the shifted one, so the projection curve must sit above the discou
 
 def sec_carry(d: dict) -> str:
     c_ff, c_zf = d["carry"]["FLAT_FORWARD_CARRY"], d["carry"]["ZERO_FORWARD_CARRY"]
+    c_fy = d["carry"]["FLAT_CARRY_YIELD"]
     chart = line_chart(CARRY_GRID, [
         ("r(T) zero rate", d["grid_rate"] * 100),
         ("implied q, FLAT_FORWARD_CARRY", c_ff["grid_yield"] * 100),
         ("implied q, ZERO_FORWARD_CARRY", c_zf["grid_yield"] * 100),
+        ("implied q, FLAT_CARRY_YIELD", c_fy["grid_yield"] * 100),
     ], xlabel="MATURITY T, YEARS", ylabel="RATE / IMPLIED YIELD, %", yfmt=lambda v: num(v, 2),
         label="Carry-implied dividend yield and discount zero rate", markers=c_ff["T"])
     rows = [[num(t, 2), pct(d["table_rate"][i]), pct(c_ff["table_yield"][i]), pct(c_zf["table_yield"][i]),
+             pct(c_fy["table_yield"][i]),
              pct(c_ff["table_fwd_carry"][i]), pct(c_zf["table_fwd_carry"][i])]
             for i, t in enumerate(CARRY_TABLE_GRID)]
-    tbl = table_html(["T", "r(T)", "q flat-fwd", "q zero-fwd", "fwd carry flat-fwd", "fwd carry zero-fwd"], rows,
+    tbl = table_html(["T", "r(T)", "q flat-fwd", "q zero-fwd", "q flat-yield", "fwd carry flat-fwd", "fwd carry zero-fwd"], rows,
                      "The last futures node is 2 years; the rows at 2.5 to 4 years are extrapolated.")
     pillar_rows = [[html.escape(q.label), num(q.tenor_years, 2), num(q.price, 4), num(b, 6), pct(y, 4), sci(abs(r))]
                    for q, b, y, r in zip(d["futures"], c_ff["carry"], c_ff["yield"], c_ff["residuals"])]
@@ -440,7 +443,8 @@ the carry curve's implied yield returns {pct(FLAT_Q, 2)} at every futures tenor.
 extrapolation decides the yield: FLAT_FORWARD_CARRY keeps the last forward carry, so <code>q</code> follows the
 discount curve's shape from {pct(float(tail_ff.min()), 2)} to {pct(float(tail_ff.max()), 2)} out to
 {num(float(CARRY_GRID[-1]), 0)} years; ZERO_FORWARD_CARRY freezes the cumulative carry, so <code>q</code> drifts up
-toward <code>r</code>.</p>
+toward <code>r</code>; FLAT_CARRY_YIELD holds the last zero carry yield <code>B/T</code>, so <code>q</code> moves only
+with <code>r</code>.</p>
 {table_html(["future", "T", "price", "carry B", "implied q", "|residual|"], pillar_rows,
             f"Residual: spot·exp(B) minus the quoted futures price; max {sci(c_ff['max_resid'])}.")}
 {figure(chart, "Implied dividend yield q(T) and r(T)", "Ticks under the axis mark the futures nodes.", tbl)}

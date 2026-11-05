@@ -33,6 +33,13 @@ from quantark.util.exceptions import ValidationError
 
 ArrayLike = Union[float, np.ndarray]
 
+#: Long-end rules under which shifting every node yield by ``s`` is the exact
+#: ``q + s`` everywhere (the tail continues a forward or holds a level, both
+#: of which move by ``s``); ``ZERO_FORWARD_CARRY`` holds ``B`` and cannot.
+_NODE_SHIFT_EXACT_TAILS = frozenset(
+    {CarryExtrapolation.FLAT_FORWARD_CARRY, CarryExtrapolation.FLAT_CARRY_YIELD}
+)
+
 
 class CarryCurve:
     """Cumulative log-carry curve on nodes ``(T_i, B_i)``.
@@ -44,8 +51,9 @@ class CarryCurve:
             in the zero carry yield ``B/T``, ``LOG_LINEAR_DF`` = linear in ``B``,
             ``CUBIC_ZERO`` / ``LOG_CUBIC_DF`` their natural-spline analogues).
             ``MONOTONE_CONVEX`` raises ``ValidationError``.
-        extrapolation: ``FLAT_FORWARD_CARRY`` (last segment's ``dB/dt`` continues)
-            or ``ZERO_FORWARD_CARRY`` (``B`` flat beyond the last node).
+        extrapolation: ``FLAT_FORWARD_CARRY`` (last segment's ``dB/dt`` continues),
+            ``ZERO_FORWARD_CARRY`` (``B`` flat beyond the last node) or
+            ``FLAT_CARRY_YIELD`` (the zero carry yield ``B/T`` held at ``B_n/T_n``).
         node_roles: optional per-node provenance metadata (aligned with the SORTED nodes).
         last_observable_tenor: last market-observable tenor; defaults to the last node.
         valuation_date: clock anchor of the time axis (``None`` = numeric axis).
@@ -161,8 +169,10 @@ class CarryCurve:
         """Nodes ``(T_i, B_i - shift·T_i)``: the implied yield ``q`` moved by ``+shift``.
 
         Exact at every ``T`` for the four linear-operator schemes under
-        ``FLAT_FORWARD_CARRY``; under ``ZERO_FORWARD_CARRY`` the flat tail cannot
-        represent ``q + shift`` beyond the last node (the view wraps instead).
+        ``FLAT_FORWARD_CARRY`` and ``FLAT_CARRY_YIELD`` (both long-end rules
+        reproduce a yield moved by a constant); under ``ZERO_FORWARD_CARRY`` the
+        flat tail cannot represent ``q + shift`` beyond the last node (the view
+        wraps instead).
         """
         s = float(shift)
         return self.with_nodes([(t, b - s * t) for t, b in self._nodes])
@@ -243,8 +253,9 @@ class CarryImpliedDividendYield(DividendYield):
 
     def parallel_shifted(self, shift: float) -> DividendYield:
         """``q + shift`` everywhere: a node-shifted view under ``FLAT_FORWARD_CARRY``
-        (exact for the linear-operator schemes), else the exact wrapper."""
-        if self.carry_curve.extrapolation is CarryExtrapolation.FLAT_FORWARD_CARRY:
+        or ``FLAT_CARRY_YIELD`` (exact for the linear-operator schemes), else the
+        exact wrapper."""
+        if self.carry_curve.extrapolation in _NODE_SHIFT_EXACT_TAILS:
             return CarryImpliedDividendYield(
                 self.carry_curve.shifted_yield(shift), self.rate_curve
             )

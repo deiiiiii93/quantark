@@ -81,6 +81,8 @@ def long_end_rule(scheme) -> LongEndRule:
         return LongEndRule.HOLD_FORWARD
     if scheme is CarryExtrapolation.ZERO_FORWARD_CARRY:
         return LongEndRule.HOLD_CUMULATIVE
+    if scheme is CarryExtrapolation.FLAT_CARRY_YIELD:
+        return LongEndRule.HOLD_LEVEL
     raise ValidationError(f"unknown extrapolation scheme: {scheme!r}")
 
 

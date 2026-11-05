@@ -22,6 +22,9 @@ class RateExtrapolation(Enum):
 class CarryExtrapolation(Enum):
     FLAT_FORWARD_CARRY = "flat_forward_carry"
     ZERO_FORWARD_CARRY = "zero_forward_carry"
+    #: ``B(T)/T`` held at ``B_n/T_n`` beyond the last node (flat zero carry
+    #: yield; with a flat rate curve this is a flat dividend yield).
+    FLAT_CARRY_YIELD = "flat_carry_yield"
 
 
 class VolExtrapolation(Enum):

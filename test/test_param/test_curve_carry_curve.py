@@ -249,3 +249,42 @@ def test_with_nodes_and_shifted_yield_keep_configuration():
     assert sh.nodes == pytest.approx([(t, b - 0.01 * t) for t, b in NODES])
     assert sh.interpolation is cc.interpolation and sh.valuation_date == vd
     assert cc.nodes == NODES
+
+
+# --------------------------------------------------------------------------- FLAT_CARRY_YIELD tail
+# spec .ship/2026-11-05-snowball-2y-carry-curve AC1-AC3
+
+
+def test_flat_carry_yield_maps_to_hold_level():
+    from quantark.param.curve.interpolation import LongEndRule, long_end_rule
+
+    assert long_end_rule(CarryExtrapolation.FLAT_CARRY_YIELD) is LongEndRule.HOLD_LEVEL
+
+
+@pytest.mark.parametrize("scheme", SCHEMES)
+def test_flat_carry_yield_holds_last_zero_carry_yield(scheme):
+    cc = CarryCurve(NODES, interpolation=scheme, extrapolation=CarryExtrapolation.FLAT_CARRY_YIELD)
+    t_n, b_n = NODES[-1]
+    for T in (t_n, 1.5 * t_n, 3.0 * t_n):
+        assert float(cc.carry(T)) / T == pytest.approx(b_n / t_n, rel=1e-14, abs=1e-16)
+    eps = 1e-9
+    assert float(cc.carry(t_n + eps)) == pytest.approx(float(cc.carry(t_n)), abs=1e-10)
+    # interior (incl. the short end) identical to the default tail, bitwise
+    ref = CarryCurve(NODES, interpolation=scheme)
+    interior = GRID[GRID <= t_n]
+    np.testing.assert_array_equal(cc.carry(interior), ref.carry(interior))
+
+
+@pytest.mark.parametrize("scheme", SCHEMES)
+def test_view_parallel_shift_flat_carry_yield_is_exact_node_shift(scheme):
+    cc = CarryCurve(NODES, interpolation=scheme, extrapolation=CarryExtrapolation.FLAT_CARRY_YIELD)
+    view = cc.to_dividend_yield(FlatRateCurve(0.02))
+    shifted = view.parallel_shifted(0.0123)
+    assert isinstance(shifted, CarryImpliedDividendYield)
+    ts = np.array([0.1, 0.25, 0.7, 2.0, 5.0, 6.5, 12.0])
+    np.testing.assert_allclose(shifted.get_yield(ts), view.get_yield(ts) + 0.0123, rtol=0.0, atol=1e-14)
+
+
+def test_legacy_forward_carry_curve_rejects_flat_carry_yield():
+    with pytest.raises(ValidationError):
+        ForwardCarryCurve(NODES, extrapolation=CarryExtrapolation.FLAT_CARRY_YIELD)

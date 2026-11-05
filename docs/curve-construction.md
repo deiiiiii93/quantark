@@ -55,6 +55,7 @@ it:
 | `RateExtrapolation.FLAT_FORWARD_RATE` (default) | `HOLD_FORWARD` | `Y(T) = Y_n + fd_n·(T − T_n)`, last discrete forward |
 | `CarryExtrapolation.FLAT_FORWARD_CARRY` (default) | `HOLD_FORWARD` | last discrete forward carry held |
 | `CarryExtrapolation.ZERO_FORWARD_CARRY` | `HOLD_CUMULATIVE` | `B(T) = B_n` (no carry past the last node) |
+| `CarryExtrapolation.FLAT_CARRY_YIELD` | `HOLD_LEVEL` | `B(T)/T = B_n/T_n` (flat zero carry yield; flat `q` under a flat rate) |
 
 ## `ZeroCurve`
 
@@ -113,10 +114,11 @@ q = cc.to_dividend_yield(zc)     # CarryImpliedDividendYield: q(T) = r(T) − B(
 ```
 
 With the defaults `CarryCurve(nodes)` is numerically identical to
-`ForwardCarryCurve(nodes)`. `MONOTONE_CONVEX` is refused for carry (its
+`ForwardCarryCurve(nodes)` (the legacy class implements only the first two
+carry rules and rejects `FLAT_CARRY_YIELD`). `MONOTONE_CONVEX` is refused for carry (its
 positivity clip has no meaning for a signed basis). The view's
 `parallel_shifted(s)` shifts the nodes exactly under `FLAT_FORWARD_CARRY` and
-falls back to the exact `ParallelShiftDividendYield` wrapper under
+`FLAT_CARRY_YIELD` and falls back to the exact `ParallelShiftDividendYield` wrapper under
 `ZERO_FORWARD_CARRY`, whose flat tail cannot represent `q + s`.
 
 ## Quotes and the clock rule
