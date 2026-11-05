@@ -1,0 +1,80 @@
+{
+  "cffex_csv": {
+    "bytes": 62517,
+    "sha256": "aab75ac75143340e4ba3eb4f1eb2164b7de97407831615009bdef1b348cabbd0",
+    "url": "http://www.cffex.com.cn/sj/hqsj/rtj/202611/05/20261105_1.csv"
+  },
+  "dashboard_syn_fut": {
+    "content_hash": "bbc20bdcad748acd03950e3e186c402260ebca0ee4603135c13744ac56231806",
+    "contract": "SYN_FUT_20270917.SH",
+    "note": "dashboard synthetic forward from live mids, r=1.4%; cross-check only",
+    "price": 6224.577134332209,
+    "revision_id": 1319397
+  },
+  "futures": [
+    {
+      "close_cffex": 6647.2,
+      "content_hash": "edb368c4e71d3531a684f5463cdbbc198c5c0947233f14a91be923be40ae9248",
+      "contract": "IM2611",
+      "expiry": "2026-11-20",
+      "price": 6647.2,
+      "revision_id": 1318449,
+      "settle": 6624.2
+    },
+    {
+      "close_cffex": 6605.0,
+      "content_hash": "dc97802afe8809c7cc840edecf02a490703d1f37f1d123efa714bd31595a1248",
+      "contract": "IM2612",
+      "expiry": "2026-12-18",
+      "price": 6605.0,
+      "revision_id": 1318695,
+      "settle": 6582.4
+    },
+    {
+      "close_cffex": 6456.0,
+      "content_hash": "1f8a3ad4785ffe923b70d767e3f78fbc748d7a5cf765c1284fed77584bead27c",
+      "contract": "IM2703",
+      "expiry": "2027-03-19",
+      "price": 6456.0,
+      "revision_id": 1318941,
+      "settle": 6434.6
+    },
+    {
+      "close_cffex": 6286.4,
+      "content_hash": "0236e4aa12eb24a396bce3df4c7583191a21355598f15abdb159e5e94fb5cf02",
+      "contract": "IM2706",
+      "expiry": "2027-06-18",
+      "price": 6286.4,
+      "revision_id": 1319187,
+      "settle": 6266.8
+    }
+  ],
+  "index_code": "000852.SH",
+  "mo_forward": 6220.022259984662,
+  "option_pair": {
+    "call_close": 464.6,
+    "call_contract": "MO2709-C-6600",
+    "call_settle": 464.6,
+    "expiry": "2027-09-17",
+    "put_close": 851.8,
+    "put_contract": "MO2709-P-6600",
+    "put_settle": 840.0,
+    "series": "MO2709",
+    "strike": 6600.0
+  },
+  "rate": 0.014,
+  "sources": {
+    "mo_pair": "CFFEX daily statistics CSV, settlement (今结算)",
+    "spot_and_im": "index-dashboard basis.sqlite3 latest_daily_basis (closes)"
+  },
+  "spot": 6650.1383,
+  "valuation_date": "2026-11-05",
+  "vol": {
+    "call_iv": 0.2761887008532567,
+    "forward": 6220.022259984662,
+    "method": "Black-76 on MO settlement, pillar forward, DF=exp(-rT)",
+    "put_iv": 0.276180307596203,
+    "strike": 6200.0,
+    "value": 0.27618450422472984
+  }
+}

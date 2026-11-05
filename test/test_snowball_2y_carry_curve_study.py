@@ -1,0 +1,122 @@
+"""2Y snowball flat-q vs CarryCurve case study (spec .ship/2026-11-05-snowball-2y-carry-curve).
+
+Fixtures only (no live dashboard DB, no network): a sqlite built from the
+2026-11-05 rows and a GBK excerpt of the CFFEX daily statistics CSV.
+"""
+from __future__ import annotations
+
+import importlib.util
+import math
+import sqlite3
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+STUDY = ROOT / "example" / "case_studies" / "snowball_2y_carry_curve"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "snowball_2y_carry_curve"
+CSV = FIXTURES / "cffex_20261105_excerpt.csv"
+
+
+def _load(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, STUDY / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def common():
+    return _load("snowball_2y_cc_common", "_common.py")
+
+
+# 2026-11-05 rows of the dashboard's latest_daily_basis view (columns the study reads)
+DB_ROWS = [
+    (1318449, 1, "IM2611", 6647.2, "2026-11-20", "edb3", None, None),
+    (1318695, 2, "IM2612", 6605.0, "2026-12-18", "dc97", None, None),
+    (1318941, 3, "IM2703", 6456.0, "2027-03-19", "1f8a", None, None),
+    (1319187, 4, "IM2706", 6286.4, "2027-06-18", "0236", None, None),
+    (1319397, 5, "SYN_FUT_20270917.SH", 6224.57713433221, "2027-09-17", "bbc2", "MO2709C6600", "MO2709P6600"),
+]
+
+
+def _make_db(path: Path, rows=DB_ROWS) -> Path:
+    con = sqlite3.connect(path)
+    con.execute(
+        "CREATE TABLE latest_daily_basis (revision_id INTEGER, provider TEXT, index_code TEXT, "
+        "futures_family TEXT, slot INTEGER, trading_date TEXT, spot REAL, contract_code TEXT, "
+        "futures REAL, expiry_date TEXT, content_hash TEXT, call_option_contract TEXT, "
+        "put_option_contract TEXT, observation_status TEXT)"
+    )
+    for rid, slot, code, fut, exp, h, c, p in rows:
+        con.execute(
+            "INSERT INTO latest_daily_basis VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (rid, "akshare", "000852.SH", "IM", slot, "2026-11-05", 6650.1383, code, fut, exp, h, c, p, "close"),
+        )
+    con.commit()
+    con.close()
+    return path
+
+
+# --------------------------------------------------------------------------- T3 snapshot (AC7)
+
+
+def test_parse_cffex_csv_reads_close_and_settle(common):
+    rows = common.parse_cffex_csv(CSV.read_bytes())
+    assert rows["IM2611"] == {"close": 6647.2, "settle": 6624.2}
+    assert rows["IM2706"] == {"close": 6286.4, "settle": 6266.8}
+    assert rows["MO2709-C-6600"] == {"close": 464.6, "settle": 464.6}
+    assert rows["MO2709-P-6600"] == {"close": 851.8, "settle": 840.0}
+
+
+def test_read_dashboard_chain(common, tmp_path):
+    chain = common.read_dashboard_chain(_make_db(tmp_path / "b.sqlite3"), "2026-11-05")
+    assert chain["spot"] == 6650.1383
+    assert [f["contract"] for f in chain["futures"]] == ["IM2611", "IM2612", "IM2703", "IM2706"]
+    assert [f["price"] for f in chain["futures"]] == [6647.2, 6605.0, 6456.0, 6286.4]
+    assert chain["futures"][0]["revision_id"] == 1318449
+    assert chain["synthetic"]["call_contract"] == "MO2709C6600"
+    assert chain["synthetic"]["expiry"] == "2027-09-17"
+
+
+def test_snapshot_values_and_mo_cross_check(common, tmp_path):
+    chain = common.read_dashboard_chain(_make_db(tmp_path / "b.sqlite3"), "2026-11-05")
+    snap = common.build_snapshot(chain, CSV.read_bytes(), source_url="fixture")
+    assert snap["valuation_date"] == "2026-11-05"
+    assert snap["spot"] == 6650.1383
+    pair = snap["option_pair"]
+    assert (pair["strike"], pair["call_settle"], pair["put_settle"]) == (6600.0, 464.6, 840.0)
+    assert (pair["call_close"], pair["put_close"]) == (464.6, 851.8)
+    assert [f["settle"] for f in snap["futures"]] == [6624.2, 6582.4, 6434.6, 6266.8]
+    T = (316) / 365.0
+    f_mo = 6600.0 + (464.6 - 840.0) * math.exp(0.014 * T)
+    assert snap["mo_forward"] == pytest.approx(f_mo, rel=1e-12)
+    assert abs(f_mo / snap["dashboard_syn_fut"]["price"] - 1.0) < 0.005
+    vol = snap["vol"]
+    assert vol["strike"] == 6200.0                       # nearest grid strike to F ≈ 6220
+    assert vol["value"] == pytest.approx(0.2762, abs=5e-4)
+    assert vol["value"] == pytest.approx(0.5 * (vol["call_iv"] + vol["put_iv"]), rel=1e-12)
+    assert len(snap["cffex_csv"]["sha256"]) == 64
+
+
+def test_missing_rows_fail_closed(common, tmp_path):
+    db = _make_db(tmp_path / "short.sqlite3", DB_ROWS[:3] + DB_ROWS[4:])
+    with pytest.raises(common.StudyDataError):
+        common.read_dashboard_chain(db, "2026-11-05")
+    with pytest.raises(common.StudyDataError):
+        common.read_dashboard_chain(_make_db(tmp_path / "b.sqlite3"), "2026-11-06")
+    chain = common.read_dashboard_chain(_make_db(tmp_path / "c.sqlite3"), "2026-11-05")
+    no_put = b"\r\n".join(
+        line for line in CSV.read_bytes().split(b"\r\n") if not line.startswith(b"MO2709-P-6600")
+    )
+    with pytest.raises(common.StudyDataError):
+        common.build_snapshot(chain, no_put, source_url="fixture")
+
+
+def test_committed_snapshot_matches_fixture_values(common):
+    snap = common.load_snapshot()
+    assert snap["spot"] == 6650.1383
+    assert [f["price"] for f in snap["futures"]] == [6647.2, 6605.0, 6456.0, 6286.4]
+    assert snap["option_pair"]["call_settle"] == 464.6 and snap["option_pair"]["put_settle"] == 840.0
