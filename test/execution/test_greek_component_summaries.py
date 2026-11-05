@@ -155,7 +155,7 @@ def test_rate_summary_zero_curve_is_fingerprintable_and_encodes_scheme_and_ancho
     from datetime import datetime as _dt
 
     lin = _rate_summary(_env(LinearRateCurve(PILLARS)))
-    assert len(lin) == 2                                   # the legacy summary is unchanged
+    assert lin == ("LinearRateCurve", tuple((float(t), float(r)) for t, r in PILLARS))  # legacy tuple pinned
     a = _rate_summary(_env(ZeroCurve(PILLARS, interpolation=CurveInterpolation.LINEAR_ZERO)))
     b = _rate_summary(_env(ZeroCurve(PILLARS, interpolation=CurveInterpolation.MONOTONE_CONVEX)))
     c = _rate_summary(_env(ZeroCurve(PILLARS, interpolation=CurveInterpolation.LINEAR_ZERO,

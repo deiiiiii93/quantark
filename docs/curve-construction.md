@@ -70,7 +70,7 @@ zc = ZeroCurve(
     valuation_date=datetime(2026, 11, 5),      # None = numeric axis
 )
 zc.get_rate(1.5); zc.get_discount_factor([0.0, 1.5, 7.0]); zc.instantaneous_forward(1.5)
-zc.with_pillars([...])        # same configuration, node roles and anchor
+zc.with_pillars([...])        # same configuration and anchor; node roles only if the count is unchanged
 zc.parallel_shifted(1e-4)     # exact DF·exp(−sT)
 ```
 
@@ -85,7 +85,11 @@ by `quantark.param.rrf.is_pillar_curve` — rather than on the
 interpolation, extrapolation and clock anchor (`InterpolatedRateCurve` gained
 the same `with_pillars`). The SA-CVA as-of roll-down and term-structure drift
 treat every non-flat curve (`is_flat_rate_curve` false) as a term structure,
-so a bootstrapped curve is rolled forward like an interpolated one. Pillars at `T = 0`
+so a bootstrapped curve is rolled forward like an interpolated one. A
+"parallel" rate stress or VaR bump on a pillar curve is a *pillar* move
+(every zero rate shifted by `s`), which equals `DF·exp(−sT)` for the four
+linear-operator schemes and differs from it only where monotone-convex
+clipping binds. Pillars at `T = 0`
 are rejected (`DF(0) = 1` is implicit); `T < 0` raises `ValidationError`.
 
 `parallel_shifted` returns a pillar-shifted `ZeroCurve` for the four linear
@@ -265,6 +269,12 @@ shortcut and were reconciled to the exact formulas.
 - A term index reset in arrears is projected without convexity adjustment;
   the omitted term is roughly `F²σ²Tτ/(1 + Fτ)`: sub-bp short-dated, several
   bp on long-dated in-arrears legs.
+- SA-CVA as-of roll-down rolls the rate curve only: a term-structure dividend
+  yield (incl. a `CarryImpliedDividendYield` view) is read off the un-rolled
+  base at the future date (pre-existing for `InterpolatedRateCurve` envs).
+  SA-CVA has no trading-clock handling: a `TradingClockRateCurve` env is now
+  rolled on its trading axis with a calendar `t0` (unsupported before and
+  still unsupported; refuse or map in a follow-up).
 - `create_calendar` holiday files cover 2020–2030; dated examples keep
   maturities ≤ 2030 or use `CalendarType.NONE`.
 - Monotone-convex forward continuity at a knot with exactly equal consecutive

@@ -83,7 +83,7 @@ def test_with_pillars_keeps_class_and_metadata_drops_roles_on_count_change():
     zc = _zc(node_roles=ROLES)
     assert zc.with_pillars(PILLARS).node_roles == ROLES
     assert zc.with_pillars(PILLARS + [(40.0, 0.05)]).node_roles is None
-    assert isinstance(InterpolatedRateCurve.with_pillars, object)
+    assert InterpolatedRateCurve.with_pillars is CubicSplineRateCurve.with_pillars  # inherited, not overridden
 
 
 # --------------------------------------------------------------------------- stress
