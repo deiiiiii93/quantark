@@ -9,6 +9,7 @@ from .interpolation import (
     long_end_rule,
 )
 from .zero_curve import ZeroCurve
+from .carry_curve import CarryCurve, CarryImpliedDividendYield
 
 __all__ = [
     "CurveInterpolation",
@@ -16,4 +17,6 @@ __all__ = [
     "TermInterpolator",
     "long_end_rule",
     "ZeroCurve",
+    "CarryCurve",
+    "CarryImpliedDividendYield",
 ]

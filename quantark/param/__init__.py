@@ -40,6 +40,8 @@ from .index import (
 from .curve import (
     CurveInterpolation,
     ZeroCurve,
+    CarryCurve,
+    CarryImpliedDividendYield,
 )
 
 __all__ = [
@@ -49,6 +51,8 @@ __all__ = [
     # Curve construction
     "CurveInterpolation",
     "ZeroCurve",
+    "CarryCurve",
+    "CarryImpliedDividendYield",
     "SpotQuote",
     "BlackImpliedVolSurface",
     "VolatilitySurface",
