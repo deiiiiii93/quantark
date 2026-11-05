@@ -527,3 +527,54 @@ def flat_forward_matches(curve: CarryCurve, q: float, maturity: float, spot: flo
     f_curve = float(curve.forward(spot, maturity))
     f_flat = spot * float(safe_exp((RATE - q) * maturity))
     return is_close(f_curve, f_flat, rel_tol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Greeks helpers (decisions 12, 13)
+# ---------------------------------------------------------------------------
+
+#: Central yield step for rho (reported per +1%) and the spot step for deltas.
+Q_BUMP = 1e-3
+SPOT_BUMP_REL = 0.01
+SCENARIO_SHOCK = 0.01
+STEEPENER_SHOCK = 0.02
+
+
+@dataclass(frozen=True)
+class ForwardIntervalBumpDividendYield(DividendYield):
+    """``q'(T)·T = q(T)·T + bump·|(0, T] ∩ (start, end]|``: the instantaneous
+    forward yield moved by ``bump`` on ``(start, end]`` only (decision 13).
+
+    A partition of ``(0, ∞)`` into intervals gives bumps that sum exactly to
+    the parallel bump. Array-safe; entries at ``T <= 0`` pass through the base.
+    """
+
+    base: DividendYield
+    start: float
+    end: float  # math.inf allowed
+    bump: float
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.start < self.end):
+            raise ValidationError(f"need 0 <= start < end, got ({self.start}, {self.end})")
+
+    def get_yield(self, time_to_maturity):  # type: ignore[override]
+        t = np.asarray(time_to_maturity, dtype=float)
+        base = np.asarray(self.base.get_yield(time_to_maturity), dtype=float)
+        overlap = np.clip(np.minimum(t, self.end) - self.start, 0.0, None)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            extra = np.where(t > 0.0, self.bump * overlap / np.where(t > 0.0, t, 1.0), 0.0)
+        out = base + extra
+        return float(out) if out.ndim == 0 else out
+
+
+def interval_edges(curve: CarryCurve, maturity: float) -> List[float]:
+    """``0, T_1, …, T_n, T_mat``: the forward-interval rho partition (the last
+    interval is the unquoted tail)."""
+    return [0.0] + list(curve.tenors) + [float(maturity)]
+
+
+def node_yield_bumped(curve: CarryCurve, shocks: Dict[int, float]) -> CarryCurve:
+    """Nodes ``B_i − shock_i·T_i`` (q at node i up by ``shock_i``)."""
+    nodes = curve.nodes
+    return curve.with_nodes([(t, b - shocks.get(i, 0.0) * t) for i, (t, b) in enumerate(nodes)])

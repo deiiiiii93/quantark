@@ -1,0 +1,642 @@
+{
+  "bumps": {
+    "forward_rel": 0.001,
+    "q": 0.001,
+    "rho_unit": "+1% q",
+    "scenario_shock": 0.01,
+    "spot_rel": 0.01
+  },
+  "coupon": 0.3160038155980395,
+  "engine": {
+    "quad_grid_points": 1001,
+    "quad_readout": "transition"
+  },
+  "notional": 10000000.0,
+  "pillars": [
+    {
+      "label": "IM2611",
+      "lot_multiplier": 200.0
+    },
+    {
+      "label": "IM2612",
+      "lot_multiplier": 200.0
+    },
+    {
+      "label": "IM2703",
+      "lot_multiplier": 200.0
+    },
+    {
+      "label": "IM2706",
+      "lot_multiplier": 200.0
+    },
+    {
+      "label": "MO2709 C-P",
+      "lot_multiplier": 98.79526100261747
+    }
+  ],
+  "runtime_seconds": 1730.2162079811096,
+  "spot": 6650.1383,
+  "tails": {
+    "hold_forward": {
+      "curve": {
+        "base_pv": 7.704670963412586e-10,
+        "buckets": [
+          {
+            "delta": 0.010445968734979142,
+            "extrapolated_tail": false,
+            "forward": 6647.2,
+            "hedge_lots": -5.222984367489571e-05,
+            "label": "IM2611",
+            "rho_q": -0.028532117280632083,
+            "tenor": 0.0410958904109589
+          },
+          {
+            "delta": 45.95467693331006,
+            "extrapolated_tail": false,
+            "forward": 6605.0,
+            "hedge_lots": -0.2297733846665503,
+            "label": "IM2612",
+            "rho_q": -357.5835706216826,
+            "tenor": 0.1178082191780822
+          },
+          {
+            "delta": 174.15346918250472,
+            "extrapolated_tail": false,
+            "forward": 6456.0,
+            "hedge_lots": -0.8707673459125236,
+            "label": "IM2703",
+            "rho_q": -4127.710138612077,
+            "tenor": 0.36712328767123287
+          },
+          {
+            "delta": -2249.9912352040815,
+            "extrapolated_tail": true,
+            "forward": 6286.4,
+            "hedge_lots": 11.249956176020408,
+            "label": "IM2706",
+            "rho_q": 87191.7620866458,
+            "tenor": 0.6164383561643836
+          },
+          {
+            "delta": 3088.02029853978,
+            "extrapolated_tail": true,
+            "forward": 6220.022259984662,
+            "hedge_lots": -31.256765427827215,
+            "label": "MO2709 C-P",
+            "rho_q": -166290.90445397768,
+            "tenor": 0.8657534246575342
+          }
+        ],
+        "delta_identity_residual": 0.09019054345355926,
+        "parallel_rho_q": -83586.1279632394,
+        "pinned_forward_delta": 1.782444961701797e-07,
+        "rho_sum_residual": -1.6633545564836822,
+        "spot": 6650.1383,
+        "spot_delta": 976.1819164900351
+      },
+      "curve_half_bumps": {
+        "buckets": [
+          {
+            "delta": 0.010445031177369037,
+            "rho_q": -0.02853214450690555
+          },
+          {
+            "delta": 45.95462928332086,
+            "rho_q": -357.5835541773734
+          },
+          {
+            "delta": 174.15392059065226,
+            "rho_q": -4127.709387205865
+          },
+          {
+            "delta": -2250.0132633018034,
+            "rho_q": 87192.16954685141
+          },
+          {
+            "delta": 3088.0646000590878,
+            "rho_q": -166292.6606399697
+          }
+        ],
+        "parallel_rho_q": -83586.22840929993,
+        "pinned_forward_delta": 1.772152814670866e-07,
+        "spot_delta": 976.1352935187502
+      },
+      "curve_spot_lots": -4.880909582450175,
+      "flat": {
+        "parallel_rho_q": -79595.89675174601,
+        "pv": 44183.479475937296,
+        "q": 0.07153749581943837,
+        "spot_delta": 952.3233694168013,
+        "spot_lots": -4.761616847084007
+      },
+      "forward_interval_rho": [
+        {
+          "end": 0.0410958904109589,
+          "label": "0-IM2611",
+          "rho_q": -2667.670348997452,
+          "start": 0.0
+        },
+        {
+          "end": 0.1178082191780822,
+          "label": "IM2611-IM2612",
+          "rho_q": -4979.5980216640855,
+          "start": 0.0410958904109589
+        },
+        {
+          "end": 0.36712328767123287,
+          "label": "IM2612-IM2703",
+          "rho_q": -15426.946122255258,
+          "start": 0.1178082191780822
+        },
+        {
+          "end": 0.6164383561643836,
+          "label": "IM2703-IM2706",
+          "rho_q": -12623.799588612865,
+          "start": 0.36712328767123287
+        },
+        {
+          "end": 0.8657534246575342,
+          "label": "IM2706-MO2709 C-P",
+          "rho_q": -11205.46521993349,
+          "start": 0.6164383561643836
+        },
+        {
+          "end": 2.0054794520547947,
+          "label": "MO2709 C-P-T_mat",
+          "rho_q": -36682.75546376213,
+          "start": 0.8657534246575342
+        }
+      ],
+      "forward_interval_sum": -83586.23476522528,
+      "label": "hold forward carry",
+      "pinned_forward_lots": -8.912224808508985e-10,
+      "scenarios": [
+        {
+          "dpv_curve_bp": -84.97250183665666,
+          "dpv_flat_bp": -80.97884023772437,
+          "dq_at_maturity": 0.009999999999999967,
+          "flat_greek_prediction_bp": -79.59589675174576,
+          "missed_bp": -3.9936615989323037,
+          "scenario": "parallel q +1%"
+        },
+        {
+          "dpv_curve_bp": -2.86649512860469e-05,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -2.86649512860469e-05,
+          "scenario": "IM2611 q +1%"
+        },
+        {
+          "dpv_curve_bp": -0.3561578109634188,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -0.3561578109634188,
+          "scenario": "IM2612 q +1%"
+        },
+        {
+          "dpv_curve_bp": -4.043104156460076,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -4.043104156460076,
+          "scenario": "IM2703 q +1%"
+        },
+        {
+          "dpv_curve_bp": 88.75433484173521,
+          "dpv_flat_bp": 109.06149474146109,
+          "dq_at_maturity": -0.014051522248243575,
+          "flat_greek_prediction_bp": 111.84435140760577,
+          "missed_bp": -20.307159899725868,
+          "scenario": "IM2706 q +1%"
+        },
+        {
+          "dpv_curve_bp": -165.09580613211955,
+          "dpv_flat_bp": -199.33986454437567,
+          "dq_at_maturity": 0.024051522248243543,
+          "flat_greek_prediction_bp": -191.4402481593515,
+          "missed_bp": 34.24405841225616,
+          "scenario": "MO2709 C-P q +1%"
+        },
+        {
+          "dpv_curve_bp": -0.7095338669039986,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -0.7095338669039986,
+          "scenario": "front steepener: IM2611+IM2612 q +2%"
+        },
+        {
+          "dpv_curve_bp": -36.54940170159351,
+          "dpv_flat_bp": -45.68314157030808,
+          "dq_at_maturity": 0.005683060109289623,
+          "flat_greek_prediction_bp": -45.23482656929832,
+          "missed_bp": 9.133739868714567,
+          "scenario": "tail only: forward q +1% beyond last pillar"
+        }
+      ]
+    },
+    "hold_yield": {
+      "curve": {
+        "base_pv": -125460.17880505418,
+        "buckets": [
+          {
+            "delta": 0.010010123547115418,
+            "extrapolated_tail": false,
+            "forward": 6647.2,
+            "hedge_lots": -5.005061773557709e-05,
+            "label": "IM2611",
+            "rho_q": -0.027341676614014432,
+            "tenor": 0.0410958904109589
+          },
+          {
+            "delta": 61.860529257778914,
+            "extrapolated_tail": false,
+            "forward": 6605.0,
+            "hedge_lots": -0.3093026462888946,
+            "label": "IM2612",
+            "rho_q": -481.35085727626574,
+            "tenor": 0.1178082191780822
+          },
+          {
+            "delta": 232.83667444958823,
+            "extrapolated_tail": false,
+            "forward": 6456.0,
+            "hedge_lots": -1.164183372247941,
+            "label": "IM2703",
+            "rho_q": -5518.59584049649,
+            "tenor": 0.36712328767123287
+          },
+          {
+            "delta": 115.97975748900511,
+            "extrapolated_tail": false,
+            "forward": 6286.4,
+            "hedge_lots": -0.5798987874450255,
+            "label": "IM2706",
+            "rho_q": -4494.4079998293455,
+            "tenor": 0.6164383561643836
+          },
+          {
+            "delta": 1395.809354253752,
+            "extrapolated_tail": true,
+            "forward": 6220.022259984662,
+            "hedge_lots": -14.128302715013543,
+            "label": "MO2709 C-P",
+            "rho_q": -75164.48750407333,
+            "tenor": 0.8657534246575342
+          }
+        ],
+        "delta_identity_residual": 0.011917799041611943,
+        "parallel_rho_q": -85658.97849254907,
+        "pinned_forward_delta": -620.0305668868197,
+        "rho_sum_residual": -0.1089491970196832,
+        "spot": 6650.1383,
+        "spot_delta": 1082.6390696125156
+      },
+      "curve_half_bumps": {
+        "buckets": [
+          {
+            "delta": 0.010009224969852754,
+            "rho_q": -0.027341621898813173
+          },
+          {
+            "delta": 61.86049561530965,
+            "rho_q": -481.35084058958455
+          },
+          {
+            "delta": 232.83737062730484,
+            "rho_q": -5518.595701857703
+          },
+          {
+            "delta": 115.9790728023021,
+            "rho_q": -4494.39207355128
+          },
+          {
+            "delta": 1395.8141825570206,
+            "rho_q": -75164.69051746011
+          }
+        ],
+        "parallel_rho_q": -85659.08371241413,
+        "pinned_forward_delta": -620.0237927572451,
+        "spot_delta": 1082.6414333001292
+      },
+      "curve_spot_lots": -5.413195348062578,
+      "flat": {
+        "parallel_rho_q": -84947.97573866548,
+        "pv": -117897.70839987915,
+        "q": 0.09123234355103535,
+        "spot_delta": 1079.0454745443324,
+        "spot_lots": -5.395227372721662
+      },
+      "forward_interval_rho": [
+        {
+          "end": 0.0410958904109589,
+          "label": "0-IM2611",
+          "rho_q": -2958.789187177099,
+          "start": 0.0
+        },
+        {
+          "end": 0.1178082191780822,
+          "label": "IM2611-IM2612",
+          "rho_q": -5523.022059557187,
+          "start": 0.0410958904109589
+        },
+        {
+          "end": 0.36712328767123287,
+          "label": "IM2612-IM2703",
+          "rho_q": -16931.147723988324,
+          "start": 0.1178082191780822
+        },
+        {
+          "end": 0.6164383561643836,
+          "label": "IM2703-IM2706",
+          "rho_q": -13183.444269711908,
+          "start": 0.36712328767123287
+        },
+        {
+          "end": 0.8657534246575342,
+          "label": "IM2706-MO2709 C-P",
+          "rho_q": -11365.715222919607,
+          "start": 0.6164383561643836
+        },
+        {
+          "end": 2.0054794520547947,
+          "label": "MO2709 C-P-T_mat",
+          "rho_q": -35696.97733957335,
+          "start": 0.8657534246575342
+        }
+      ],
+      "forward_interval_sum": -85659.09580292748,
+      "label": "hold zero carry yield",
+      "pinned_forward_lots": 3.1001528344340983,
+      "scenarios": [
+        {
+          "dpv_curve_bp": -86.96691783988996,
+          "dpv_flat_bp": -86.25494288068475,
+          "dq_at_maturity": 0.009999999999999995,
+          "flat_greek_prediction_bp": -84.94797573866543,
+          "missed_bp": -0.7119749592051958,
+          "scenario": "parallel q +1%"
+        },
+        {
+          "dpv_curve_bp": -2.7468965447042138e-05,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -2.7468965447042138e-05,
+          "scenario": "IM2611 q +1%"
+        },
+        {
+          "dpv_curve_bp": -0.4796802516564785,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -0.4796802516564785,
+          "scenario": "IM2612 q +1%"
+        },
+        {
+          "dpv_curve_bp": -5.426066664386657,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -5.426066664386657,
+          "scenario": "IM2703 q +1%"
+        },
+        {
+          "dpv_curve_bp": -4.360873702494704,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -4.360873702494704,
+          "scenario": "IM2706 q +1%"
+        },
+        {
+          "dpv_curve_bp": -75.04627177980569,
+          "dpv_flat_bp": -86.25494288068475,
+          "dq_at_maturity": 0.009999999999999995,
+          "flat_greek_prediction_bp": -84.94797573866543,
+          "missed_bp": 11.208671100879059,
+          "scenario": "MO2709 C-P q +1%"
+        },
+        {
+          "dpv_curve_bp": -0.9560866421856772,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -0.9560866421856772,
+          "scenario": "front steepener: IM2611+IM2612 q +2%"
+        },
+        {
+          "dpv_curve_bp": -35.542693667660686,
+          "dpv_flat_bp": -48.700555789426424,
+          "dq_at_maturity": 0.005683060109289623,
+          "flat_greek_prediction_bp": -48.276445228531244,
+          "missed_bp": 13.157862121765735,
+          "scenario": "tail only: forward q +1% beyond last pillar"
+        }
+      ]
+    },
+    "zero_carry": {
+      "curve": {
+        "base_pv": 158372.55895142647,
+        "buckets": [
+          {
+            "delta": 0.0107675937630787,
+            "extrapolated_tail": false,
+            "forward": 6647.2,
+            "hedge_lots": -5.3837968815393496e-05,
+            "label": "IM2611",
+            "rho_q": -0.029410617862595245,
+            "tenor": 0.0410958904109589
+          },
+          {
+            "delta": 26.103145678963525,
+            "extrapolated_tail": false,
+            "forward": 6605.0,
+            "hedge_lots": -0.13051572839481762,
+            "label": "IM2612",
+            "rho_q": -203.11401378261507,
+            "tenor": 0.1178082191780822
+          },
+          {
+            "delta": 101.24223060424647,
+            "extrapolated_tail": false,
+            "forward": 6456.0,
+            "hedge_lots": -0.5062111530212323,
+            "label": "IM2703",
+            "rho_q": -2399.5974826019665,
+            "tenor": 0.36712328767123287
+          },
+          {
+            "delta": 59.712543302238636,
+            "extrapolated_tail": false,
+            "forward": 6286.4,
+            "hedge_lots": -0.2985627165111932,
+            "label": "IM2706",
+            "rho_q": -2313.9512506479514,
+            "tenor": 0.6164383561643836
+          },
+          {
+            "delta": 705.6360433682113,
+            "extrapolated_tail": true,
+            "forward": 6220.022259984662,
+            "hedge_lots": -7.1424078058715414,
+            "label": "MO2709 C-P",
+            "rho_q": -37998.541485419846,
+            "tenor": 0.8657534246575342
+          }
+        ],
+        "delta_identity_residual": 0.14280711750996034,
+        "parallel_rho_q": -80578.96859232918,
+        "pinned_forward_delta": 1.8413369878888344e-07,
+        "rho_sum_residual": -37663.73494925894,
+        "spot": 6650.1383,
+        "spot_delta": 840.8097633186036
+      },
+      "curve_half_bumps": {
+        "buckets": [
+          {
+            "delta": 0.010766627006003802,
+            "rho_q": -0.029410565621219575
+          },
+          {
+            "delta": 26.1030817701244,
+            "rho_q": -203.11399773403537
+          },
+          {
+            "delta": 101.24238410244423,
+            "rho_q": -2399.595994995034
+          },
+          {
+            "delta": 59.711871547185694,
+            "rho_q": -2313.937323532591
+          },
+          {
+            "delta": 705.6367938167778,
+            "rho_q": -37998.58097849152
+          }
+        ],
+        "parallel_rho_q": -80579.05990842613,
+        "pinned_forward_delta": 1.8302252452158066e-07,
+        "spot_delta": 840.7028305492298
+      },
+      "curve_spot_lots": -4.204048816593018,
+      "flat": {
+        "parallel_rho_q": -72669.74391603057,
+        "pv": 228468.45343956674,
+        "q": 0.04734073847285133,
+        "spot_delta": 797.4621688314948,
+        "spot_lots": -3.9873108441574736
+      },
+      "forward_interval_rho": [
+        {
+          "end": 0.0410958904109589,
+          "label": "0-IM2611",
+          "rho_q": -2297.4874749971787,
+          "start": 0.0
+        },
+        {
+          "end": 0.1178082191780822,
+          "label": "IM2611-IM2612",
+          "rho_q": -4288.58836978121,
+          "start": 0.0410958904109589
+        },
+        {
+          "end": 0.36712328767123287,
+          "label": "IM2612-IM2703",
+          "rho_q": -13508.065945270937,
+          "start": 0.1178082191780822
+        },
+        {
+          "end": 0.6164383561643836,
+          "label": "IM2703-IM2706",
+          "rho_q": -11878.488710995589,
+          "start": 0.36712328767123287
+        },
+        {
+          "end": 0.8657534246575342,
+          "label": "IM2706-MO2709 C-P",
+          "rho_q": -10942.631865830188,
+          "start": 0.6164383561643836
+        },
+        {
+          "end": 2.0054794520547947,
+          "label": "MO2709 C-P-T_mat",
+          "rho_q": -37663.79589201693,
+          "start": 0.8657534246575342
+        }
+      ],
+      "forward_interval_sum": -80579.05825889204,
+      "label": "zero carry past last node",
+      "pinned_forward_lots": -9.206684939444171e-10,
+      "scenarios": [
+        {
+          "dpv_curve_bp": -82.06588638228595,
+          "dpv_flat_bp": -74.12559430051228,
+          "dq_at_maturity": 0.010000000000000002,
+          "flat_greek_prediction_bp": -72.66974391603058,
+          "missed_bp": -7.940292081773674,
+          "scenario": "parallel q +1%"
+        },
+        {
+          "dpv_curve_bp": -2.9547504091169685e-05,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -2.9547504091169685e-05,
+          "scenario": "IM2611 q +1%"
+        },
+        {
+          "dpv_curve_bp": -0.20199325721766218,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -0.20199325721766218,
+          "scenario": "IM2612 q +1%"
+        },
+        {
+          "dpv_curve_bp": -2.3250292247471807,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -2.3250292247471807,
+          "scenario": "IM2703 q +1%"
+        },
+        {
+          "dpv_curve_bp": -2.223750910616189,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -2.223750910616189,
+          "scenario": "IM2706 q +1%"
+        },
+        {
+          "dpv_curve_bp": -38.02542848952039,
+          "dpv_flat_bp": -31.643313886428224,
+          "dq_at_maturity": 0.004316939890710379,
+          "flat_greek_prediction_bp": -31.37109163588202,
+          "missed_bp": -6.382114603092166,
+          "scenario": "MO2709 C-P q +1%"
+        },
+        {
+          "dpv_curve_bp": -0.4018164145447372,
+          "dpv_flat_bp": 0.0,
+          "dq_at_maturity": 0.0,
+          "flat_greek_prediction_bp": -0.0,
+          "missed_bp": -0.4018164145447372,
+          "scenario": "front steepener: IM2611+IM2612 q +2%"
+        },
+        {
+          "dpv_curve_bp": -37.56291094355345,
+          "dpv_flat_bp": -41.770049950112124,
+          "dq_at_maturity": 0.005683060109289616,
+          "flat_greek_prediction_bp": -41.29865228014851,
+          "missed_bp": 4.207139006558674,
+          "scenario": "tail only: forward q +1% beyond last pillar"
+        }
+      ]
+    }
+  },
+  "valuation_date": "2026-11-05"
+}

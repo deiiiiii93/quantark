@@ -70,6 +70,11 @@ def main() -> int:
         curve_cell = cell(c.curve_env(snap, tail))
         flat_cell = cell(c.flat_env(snap, tail, T))
         gap = flat_cell["pv"] - curve_cell["pv"]
+        # the curve model's own annuity for this tail (PV affine in the coupon)
+        env_tail = c.curve_env(snap, tail)
+        dc = 0.01
+        annuity = (float(quad.price(c.build_product(sol.coupon + dc, s0, terms), env_tail))
+                   - float(quad.price(c.build_product(sol.coupon - dc, s0, terms), env_tail))) / (2 * dc)
         tails[tail] = {
             "label": label,
             "extrapolation": ext.value,
@@ -84,10 +89,11 @@ def main() -> int:
             "gap_bp": c.bp(gap),
             "gap_bp_fine_grid": flat_cell["pv_bp_fine_grid"] - curve_cell["pv_bp_fine_grid"],
             "gap_bp_pde": flat_cell["pv_bp_pde"] - curve_cell["pv_bp_pde"],
-            "coupon_equiv_gap": gap / sol.annuity,
+            "annuity": annuity,
+            "coupon_equiv_gap": gap / annuity,
         }
         print(f"{tail:13s} q_flat {q_flat:.4%}  curve {curve_cell['pv_bp']:8.2f} bp  flat {flat_cell['pv_bp']:8.2f} bp"
-              f"  gap {c.bp(gap):7.2f} bp = {gap / sol.annuity:+.4%} coupon"
+              f"  gap {c.bp(gap):7.2f} bp = {gap / annuity:+.4%} coupon"
               f"  | PDE gap {tails[tail]['gap_bp_pde']:7.2f}  fine-grid gap {tails[tail]['gap_bp_fine_grid']:7.2f}")
 
     marks = {}

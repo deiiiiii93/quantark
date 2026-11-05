@@ -177,3 +177,72 @@ def test_pricing_results_meet_acceptance(common):
             assert 0.0 < ev["expected_life_years"] <= res["terms"]["maturity_years"]
         assert abs(tail["gap_bp_pde"] - tail["gap_bp"]) <= 2.0
     assert set(res["marks"]) == {"mo_close", "all_settle"}
+
+
+# --------------------------------------------------------------------------- T5 Greeks (AC5, AC10)
+
+
+def test_forward_interval_bumps_partition_to_parallel(common):
+    import numpy as np
+
+    snap = common.load_snapshot()
+    T = common.build_terms().maturity_years
+    curve = common.build_curve(snap, "hold_forward")
+    view = curve.to_dividend_yield(common.rate_curve())
+    edges = common.interval_edges(curve, T) + [math.inf]
+    ts = np.array([0.0, 0.01, 0.2, 0.7, 0.9, 1.5, T, 3.0])
+    total = np.zeros_like(ts)
+    for a, b in zip(edges, edges[1:]):
+        wrapped = common.ForwardIntervalBumpDividendYield(view, a, b, 0.01)
+        bumped = wrapped.get_yield(ts)
+        total += bumped - view.get_yield(ts)
+        for t, v in zip(ts[1:], bumped[1:]):                       # scalar path == array path
+            assert wrapped.get_yield(float(t)) == pytest.approx(v, abs=1e-15)
+    np.testing.assert_allclose(total[1:], 0.01, atol=1e-15)
+    assert total[0] == 0.0
+    with pytest.raises(common.ValidationError):
+        common.ForwardIntervalBumpDividendYield(view, 1.0, 0.5, 0.01)
+
+
+def test_node_yield_bump_moves_only_that_node(common):
+    snap = common.load_snapshot()
+    curve = common.build_curve(snap, "hold_forward")
+    bumped = common.node_yield_bumped(curve, {2: 0.01})
+    view, view_b = (x.to_dividend_yield(common.rate_curve()) for x in (curve, bumped))
+    for i, t in enumerate(curve.tenors):
+        expect = 0.01 if i == 2 else 0.0
+        assert float(view_b.get_yield(t)) - float(view.get_yield(t)) == pytest.approx(expect, abs=1e-15)
+
+
+def test_greeks_results_meet_acceptance(common):
+    res = common.read_json(common.RESULTS_DIR / "greeks.json")
+    notional = res["notional"]
+    assert res["engine"]["quad_readout"] == "transition"
+    assert set(res["tails"]) == set(common.TAILS)
+    for name, tail in res["tails"].items():
+        cur, half = tail["curve"], tail["curve_half_bumps"]
+        # AC5: chain rule within 2% of the spot delta, every tail
+        assert abs(cur["delta_identity_residual"]) <= 0.02 * abs(cur["spot_delta"])
+        if name != "zero_carry":
+            assert abs(cur["rho_sum_residual"]) <= 0.01 * abs(cur["parallel_rho_q"])
+        else:
+            # the flat-B tail cannot carry q+s: the residual IS the tail interval's exposure
+            tail_interval = tail["forward_interval_rho"][-1]["rho_q"]
+            assert cur["rho_sum_residual"] == pytest.approx(tail_interval, rel=0.01)
+        # AC5: halving every bump moves each bucket by <= 2% (or <= 0.1 bp of notional)
+        for b, hb in zip(cur["buckets"], half["buckets"]):
+            for key, scale in (("delta", 0.01 * b["forward"]), ("rho_q", 1.0)):
+                diff = abs(b[key] - hb[key])
+                assert diff <= 0.02 * abs(b[key]) or 1e4 * diff * scale / notional <= 0.1
+        # AC10: forward-interval buckets partition the parallel rho
+        assert tail["forward_interval_sum"] == pytest.approx(cur["parallel_rho_q"], rel=0.005)
+        assert len(tail["forward_interval_rho"]) == len(cur["buckets"]) + 1
+        names = [s["scenario"] for s in tail["scenarios"]]
+        assert len(names) == len(cur["buckets"]) + 3
+        for s in tail["scenarios"]:
+            assert s["missed_bp"] == pytest.approx(s["dpv_curve_bp"] - s["dpv_flat_bp"], abs=1e-9)
+        lots = [b["hedge_lots"] for b in cur["buckets"]]
+        assert all(isinstance(x, float) for x in lots)
+    # the default tail hedges the unquoted 2Y exposure as an IM2706 / MO2709 calendar spread
+    hf = res["tails"]["hold_forward"]["curve"]["buckets"]
+    assert hf[3]["hedge_lots"] * hf[4]["hedge_lots"] < 0.0

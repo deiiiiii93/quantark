@@ -104,11 +104,12 @@
   },
   "notional": 10000000.0,
   "rate": 0.014,
-  "runtime_seconds": 90.53315210342407,
+  "runtime_seconds": 95.53215074539185,
   "spot": 6650.1383,
   "tails": {
     "hold_forward": {
-      "coupon_equiv_gap": 0.012958698787182135,
+      "annuity": 3409561.422913712,
+      "coupon_equiv_gap": 0.012958698787182607,
       "curve": {
         "events": {
           "expected_life_years": 0.9201365728475918,
@@ -284,7 +285,8 @@
       ]
     },
     "hold_yield": {
-      "coupon_equiv_gap": 0.002218018527060905,
+      "annuity": 3267610.13417915,
+      "coupon_equiv_gap": 0.002314373531307089,
       "curve": {
         "events": {
           "expected_life_years": 0.9255134299358267,
@@ -460,7 +462,8 @@
       ]
     },
     "zero_carry": {
-      "coupon_equiv_gap": 0.020558624935472142,
+      "annuity": 3600740.0296438127,
+      "coupon_equiv_gap": 0.019467080075501644,
       "curve": {
         "events": {
           "expected_life_years": 0.9129611632800996,
