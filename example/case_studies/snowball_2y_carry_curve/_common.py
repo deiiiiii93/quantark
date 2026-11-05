@@ -83,7 +83,8 @@ SYNTHETIC_SLOT = 5
 # CFFEX daily statistics CSV (GBK): code, open, high, low, volume, turnover,
 # open interest, OI change, close (今收盘), settlement (今结算), …
 _CSV_CODE, _CSV_CLOSE, _CSV_SETTLE = 0, 8, 9
-_CSV_HEADER_CODE = "合约代码"
+#: Header names the parser reads by position; any layout change fails closed.
+_CSV_HEADER = {_CSV_CODE: "合约代码", _CSV_CLOSE: "今收盘", _CSV_SETTLE: "今结算"}
 
 
 class StudyDataError(MarketDataError):
@@ -109,8 +110,10 @@ def parse_cffex_csv(payload: bytes) -> Dict[str, Dict[str, float]]:
     text = payload.decode("gbk")
     reader = csv.reader(io.StringIO(text))
     header = next(reader, None)
-    if not header or header[_CSV_CODE].strip() != _CSV_HEADER_CODE:
-        raise StudyDataError("not a CFFEX daily statistics CSV (header missing)")
+    if not header or len(header) <= _CSV_SETTLE or any(
+        header[i].strip() != name for i, name in _CSV_HEADER.items()
+    ):
+        raise StudyDataError(f"not a CFFEX daily statistics CSV in the expected layout: {_CSV_HEADER}")
     out: Dict[str, Dict[str, float]] = {}
     for row in reader:
         if len(row) <= _CSV_SETTLE:
@@ -536,6 +539,7 @@ def flat_forward_matches(curve: CarryCurve, q: float, maturity: float, spot: flo
 #: Central yield step for rho (reported per +1%) and the spot step for deltas.
 Q_BUMP = 1e-3
 SPOT_BUMP_REL = 0.01
+FORWARD_BUMP_REL = 1e-3
 SCENARIO_SHOCK = 0.01
 STEEPENER_SHOCK = 0.02
 

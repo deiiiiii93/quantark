@@ -128,6 +128,9 @@ def calculate_carry_curve_buckets(
     validate_positive(spot_bump_rel, "spot_bump_rel")
     validate_positive(forward_bump_rel, "forward_bump_rel")
     validate_positive(q_bump, "q_bump")
+    for name, rel in (("spot_bump_rel", spot_bump_rel), ("forward_bump_rel", forward_bump_rel)):
+        if not rel < 1.0:  # the down leg S·(1−h) / F·(1−h) must stay positive
+            raise ValidationError(f"{name} must be < 1, got {rel}")
     nodes = carry_curve.nodes
     n = len(nodes)
     if labels is None:

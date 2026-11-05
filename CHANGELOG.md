@@ -12,6 +12,11 @@ During 0.x the public API may still change between minor versions.
 - `CarryExtrapolation.FLAT_CARRY_YIELD`: a third carry long-end rule that holds the zero carry yield `B(T)/T` at the
   last node's value (flat `q` under a flat rate curve). `CarryImpliedDividendYield.parallel_shifted` shifts nodes
   exactly under it; the legacy `ForwardCarryCurve` rejects it. Existing rules and defaults are unchanged.
+- `calculate_carry_curve_buckets` (`quantark.asset.equity.riskmeasures`, with `CarryCurveBucketReport` /
+  `CarryPillarBucket`): pillar-bucket risk on any `CarryCurve` — `∂PV/∂F_i` at fixed spot with optional hedge lots
+  per pillar, spot delta (nodes held), pinned-forward delta (forwards held), rho_q per node and parallel, and the
+  chain-rule / rho-sum identity residuals. Every price goes through `resolve_bump_engine`. Case study:
+  `example/case_studies/snowball_2y_carry_curve/` (2Y CSI 1000 snowball, flat q vs the IM + MO carry curve).
 
 - Curve construction (`quantark.param.curve`, re-exported from `quantark.param`): `ZeroCurve` and `CarryCurve` on one
   shared term interpolator with five schemes (`CurveInterpolation.LINEAR_ZERO`, `LOG_LINEAR_DF`, `CUBIC_ZERO`,

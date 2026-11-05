@@ -71,6 +71,15 @@ def test_parse_cffex_csv_reads_close_and_settle(common):
     assert rows["MO2709-P-6600"] == {"close": 851.8, "settle": 840.0}
 
 
+def test_parse_cffex_csv_fails_closed_on_layout_change(common):
+    raw = CSV.read_bytes().decode("gbk")
+    header, rest = raw.split("\r\n", 1)
+    cols = header.split(",")
+    cols[8], cols[9] = cols[9], cols[8]                 # close and settlement swapped
+    with pytest.raises(common.StudyDataError):
+        common.parse_cffex_csv((",".join(cols) + "\r\n" + rest).encode("gbk"))
+
+
 def test_read_dashboard_chain(common, tmp_path):
     chain = common.read_dashboard_chain(_make_db(tmp_path / "b.sqlite3"), "2026-11-05")
     assert chain["spot"] == 6650.1383
@@ -218,6 +227,9 @@ def test_greeks_results_meet_acceptance(common):
     res = common.read_json(common.RESULTS_DIR / "greeks.json")
     notional = res["notional"]
     assert res["engine"]["quad_readout"] == "transition"
+    pricing = common.read_json(common.RESULTS_DIR / "pricing.json")
+    assert res["engine"]["quad_grid_resolved"] == pricing["engine"]["quad_grid_resolved"]
+    assert res["bumps"]["forward_rel"] == common.FORWARD_BUMP_REL
     assert set(res["tails"]) == set(common.TAILS)
     for name, tail in res["tails"].items():
         cur, half = tail["curve"], tail["curve_half_bumps"]

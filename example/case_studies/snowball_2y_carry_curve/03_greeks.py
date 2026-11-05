@@ -64,11 +64,12 @@ def main() -> int:
         env = c.curve_env(snap, tail)
         report = calculate_carry_curve_buckets(
             product, env, quad, curve, labels=labels, lot_multipliers=mults,
-            spot_bump_rel=c.SPOT_BUMP_REL, q_bump=c.Q_BUMP,
+            spot_bump_rel=c.SPOT_BUMP_REL, forward_bump_rel=c.FORWARD_BUMP_REL, q_bump=c.Q_BUMP,
         )
         half = calculate_carry_curve_buckets(
             product, env, quad, curve, labels=labels, lot_multipliers=mults,
-            spot_bump_rel=0.5 * c.SPOT_BUMP_REL, forward_bump_rel=0.5e-3, q_bump=0.5 * c.Q_BUMP,
+            spot_bump_rel=0.5 * c.SPOT_BUMP_REL, forward_bump_rel=0.5 * c.FORWARD_BUMP_REL,
+            q_bump=0.5 * c.Q_BUMP,
         )
 
         # flat model
@@ -149,8 +150,9 @@ def main() -> int:
         "coupon": pricing["coupon"]["value"],
         "notional": c.NOTIONAL,
         "spot": s0,
-        "engine": {"quad_readout": c.QUAD_READOUT, "quad_grid_points": quad.params.grid_points},
-        "bumps": {"spot_rel": c.SPOT_BUMP_REL, "forward_rel": 1e-3, "q": c.Q_BUMP,
+        "engine": {"quad_readout": c.QUAD_READOUT, "quad_grid_points": quad.params.grid_points,
+                   "quad_grid_resolved": c.resolved_quad_grid(quad, product, c.curve_env(snap, c.COUPON_TAIL))},
+        "bumps": {"spot_rel": c.SPOT_BUMP_REL, "forward_rel": c.FORWARD_BUMP_REL, "q": c.Q_BUMP,
                   "rho_unit": "+1% q", "scenario_shock": c.SCENARIO_SHOCK},
         "pillars": [{"label": lab, "lot_multiplier": m} for lab, m in zip(labels, mults)],
         "tails": tails,

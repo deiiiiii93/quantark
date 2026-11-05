@@ -9,6 +9,7 @@
   "coupon": 0.3160038155980395,
   "engine": {
     "quad_grid_points": 1001,
+    "quad_grid_resolved": 2075,
     "quad_readout": "transition"
   },
   "notional": 10000000.0,

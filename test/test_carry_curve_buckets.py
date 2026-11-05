@@ -128,6 +128,7 @@ def test_validation_errors():
     env, eng, opt = _env(curve), BlackScholesEngine(), _call_at_node(1)
     bad = [
         dict(spot_bump_rel=0.0), dict(forward_bump_rel=-1e-3), dict(q_bump=0.0),
+        dict(spot_bump_rel=1.0), dict(forward_bump_rel=1.5),   # down-leg spot/forward would be <= 0
         dict(labels=["a", "b"]), dict(lot_multipliers=[200.0] * 3),
         dict(lot_multipliers=[200.0, 200.0, 0.0, 100.0]),
     ]
