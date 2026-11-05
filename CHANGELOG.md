@@ -21,6 +21,11 @@ During 0.x the public API may still change between minor versions.
   `IRSDiscountEngine` and `BondDiscountEngine` by construction; a QuantLib cross-check (skipped when QuantLib is
   absent) agrees within 1e-10. `key_rate_bumped_zero_curve` uses `with_pillars` when the curve has it. Guide:
   `docs/curve-construction.md`; demo: `example/param/curve_construction_demo.py`.
+- Pillar-curve protocol for the risk stack: `quantark.param.rrf.is_pillar_curve` (`pillars` + `with_pillars`) and
+  `is_flat_rate_curve`; `InterpolatedRateCurve.with_pillars`. The equity/FX/credit stress applicators, FX VaR
+  revaluation, SA-CVA key-rate IR delta, as-of roll-down and term-structure drift, PnL-explain bucketing and the
+  execution greeks fingerprints accept a `ZeroCurve` (or any pillar curve) where they used to require
+  `InterpolatedRateCurve`; a stressed or bumped curve keeps its interpolation, extrapolation and clock anchor.
 - `simple_forward_rate(curve, t_start, t_end, dcf=None)` (`quantark.param.rrf.projection`): the simple forward over a
   window on a rate curve, with the running-period (`t_start < 0`) rule; the single projection call site for the rate
   engines, the FRN and the bootstrap strips.

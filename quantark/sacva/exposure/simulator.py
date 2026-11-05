@@ -42,7 +42,7 @@ from quantark.sacva.exposure.snowball_surface import (
 from quantark.sacva.exposure.statemachine import BarrierStateMachine, PhoenixStateMachine
 from quantark.sacva.exposure.value_surface import AnalyticValueSurface
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.param.rrf.rate_curve import is_flat_rate_curve
 from quantark.util.exceptions import ValidationError
 
 # tau below this (in years, ~1 calendar day) is treated as the terminal node and
@@ -193,8 +193,8 @@ class MonteCarloExposureEngine(ExposureEngine):
                                   event_times=[])
         times = grid.times
         self._check_market_consistency(priced, times)
-        # Term-structure-consistent drift: when any underlying's discount curve is a term
-        # structure (InterpolatedRateCurve), the per-step drift is the exact integrated
+        # Term-structure-consistent drift: when any underlying's discount curve is not flat
+        # (InterpolatedRateCurve, ZeroCurve, wrappers over them), the per-step drift is the exact integrated
         # forward (rate-div) so the spot distribution at every node is exact (required for
         # IR delta). Flat curves keep the scalar-drift path (byte-identical), so existing
         # flat-curve exposure is unchanged.
@@ -259,14 +259,15 @@ class MonteCarloExposureEngine(ExposureEngine):
     def _step_forwards(self, keys, market_env, times):
         """Per-(asset, step) forward rate/div for term-structure drift, or (None, None).
 
-        Activated only when some underlying carries an InterpolatedRateCurve discount
-        curve. The integrated rate R(t)=-ln DF(t) and integrated dividend Q(t)=q(t)*t are
+        Activated only when some underlying carries a non-flat discount curve
+        (``is_flat_rate_curve`` false). The integrated rate R(t)=-ln DF(t) and integrated dividend Q(t)=q(t)*t are
         differenced over each step: forward = (X(t_{j+1})-X(t_j))/dt_j. For a flat curve
         this reproduces the constant rate, so flat-only portfolios are left on the scalar
         path (returns None) and are byte-identical to before.
         """
-        term = any(isinstance(getattr(market_env[k], "rate_curve", None),
-                              InterpolatedRateCurve) for k in keys)
+        term = any(getattr(market_env[k], "rate_curve", None) is not None
+                   and not is_flat_rate_curve(getattr(market_env[k], "rate_curve", None))
+                   for k in keys)
         if not term:
             return None, None
         dt = np.diff(np.asarray(times, dtype=float))

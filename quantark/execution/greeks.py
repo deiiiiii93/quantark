@@ -237,7 +237,7 @@ def _rate_summary(env):
 
 def _rate_curve_summary(curve):
     from quantark.param.rrf.rate_curve import (
-        FlatRateCurve, InterpolatedRateCurve, ParallelShiftRateCurve,
+        FlatRateCurve, InterpolatedRateCurve, ParallelShiftRateCurve, is_pillar_curve,
     )
 
     if isinstance(curve, FlatRateCurve):
@@ -248,6 +248,15 @@ def _rate_curve_summary(curve):
     if isinstance(curve, ParallelShiftRateCurve):
         return ("parallel_shift", _rate_curve_summary(curve.base_curve),
                 float(curve.shift))
+    if is_pillar_curve(curve):
+        # ZeroCurve and other configurable pillar curves: pillars + scheme + clock anchor
+        # (the InterpolatedRateCurve summary above is kept byte-identical)
+        anchor = getattr(curve, "valuation_date", None)
+        return (type(curve).__qualname__,
+                tuple((float(t), float(r)) for t, r in curve.pillars),
+                str(getattr(getattr(curve, "interpolation", None), "value", "")),
+                str(getattr(getattr(curve, "extrapolation", None), "value", "")),
+                anchor.isoformat() if anchor is not None else None)
     return curve
 
 

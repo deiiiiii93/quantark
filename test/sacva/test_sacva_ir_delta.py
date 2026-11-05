@@ -20,6 +20,8 @@ from quantark.asset.equity.product.option.european_vanilla_option import (
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.param import CurveInterpolation, ZeroCurve
+from quantark.param.extrapolation import RateExtrapolation
 from quantark.param.rrf.rate_curve import LinearRateCurve
 from quantark.priceenv.pricing_environment import PricingEnvironment
 from quantark.sacva.exposure.curves import (
@@ -254,3 +256,25 @@ def test_ir_delta_stateful_trade_raises():
     with pytest.raises(ValidationError, match="IR delta is deferred for stateful"):
         _engine(num_paths=4000).compute(
             CVATradePortfolio([_cp(trade)], [], reporting_currency="USD"))
+
+
+# --- a bootstrapped-style ZeroCurve at the vertices goes through the same IR delta ----
+
+def _zero_curve_env(scheme):
+    env = _term_env()
+    env.rate_curve = ZeroCurve([(t, r) for t, r in PILLARS], interpolation=scheme,
+                               extrapolation=RateExtrapolation.FLAT_ZERO_RATE, valuation_date=VAL)
+    return env
+
+
+@pytest.mark.parametrize("scheme", [CurveInterpolation.LINEAR_ZERO, CurveInterpolation.MONOTONE_CONVEX])
+def test_ir_delta_on_a_zero_curve(scheme):
+    trade = CVATrade("eq", _call(), BlackScholesEngine(), _zero_curve_env(scheme), quantity=50.0,
+                     trade_currency="USD", equity_bucket=5)
+    result = _engine(num_paths=4000, n_steps=8).compute(
+        CVATradePortfolio([_cp(trade)], [], reporting_currency="USD"))
+    ir = [s for s in result.sensitivities
+          if s.risk_class is RiskClass.INTEREST_RATE and s.risk_type is RiskType.DELTA]
+    assert sorted(s.tenor for s in ir) == list(IR_DELTA_TENORS)
+    assert all(np.isfinite(s.s_cva) for s in ir)
+    assert sum(s.s_cva for s in ir if s.tenor in (1.0, 2.0)) > 0.0

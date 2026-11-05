@@ -8,6 +8,8 @@ from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackSc
 from quantark.asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote, TermStructureVolSurface
 from quantark.param.div import ContinuousDividendYield
+from quantark.param import CurveInterpolation, ZeroCurve
+from quantark.param.extrapolation import RateExtrapolation
 from quantark.param.rrf.rate_curve import LinearRateCurve
 from quantark.pnlexplain import ExplainMethod, Factor, PnLExplainConfig, RowKind, ValuationSnapshot, explain
 from quantark.priceenv import PricingEnvironment
@@ -191,3 +193,26 @@ def test_a_stencil_without_the_scalar_slot_does_not_claim_its_buckets():
                                                   stencil=("delta", "theta")))
     assert res.metadata["bucketed_factors"] == ()
     assert not any(r.term.startswith("rate_keyrate.") or r.term.startswith("vega.") for r in res.rows)
+
+
+def _env_zc(spot, date, vols, rates, times=(0.5, 1.0, 2.0)):
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=spot),
+        vol_surface=TermStructureVolSurface(times=list(times), vols=list(vols)),
+        rate_curve=ZeroCurve(list(zip([0.5, 1.0, 2.0], rates)), interpolation=CurveInterpolation.LINEAR_ZERO,
+                             extrapolation=RateExtrapolation.FLAT_ZERO_RATE),
+        div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=date)
+
+
+def test_bucketed_rate_keyrate_rows_on_a_zero_curve():
+    s0 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0),
+                           ENG, _env_zc(100.0, T0, (0.20, 0.22, 0.24), (0.030, 0.032, 0.034)), date=T0)
+    s1 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0 - 3 / 365),
+                           ENG, _env_zc(101.0, T1, (0.21, 0.225, 0.24), (0.031, 0.033, 0.035)), date=T1)
+    scalar = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical"))
+    bucketed = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True))
+    rho_pnl = [r for r in scalar.rows if r.term == "rho"][0].pnl
+    buckets = [r for r in bucketed.rows if r.term.startswith("rate_keyrate.") and r.kind is RowKind.COMPONENT]
+    assert len(buckets) == 3 and rho_pnl != 0.0
+    assert sum(r.pnl for r in buckets) == pytest.approx(rho_pnl, rel=5e-2)
+    assert bucketed.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)

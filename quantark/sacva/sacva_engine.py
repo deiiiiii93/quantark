@@ -38,7 +38,7 @@ from quantark.sacva.sensitivities.shifts import (
     bump_spot_env,
     bump_vol_env,
 )
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.param.rrf.rate_curve import is_pillar_curve
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import freeze_missing_fixings
 
@@ -219,7 +219,8 @@ class SACVAEngine:
 
         EXACT only for vanilla analytic trades. Preconditions, all enforced by raising
         rather than approximating: every eligible trade shares ONE term-structure
-        (InterpolatedRateCurve) reporting curve with pillars at every SA-CVA vertex; no
+        (pillar curve: InterpolatedRateCurve or ZeroCurve) reporting curve with pillars at
+        every SA-CVA vertex; no
         stateful (single-rate QUAD) or FX trade is present; and a flat reporting curve
         (no exact per-tenor IR degrees of freedom) RAISES rather than silently omitting IR
         risk. This method is only reached when IR delta is enabled (the default); callers
@@ -230,7 +231,7 @@ class SACVAEngine:
         if not trades:
             return []
         curves = [getattr(t.env, "rate_curve", None) for t in trades]
-        term = [c for c in curves if isinstance(c, InterpolatedRateCurve)]
+        term = [c for c in curves if is_pillar_curve(c)]
         if not term:
             # IR delta is enabled but no per-tenor curve is supplied. A flat curve has no
             # exact per-tenor IR degrees of freedom -> raise (do NOT silently omit IR risk;
@@ -245,6 +246,7 @@ class SACVAEngine:
                 "IR delta requires ALL trades to share one term-structure reporting curve;"
                 " some trades use a flat or absent rate curve (mixed curves are ambiguous)")
         identity = {(type(c).__name__,
+                     getattr(c, "interpolation", None), getattr(c, "extrapolation", None),
                      tuple((float(t), float(r)) for t, r in c.pillars)) for c in term}
         if len(identity) != 1:
             raise ValidationError(

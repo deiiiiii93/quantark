@@ -21,6 +21,7 @@ from quantark.param.div.dividend_yield import NoDividend, TermStructureDividendY
 from quantark.param.rrf.rate_curve import (
     CubicSplineRateCurve, LinearRateCurve, ParallelShiftRateCurve, RateCurve,
 )
+from quantark.param import CurveInterpolation, ZeroCurve
 from quantark.param.vol.vol_surface import TermStructureVolSurface
 from quantark.priceenv import PricingEnvironment
 
@@ -148,3 +149,17 @@ def test_vol_summary_unknown_family_is_not_fingerprintable():
     env = _env()
     env.vol_surface = _MysterySurface()
     assert try_fingerprint(_vol_summary(env)) is None
+
+
+def test_rate_summary_zero_curve_is_fingerprintable_and_encodes_scheme_and_anchor():
+    from datetime import datetime as _dt
+
+    lin = _rate_summary(_env(LinearRateCurve(PILLARS)))
+    assert len(lin) == 2                                   # the legacy summary is unchanged
+    a = _rate_summary(_env(ZeroCurve(PILLARS, interpolation=CurveInterpolation.LINEAR_ZERO)))
+    b = _rate_summary(_env(ZeroCurve(PILLARS, interpolation=CurveInterpolation.MONOTONE_CONVEX)))
+    c = _rate_summary(_env(ZeroCurve(PILLARS, interpolation=CurveInterpolation.LINEAR_ZERO,
+                                     valuation_date=_dt(2024, 1, 15))))
+    assert try_fingerprint(a) is not None and try_fingerprint(b) is not None
+    assert a != b and a != c and a != lin
+    assert a == _rate_summary(_env(ZeroCurve(list(PILLARS), interpolation=CurveInterpolation.LINEAR_ZERO)))

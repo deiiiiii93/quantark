@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from typing import List
 
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve, RateCurve
+from quantark.param.rrf.rate_curve import RateCurve, is_pillar_curve
 from quantark.util.exceptions import ValidationError
 
 # SA-CVA interest-rate delta vertices (MAR50.55, reduced set).
@@ -66,12 +66,14 @@ class ForwardRateCurve(RateCurve):
 
 def key_rate_bumped_curve(curve: RateCurve, tenor: float, bump: float) -> RateCurve:
     """Return a copy of ``curve`` with the pillar at ``tenor`` shifted by ``bump`` (an
-    absolute zero-rate shift), all other pillars held. The curve must be interpolated
-    (have pillars) and contain that tenor exactly — no silent nearest-pillar snapping."""
-    if not isinstance(curve, InterpolatedRateCurve):
+    absolute zero-rate shift), all other pillars held. The curve must be a pillar curve
+    (``InterpolatedRateCurve`` or ``ZeroCurve``: ``pillars`` + ``with_pillars``, so the
+    bumped curve keeps its interpolation) and contain that tenor exactly — no silent
+    nearest-pillar snapping."""
+    if not is_pillar_curve(curve):
         raise ValidationError(
-            "key-rate IR delta requires an InterpolatedRateCurve (term structure); a flat "
-            "curve has no per-tenor pillars to bump")
+            "key-rate IR delta requires a pillar curve (InterpolatedRateCurve or ZeroCurve); "
+            "a flat curve has no per-tenor pillars to bump")
     pillars: List = list(curve.pillars)
     idx = [i for i, (t, _) in enumerate(pillars) if t == tenor]
     if len(idx) != 1:
@@ -82,4 +84,4 @@ def key_rate_bumped_curve(curve: RateCurve, tenor: float, bump: float) -> RateCu
     t_i, r_i = pillars[i]
     bumped = list(pillars)
     bumped[i] = (t_i, r_i + bump)
-    return type(curve)(bumped)
+    return curve.with_pillars(bumped)

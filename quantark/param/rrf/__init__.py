@@ -9,6 +9,8 @@ from .rate_curve import (
     LinearRateCurve,
     LogLinearRateCurve,
     CubicSplineRateCurve,
+    is_pillar_curve,
+    is_flat_rate_curve,
 )
 from .trading_clock_curve import TradingClockRateCurve
 from .projection import (
@@ -21,6 +23,8 @@ from .projection import (
 __all__ = [
     'TradingClockRateCurve',
     'act365f',
+    'is_pillar_curve',
+    'is_flat_rate_curve',
     'simple_forward_rate',
     'RateCurve',
     'FlatRateCurve',

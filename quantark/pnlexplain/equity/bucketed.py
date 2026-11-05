@@ -22,7 +22,7 @@ from quantark.asset.equity.riskmeasures.bucketed_greeks import (
     RateKeyrateConvention,
 )
 from quantark.param import TermStructureVolSurface
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.param.rrf.rate_curve import is_pillar_curve
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
 from quantark.pnlexplain.equity.scenario import ScenarioCache
 from quantark.util.exceptions import ValidationError
@@ -30,14 +30,14 @@ from quantark.util.exceptions import ValidationError
 RATE_CONVENTION = RateKeyrateConvention.DIVIDEND_HELD    # the factor model's rate step: q held, F moves
 
 
-def _check_pair(name: str, a: Any, b: Any, cls) -> bool:
-    """True when both snapshots carry a `cls` term structure.
+def _check_pair(name: str, a: Any, b: Any, pred) -> bool:
+    """True when both snapshots carry a term structure (``pred(x)`` true).
 
     Rule (spec §7.6): the canonical pillars are the t0 object's; the t1 object
     is sampled at those pillars with its own interpolation, so a differing t1
     grid is allowed. A term structure on one side only is rejected.
     """
-    is_a, is_b = isinstance(a, cls), isinstance(b, cls)
+    is_a, is_b = bool(pred(a)), bool(pred(b))
     if is_a != is_b:
         raise ValidationError(f"bucketed mode: {name} is a term structure on one side only")
     return is_a
@@ -57,10 +57,11 @@ def bucketed_rows(cache: ScenarioCache, calc: Any, bump: Any, level: str
     q, K = snap0.quantity, moves.coordinate.reference_strike
     T = moves.coordinate.tenor_t1
     coords = []
-    if _check_pair("vol_surface", e0.vol_surface, e1.vol_surface, TermStructureVolSurface) \
+    if _check_pair("vol_surface", e0.vol_surface, e1.vol_surface,
+                   lambda s: isinstance(s, TermStructureVolSurface)) \
             and Factor.VOL in moves.coordinate.applicable:
         coords.append(BucketedGreekCoordinate.VOL_TENOR_VEGA)
-    if _check_pair("rate_curve", e0.rate_curve, e1.rate_curve, InterpolatedRateCurve) \
+    if _check_pair("rate_curve", e0.rate_curve, e1.rate_curve, is_pillar_curve) \
             and Factor.RATE in moves.coordinate.applicable:
         coords.append(BucketedGreekCoordinate.RATE_KEYRATE)
     if not coords:

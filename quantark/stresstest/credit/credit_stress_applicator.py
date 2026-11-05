@@ -28,7 +28,7 @@ from quantark.asset.credit.conventions import (
 )
 from quantark.param import FlatRateCurve
 from quantark.param.credit import FlatHazardCurve
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve, RateCurve
+from quantark.param.rrf.rate_curve import RateCurve, is_pillar_curve
 from quantark.priceenv import CreditPricingEnvironment
 from quantark.stresstest.stress.stress_types import StressLevel, StressType
 from quantark.util.exceptions import ValidationError
@@ -216,12 +216,12 @@ class CreditStressApplicator:
         new_rate = stress.stress_type.apply(current, stress.stress_value)
         if isinstance(curve, FlatRateCurve):
             return FlatRateCurve(rate=new_rate)
-        if isinstance(curve, InterpolatedRateCurve):
+        if is_pillar_curve(curve):
             delta = new_rate - current
-            return curve.__class__([(t, r + delta) for t, r in curve.pillars])
+            return curve.with_pillars([(t, r + delta) for t, r in curve.pillars])
         raise ValidationError(
             f"Cannot stress credit discount curve type {type(curve).__name__}; "
-            "only FlatRateCurve or interpolated curves are supported."
+            "only FlatRateCurve or pillar curves (InterpolatedRateCurve, ZeroCurve) are supported."
         )
 
 

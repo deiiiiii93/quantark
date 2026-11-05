@@ -18,7 +18,7 @@ from quantark.param import (
     SpotQuote,
     TermStructureVolSurface,
 )
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.param.rrf.rate_curve import is_pillar_curve
 from quantark.param.vol.vannavolga import VannaVolgaVolSurface, SmileQuotes
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.exceptions import ValidationError
@@ -32,11 +32,11 @@ def _shift_curve(curve, shift: float):
         return curve
     if isinstance(curve, FlatRateCurve):
         return FlatRateCurve(rate=curve.get_rate(1.0) + shift)
-    if isinstance(curve, InterpolatedRateCurve):
-        return curve.__class__([(t, r + shift) for t, r in curve.pillars])
+    if is_pillar_curve(curve):
+        return curve.with_pillars([(t, r + shift) for t, r in curve.pillars])
     raise ValidationError(
         f"Cannot bump FX curve type {type(curve).__name__} for VaR; "
-        "only FlatRateCurve or interpolated curves are supported."
+        "only FlatRateCurve or pillar curves (InterpolatedRateCurve, ZeroCurve) are supported."
     )
 
 

@@ -205,6 +205,16 @@ class InterpolatedRateCurve(RateCurve):
         self.node_roles = node_roles
         self.last_observable_tenor = last_observable_tenor
 
+    def with_pillars(self, pillars: List[Tuple[float, float]]) -> "InterpolatedRateCurve":
+        """A curve of the same class on ``pillars``; ``last_observable_tenor`` is kept,
+        ``node_roles`` only when the pillar count is unchanged (they are per pillar)."""
+        same_count = len(pillars) == len(self.pillars)
+        return self.__class__(
+            list(pillars),
+            node_roles=self.node_roles if same_count else None,
+            last_observable_tenor=self.last_observable_tenor,
+        )
+
     @property
     def tenors(self) -> List[float]:
         """Pillar times (sorted)."""
@@ -481,3 +491,27 @@ class CubicSplineRateCurve(InterpolatedRateCurve):
         """
         rate = self.get_rate(time_to_maturity)
         return math.exp(-rate * time_to_maturity)
+
+
+# --------------------------------------------------------------------------- curve kinds
+
+
+def is_pillar_curve(curve) -> bool:
+    """True for a curve that exposes ``pillars`` and rebuilds itself with ``with_pillars``.
+
+    This is the protocol the risk stack (stress applicators, FX VaR revaluation,
+    SA-CVA IR delta, PnL-explain bucketing, execution fingerprints) dispatches on:
+    ``InterpolatedRateCurve`` and its subclasses, and ``quantark.param.curve.ZeroCurve``.
+    A flat curve or a wrapper is not a pillar curve.
+    """
+    return curve is not None and hasattr(curve, "pillars") and callable(getattr(curve, "with_pillars", None))
+
+
+def is_flat_rate_curve(curve) -> bool:
+    """True for a ``FlatRateCurve``, or a ``ParallelShiftRateCurve`` over one (a constant
+    zero rate: its forward curve is itself). ``None`` is not a flat curve."""
+    if isinstance(curve, FlatRateCurve):
+        return True
+    if isinstance(curve, ParallelShiftRateCurve):
+        return is_flat_rate_curve(curve.base_curve)
+    return False

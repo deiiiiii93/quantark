@@ -160,12 +160,14 @@ class ZeroCurve(RateCurve):
     # ----------------------------------------------------------------- derived curves
 
     def with_pillars(self, pillars: Sequence[Tuple[float, float]]) -> "ZeroCurve":
-        """A new curve on ``pillars`` with this curve's configuration and metadata."""
+        """A new curve on ``pillars`` with this curve's configuration and metadata
+        (``node_roles`` are per pillar and survive only an unchanged pillar count)."""
+        same_count = len(pillars) == len(self._pillars)
         return ZeroCurve(
             pillars,
             interpolation=self.interpolation,
             extrapolation=self.extrapolation,
-            node_roles=self.node_roles,
+            node_roles=self.node_roles if same_count else None,
             last_observable_tenor=self.last_observable_tenor,
             valuation_date=self.valuation_date,
         )

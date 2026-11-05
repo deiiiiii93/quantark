@@ -18,7 +18,7 @@ from quantark.param import (
     FlatBasisYield,
     TermStructureBasisYield,
 )
-from quantark.param.rrf.rate_curve import FlatRateCurve, InterpolatedRateCurve, LinearRateCurve
+from quantark.param.rrf.rate_curve import FlatRateCurve, is_pillar_curve
 from quantark.portfolio import Portfolio, Position
 from quantark.stresstest.stress.stress_types import (
     StressType,
@@ -249,14 +249,14 @@ class StressApplicator:
 
         if isinstance(curve, FlatRateCurve):
             env.rate_curve = FlatRateCurve(rate=new_rate)
-        elif isinstance(curve, InterpolatedRateCurve):
+        elif is_pillar_curve(curve):
             delta = new_rate - current_rate
             updated = [(time, rate + delta) for time, rate in curve.pillars]
-            env.rate_curve = curve.__class__(updated)
+            env.rate_curve = curve.with_pillars(updated)
         else:
             raise ValidationError(
                 f"Cannot stress curve type {type(curve).__name__}; "
-                "only FlatRateCurve or interpolated curves are supported."
+                "only FlatRateCurve or pillar curves (InterpolatedRateCurve, ZeroCurve) are supported."
             )
 
     @staticmethod
@@ -268,7 +268,7 @@ class StressApplicator:
                 "Key rate stress requires tenor_bucket metadata (e.g., '5Y')."
             )
 
-        if isinstance(curve, InterpolatedRateCurve):
+        if is_pillar_curve(curve):
             new_pillars = []
             found = False
             for time, rate in curve.pillars:
@@ -283,7 +283,7 @@ class StressApplicator:
                 new_rate = stress.stress_type.apply(base, stress.stress_value)
                 new_pillars.append((bucket, new_rate))
                 new_pillars.sort(key=lambda x: x[0])
-            env.rate_curve = curve.__class__(new_pillars)
+            env.rate_curve = curve.with_pillars(new_pillars)
         else:
             # Fallback to parallel shift for flat curves
             StressApplicator._stress_rate(env, stress)
