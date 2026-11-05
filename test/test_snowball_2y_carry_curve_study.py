@@ -246,3 +246,29 @@ def test_greeks_results_meet_acceptance(common):
     # the default tail hedges the unquoted 2Y exposure as an IM2706 / MO2709 calendar spread
     hf = res["tails"]["hold_forward"]["curve"]["buckets"]
     assert hf[3]["hedge_lots"] * hf[4]["hedge_lots"] < 0.0
+
+
+# --------------------------------------------------------------------------- T6 report (AC11)
+
+REPORT_SECTION_IDS = ("s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8")
+
+
+def test_report_builds_offline_with_required_chrome(common, tmp_path):
+    import re
+
+    report = _load("snowball_2y_cc_report", "04_report.py")
+    out = tmp_path / "report.html"
+    report.build_report(out)
+    assert out.exists()
+    page = out.read_text(encoding="utf-8")
+    # frozen navigator + light/dark switcher (docs/UI_LANGUAGE.md)
+    for needle in ("position: sticky", "data-theme", "localStorage", "prefers-color-scheme", "IntersectionObserver"):
+        assert needle in page, needle
+    # opens offline: no network asset in any src/href
+    assert not re.search(r"""(?:src|href)\s*=\s*["']?\s*(?:https?:)?//""", page, flags=re.I)
+    for sid in REPORT_SECTION_IDS:
+        assert f'id="{sid}"' in page, sid
+        assert f'href="#{sid}"' in page, sid
+    assert "not hedgeable with IM futures" in page
+    # true minus sign in figures, never a negative zero
+    assert "−0.00<" not in page and "-0.00<" not in page

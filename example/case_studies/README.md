@@ -10,6 +10,7 @@ next to this one, e.g. `example/asset/`, `example/var/`).
 | `fx_volmodels/` | The same pattern for FX: a deliberately narrower question on CFETS snapshots |
 | `volmodels_improvement_program/` | Research artifacts behind the vol-model solver improvements |
 | `snowball_q_term_structure/` | Does a q term structure help hedge a snowball? Includes the bucket-futures-hedge validation |
+| `snowball_2y_carry_curve/` | How much does a flat q misprice and mis-hedge a 2Y snowball against the IM + MO carry curve? Three tail conventions, pillar-bucket Greeks, offline HTML report |
 | `snowball_simulated_paths/` | Realised CSI 1000 history turned into bootstrapped and stress path batches for the snowball hedging study |
 | `snowball_volmodel_backtest/` | Term sheet, trading calendar and inception scheduler (locked 3Y seller snowball on 000852.SH) for the vol-model backtest fleet |
 | `snowball_rfq_ko_rate/` | How r, q and vol move the quoted KO rate on a snowball RFQ |
