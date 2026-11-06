@@ -41,6 +41,16 @@ from s2ts.tails import (  # noqa: E402
     build_curve,
     pillar_inputs,
 )
+from s2ts.note import (  # noqa: E402
+    DayGreeks,
+    NoteLife,
+    build_note,
+    build_terms,
+    daily_greeks,
+    inception_dates,
+    make_env,
+    solve_coupon,
+)
 
 HEADER = "合约代码,今开盘,最高价,最低价,成交量,成交金额,持仓量,持仓变化,今收盘,今结算,前结算,涨跌1,涨跌2,Delta\n"
 
@@ -483,3 +493,191 @@ def test_stability_json_has_six_tails_by_four_variants():
         for t in v["tails"].values():
             assert t["summary"]["all"]["std"] > 0 and t["switch_floor"]["n"] > 0
             assert len(t["q2y"]) == v["n_days"]
+
+
+# ---------------------------------------------------------------------------
+# Task 3: the note — terms, coupon, lifecycle, daily greeks
+# ---------------------------------------------------------------------------
+
+from s2ts import NOTIONAL  # noqa: E402
+
+S0 = 6500.0
+INCEPTION = date(2024, 1, 2)
+
+
+def _v2():
+    from quantark.asset.equity.engine.quad import SnowballQuadEngineV2
+    from quantark.asset.equity.param import QuadV2Params
+
+    return SnowballQuadEngineV2(params=QuadV2Params())
+
+
+def _sse_days(start: date, end: date) -> list:
+    cal = create_calendar(CalendarType.CHINA_SSE)
+    return [d.date() for d in pd.date_range(start, end)
+            if cal.is_business_day(datetime(d.year, d.month, d.day))]
+
+
+def _env(dc):
+    return make_env(dc, build_curve(dc, "hold_forward", None).to_dividend_yield(_flat_rate()))
+
+
+def _run(path, coupon=0.2, inception=INCEPTION, stop_when_dead=True):
+    """Step a NoteLife over ``path`` = [(day, spot)]; returns (life, terms, [(day, NoteDay)])."""
+    terms = build_terms(inception)
+    life = NoteLife(build_note(coupon, S0, terms), inception)
+    out = []
+    for day, spot in path:
+        dc = synth_chain(day, spot=spot)
+        nd = life.step(dc, _env(dc))
+        out.append((day, nd))
+        if stop_when_dead and not nd.alive:
+            break
+    return life, terms, out
+
+
+def test_build_terms_rolls_to_sse_days():
+    terms = build_terms(date(2023, 10, 9))
+    sse = set(_sse_days(date(2023, 10, 1), date(2025, 12, 31)))
+    assert terms.ko_dates[0] == date(2024, 1, 9)            # month 3 = 2024-01-09 (a trading day)
+    assert all(d in sse for d in terms.ko_dates) and terms.ko_dates[-1] == terms.maturity_date
+    assert len(terms.ko_dates) == 22
+    assert terms.maturity_date == date(2025, 10, 9)
+    assert terms.ko_times[0] == pytest.approx((date(2024, 1, 9) - date(2023, 10, 9)).days / 365.0, rel=1e-15)
+    assert terms.ki_times[0] == pytest.approx(1 / 365.0, rel=1e-15)  # 2023-10-10, first SSE day after
+    # a month-3 anniversary on a holiday rolls forward: 2024-02-10 (Spring Festival) -> 2024-02-19
+    assert build_terms(date(2023, 11, 10)).ko_dates[0] == date(2024, 2, 19)
+
+
+def test_coupon_solves_par():
+    dc = synth_chain(INCEPTION, spot=S0)
+    engine = _v2()
+    coupon = solve_coupon(dc, engine)
+    assert 0.0 < coupon < 1.0
+    pv = engine.price(build_note(coupon, S0, build_terms(INCEPTION)), _env(dc))
+    assert abs(pv) <= 1e-6 * NOTIONAL
+
+
+def test_day0_aged_pv_equals_fresh_pv():
+    dc = synth_chain(INCEPTION, spot=S0)
+    terms = build_terms(INCEPTION)
+    fresh = build_note(0.2, S0, terms)
+    life = NoteLife(build_note(0.2, S0, terms), INCEPTION)
+    nd = life.step(dc, _env(dc))
+    assert nd.alive and nd.cash == 0.0 and not nd.knocked_in and nd.end_reason is None
+    aged_pv = _v2().price(nd.product, _env(dc), lifecycle_state=life.lifecycle)
+    fresh_pv = _v2().price(fresh, _env(dc))
+    assert aged_pv == pytest.approx(fresh_pv, rel=1e-12)
+
+
+def test_note_knocks_out_on_first_ko_date():
+    terms = build_terms(INCEPTION)
+    days = _sse_days(INCEPTION, date(2024, 6, 30))
+    life, terms, out = _run([(d, S0 if d == INCEPTION else 1.05 * S0) for d in days])
+    ko_day = terms.ko_dates[0]
+    assert ko_day == date(2024, 4, 2)                         # month 3 (2024-04-02, a trading day)
+    assert [d for d, nd in out if not nd.alive] == [ko_day]
+    assert out[-2][1].alive and out[-2][1].cash == 0.0
+    last = out[-1][1]
+    assert last.end_reason == "ko" and last.product is None
+    assert last.cash == pytest.approx(0.2 * NOTIONAL * terms.ko_times[0], rel=1e-12)
+    assert last.cash > 0
+    assert sum(nd.cash for _, nd in out) == last.cash
+    with pytest.raises(ValidationError):
+        life.step(synth_chain(days[len(out)], spot=S0), _env(synth_chain(days[len(out)], spot=S0)))
+
+
+def test_note_ki_latches():
+    days = _sse_days(INCEPTION, date(2024, 1, 31))[:10]
+    hit = [(d, S0 if i == 0 else (0.70 if i == 1 else 0.99) * S0) for i, d in enumerate(days)]
+    twin = [(d, S0 if i == 0 else 0.99 * S0) for i, d in enumerate(days)]
+    life, _, out = _run(hit)
+    life_t, _, out_t = _run(twin)
+    assert [nd.knocked_in for _, nd in out] == [False] + [True] * 9
+    assert not any(nd.knocked_in for _, nd in out_t)
+    assert all(nd.alive and nd.cash == 0.0 for _, nd in out)
+    dc = synth_chain(days[-1], spot=0.99 * S0)
+    engine = _v2()
+    pv_ki = engine.price(out[-1][1].product, _env(dc), lifecycle_state=life.lifecycle)
+    pv_tw = engine.price(out_t[-1][1].product, _env(dc), lifecycle_state=life_t.lifecycle)
+    assert pv_ki < pv_tw
+
+
+def test_note_matures_without_ko_no_ki():
+    terms = build_terms(INCEPTION)
+    days = _sse_days(INCEPTION, terms.maturity_date)
+    life, terms, out = _run([(d, S0 if d == INCEPTION else 0.90 * S0) for d in days])
+    assert out[-1][0] == terms.maturity_date and len(out) == len(days)
+    last = out[-1][1]
+    assert not last.alive and last.end_reason == "maturity" and not last.knocked_in
+    assert last.cash == pytest.approx(0.2 * NOTIONAL * terms.maturity_years, rel=1e-12)
+    assert all(nd.alive and nd.cash == 0.0 for _, nd in out[:-1])
+
+
+def test_note_matures_after_ki():
+    terms = build_terms(INCEPTION)
+    days = _sse_days(INCEPTION, terms.maturity_date)
+    spots = [S0, 0.70 * S0] + [0.90 * S0] * (len(days) - 2)
+    life, terms, out = _run(list(zip(days, spots)))
+    last = out[-1][1]
+    assert out[-1][0] == terms.maturity_date
+    assert not last.alive and last.end_reason == "maturity" and last.knocked_in
+    assert last.cash == pytest.approx(-(1.0 - 0.90) * NOTIONAL, rel=1e-12)   # the holder loses
+    # every ledger entry is paid on its determination day (no settlement lag): cash == determined amount
+    for cf in life.lifecycle.ledger.cashflows:
+        assert cf.payment_time == cf.determination_time
+
+
+@pytest.mark.skipif(not Path("/Users/fuxinyao/quant-ark/example/output/snowball_2y_tail_stability/daily_chain.pkl").exists(),
+                    reason="run 01_data.py first")
+def test_inception_dates():
+    from s2ts.chain import load_chain
+
+    chains = load_chain()
+    incs = inception_dates(chains, anchor_series(chains, 63))
+    assert incs[0] == date(2023, 10, 9)
+    assert 12 <= len(incs) <= 14
+    days = [dc.day for dc in chains]
+    for d in incs:
+        q = (d.month - 1) // 3
+        assert d == min(x for x in days if x.year == d.year and (x.month - 1) // 3 == q)
+    assert len({(d.year, (d.month - 1) // 3) for d in incs}) == len(incs)
+
+
+def test_inception_dates_needs_anchor():
+    days = _days(120)   # 2024-01-02 .. 2024-06-14
+    chains = [synth_chain(d) for d in days]
+    incs = inception_dates(chains, anchor_series(chains, 63))
+    # Q1 2024 starts before any anchor; Q2 starts 2024-04-01 (index 65 >= 62)
+    assert incs == [date(2024, 4, 1)]
+
+
+@pytest.mark.slow  # ~15-20 s per tail (a full bucket report + 15 V2 prices)
+@pytest.mark.parametrize("tail", ["hold_forward", "converge_hl050"])
+def test_daily_greeks_match_bucket_report(tail):
+    from quantark.asset.equity.riskmeasures import calculate_carry_curve_buckets
+
+    c = _cc_common()
+    snap = c.load_snapshot()
+    pricing = c.read_json(c.RESULTS_DIR / "pricing.json")
+    s0 = float(snap["spot"])
+    base = c.build_curve(snap, "hold_forward")
+    far = snap["futures"][-1]
+    b_inf = math.log(far["price"] / s0) / c.year_fraction(date.fromisoformat(far["expiry"]))
+    curve = base if tail == "hold_forward" else ConvergingCarryCurve(base.nodes, b_inf=b_inf, half_life=0.5)
+    product = c.build_product(pricing["coupon"]["value"], s0, c.build_terms())
+    env = c.make_env(snap, curve.to_dividend_yield(c.rate_curve()))
+    mults = c.lot_multipliers(snap)
+    rep = calculate_carry_curve_buckets(product, env, _v2(), curve, lot_multipliers=mults,
+                                        spot_bump_rel=0.01, forward_bump_rel=1e-3)
+    g = daily_greeks(product, env, curve, _v2(), None, mults)
+    assert isinstance(g, DayGreeks)
+    assert g.pv == pytest.approx(rep.base_pv, rel=1e-12)
+    assert g.spot_delta == pytest.approx(rep.spot_delta, rel=1e-12)
+    assert g.pinned_delta == pytest.approx(rep.pinned_forward_delta, rel=1e-12, abs=1e-9)
+    assert len(g.pillar_delta) == len(rep.buckets) == len(g.pillar_lots)
+    for gd, gl, b in zip(g.pillar_delta, g.pillar_lots, rep.buckets):
+        assert gd == pytest.approx(b.delta, rel=1e-12, abs=1e-12)
+        assert gl == pytest.approx(b.hedge_lots, rel=1e-12, abs=1e-12)
+    # holder side: the long note gains when spot rises (a snowball is long the index)
+    assert g.spot_delta > 0
