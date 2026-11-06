@@ -50,6 +50,8 @@ COUPON_TAIL = "hold_forward"
 #: ``calculate_carry_curve_buckets`` settings of the 2Y study.
 SPOT_BUMP_REL = 0.01
 FORWARD_BUMP_REL = 1e-3
+#: One vol point (absolute vol), the vega step and unit.
+VOL_BUMP = 0.01
 
 _SSE = create_calendar(CalendarType.CHINA_SSE)
 
@@ -273,23 +275,30 @@ class NoteLife:
 
 @dataclass(frozen=True)
 class DayGreeks:
-    """Holder-side PV and deltas; ``pillar_lots = −δ_i/m_i`` (holder lots; the books negate)."""
+    """Holder-side PV and deltas; ``pillar_lots = −δ_i/m_i`` (holder lots; the books negate).
+
+    ``vega``: holder-side CNY per vol point (0.01 absolute vol), central; ``None`` when not computed.
+    Diagnostic only (nothing hedges it).
+    """
 
     pv: float
     spot_delta: float
     pinned_delta: float
     pillar_delta: Tuple[float, ...]
     pillar_lots: Tuple[float, ...]
+    vega: Optional[float] = None
 
 
 def daily_greeks(product, env: PricingEnvironment, curve: CarryCurve, engine, lifecycle_state,
-                 lot_mults: Sequence[float]) -> DayGreeks:
-    """PV, spot delta, pinned-forward delta and pillar deltas of ``product`` on ``curve``.
+                 lot_mults: Sequence[float], *, with_vega: bool = True) -> DayGreeks:
+    """PV, spot delta, pinned-forward delta and pillar deltas of ``product`` on ``curve``; then vega.
 
     The same formulas as ``calculate_carry_curve_buckets`` (spot step 1%, forward
     step 0.1%) and the same price order, so the engine's single-slot cache
     behaves identically: base; spot ±; pinned-forward ± (``B_i − ln(S'/S)``);
-    each pillar ``F_i ±``. Rho is not computed. ``env.div_yield`` is replaced by
+    each pillar ``F_i ±``. Rho is not computed. With ``with_vega`` the flat vol
+    is then bumped ±``VOL_BUMP`` on the base curve and spot — priced AFTER the
+    delta prices, so they are unchanged. ``env.div_yield`` is replaced by
     ``curve``'s view; ``env`` itself is never mutated.
     """
     nodes = curve.nodes
@@ -336,4 +345,19 @@ def daily_greeks(product, env: PricingEnvironment, curve: CarryCurve, engine, li
         delta = (pv(moved(b_i + up_log)) - pv(moved(b_i + dn_log))) / (2.0 * FORWARD_BUMP_REL * f_i)
         deltas.append(delta)
         lots.append(-delta / float(lot_mults[i]))
-    return DayGreeks(base_pv, spot_delta, pinned_delta, tuple(deltas), tuple(lots))
+
+    vega: Optional[float] = None
+    if with_vega:
+        surface = env.vol_surface
+        if not isinstance(surface, FlatVolSurface):
+            raise ValidationError(f"vega bumps a flat vol; got {type(surface).__name__}")
+
+        def at_vol(vol: float) -> float:
+            e = env_for(base_div)
+            e.vol_surface = FlatVolSurface(volatility=vol)
+            return float(bump_engine.price(product, e, lifecycle_state=lifecycle_state))
+
+        sigma = float(surface.volatility)
+        # per vol point: (PV(σ+h) − PV(σ−h)) / 2 with h = one point
+        vega = (at_vol(sigma + VOL_BUMP) - at_vol(sigma - VOL_BUMP)) / 2.0
+    return DayGreeks(base_pv, spot_delta, pinned_delta, tuple(deltas), tuple(lots), vega)

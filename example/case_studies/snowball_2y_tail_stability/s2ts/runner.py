@@ -123,6 +123,13 @@ def _d_mo_basis(prev: DayChain, dc: DayChain) -> Optional[float]:
     return _basis(dc.mo.forward, dc.spot) - _basis(prev.mo.forward, prev.spot)
 
 
+def _d_vol(prev: DayChain, dc: DayChain) -> Optional[float]:
+    """Change of the flat vol in vol points, same MO expiry both days, else ``None`` (the MO roll day)."""
+    if dc.mo.expiry != prev.mo.expiry:
+        return None
+    return 100.0 * (dc.mo.vol - prev.mo.vol)
+
+
 def run_one(
     inception: date,
     tail: str,
@@ -176,7 +183,7 @@ def run_one(
         tp = time.perf_counter()
         _, mults = pillar_inputs(dc0)
         g1 = daily_greeks(build_note(coupon, dc0.spot, terms), env, curve,
-                          V1NoLifecycle(v1 if v1 is not None else v1_engine()), None, mults)
+                          V1NoLifecycle(v1 if v1 is not None else v1_engine()), None, mults, with_vega=False)
         parity_out = {
             "pv_v2": g.pv, "pv_v1": g1.pv, "pv_diff_bp": 1e4 * (g.pv - g1.pv) / NOTIONAL,
             "lots_v2": list(g.pillar_lots), "lots_v1": list(g1.pillar_lots),
@@ -214,6 +221,7 @@ def run_one(
             "note_cash": nd.cash, "note_pnl": note_pnl, "pv": pv,
             "spot_delta": None if g is None else g.spot_delta,
             "pinned_delta": None if g is None else g.pinned_delta,
+            "vega": None if g is None else g.vega, "d_vol": _d_vol(prev, dc),
             "d_far_basis": _d_far_basis(prev, dc), "d_mo_basis": _d_mo_basis(prev, dc),
         }
         for k, b in books.items():
@@ -242,7 +250,7 @@ def run_one(
     out: Dict[str, Any] = {
         "inception": inception.isoformat(), "tail": tail, "coupon": float(coupon),
         "day0_pv": pv0, "day0_spot_delta": g0.spot_delta, "day0_pinned_delta": g0.pinned_delta,
-        "day0_lots": list(g0.pillar_lots),
+        "day0_lots": list(g0.pillar_lots), "day0_vega": g0.vega,
         "truncated": end_reason == "data_end", "end_reason": end_reason,
         "end_date": prev.day.isoformat(), "live_days": len(rows), "pv_end": pv_end,
         "parity": parity_out,

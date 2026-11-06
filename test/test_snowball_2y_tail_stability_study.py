@@ -912,7 +912,47 @@ class FakeEngine:
 
 DAY_KEYS = {"date", "note_pnl", "pnl_a", "pnl_b", "cost_a", "cost_b", "turn_a", "turn_b", "roll_a", "roll_b",
             "d_far_basis", "d_mo_basis", "pv", "spot_delta", "pinned_delta", "hedged_a", "hedged_b",
-            "accrual_a", "accrual_b", "note_cash"}
+            "accrual_a", "accrual_b", "note_cash", "vega", "d_vol"}
+
+
+def test_daily_vega_sign_and_order_invariance():
+    """Vega is priced AFTER the 15 delta prices: switching it off leaves every other field bitwise equal;
+    a long snowball holder is short vol."""
+    dc = synth_chain(INCEPTION, spot=S0)
+    curve = build_curve(dc, "converge_hl050", -0.05)
+    env = make_env(dc, curve.to_dividend_yield(_flat_rate()))
+    note = build_note(0.2, S0, build_terms(INCEPTION))
+    _, mults = pillar_inputs(dc)
+    with_vega = daily_greeks(note, env, curve, _v2(), None, mults)
+    without = daily_greeks(note, env, curve, _v2(), None, mults, with_vega=False)
+    assert without.vega is None
+    assert with_vega.vega < 0
+    for name in ("pv", "spot_delta", "pinned_delta", "pillar_delta", "pillar_lots"):
+        assert getattr(with_vega, name) == getattr(without, name)
+    # one vol point = 0.01 absolute vol, central
+    from quantark.param import FlatVolSurface
+
+    def pv_at(vol):
+        e = make_env(dc, curve.to_dividend_yield(_flat_rate()))
+        e.vol_surface = FlatVolSurface(volatility=vol)
+        return _v2().price(note, e)
+
+    assert with_vega.vega == pytest.approx((pv_at(dc.mo.vol + 0.01) - pv_at(dc.mo.vol - 0.01)) / 2.0, rel=1e-9)
+
+
+def test_run_one_records_vega_and_same_expiry_vol_change():
+    chains = _path_chains(4, lambda i: S0)
+    chains = [dataclasses.replace(dc, mo=dataclasses.replace(dc.mo, vol=0.25 + 0.01 * i)) for i, dc in enumerate(chains)]
+    rolled = dataclasses.replace(chains[3], mo=dataclasses.replace(chains[3].mo, series="MO2712",
+                                                                   expiry=date(2027, 12, 17)))
+    chains[3] = rolled
+    old_pair = {"MO2709-C-6400": {"close": 0.0, "settle": 560.0}, "MO2709-P-6400": {"close": 0.0, "settle": 610.0}}
+    run = run_one(INCEPTION, "hold_forward", chains, _anchors(chains), 0.2, parity=False, engine=FakeEngine(),
+                  rows_loader=lambda day: old_pair)
+    d_vols = [d["d_vol"] for d in run["days"]]
+    assert d_vols[:2] == [pytest.approx(1.0), pytest.approx(1.0)] and d_vols[2] is None   # roll day: None
+    assert all(d["vega"] == 0.0 for d in run["days"][:-1])   # FakeEngine ignores vol
+    assert run["day0_vega"] == 0.0
 
 
 def _path_chains(n, spot_fn, start=INCEPTION):

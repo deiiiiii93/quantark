@@ -78,10 +78,18 @@ def print_quick(paths) -> None:
         if par is not None:
             print(f"  V1 parity: PV diff {par['pv_diff_bp']:+.4f} bp, max lot diff {par['max_lot_diff']:.4f}, "
                   f"flag {par['flag']}")
-        print(f"  {'date':10s} {'note_pnl':>11s} {'pnl_a':>11s} {'pnl_b':>11s} {'hedged_a':>10s} {'hedged_b':>10s}")
+        print(f"  {'date':10s} {'note_pnl':>11s} {'pnl_a':>11s} {'pnl_b':>11s} {'hedged_a':>10s} {'hedged_b':>10s} "
+              f"{'d_vol':>6s} {'vega_expl':>10s} {'resid_b':>10s}")
+        vega_prev = run.get("day0_vega")
         for d in run["days"][:5]:
+            # the short's vol P&L: −vega_{t−1}·Δvol_t (holder vega, CNY per vol point)
+            expl = None if vega_prev is None or d["d_vol"] is None else -vega_prev * d["d_vol"]
+            resid = "" if expl is None else f"{d['hedged_b'] - expl:10.1f}"
             print(f"  {d['date']:10s} {d['note_pnl']:11.1f} {d['pnl_a']:11.1f} {d['pnl_b']:11.1f} "
-                  f"{d['hedged_a']:10.1f} {d['hedged_b']:10.1f}")
+                  f"{d['hedged_a']:10.1f} {d['hedged_b']:10.1f} "
+                  f"{'' if d['d_vol'] is None else format(d['d_vol'], '+6.2f'):>6s} "
+                  f"{'' if expl is None else format(expl, '10.1f'):>10s} {resid:>10s}")
+            vega_prev = d["vega"]
 
 
 def main() -> int:
