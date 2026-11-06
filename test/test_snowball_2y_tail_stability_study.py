@@ -49,6 +49,15 @@ from s2ts.books import (  # noqa: E402
     total_cost,
     turnover,
 )
+from s2ts.measures import (  # noqa: E402
+    basis_mitigation,
+    holm,
+    paired,
+    paired_complete,
+    per_run,
+    terminal_paired,
+    verdict,
+)
 from s2ts.runner import (  # noqa: E402
     RssGuard,
     coupons_for,
@@ -1068,3 +1077,219 @@ def test_rss_guard_trips_and_calls_back():
     quiet.stop()
     quiet.join(2.0)
     assert not quiet.tripped.is_set() and quiet.rss() > 0
+
+
+# ---------------------------------------------------------------------------
+# Task 6: measures and verdict (synthetic run dicts, no pricing)
+# ---------------------------------------------------------------------------
+import numpy as np  # noqa: E402
+
+from s2ts import NOTIONAL as _N  # noqa: E402
+
+_BP = _N / 1e4
+
+
+def _row(i, hedged_a, hedged_b=None, note=None, *, d_far=0.0, d_mo=0.0, roll_a=False, roll_b=False,
+         d_vol=0.0, vega=0.0, turn=1.0, cost=0.0):
+    hb = hedged_a if hedged_b is None else hedged_b
+    return {
+        "date": f"2024-01-{i + 1:02d}", "note_pnl": (hedged_a if note is None else note) * _BP, "note_cash": 0.0,
+        "pv": 0.0, "spot_delta": 0.0, "pinned_delta": 0.0, "vega": vega, "d_vol": d_vol,
+        "d_far_basis": d_far, "d_mo_basis": d_mo,
+        "hedged_a": hedged_a * _BP, "hedged_b": hb * _BP, "roll_a": roll_a, "roll_b": roll_b,
+        "turn_a": turn, "turn_b": 2 * turn, "cost_a": cost * _BP, "cost_b": cost * _BP,
+        "pnl_a": 0.0, "pnl_b": 0.0, "vm_a": 0.0, "vm_b": 0.0, "mtm_a": 0.0, "mtm_b": 0.0,
+        "accrual_a": 0.0, "accrual_b": 0.0,
+    }
+
+
+def _synth_run(inc, tail, a, b=None, *, term=(0.0, 0.0), truncated=False, day0_pv=0.0, day0_vega=0.0, rows=None):
+    b = a if b is None else b
+    days = rows if rows is not None else [_row(i, x, y) for i, (x, y) in enumerate(zip(a, b))]
+    return {
+        "inception": inc, "tail": tail, "coupon": 0.1, "day0_pv": day0_pv, "day0_vega": day0_vega,
+        "truncated": truncated, "end_reason": "data_end" if truncated else "knock_out", "live_days": len(days),
+        "terminal_a": term[0] * _BP, "terminal_b": term[1] * _BP,
+        "terminal_own_a": (term[0] + 5) * _BP, "terminal_own_b": (term[1] + 5) * _BP,
+        "cost_total_a": 3 * _BP, "cost_total_b": 4 * _BP, "parity": None, "days": days,
+    }
+
+
+def _alt(n, sd):
+    """n values, mean 0, sample std exactly sd (n even): +-sd*sqrt((n-1)/n)."""
+    k = sd * math.sqrt((n - 1) / n)
+    return [k if i % 2 == 0 else -k for i in range(n)]
+
+
+def test_std_and_r2_on_known_series():
+    h = [1.0, -1.0, 2.0, -2.0, 0.5, -0.5]
+    note = [2.0 * x for x in h]                      # hedged variance = 1/4 of note variance
+    out = per_run(_synth_run("2024-01-01", "hold_forward", h, rows=[_row(i, x, note=n) for i, (x, n) in enumerate(zip(h, note))]))
+    assert out["a"]["std_bp"] == pytest.approx(float(np.std(h, ddof=1)), rel=1e-12)
+    assert out["a"]["r2"] == pytest.approx(0.75, abs=1e-12)
+    assert out["a"]["turnover_lots_per_day"] == pytest.approx(1.0)
+    assert out["b"]["turnover_lots_per_day"] == pytest.approx(2.0)
+    assert out["a"]["cost_bp"] == pytest.approx(3.0) and out["b"]["cost_bp"] == pytest.approx(4.0)
+
+
+def test_max_drawdown_and_roll_day_abs():
+    h = [1.0, 2.0, -4.0, -1.0, 3.0]
+    rows = [_row(i, x, roll_a=(i in (2, 3))) for i, x in enumerate(h)]
+    out = per_run(_synth_run("2024-01-01", "hold_forward", h, rows=rows))["a"]
+    assert out["max_dd_bp"] == pytest.approx(5.0)    # cum: 1,3,-1,-2,1 ; peak 3 -> trough -2
+    assert out["roll_day_abs_bp"] == pytest.approx(2.5)
+
+
+def test_basis_regression_recovers_beta():
+    rng = np.random.default_rng(0)
+    n = 80
+    d_far, d_mo = rng.normal(0, 0.003, n), rng.normal(0, 0.002, n)
+    h = 3.0 * 100 * d_far - 1.0 * 100 * d_mo + 1e-6 * rng.normal(size=n)
+    rows = [_row(i, h[i], d_far=d_far[i], d_mo=d_mo[i]) for i in range(n)]
+    # a roll day with a wild value and None basis must be excluded
+    rows.append(_row(n, 500.0, d_far=None, d_mo=None, roll_a=True))
+    b = per_run(_synth_run("2024-01-01", "hold_forward", [0.0], rows=rows))["a"]["basis"]
+    assert b["beta_far"] == pytest.approx(3.0, abs=1e-4)
+    assert b["beta_mo"] == pytest.approx(-1.0, abs=1e-4)
+    assert b["basis_r2"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_vega_residual_diagnostic():
+    # short vega P&L = -vega_{t-1} * d_vol_t ; day 1 uses day0_vega
+    rows = [_row(0, -2.0 * 0.5, d_vol=0.5, vega=3.0 * _BP),   # prev = day0_vega = 2 -> -1.0 ; resid 0
+            _row(1, -3.0 * 1.0, d_vol=1.0, vega=4.0 * _BP),   # prev vega 3 -> -3 ; resid 0
+            _row(2, 7.0, d_vol=None, vega=4.0 * _BP)]         # skipped
+    out = per_run(_synth_run("2024-01-01", "hold_forward", [0.0], rows=rows, day0_vega=2.0 * _BP))["a"]
+    assert out["std_vega_resid_bp"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_holm_adjustment():
+    assert holm([0.01, 0.04, 0.03]) == pytest.approx([0.03, 0.06, 0.06])
+
+
+def _books(tail_sd, n_inc=13, hf_sd=2.0):
+    incs = [f"2024-{i + 1:02d}-01" for i in range(n_inc)]
+    hf = [_synth_run(inc, "hold_forward", _alt(10, hf_sd)) for inc in incs]
+    tl = [_synth_run(inc, "converge_hl050", _alt(10, tail_sd(i))) for i, inc in enumerate(incs)]
+    return {"hold_forward": hf, "converge_hl050": tl}
+
+
+def test_pooled_std_equal_weight():
+    a = [_synth_run("2024-01-01", "converge_hl050", _alt(10, 1.0)), _synth_run("2024-02-01", "converge_hl050", _alt(100, 2.0))]
+    hf = [_synth_run("2024-01-01", "hold_forward", _alt(10, 1.0)), _synth_run("2024-02-01", "hold_forward", _alt(100, 2.0))]
+    out = paired({"hold_forward": hf, "converge_hl050": a}, "a")
+    assert out["converge_hl050"]["pooled_std_bp"] == pytest.approx(math.sqrt(2.5), rel=1e-9)
+    assert out["converge_hl050"]["hf_pooled_std_bp"] == pytest.approx(math.sqrt(2.5), rel=1e-9)
+    assert out["converge_hl050"]["n"] == 2
+
+
+def test_paired_ratios_and_t_and_holm():
+    rb = _books(lambda i: 1.0 + 0.01 * i)
+    rb["converge_hl025"] = rb["converge_hl050"]
+    rb["converge_hl100"] = rb["converge_hl050"]
+    out = paired(rb, "a")
+    r = out["converge_hl050"]
+    assert r["n"] == 13 and r["n_lower"] == 13
+    assert r["ratios"][0] == pytest.approx(0.25, rel=1e-9)
+    assert r["t_log_ratio"] < -5 and r["p_holm"] <= 1.0
+    assert r["p_holm"] >= r["p_raw"]
+
+
+def test_terminal_traded_price_net_of_day0_gap():
+    h = _alt(6, 1.0)
+    r1 = _synth_run("2024-01-01", "hold_forward", h, term=(2.0, -1.0), day0_pv=0.0)
+    r2 = _synth_run("2024-01-01", "converge_hl050", h, term=(2.0, -1.0), day0_pv=100.0 * _BP)
+    r2["terminal_own_a"] = r1["terminal_own_a"] + 100.0 * _BP
+    assert per_run(r1)["a"]["terminal_bp"] == per_run(r2)["a"]["terminal_bp"] == pytest.approx(2.0)
+    assert per_run(r2)["a"]["terminal_own_bp"] == pytest.approx(107.0)
+
+
+def _verdict_inputs(tail_sd, term_tail, term_hf, n=13, complete=None):
+    incs = [f"2024-{i + 1:02d}-01" for i in range(n)]
+    complete = n if complete is None else complete
+    hf, tl = [], []
+    for i, inc in enumerate(incs):
+        trunc = i >= complete
+        hf.append(_synth_run(inc, "hold_forward", _alt(10, 2.0), term=(term_hf[i % len(term_hf)],) * 2, truncated=trunc))
+        tl.append(_synth_run(inc, "converge_hl050", _alt(10, tail_sd(i)), term=(term_tail[i % len(term_tail)],) * 2,
+                       truncated=trunc))
+    rb = {"hold_forward": hf, "converge_hl050": tl}
+    return (paired(rb, "a"), paired(rb, "b"), terminal_paired(rb, "a"), terminal_paired(rb, "b"), rb)
+
+
+_TERM_LOW, _TERM_HF = [0.5, -0.5, 0.6, -0.6], [3.0, -3.0, 2.0, -2.0]
+
+
+def test_verdict_requires_both_conditions():
+    # lower in only 6/13 inceptions, pooled std lower (huge win in those 6) -> False
+    sd = lambda i: 0.1 if i < 6 else 2.5            # noqa: E731
+    pa, pb, ta, tb, _ = _verdict_inputs(sd, _TERM_LOW, _TERM_HF)
+    assert pa["converge_hl050"]["n_lower"] == 6
+    assert pa["converge_hl050"]["pooled_std_bp"] < pa["converge_hl050"]["hf_pooled_std_bp"]
+    v = verdict(pa, pb, ta, tb)["converge_hl050"]
+    assert v["book_a"] is False and v["daily_ok_a"] is False
+    # lower in 7/13 but higher pooled std -> False
+    sd = lambda i: 1.9 if i < 7 else 6.0            # noqa: E731
+    pa, pb, ta, tb, _ = _verdict_inputs(sd, _TERM_LOW, _TERM_HF)
+    assert pa["converge_hl050"]["n_lower"] == 7
+    assert pa["converge_hl050"]["pooled_std_bp"] > pa["converge_hl050"]["hf_pooled_std_bp"]
+    assert verdict(pa, pb, ta, tb)["converge_hl050"]["book_a"] is False
+    # both -> True
+    pa, pb, ta, tb, _ = _verdict_inputs(lambda i: 1.0, _TERM_LOW, _TERM_HF)
+    v = verdict(pa, pb, ta, tb)["converge_hl050"]
+    assert v["book_a"] is True and v["book_b"] is True and v["beats_hold_forward"] is True
+
+
+def test_verdict_per_book_independent():
+    pa, pb, ta, tb, rb = _verdict_inputs(lambda i: 1.0, _TERM_LOW, _TERM_HF)
+    # make Book B of the tail worse than hold-forward
+    for r in rb["converge_hl050"]:
+        for d in r["days"]:
+            d["hedged_b"] = d["hedged_b"] * 5.0
+    pb = paired(rb, "b")
+    v = verdict(pa, pb, ta, tb)["converge_hl050"]
+    assert v["book_a"] is True and v["book_b"] is False and v["beats_hold_forward"] is False
+    assert v["daily_ok_a"] and not v["daily_ok_b"]
+
+
+def test_verdict_requires_terminal_agreement():
+    pa, pb, ta, tb, _ = _verdict_inputs(lambda i: 1.0, [5.0, -5.0, 4.0, -4.0], _TERM_HF)
+    v = verdict(pa, pb, ta, tb)["converge_hl050"]
+    assert v["daily_ok_a"] is True and v["terminal_ok_a"] is False
+    assert v["book_a"] is False and v["beats_hold_forward"] is False
+
+
+def test_verdict_not_decidable_under_5_complete():
+    pa, pb, ta, tb, _ = _verdict_inputs(lambda i: 1.0, _TERM_LOW, _TERM_HF, complete=4)
+    assert ta["converge_hl050"]["n_complete"] == 4
+    v = verdict(pa, pb, ta, tb)["converge_hl050"]
+    assert v["book_a"] == "not_decidable" and v["book_b"] == "not_decidable"
+    assert v["beats_hold_forward"] is False
+
+
+def test_terminal_excludes_truncated():
+    pa, pb, ta, tb, rb = _verdict_inputs(lambda i: 1.0, _TERM_LOW, _TERM_HF)
+    base = terminal_paired(rb, "a")["converge_hl050"]["terminal_std_bp"]
+    rb["converge_hl050"][0]["truncated"] = True
+    rb["converge_hl050"][0]["terminal_a"] = 1e9
+    out = terminal_paired(rb, "a")["converge_hl050"]
+    assert out["n_complete"] == 12 and out["terminal_std_bp"] < 10 * base
+
+
+def test_verdict_complete_only_and_vega_diagnostic_not_in_verdict():
+    pa, pb, ta, tb, rb = _verdict_inputs(lambda i: 1.0, _TERM_LOW, _TERM_HF)
+    v = verdict(pa, pb, ta, tb, paired_complete(rb, "a"), paired_complete(rb, "b"))["converge_hl050"]
+    assert v["complete_only"] == {"daily_ok_a": True, "daily_ok_b": True}
+    assert "vega_resid" in pa["converge_hl050"] and pa["converge_hl050"]["vega_resid"]["n"] == 13
+
+
+def test_basis_mitigation_table():
+    pa = per_run(_synth_run("2024-01-01", "hold_forward", [1.0, 2.0, 3.0]))
+    fake = {"a": {"basis": {"beta_far": -2.0, "beta_mo": 1.0, "basis_r2": 0.5}, "cost_bp": 3.0},
+            "b": {"basis": {"beta_far": 1.0, "beta_mo": -0.5, "basis_r2": 0.2}, "cost_bp": 5.0}}
+    out = basis_mitigation([{"tail": "hold_forward", "inception": "x", **fake},
+                            {"tail": "hold_forward", "inception": "y", **fake}, {"tail": "zero_carry", **pa}])
+    t = out["hold_forward"]
+    assert t["a"]["abs_beta_far"] == pytest.approx(2.0) and t["b"]["abs_beta_far"] == pytest.approx(1.0)
+    assert t["b_minus_a"]["abs_beta_far"] == pytest.approx(-1.0)
+    assert t["b_minus_a"]["basis_r2"] == pytest.approx(-0.3) and t["b_minus_a"]["cost_bp"] == pytest.approx(2.0)
