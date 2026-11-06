@@ -1365,3 +1365,78 @@ def test_basis_mitigation_table():
     assert t["a"]["abs_beta_far"] == pytest.approx(2.0) and t["b"]["abs_beta_far"] == pytest.approx(1.0)
     assert t["b_minus_a"]["abs_beta_far"] == pytest.approx(-1.0)
     assert t["b_minus_a"]["basis_r2"] == pytest.approx(-0.3) and t["b_minus_a"]["cost_bp"] == pytest.approx(2.0)
+
+
+# ---------------------------------------------------------------------------
+# T7: report (Bloomberg x Swiss) -- structure and partial runs
+# ---------------------------------------------------------------------------
+
+import re  # noqa: E402
+
+_REPORT_SECTIONS = ("verdict", "stability", "hedging", "basis", "curve", "method", "parity")
+_REPORT_TAILS = ("hold_forward", "hold_yield", "zero_carry", "converge_hl025", "converge_hl050", "converge_hl100")
+
+
+def _report_module():
+    name = "s2ts_report_04"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, STUDY_DIR / "04_report.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def _report_runs(skip_tails=(), n_inc=6):
+    runs = []
+    for i in range(n_inc):
+        inc = f"2024-{i + 1:02d}-01"
+        for k, tail in enumerate(_REPORT_TAILS):
+            if tail in skip_tails:
+                continue
+            sd = 2.0 if tail == "hold_forward" else 1.0 + 0.1 * k
+            run = _synth_run(inc, tail, _alt(10, sd), term=(0.5 + 0.1 * i, -0.5), truncated=(i == n_inc - 1),
+                             day0_pv=1000.0 * k, day0_vega=10.0)
+            run["parity"] = {"flag": i == 0 and k == 1, "pv_v1": 1.0, "pv_v2": 2.0, "pv_diff_bp": 0.7,
+                             "lots_v1": [1.0], "lots_v2": [1.0], "max_lot_diff": 0.0}
+            runs.append(run)
+    return runs
+
+
+_REPORT_CURVE = {"day": "2026-11-05", "grid": [0.25, 1.0, 2.0],
+                 "q": {t: [0.04, 0.05 + 0.001 * k, 0.06] for k, t in enumerate(_REPORT_TAILS)}}
+
+
+def _render_report(runs, errors=()):
+    from s2ts import html as s2html
+
+    mod = _report_module()
+    stability = json.loads((STUDY_DIR / "results" / "stability.json").read_text())
+    data = mod.build_data(stability, runs, list(errors), [f"2024-{i + 1:02d}-01" for i in range(6)], _REPORT_CURVE)
+    return s2html.render(data), data
+
+
+def test_report_structure():
+    page, data = _render_report(_report_runs(), errors=["2024-02-01__zero_carry"])
+    for sid in _REPORT_SECTIONS:
+        assert f'<section id="{sid}"' in page, sid
+    assert 'id="theme"' in page and 'class="top"' in page and "position: sticky" in page
+    assert not re.findall(r'(?:src|href)\s*=\s*["\']?https?:', page)
+    assert "http" not in " ".join(re.findall(r'(?:src|href)\s*=\s*["\'][^"\']*', page))
+    assert page.count('class="vrow"') == 3                       # one per converging tail
+    assert "<svg" in page and "2024-02-01__zero_carry" in page   # failed run listed in #parity
+    assert "not a recommendation" in page                        # zero_carry caveat
+    assert set(data["verdict"]) == {"converge_hl025", "converge_hl050", "converge_hl100"}
+
+
+def test_report_handles_partial_runs():
+    page, data = _render_report(_report_runs(skip_tails=("converge_hl100",), n_inc=4))
+    assert page.count('class="vrow"') == 3
+    assert "converge_hl100" in data["missing"]["tails"]
+    assert "missing" in page
+    for sid in _REPORT_SECTIONS:
+        assert f'<section id="{sid}"' in page
+    page2, _ = _render_report([r for r in _report_runs() if r["tail"] != "hold_forward"])
+    assert "unavailable" in page2                                # no baseline: pairing unavailable, no crash
+    page3, _ = _render_report([])
+    assert '<section id="verdict"' in page3
