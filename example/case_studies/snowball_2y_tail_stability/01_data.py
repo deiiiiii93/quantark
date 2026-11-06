@@ -101,6 +101,14 @@ def extend_spot(through: date) -> None:
     print(f"spot extension: {len(found)} rows after {last_spot}")
 
 
+def verify_reaches(chains, through: date) -> None:
+    """The chain must end on the latest published CFFEX day; a lagging spot DB would silently drop days."""
+    if chains[-1].day != through:
+        raise StudyDataError(
+            f"daily chain ends {chains[-1].day} but the latest published CFFEX day is {through}: the spot source "
+            f"(dashboard DB) lags; update it and rerun 01_data.py")
+
+
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     today = date.today()
@@ -109,6 +117,7 @@ def main() -> None:
     extend_spot(through)
     cal = sse_trading_days(2023, 2030)
     chains = build_all_chains(HISTORY_DIR, CFFEX_EXTENSION_DIR, cal, SPOT_EXTENSION_PATH)
+    verify_reaches(chains, through)
     tmp = CHAIN_PATH.with_suffix(".tmp")
     with tmp.open("wb") as fh:
         pickle.dump(chains, fh)

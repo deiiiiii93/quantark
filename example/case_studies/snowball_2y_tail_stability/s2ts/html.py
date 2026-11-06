@@ -86,7 +86,7 @@ def frac(a: Optional[int], b: Optional[int]) -> str:
 def yesno(v: Optional[bool]) -> str:
     if v is None:
         return '<span class="dim">n/d</span>'
-    return '<span class="up">yes</span>' if v else '<span class="dn">no</span>'
+    return '<b class="hit-yes">yes</b>' if v else '<span class="dim">no</span>'
 
 
 def _ordinal_label(v: float) -> str:
@@ -294,18 +294,42 @@ def headline_text(data: Mapping[str, Any]) -> Tuple[str, str]:
     done = [t for t in verdict if verdict[t]["book_a"] != "not_decidable" and verdict[t]["book_b"] != "not_decidable"]
     qual = data["qualifying"]
     n_conv = len(verdict)
+    smoothing, daily_fail, undecidable = [], [], []
+    for t, v in verdict.items():
+        if v["beats_hold_forward"]:
+            continue
+        nd_books = [k for k in BOOKS if v[f"book_{k}"] == "not_decidable"]
+        if nd_books:
+            undecidable.append(f"{tname(t)} (Book {' and '.join(k.upper() for k in nd_books)})")
+            continue
+        daily_books = [k for k in BOOKS if v[f"daily_ok_{k}"]]
+        bad_term = [k.upper() for k in BOOKS if v[f"daily_ok_{k}"] and not v[f"terminal_ok_{k}"]]
+        if len(daily_books) == 2 and bad_term:
+            smoothing.append(f"{tname(t)}: daily variance lower in both books, but terminal P&L disagrees in Book "
+                             f"{' and '.join(bad_term)}, not adopted")
+        else:
+            daily_fail.append(tname(t))
+    extra = ""
+    if smoothing:
+        extra += ("<b>Daily and terminal measures disagree (possible mark smoothing):</b> " + esc("; ".join(smoothing))
+                  + ". ")
+    if daily_fail:
+        extra += f"Daily criteria (a)+(b) fail in at least one book for {esc(', '.join(daily_fail))}. "
+    if undecidable:
+        extra += (f"Not decidable (fewer than 5 completed inceptions in the terminal measure): "
+                  f"{esc('; '.join(undecidable))}. Re-run the report as runs complete. ")
     if qual:
         names = ", ".join(tname(t) for t in qual)
         return (f"{len(qual)} of {n_conv} converging tails beat hold-forward in both books.",
                 f"Lowest pooled daily hedged-P&L std in Book A: <b>{esc(names)}</b>. Each qualifier is lower on the pooled "
-                f"std, in a strict majority of paired inceptions, and on the terminal P&L, in Book A and Book B.")
-    if n_conv and len(done) == n_conv:
-        return ("No converging tail beats hold-forward.",
-                "Every converging tail is decidable and none passes (a) pooled std, (b) paired majority and (c) terminal "
-                "in both books. The anchor does not buy a lower hedging variance on this history.")
+                f"std, in a strict majority of paired inceptions, and on the terminal P&L, in Book A and Book B. " + extra)
+    if n_conv and not undecidable:
+        head = ("No converging tail is adopted: daily and terminal measures disagree." if smoothing and not daily_fail
+                else "No converging tail beats hold-forward.")
+        return (head, "Every converging tail is decidable and none passes (a) pooled std, (b) paired majority and (c) "
+                      "terminal in both books. " + extra)
     return ("Not shown yet that a converging tail beats hold-forward.",
-            f"{len(done)} of {n_conv} converging tails are decidable (at least 5 completed inceptions in the terminal "
-            "measure); none that is decidable passes in both books. Re-run the report as runs complete.")
+            f"{len(done)} of {n_conv} converging tails are decidable. " + extra)
 
 
 def section_verdict(data: Mapping[str, Any]) -> str:
@@ -337,8 +361,8 @@ def section_verdict(data: Mapping[str, Any]) -> str:
             hf_a, hf_b = _hedge(data, "a", HF), _hedge(data, "b", HF)
             cells.append(f'{num(hf_a["pooled_std"]) if hf_a else "–"} / {num(hf_b["pooled_std"]) if hf_b else "–"}')
             nd = "not_decidable" in (v["book_a"], v["book_b"])
-            cells.append('<b class="up">BEATS</b>' if v["beats_hold_forward"] else '<b class="dim">NOT DECIDABLE</b>'
-                         if nd else '<b class="dn">DOES NOT BEAT</b>')
+            cells.append('<b class="hit-yes">BEATS</b>' if v["beats_hold_forward"] else '<b class="dim">NOT DECIDABLE</b>'
+                         if nd else '<span class="dim">DOES NOT BEAT</span>')
         rows.append(cells)
         cls.append("vrow")
     parts.append(table(["Tail", "Book A std (bp)", "Book B std (bp)", "A n_lower/n", "B n_lower/n",
@@ -377,28 +401,25 @@ def section_stability(data: Mapping[str, Any]) -> str:
             cells.append(f'{num(s["all"]["std"], 1)} <span class="dim">/ {num(s["all"]["mad"], 1)}</span>')
         base = st["variants"]["base"]["tails"][t]["summary"]
         cells += [num(base["ordinary"]["std"], 1), num(base["atm_switch"]["std"], 1), num(base["mo_roll"]["std"], 1)]
+        fl = st["variants"]["base"]["tails"][t].get("switch_floor") or {}
+        cells += [num(fl.get("median_abs"), 1), num(fl.get("p90_abs"), 1)]
         rows.append(cells)
     tbl = table(["Tail"] + [f"{VARIANT_LABEL[v]} std / mad" for v in variants]
-                + ["base · ordinary", "base · ATM switch", "base · MO roll"], rows,
+                + ["base · ordinary", "base · ATM switch", "base · MO roll", "switch floor median (bp)",
+                   "switch floor p90 (bp)"], rows,
                 note="Bp of yield, change of q(2Y) = r − B(2Y)/2 day over day. Variants share a date window per "
-                     "variant, so tails compare paired within a column.")
-    floor = None
-    for t in tails:
-        floor = st["variants"]["base"]["tails"][t].get("switch_floor")
-        if floor:
-            break
-    rank = [esc(tname(t)) for t in st["variants"]["base"]["ranking"]]
-    prose = [
-        f'<b>Ranking by std of Δq(2Y), most stable first (base):</b> {" · ".join(rank)}.',
-        "<b>zero_carry ranks most stable only because q(2Y) = r − B<sub>n</sub>/2 halves the pillar noise "
-        "(its carry past the last pillar is zero, so only the pillar level B<sub>n</sub> is left in q(2Y)). "
-        "This is a mechanical property of the formula, not a recommendation: a tail that ignores the curve "
-        "beyond the last pillar is stable because it is uninformative.</b>",
-    ]
-    if floor:
-        prose.append(f"<b>ATM-switch floor.</b> Re-pricing today's MO pillar at yesterday's ATM strike moves q(2Y) by "
-                     f"median {num(floor['median_abs'], 1)} bp (p90 {num(floor['p90_abs'], 1)}, "
-                     f"n = {floor['n']}): the part of the daily noise that is the pillar re-selection, not the market.")
+                     "variant, so tails compare paired within a column. Switch floor: the |change| of that tail's q(2Y) from "
+                     "re-pricing today's MO pillar at yesterday's ATM strike instead of today's, i.e. the part of the daily "
+                     "noise that is the pillar re-selection, not the market.")
+    rank_raw = st["variants"]["base"]["ranking"]
+    rank = [esc(tname(t)) for t in rank_raw]
+    prose = [f'<b>Ranking by std of Δq(2Y), most stable first (base):</b> {" · ".join(rank)}.']
+    if rank_raw and rank_raw[0] == "zero_carry":
+        prose.append(
+            "<b>zero_carry ranks most stable only because q(2Y) = r − B<sub>n</sub>/2 halves the pillar noise "
+            "(its carry past the last pillar is zero, so only the pillar level B<sub>n</sub> is left in q(2Y)). "
+            "This is a mechanical property of the formula, not a recommendation: a tail that ignores the curve "
+            "beyond the last pillar is stable because it is uninformative.</b>")
     ch = ""
     base_v = st["variants"]["base"]
     dates = [date.fromisoformat(x).toordinal() for x in base_v["dates"]]
@@ -411,6 +432,13 @@ def section_stability(data: Mapping[str, Any]) -> str:
                              yfmt=lambda v: num(v, 1) + "%", ylabel="q(2Y), % P.A.", xlabel="DATE",
                              label="Daily q(2Y) under six tails"),
                     "Daily q(2Y), six tails", f"base variant, {len(dates)} days with an anchor")
+        firsts: Dict[str, int] = {}
+        for i, dstr in enumerate(base_v["dates"]):
+            firsts.setdefault(dstr[:7], i)
+        ch += table(["First day of month"] + [tname(t) + " %" for t in tails],
+                    [[base_v["dates"][i]] + [num(100 * base_v["tails"][t]["q2y"][i], 2) for t in tails]
+                     for i in firsts.values()],
+                    note="The chart's series sampled on the first available day of each month.")
     return section(2, "stability", "STABILITY", "q(2Y) day-to-day stability",
                    f'<p class="lead">Rebuilt daily from the chain ({esc(meta["chain_first_day"])} → '
                    f'{esc(meta["chain_last_day"])}, {meta["chain_days"]} days). Smaller std of the daily change '
@@ -448,8 +476,8 @@ def _hedge_table(data: Mapping[str, Any], book: str) -> str:
 
 
 def section_hedging(data: Mapping[str, Any]) -> str:
-    parts = ['<p class="lead">Short 2Y snowball, hedged daily, 13 quarterly inceptions × six tails on '
-             "QUAD V2. Daily hedged P&amp;L is gross of costs.</p>"]
+    parts = [f'<p class="lead">Short 2Y snowball, hedged daily, {len(data["inceptions"])} quarterly inceptions × '
+             f'{len(data["all_tails"])} tails on QUAD V2. Daily hedged P&amp;L is gross of costs.</p>']
     # coverage
     incs = data["inceptions"]
     cov = data["coverage"]
@@ -472,13 +500,19 @@ def section_hedging(data: Mapping[str, Any]) -> str:
                 if h and h["ratios"]:
                     pts = [(r, f"{tname(tail)} · {BOOK_NAME[k].split(' ·')[0]} · {lab} · variance ratio {num(r, 2)}")
                            for r, lab in zip(h["ratios"], h["ratio_incs"])]
-                    strips.append(dict(name=f"{tname(tail)} · {k.upper()}", colour=BOOK_COLOUR[k], points=pts))
+                    strips.append(dict(name=f"{tname(tail)} · {k.upper()}", colour=BOOK_COLOUR[k], points=pts,
+                                       labels=list(h["ratio_incs"])))
         if strips:
             parts.append(figure(strip_chart(strips, label="Paired variance ratios per inception",
                                             xlabel="PAIRED VARIANCE RATIO vs HOLD-FORWARD (LOG), LEFT OF 1 = TAIL LOWER"),
                                 "Paired variance ratio per inception", "one dot per inception; Book A amber, Book B blue"))
             parts.append(table(["Row", "Dots left of 1"],
                                [[esc(s["name"]), frac(sum(1 for v, _ in s["points"] if v < 1), len(s["points"]))] for s in strips]))
+            labs = sorted({lab for s in strips for lab in s["labels"]})
+            by = [{lab: v for (v, _), lab in zip(s["points"], s["labels"])} for s in strips]
+            parts.append(table(["Inception"] + [s["name"] for s in strips],
+                               [[esc(lab)] + [num(b.get(lab), 2) for b in by] for lab in labs],
+                               note="The strip chart's numbers: paired variance ratio (tail / hold-forward) per inception."))
     gap = data["gap"]
     parts.append(sub("Inception-day model gap (static)"))
     if gap:
@@ -531,6 +565,12 @@ def section_curve(data: Mapping[str, Any]) -> str:
         parts.append(table(["First", "Last", "Min %", "Max %", "Latest %"],
                            [[base["dates"][0], base["dates"][-1], num(100 * min(base["anchor"]), 2),
                              num(100 * max(base["anchor"]), 2), num(100 * base["anchor"][-1], 2)]]))
+        seen: Dict[str, int] = {}
+        for i, dstr in enumerate(base["dates"]):
+            seen.setdefault(dstr[:7], i)
+        parts.append(table(["First day of month", f"{ANCHOR_WINDOW}d anchor %"],
+                           [[base["dates"][i], num(100 * base["anchor"][i], 2)] for i in seen.values()],
+                           note="The chart's series sampled on the first available day of each month."))
     else:
         parts.append(missing_note("anchor series (results/stability.json)"))
     c = data.get("curve")
@@ -548,6 +588,20 @@ def section_curve(data: Mapping[str, Any]) -> str:
     else:
         parts.append(missing_note("illustrative-day curve (needs OUTPUT_DIR/daily_chain.pkl)"))
     return section(5, "curve", "CURVE", "The anchor and the tails", "".join(parts))
+
+
+def _vega_caveat(data: Mapping[str, Any]) -> str:
+    """Unhedged-vega caveat with the variance share computed from the data (1 - (vega-adjusted std / raw std)^2)."""
+    shares = []
+    for k in BOOKS:
+        vals = [1.0 - (h["vr_pooled_std"] / h["pooled_std"]) ** 2 for h in data["hedge"].get(k, {}).values()
+                if _ok(h.get("vr_pooled_std")) and _ok(h.get("pooled_std")) and h["pooled_std"] > 0]
+        if vals:
+            shares.append(f"Book {k.upper()} {num(100 * sum(vals) / len(vals), 0)}%")
+    tail = (f" Share of raw hedged variance removed by the vega adjustment (mean over tails): {', '.join(shares)}."
+            if shares else " The variance share cannot be computed yet (no paired runs).")
+    return ("<b>Unhedged vega.</b> Neither book hedges vega; its daily P&amp;L is common to all tails, which is why a "
+            "vega-adjusted residual is shown as a diagnostic." + tail)
 
 
 def section_method(data: Mapping[str, Any]) -> str:
@@ -577,8 +631,7 @@ def section_method(data: Mapping[str, Any]) -> str:
         "live days, the terminal measure uses completed runs only (under 5 completed is not decidable).",
         f"<b>Early knock-outs.</b> Hold-forward run endings: {esc(ends_txt)}. A knock-out ends the hedge early, so those daily "
         "samples are short and the terminal sample is small.",
-        "<b>Unhedged vega.</b> Neither book hedges vega; its daily P&amp;L is common to all tails and dominates the raw hedged "
-        "variance, which is why a vega-adjusted residual is shown as a diagnostic.",
+        _vega_caveat(data),
         "<b>One flat vol.</b> No smile, local or stochastic vol; the vol used each day is the one the chain implies.",
         "<b>Basis is not modelled.</b> The curve is built from marks; the realised basis is in the P&amp;L, which is the point.",
     ]
@@ -592,7 +645,7 @@ def section_parity(data: Mapping[str, Any]) -> str:
              "transition-readout engine; a breach is a PV difference above 0.5 bp of notional or a lot difference above 0.01.</p>"]
     if p["rows"]:
         rows = [[esc(r["inception"]), esc(tname(r["tail"])), num(r["pv_diff_bp"], 3), num(r["max_lot_diff"], 4),
-                 '<span class="dn">FLAG</span>' if r["flag"] else '<span class="up">ok</span>'] for r in p["rows"]]
+                 '<b class="hit-yes">FLAG</b>' if r["flag"] else '<span class="dim">ok</span>'] for r in p["rows"]]
         parts.append(table(["Inception", "Tail", "|PV V2 − V1| bp", "Max lot diff", "Flag"], rows,
                            note=f"{p['n_flag']} flagged of {len(p['rows'])} checked."))
     else:
@@ -652,21 +705,21 @@ CSS = """
   --ink:#e8e6df;--ink-2:#a3a199;--ink-3:#6f6d66;
   --amber:#ffa028;--amber-dim:#b37018;
   --up:#3ecf6e;--dn:#ff5a4f;
-  --s1:#d07a00;--s2:#2b95cf;--s3:#e0569b;--s4:#7bc96f;--s5:#a78bfa;--s6:#3fc1b0;
+  --s1:#d07a00;--s2:#2b95cf;--s3:#e0569b;--s4:#7f9a1c;--s5:#8a6fe0;--s6:#1a9f90;
   color-scheme:dark}
 @media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
   --bg:#f4f2ec;--panel:#ebe8e0;--line:#cbc7bb;--hair:#dedad0;--row:#e8e4da;
   --ink:#111110;--ink-2:#46443e;--ink-3:#77746b;
   --amber:#b35a00;--amber-dim:#9a5b10;
   --up:#13803a;--dn:#c42b20;
-  --s1:#c46a00;--s2:#1f7fc0;--s3:#d0457f;--s4:#3d8b2f;--s5:#6d4fd0;--s6:#168a7c;
+  --s1:#c46a00;--s2:#1f7fc0;--s3:#d0457f;--s4:#5f8a10;--s5:#6d4fd0;--s6:#0f8f80;
   color-scheme:light}}
 :root[data-theme="light"]{
   --bg:#f4f2ec;--panel:#ebe8e0;--line:#cbc7bb;--hair:#dedad0;--row:#e8e4da;
   --ink:#111110;--ink-2:#46443e;--ink-3:#77746b;
   --amber:#b35a00;--amber-dim:#9a5b10;
   --up:#13803a;--dn:#c42b20;
-  --s1:#c46a00;--s2:#1f7fc0;--s3:#d0457f;--s4:#3d8b2f;--s5:#6d4fd0;--s6:#168a7c;
+  --s1:#c46a00;--s2:#1f7fc0;--s3:#d0457f;--s4:#5f8a10;--s5:#6d4fd0;--s6:#0f8f80;
   color-scheme:light}
 :root{
   --bar:#000;--bar-2:#0d0d0d;--bar-line:#2a2a2a;--bar-ink:#e8e6df;--bar-ink-2:#a3a199;--bar-ink-3:#77756e;
@@ -734,6 +787,7 @@ td{padding:6px 12px 6px 0;text-align:right;border-bottom:1px solid var(--hair);w
 th:first-child,td:first-child,table.text th,table.text td{text-align:left}
 tbody tr:hover td{background:var(--row)}
 td code{color:var(--ink)}
+.hit-yes{color:var(--amber);font-weight:600}
 .up{color:var(--up)}.dn{color:var(--dn)}.flat{color:var(--ink-2)}.dim{color:var(--ink-3)}
 .note{margin:6px 0 0;font:11px/1.5 var(--mono);color:var(--ink-3);max-width:none}
 .note.missing{color:var(--amber)}

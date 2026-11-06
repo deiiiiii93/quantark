@@ -1440,3 +1440,68 @@ def test_report_handles_partial_runs():
     assert "unavailable" in page2                                # no baseline: pairing unavailable, no crash
     page3, _ = _render_report([])
     assert '<section id="verdict"' in page3
+
+
+# ---------------------------------------------------------------------------
+# T7 final-review fixes
+# ---------------------------------------------------------------------------
+
+
+def _section_html(page, sid):
+    start = page.index(f'<section id="{sid}"')
+    return page[start:page.index("</section>", start)]
+
+
+def test_report_stability_table_has_each_tails_own_floor():
+    page, _ = _render_report(_report_runs())
+    sec = _section_html(page, "stability")
+    st = json.loads((STUDY_DIR / "results" / "stability.json").read_text())
+    assert "switch floor median (bp)" in sec and "ATM-switch floor.</b>" not in sec
+    from s2ts import html as s2html
+
+    for t in ("hold_forward", "zero_carry", "converge_hl050"):
+        fl = st["variants"]["base"]["tails"][t]["switch_floor"]
+        row = re.search(rf"<tr><td>{re.escape(s2html.tname(t))}</td>.*?</tr>", sec).group(0)
+        assert s2html.num(fl["median_abs"], 1) in row and s2html.num(fl["p90_abs"], 1) in row
+    assert sec.count("First day of month") == 1            # monthly q(2Y) table
+
+
+def test_report_headline_names_daily_vs_terminal_disagreement():
+    page, data = _render_report(_report_runs())             # tails: daily lower, terminal equal to hold-forward
+    assert any(v["daily_ok_a"] and v["daily_ok_b"] and not v["terminal_ok_a"] for v in data["verdict"].values())
+    assert "daily variance lower in both books, but terminal P&amp;L disagrees in Book" in page
+    assert "not adopted" in page and "does not buy" not in page
+
+
+def test_report_no_green_red_on_criteria_and_parity():
+    page, _ = _render_report(_report_runs())
+    for sid in ("verdict", "parity"):
+        sec = _section_html(page, sid)
+        assert 'class="up"' not in sec and 'class="dn"' not in sec, sid
+
+
+def test_report_computed_prose_and_companion_tables():
+    from s2ts import html as s2html
+
+    page, data = _render_report(_report_runs())
+    assert "6 quarterly inceptions × 6 tails" in page and "13 quarterly" not in page
+    assert "Share of raw hedged variance removed by the vega adjustment" in _section_html(page, "method")
+    assert "The strip chart's numbers" in page and "First day of month" in _section_html(page, "curve")
+    data["stability"]["variants"]["base"]["ranking"] = ["hold_forward", "zero_carry"]
+    assert "not a recommendation" not in s2html.render(data)
+    data["stability"]["variants"]["base"]["ranking"] = ["zero_carry", "hold_forward"]
+    assert "not a recommendation" in s2html.render(data)
+
+
+def test_01_data_rejects_chain_behind_latest_cffex_day():
+    spec = importlib.util.spec_from_file_location("s2ts_data_01", STUDY_DIR / "01_data.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class _Chain:
+        def __init__(self, day):
+            self.day = day
+
+    mod.verify_reaches([_Chain(date(2026, 11, 5))], date(2026, 11, 5))
+    with pytest.raises(StudyDataError, match="2026-11-04.*2026-11-05"):
+        mod.verify_reaches([_Chain(date(2026, 11, 4))], date(2026, 11, 5))
