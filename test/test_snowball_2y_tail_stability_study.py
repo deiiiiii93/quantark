@@ -41,6 +41,14 @@ from s2ts.tails import (  # noqa: E402
     build_curve,
     pillar_inputs,
 )
+from s2ts.books import (  # noqa: E402
+    BookA,
+    BookB,
+    Trade,
+    offchain_marks,
+    total_cost,
+    turnover,
+)
 from s2ts.note import (  # noqa: E402
     DayGreeks,
     NoteLife,
@@ -681,3 +689,193 @@ def test_daily_greeks_match_bucket_report(tail):
         assert gl == pytest.approx(b.hedge_lots, rel=1e-12, abs=1e-12)
     # holder side: the long note gains when spot rises (a snowball is long the index)
     assert g.spot_delta > 0
+
+
+# ---------------------------------------------------------------------------
+# Task 4: hedge books
+# ---------------------------------------------------------------------------
+
+MO_ALL_2709 = {6400.0: (560.0, 610.0), 6600.0: (480.0, 720.0), 6800.0: (410.0, 840.0)}
+
+
+def book_chain(day, spot=6500.0, im=(("IM2612", 0.115, 6460.0), ("IM2706", 0.6137, 6300.0)),
+               mo_series="MO2709", mo_strike=6600.0, mo_all=None, mo_tenor=0.86) -> DayChain:
+    """A DayChain with explicit IM (code, tenor, close) and MO pillar series / ATM strike."""
+    quotes = tuple(ImQuote(code, date(2027, 6, 18), tenor, close, close + 3.0) for code, tenor, close in im)
+    mo_all = dict(mo_all or MO_ALL_2709)
+    c, p = mo_all[mo_strike]
+    df = math.exp(-RATE * mo_tenor)
+    near = tuple((k, mo_all[k][0], mo_all[k][1]) for k in sorted(mo_all))
+    mo = MoPillar(mo_series, date(2027, 9, 17), mo_tenor, mo_strike, c, p, mo_strike + (c - p) / df, 0.25, near)
+    far = quotes[-1]
+    return DayChain(day, spot, quotes, mo, mo_all, math.log(far.close / spot) / far.tenor)
+
+
+def greeks(spot_delta=0.0, pinned=0.0, deltas=(0.0, 0.0, 0.0)) -> DayGreeks:
+    return DayGreeks(0.0, spot_delta, pinned, tuple(deltas), tuple(-d for d in deltas))
+
+
+def test_linear_note_is_perfectly_hedged():
+    """Holder PV = a·(F_far − F_far0): a pure forward. The SHORT note's P&L plus Book A's is zero;
+    a sign-flipped target doubles the error (guards the short-desk sign)."""
+    a = 1500.0
+    days = _days(10)
+    path = [(6500.0 + 40.0 * math.sin(i), 6300.0 + 55.0 * math.cos(1.3 * i)) for i in range(10)]
+    chains = [book_chain(d, spot=s, im=(("IM2612", 0.115, f + 150.0), ("IM2706", 0.6137, f)))
+              for d, (s, f) in zip(days, path)]
+    f0 = chains[0].im[-1].close
+    pv = [a * (dc.im[-1].close - f0) for dc in chains]
+    g = [greeks(spot_delta=a * dc.im[-1].close / dc.spot) for dc in chains]   # holder-side ∂PV/∂S
+    book, flipped = BookA(), BookA()
+    hedged, hedged_flipped, short_total = 0.0, 0.0, 0.0
+    for t, dc in enumerate(chains):
+        if t:
+            short = -(pv[t] - pv[t - 1])
+            short_total += short
+            hedged += short + book.pnl(chains[t - 1], dc)
+            hedged_flipped += short + flipped.pnl(chains[t - 1], dc)
+        book.rebalance(dc, book.target(dc, g[t]))
+        flipped.rebalance(dc, {k: -q for k, q in flipped.target(dc, g[t]).items()})
+    assert book.positions["IM2706"] == pytest.approx(a / 200.0, rel=1e-12)    # short desk buys
+    assert abs(hedged) < 1e-9
+    assert abs(short_total) > 1e3
+    assert hedged_flipped == pytest.approx(2.0 * short_total, rel=1e-12)
+
+
+def test_book_a_rolls_to_new_longest():
+    d0, d1 = _days(2)
+    c0 = book_chain(d0)
+    c1 = book_chain(d1, im=(("IM2612", 0.112, 6460.0), ("IM2706", 0.61, 6310.0), ("IM2709", 0.86, 6200.0)))
+    book = BookA()
+    g = greeks(spot_delta=1000.0)
+    book.rebalance(c0, book.target(c0, g))
+    assert not book.rolled
+    q0 = book.positions["IM2706"]
+    assert q0 == pytest.approx(1000.0 * 6500.0 / (200.0 * 6300.0), rel=1e-12)
+    trades = book.rebalance(c1, book.target(c1, g))
+    assert book.rolled
+    assert set(book.positions) == {"IM2709"}
+    by = {t.instrument: t for t in trades}
+    assert set(by) == {"IM2706", "IM2709"}
+    assert by["IM2706"].qty == pytest.approx(-q0) and by["IM2706"].price == 6310.0
+    q1 = 1000.0 * 6500.0 / (200.0 * 6200.0)
+    assert by["IM2709"].qty == pytest.approx(q1, rel=1e-12)
+    for t in trades:
+        assert t.cost == pytest.approx(1e-4 * abs(t.qty) * t.price * 200.0, rel=1e-12)
+    assert turnover(trades) == pytest.approx(q0 + q1, rel=1e-12)
+    assert total_cost(trades) == pytest.approx(sum(t.cost for t in trades), rel=1e-15)
+
+
+def _b_target(book, dc, mo_delta, im_deltas=(0.0, 0.0), pinned=0.0):
+    return book.target(dc, greeks(pinned=pinned, deltas=tuple(im_deltas) + (mo_delta,)))
+
+
+def test_mo_pair_keeps_opened_strike():
+    d0, d1, d2 = _days(3)
+    c0 = book_chain(d0, mo_strike=6600.0)
+    c1 = book_chain(d1, mo_strike=6400.0)               # ATM moved, same series
+    book = BookB()
+    book.rebalance(c0, _b_target(book, c0, 50.0))
+    m = 100.0 * math.exp(-RATE * 0.86)
+    assert book.positions["MO2709@6600"] == pytest.approx(50.0 / m, rel=1e-12)
+    trades = book.rebalance(c1, _b_target(book, c1, 80.0))
+    assert [t.instrument for t in trades if t.instrument.startswith("MO")] == ["MO2709@6600"]
+    assert "MO2709@6400" not in book.positions
+    assert book.positions["MO2709@6600"] == pytest.approx(80.0 / m, rel=1e-12)
+    assert not book.rolled
+    # marked at the HELD strike's C−P, not the ATM pair's
+    c2 = book_chain(d2, mo_strike=6400.0, mo_all={**MO_ALL_2709, 6600.0: (500.0, 700.0)})
+    assert book.mark(c2)["MO2709@6600"] == pytest.approx(-200.0)
+    assert book.pnl(c1, c2) == pytest.approx(80.0 / m * ((500.0 - 700.0) - (480.0 - 720.0)) * 100.0, rel=1e-12)
+    # the held strike vanishing from the series fails closed
+    c3 = book_chain(d2, mo_strike=6400.0, mo_all={k: v for k, v in MO_ALL_2709.items() if k != 6600.0})
+    with pytest.raises(StudyDataError):
+        book.mark(c3)
+
+
+def test_mo_roll_closes_old_pair():
+    """Review Focus 3: on the roll day the old pair's overnight P&L is marked at today's settlement of
+    the OLD series (off-chain mark), it is closed there, and the new pillar opens from zero."""
+    d0, d1 = _days(2)
+    c0 = book_chain(d0, mo_strike=6600.0)
+    mo_2712 = {6200.0: (700.0, 560.0), 6400.0: (600.0, 640.0)}
+    c1 = book_chain(d1, mo_series="MO2712", mo_strike=6400.0, mo_all=mo_2712, mo_tenor=1.0)
+    book = BookB()
+    book.rebalance(c0, _b_target(book, c0, 50.0))
+    q = book.positions["MO2709@6600"]
+    with pytest.raises(StudyDataError):
+        book.pnl(c0, c1)                                    # no mark for the old series: fail closed
+    rows = {"MO2709-C-6600": {"close": 0.0, "settle": 470.0}, "MO2709-P-6600": {"close": 0.0, "settle": 735.0}}
+    extra = offchain_marks(rows, book.unmarkable(c1))
+    assert extra == {"MO2709@6600": pytest.approx(470.0 - 735.0)}
+    assert book.pnl(c0, c1, extra) == pytest.approx(q * ((470.0 - 735.0) - (480.0 - 720.0)) * 100.0, rel=1e-12)
+    trades = book.rebalance(c1, _b_target(book, c1, 50.0), extra)
+    assert book.rolled
+    by = {t.instrument: t for t in trades if t.instrument.startswith("MO")}
+    assert by["MO2709@6600"].qty == pytest.approx(-q) and by["MO2709@6600"].price == pytest.approx(-265.0)
+    assert by["MO2712@6400"].qty == pytest.approx(50.0 / (100.0 * math.exp(-RATE * 1.0)), rel=1e-12)
+    assert set(k for k in book.positions if k.startswith("MO")) == {"MO2712@6400"}
+
+
+def test_dropped_im_pillar_closed_at_mark():
+    d0, d1 = _days(2)
+    im0 = (("IM2611", 0.03, 6490.0), ("IM2612", 0.115, 6460.0), ("IM2706", 0.6137, 6300.0))
+    c0 = book_chain(d0, im=im0)
+    c1 = book_chain(d1, im=(("IM2612", 0.112, 6470.0), ("IM2706", 0.61, 6310.0)))   # IM2611 < 7 days
+    book = BookB()
+    book.rebalance(c0, _b_target(book, c0, 0.0, im_deltas=(400.0, 200.0, 300.0)))
+    assert book.positions["IM2611"] == pytest.approx(2.0)
+    assert book.unmarkable(c1) == ["IM2611"]
+    extra = offchain_marks({"IM2611": {"close": 6495.0, "settle": 6494.0}}, ["IM2611"])
+    pnl = book.pnl(c0, c1, extra)
+    expect = 2.0 * 5.0 * 200 + 1.0 * 10.0 * 200 + 1.5 * 10.0 * 200
+    assert pnl == pytest.approx(expect, rel=1e-12)
+    trades = book.rebalance(c1, _b_target(book, c1, 0.0, im_deltas=(200.0, 300.0)), extra)
+    closed = [t for t in trades if t.instrument == "IM2611"][0]
+    assert closed.qty == pytest.approx(-2.0) and closed.price == 6495.0
+    assert closed.cost == pytest.approx(1e-4 * 2.0 * 6495.0 * 200.0, rel=1e-12)
+    assert "IM2611" not in book.positions and book.rolled
+
+
+def test_book_b_spot_neutral():
+    dc = book_chain(date(2026, 11, 5), im=(("IM2612", 0.115, 6460.0), ("IM2703", 0.36, 6380.0),
+                                           ("IM2706", 0.6137, 6300.0)))
+    deltas = (120.0, -340.0, 2250.0, -6200.0)              # holder-side ∂PV/∂F_i, 3 IM + MO
+    pinned = -337.0
+    fwd = [q.close for q in dc.im] + [dc.mo.forward]
+    spot_delta = pinned + sum(f / dc.spot * d for f, d in zip(fwd, deltas))
+    book = BookB()
+    tgt = book.target(dc, greeks(spot_delta=spot_delta, pinned=pinned, deltas=deltas))
+    df = math.exp(-RATE * dc.mo.tenor)
+    exposure = sum(tgt[q.code] * 200.0 * q.close / dc.spot for q in dc.im) + \
+        tgt["MO2709@6600"] * 100.0 * df * dc.mo.forward / dc.spot
+    assert abs(exposure - spot_delta) < 1e-6
+    # the pinned-forward delta sits on the far IM, on top of its pillar lots
+    assert tgt["IM2706"] == pytest.approx(2250.0 / 200.0 + pinned * dc.spot / (200.0 * 6300.0), rel=1e-12)
+    with pytest.raises(ValidationError):
+        book.target(dc, greeks(deltas=(1.0, 2.0, 3.0)))       # one pillar short
+
+
+def test_mo_cost_40_cny_per_pair():
+    dc = book_chain(date(2026, 11, 5))
+    book = BookB()
+    trades = book.rebalance(dc, {"MO2709@6600": 3.0})
+    assert trades == [Trade("MO2709@6600", 3.0, -240.0, 120.0)]
+    assert book.premium(trades) == pytest.approx(3.0 * -240.0 * 100.0)
+    assert book.value(dc) == pytest.approx(3.0 * -240.0 * 100.0)
+    out = book.unwind(dc)
+    assert out == [Trade("MO2709@6600", -3.0, -240.0, 120.0)] and book.positions == {}
+    assert not book.rolled
+
+
+def test_book_pnl_split_into_im_margin_and_mo_mtm():
+    d0, d1 = _days(2)
+    c0 = book_chain(d0)
+    c1 = book_chain(d1, im=(("IM2612", 0.112, 6470.0), ("IM2706", 0.61, 6290.0)),
+                    mo_all={**MO_ALL_2709, 6600.0: (490.0, 715.0)})
+    book = BookB()
+    book.rebalance(c0, {"IM2706": 2.0, "MO2709@6600": -1.5})
+    im_vm, mo_mtm = book.pnl_split(c0, c1)
+    assert im_vm == pytest.approx(2.0 * (6290.0 - 6300.0) * 200.0)
+    assert mo_mtm == pytest.approx(-1.5 * ((490.0 - 715.0) - (480.0 - 720.0)) * 100.0)
+    assert book.pnl(c0, c1) == pytest.approx(im_vm + mo_mtm, rel=1e-15)
