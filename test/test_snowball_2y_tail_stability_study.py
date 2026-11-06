@@ -49,6 +49,14 @@ from s2ts.books import (  # noqa: E402
     total_cost,
     turnover,
 )
+from s2ts.runner import (  # noqa: E402
+    RssGuard,
+    coupons_for,
+    parity_flag,
+    run_all,
+    run_one,
+    run_path,
+)
 from s2ts.note import (  # noqa: E402
     DayGreeks,
     NoteLife,
@@ -879,3 +887,144 @@ def test_book_pnl_split_into_im_margin_and_mo_mtm():
     assert im_vm == pytest.approx(2.0 * (6290.0 - 6300.0) * 200.0)
     assert mo_mtm == pytest.approx(-1.5 * ((490.0 - 715.0) - (480.0 - 720.0)) * 100.0)
     assert book.pnl(c0, c1) == pytest.approx(im_vm + mo_mtm, rel=1e-15)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: runner
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+
+class FakeEngine:
+    """Cheap stand-in for V2 (same ``price`` signature): PV moves with spot and q(1.5), so the
+    loop, books and cash account are exercised without quadrature."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def price(self, product, env, *, lifecycle_state=None):
+        self.calls += 1
+        s = float(env.spot_quote.spot)
+        q = float(env.get_div_yield(1.5))
+        return 4e6 * (s / product.initial_price - 1.0) - 2e7 * (q - 0.05)
+
+
+DAY_KEYS = {"date", "note_pnl", "pnl_a", "pnl_b", "cost_a", "cost_b", "turn_a", "turn_b", "roll_a", "roll_b",
+            "d_far_basis", "d_mo_basis", "pv", "spot_delta", "pinned_delta", "hedged_a", "hedged_b",
+            "accrual_a", "accrual_b", "note_cash"}
+
+
+def _path_chains(n, spot_fn, start=INCEPTION):
+    days = _sse_days(start, start + pd.Timedelta(days=200).to_pytimedelta())[:n]
+    return [synth_chain(d, spot=spot_fn(i), far_close=6300.0 + 20.0 * math.sin(i)) for i, d in enumerate(days)]
+
+
+def _anchors(chains):
+    return {dc.day: -0.05 for dc in chains}
+
+
+def test_run_one_synthetic_short_path():
+    chains = _path_chains(8, lambda i: S0 * (1.0 + 0.01 * math.sin(i)))
+    run = run_one(INCEPTION, "converge_hl050", chains, _anchors(chains), 0.2, parity=False, engine=FakeEngine())
+    assert run["inception"] == INCEPTION.isoformat() and run["tail"] == "converge_hl050" and run["coupon"] == 0.2
+    assert run["end_reason"] == "data_end" and run["truncated"] is True
+    assert len(run["days"]) == 7
+    assert all(set(d) >= DAY_KEYS for d in run["days"])
+    assert all(d["roll_a"] is False and d["d_far_basis"] is not None for d in run["days"])
+    for b in ("a", "b"):
+        hedged = [d[f"hedged_{b}"] for d in run["days"]]
+        for d in run["days"]:
+            assert d[f"hedged_{b}"] == pytest.approx(d["note_pnl"] + d[f"pnl_{b}"] + d[f"accrual_{b}"], rel=1e-12)
+        # wealth identity: daily hedged P&L sums to the own-PV terminal (gross of costs)
+        assert sum(hedged) == pytest.approx(run[f"terminal_own_{b}"], rel=1e-9, abs=1e-6)
+        assert run[f"day0_cost_{b}"] > 0
+    # traded-price terminal = own-PV terminal less the day-0 own PV grown at r
+    growth = 1.0
+    for prev, dc in zip(chains, chains[1:]):
+        growth *= 1.0 + RATE * (dc.day - prev.day).days / 365.0
+    assert run["terminal_own_a"] - run["terminal_a"] == pytest.approx(run["day0_pv"] * growth, rel=1e-9)
+    json.dumps(run, allow_nan=False)
+
+
+def test_run_one_knock_out_unwinds_and_stops():
+    chains = _path_chains(80, lambda i: S0 if i == 0 else 1.05 * S0)
+    run = run_one(INCEPTION, "hold_forward", chains, _anchors(chains), 0.2, parity=False, engine=FakeEngine())
+    assert run["end_reason"] == "ko" and run["truncated"] is False
+    last = run["days"][-1]
+    assert last["date"] == "2024-04-02" and last["pv"] == 0.0 and last["spot_delta"] is None
+    assert last["note_cash"] == pytest.approx(0.2 * NOTIONAL * build_terms(INCEPTION).ko_times[0], rel=1e-12)
+    prev_pv = run["days"][-2]["pv"]
+    assert last["note_pnl"] == pytest.approx(prev_pv - last["note_cash"], rel=1e-12)
+    assert last["turn_a"] > 0                                  # the unwind traded
+    for b in ("a", "b"):
+        assert sum(d[f"hedged_{b}"] for d in run["days"]) == pytest.approx(run[f"terminal_own_{b}"], rel=1e-9)
+
+
+def test_same_coupon_and_contract_across_tails():
+    chains = _path_chains(4, lambda i: S0 * (1.0 + 0.005 * i))
+    runs = [run_one(INCEPTION, t, chains, _anchors(chains), 0.17, parity=False, engine=FakeEngine())
+            for t in ("hold_forward", "converge_hl050")]
+    assert runs[0]["coupon"] == runs[1]["coupon"] == 0.17
+    assert [d["date"] for d in runs[0]["days"]] == [d["date"] for d in runs[1]["days"]]
+    assert [d["note_cash"] for d in runs[0]["days"]] == [d["note_cash"] for d in runs[1]["days"]]
+    assert runs[0]["day0_pv"] != runs[1]["day0_pv"]
+
+
+def test_coupons_cached_once_per_inception(tmp_path):
+    calls = []
+
+    def solver(dc):
+        calls.append(dc.day)
+        return 0.1 + 0.01 * len(calls)
+
+    chains = _path_chains(3, lambda i: S0)
+    path = tmp_path / "coupons.json"
+    first = coupons_for([INCEPTION], chains, path, solver=solver)
+    again = coupons_for([INCEPTION], chains, path, solver=solver)
+    assert first == again == {INCEPTION: 0.11} and calls == [INCEPTION]
+    assert json.loads(path.read_text()) == {INCEPTION.isoformat(): 0.11}
+
+
+def test_resume_skips_complete_and_ignores_tmp(tmp_path):
+    """Review Focus 5: a complete file is skipped, a stale .tmp is never read and is removed."""
+    a, b = (INCEPTION, "hold_forward"), (INCEPTION, "zero_carry")
+    run_path(tmp_path, *a).write_text(json.dumps({"done": True}))
+    stale = run_path(tmp_path, *b).with_name(run_path(tmp_path, *b).name + ".tmp")
+    stale.write_text("{ half-written")
+    called = []
+
+    def job(inception, tail):
+        called.append((inception, tail))
+        return {"inception": inception.isoformat(), "tail": tail}
+
+    paths = run_all([INCEPTION], ["hold_forward", "zero_carry"], tmp_path, workers=0, job=job)
+    assert called == [b]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        [run_path(tmp_path, *a).name, run_path(tmp_path, *b).name])
+    assert json.loads(run_path(tmp_path, *b).read_text()) == {"inception": INCEPTION.isoformat(), "tail": "zero_carry"}
+    assert json.loads(run_path(tmp_path, *a).read_text()) == {"done": True}
+    assert set(paths) == {run_path(tmp_path, *a), run_path(tmp_path, *b)}
+
+
+def test_parity_flag_logic():
+    lots = (1.0, -2.0, 3.0)
+    assert parity_flag(0.0, 0.6e-4 * NOTIONAL, lots, lots)                       # 0.6 bp
+    assert not parity_flag(0.0, 0.4e-4 * NOTIONAL, lots, (1.005, -2.005, 3.0))   # 0.4 bp, 0.005 lots
+    assert parity_flag(0.0, 0.0, lots, (1.0, -2.0, 3.02))                         # a lot off by 0.02
+    with pytest.raises(ValidationError):
+        parity_flag(0.0, 0.0, lots, lots[:2])
+
+
+def test_rss_guard_trips_and_calls_back():
+    import threading
+
+    tripped = threading.Event()
+    guard = RssGuard(limit_bytes=1, poll_s=0.01, on_trip=tripped.set)
+    guard.start()
+    assert tripped.wait(5.0) and guard.tripped.is_set()
+    quiet = RssGuard(limit_bytes=1 << 50, poll_s=0.01, on_trip=tripped.clear)
+    quiet.start()
+    quiet.stop()
+    quiet.join(2.0)
+    assert not quiet.tripped.is_set() and quiet.rss() > 0
