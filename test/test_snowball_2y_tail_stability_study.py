@@ -59,8 +59,11 @@ from s2ts.measures import (  # noqa: E402
     verdict,
 )
 from s2ts.runner import (  # noqa: E402
+    OutDirLocked,
     RssGuard,
+    RunsFailed,
     coupons_for,
+    error_path,
     parity_flag,
     run_all,
     run_one,
@@ -1038,22 +1041,91 @@ def test_coupons_cached_once_per_inception(tmp_path):
 def test_resume_skips_complete_and_ignores_tmp(tmp_path):
     """Review Focus 5: a complete file is skipped, a stale .tmp is never read and is removed."""
     a, b = (INCEPTION, "hold_forward"), (INCEPTION, "zero_carry")
-    run_path(tmp_path, *a).write_text(json.dumps({"done": True}))
+    complete = {"inception": INCEPTION.isoformat(), "tail": "hold_forward", "days": [], "done": True}
+    run_path(tmp_path, *a).write_text(json.dumps(complete))
     stale = run_path(tmp_path, *b).with_name(run_path(tmp_path, *b).name + ".tmp")
     stale.write_text("{ half-written")
     called = []
 
     def job(inception, tail):
         called.append((inception, tail))
-        return {"inception": inception.isoformat(), "tail": tail}
+        return {"inception": inception.isoformat(), "tail": tail, "days": []}
 
     paths = run_all([INCEPTION], ["hold_forward", "zero_carry"], tmp_path, workers=0, job=job)
     assert called == [b]
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
         [run_path(tmp_path, *a).name, run_path(tmp_path, *b).name])
-    assert json.loads(run_path(tmp_path, *b).read_text()) == {"inception": INCEPTION.isoformat(), "tail": "zero_carry"}
-    assert json.loads(run_path(tmp_path, *a).read_text()) == {"done": True}
+    assert json.loads(run_path(tmp_path, *b).read_text()) == {
+        "inception": INCEPTION.isoformat(), "tail": "zero_carry", "days": []}
+    assert json.loads(run_path(tmp_path, *a).read_text()) == complete
     assert set(paths) == {run_path(tmp_path, *a), run_path(tmp_path, *b)}
+
+
+def _ok_job(called):
+    def job(inception, tail):
+        called.append((inception, tail))
+        return {"inception": inception.isoformat(), "tail": tail, "days": []}
+    return job
+
+
+def test_failed_run_writes_error_json_and_the_rest_complete(tmp_path):
+    """CP1 #1: one failing run never discards the others; it leaves only an .error.json, a summary
+    error is raised after all runs, and resume re-runs it (deleting the .error.json first)."""
+    tails = ["hold_forward", "zero_carry", "hold_yield"]
+    called = []
+
+    def job(inception, tail):
+        called.append((inception, tail))
+        if tail == "zero_carry":
+            raise ValueError("boom in zero_carry")
+        return {"inception": inception.isoformat(), "tail": tail, "days": []}
+
+    with pytest.raises(RunsFailed) as e:
+        run_all([INCEPTION], tails, tmp_path, workers=0, job=job)
+    assert "zero_carry" in str(e.value)
+    assert len(called) == 3                                       # every run was attempted
+    bad = error_path(tmp_path, INCEPTION, "zero_carry")
+    assert bad.exists() and not run_path(tmp_path, INCEPTION, "zero_carry").exists()
+    err = json.loads(bad.read_text())
+    assert err["tail"] == "zero_carry" and "boom in zero_carry" in err["traceback"]
+    for t in ("hold_forward", "hold_yield"):
+        assert json.loads(run_path(tmp_path, INCEPTION, t).read_text())["tail"] == t
+    again = []
+    run_all([INCEPTION], tails, tmp_path, workers=0, job=_ok_job(again))
+    assert again == [(INCEPTION, "zero_carry")]
+    assert not bad.exists() and run_path(tmp_path, INCEPTION, "zero_carry").exists()
+
+
+def test_invalid_run_file_is_rerun(tmp_path):
+    """CP1 #2: a truncated or incomplete <run>.json is deleted and re-run, never trusted."""
+    run_path(tmp_path, INCEPTION, "hold_forward").write_text('{"inception": "2024-01-02", "ta')
+    run_path(tmp_path, INCEPTION, "zero_carry").write_text(json.dumps(
+        {"inception": INCEPTION.isoformat(), "tail": "zero_carry"}))           # no days list
+    run_path(tmp_path, INCEPTION, "hold_yield").write_text(json.dumps(
+        {"inception": INCEPTION.isoformat(), "tail": "hold_forward", "days": []}))  # someone else's run
+    called = []
+    run_all([INCEPTION], ["hold_forward", "zero_carry", "hold_yield"], tmp_path, workers=0, job=_ok_job(called))
+    assert sorted(t for _, t in called) == ["hold_forward", "hold_yield", "zero_carry"]
+    for t in ("hold_forward", "zero_carry", "hold_yield"):
+        assert json.loads(run_path(tmp_path, INCEPTION, t).read_text())["tail"] == t
+
+
+def test_out_dir_lock(tmp_path):
+    """CP1 #3: a live lock refuses to start (and touches nothing); a dead pid's lock is taken over."""
+    import os
+
+    lock = tmp_path / ".lock"
+    stale_tmp = tmp_path / "x__hold_forward.json.tmp"
+    stale_tmp.write_text("{")
+    lock.write_text(str(os.getpid()))
+    with pytest.raises(OutDirLocked):
+        run_all([INCEPTION], ["hold_forward"], tmp_path, workers=0, job=_ok_job([]))
+    assert stale_tmp.exists() and lock.read_text() == str(os.getpid())
+    lock.write_text("99999999")                                   # no such process
+    called = []
+    run_all([INCEPTION], ["hold_forward"], tmp_path, workers=0, job=_ok_job(called))
+    assert called == [(INCEPTION, "hold_forward")]
+    assert not lock.exists() and not stale_tmp.exists()
 
 
 def test_parity_flag_logic():

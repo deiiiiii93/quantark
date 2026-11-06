@@ -29,6 +29,7 @@ import multiprocessing as mp
 import os
 import threading
 import time
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
@@ -273,11 +274,15 @@ def run_one(
 
 
 def write_json_atomic(path: Path, payload: Any) -> None:
-    """``path.tmp`` then ``os.replace``: a reader never sees a half-written file."""
+    """``path.tmp`` (flushed and fsynced) then ``os.replace``: a reader never sees a half-written file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(payload, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    text = json.dumps(payload, sort_keys=True, allow_nan=False) + "\n"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, path)
 
 
@@ -387,6 +392,69 @@ class RssLimitExceeded(RuntimeError):
     """The group RSS guard terminated the pool."""
 
 
+class RunsFailed(RuntimeError):
+    """Some runs raised; each left ``<inception>__<tail>.error.json`` (every other run completed)."""
+
+
+class OutDirLocked(RuntimeError):
+    """Another live instance holds ``out_dir/.lock``."""
+
+
+LOCK_NAME = ".lock"
+
+
+def error_path(out_dir: Path, inception: date, tail: str) -> Path:
+    return Path(out_dir) / f"{inception.isoformat()}__{tail}.error.json"
+
+
+def is_complete_run(path: Path, inception: date, tail: str) -> bool:
+    """A run file that parses and is this run's: ``inception``, ``tail`` and a ``days`` list."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (isinstance(data, dict) and data.get("inception") == inception.isoformat()
+            and data.get("tail") == tail and isinstance(data.get("days"), list))
+
+
+def _acquire_lock(out_dir: Path) -> Path:
+    """``out_dir/.lock`` via ``O_CREAT|O_EXCL`` holding this pid; a lock whose pid is dead is taken over.
+
+    A lock that cannot be read as a pid is refused (delete it by hand once no instance runs)."""
+    lock = Path(out_dir) / LOCK_NAME
+    for _ in range(2):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                pid = int(lock.read_text().strip())
+            except (OSError, ValueError):
+                raise OutDirLocked(f"{lock} exists and holds no pid; remove it if no backtest is running") from None
+            if psutil.pid_exists(pid):
+                raise OutDirLocked(f"{lock}: process {pid} is running a backtest in {out_dir}") from None
+            lock.unlink()                                  # stale: its owner is dead
+            continue
+        with os.fdopen(fd, "w") as fh:
+            fh.write(str(os.getpid()))
+        return lock
+    raise OutDirLocked(f"{lock}: could not take the lock")
+
+
+def _release_lock(lock: Path) -> None:
+    try:
+        if lock.read_text().strip() == str(os.getpid()):
+            lock.unlink()
+    except OSError:
+        pass
+
+
+def _record_failure(out_dir: Path, inc: date, tail: str, err: BaseException, log) -> None:
+    tb = "".join(traceback.format_exception(type(err), err, err.__traceback__))
+    log(f"  FAILED {inc} {tail}: {err!r}\n{tb}")
+    write_json_atomic(error_path(out_dir, inc, tail),
+                      {"inception": inc.isoformat(), "tail": tail, "error": repr(err), "traceback": tb})
+
+
 def run_all(
     inceptions: Sequence[date],
     tails: Sequence[str],
@@ -403,58 +471,101 @@ def run_all(
 ) -> List[Path]:
     """Every missing run of ``inceptions × tails`` into ``out_dir``; returns all their paths.
 
-    Resumable: a complete ``<inception>__<tail>.json`` is skipped; stale ``*.json.tmp``
-    are deleted unread; each result is written ``.tmp`` then ``os.replace``.
-    ``workers=0`` runs in-process (``job(inception, tail)`` when given). Otherwise a
-    spawn ``ProcessPoolExecutor`` runs ``worker_job``; launch it from a script file
-    (never stdin). An ``RssGuard`` terminates the workers above ``rss_limit_bytes``
-    and this raises ``RssLimitExceeded``.
+    - One instance per ``out_dir``: ``out_dir/.lock`` (this pid) is taken first, a live
+      lock raises ``OutDirLocked`` before anything is touched; a dead pid's lock is
+      taken over; the lock is removed on exit.
+    - Resumable: a ``<inception>__<tail>.json`` is skipped only if it parses as this
+      run (``is_complete_run``), else it is deleted and re-run; stale ``*.json.tmp``
+      are deleted unread; a run's ``.error.json`` is deleted before it re-runs; each
+      result is written ``.tmp`` (fsynced) then ``os.replace``.
+    - A run that raises leaves only ``<inception>__<tail>.error.json`` (traceback) and
+      the others go on; after the last run ``RunsFailed`` lists the failures.
+    - ``workers=0`` runs in-process (``job(inception, tail)`` when given). Otherwise a
+      spawn ``ProcessPoolExecutor`` runs ``worker_job``; launch it from a script file
+      (never stdin). An ``RssGuard`` terminates the workers above ``rss_limit_bytes``;
+      the queued runs are cancelled and this raises ``RssLimitExceeded``.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    lock = _acquire_lock(out_dir)
+    try:
+        return _run_all_locked(inceptions, tails, out_dir, workers=workers, coupons=coupons, max_days=max_days,
+                               parity=parity, job=job, rss_limit_bytes=rss_limit_bytes, poll_s=poll_s, log=log)
+    finally:
+        _release_lock(lock)
+
+
+def _run_all_locked(inceptions, tails, out_dir: Path, *, workers, coupons, max_days, parity, job,
+                    rss_limit_bytes, poll_s, log) -> List[Path]:
     for stale in out_dir.glob("*.json.tmp"):
         stale.unlink()
     wanted = [(inc, tail) for inc in inceptions for tail in tails]
-    todo = [(inc, tail) for inc, tail in wanted if not run_path(out_dir, inc, tail).exists()]
+    todo = []
+    for inc, tail in wanted:
+        path = run_path(out_dir, inc, tail)
+        if path.exists() and is_complete_run(path, inc, tail):
+            continue
+        if path.exists():
+            log(f"  {path.name} is not a complete run: deleted, re-running")
+            path.unlink()
+        error_path(out_dir, inc, tail).unlink(missing_ok=True)
+        todo.append((inc, tail))
     log(f"{len(wanted)} runs requested, {len(wanted) - len(todo)} complete, {len(todo)} to run")
-    if workers == 0:
-        for inc, tail in todo:
-            if job is not None:
-                result = job(inc, tail)
-            else:
-                result = worker_job(inc.isoformat(), tail, float(coupons[inc]), max_days, parity)
-            write_json_atomic(run_path(out_dir, inc, tail), result)
-            log(f"  done {inc} {tail}")
-        return [run_path(out_dir, inc, tail) for inc, tail in wanted]
-    if job is not None:
-        raise ValidationError("a custom job runs in-process only (workers=0)")
-    if coupons is None:
-        raise ValidationError("coupons are required")
-    guard = RssGuard(rss_limit_bytes, poll_s)
-    guard.start()
+    failed: List[str] = []
     started = time.perf_counter()
-    try:
-        ctx = mp.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=init_worker,
-                                 initargs=(str(CHAIN_PATH),)) as pool:
-            futures = {
-                pool.submit(worker_job, inc.isoformat(), tail, float(coupons[inc]), max_days, parity): (inc, tail)
-                for inc, tail in todo
-            }
-            for n, fut in enumerate(as_completed(futures), start=1):
-                inc, tail = futures[fut]
-                try:
-                    result = fut.result()
-                except Exception:
-                    if guard.tripped.is_set():
-                        raise RssLimitExceeded(f"group RSS above {rss_limit_bytes / 1024 ** 3:.0f} GB") from None
-                    raise
-                write_json_atomic(run_path(out_dir, inc, tail), result)
-                log(f"  [{n}/{len(todo)}] {inc} {tail}: {result['end_reason']}, {result['live_days']} days, "
-                    f"{result['s_per_day']:.2f} s/day, {time.perf_counter() - started:.0f} s elapsed")
-    finally:
-        guard.stop()
-    if guard.tripped.is_set():
-        raise RssLimitExceeded(f"group RSS above {rss_limit_bytes / 1024 ** 3:.0f} GB")
-    log(f"peak group RSS {guard.peak / 1024 ** 3:.2f} GB (polled every {poll_s:.0f} s)")
+
+    def done(n: int, inc: date, tail: str, result: Dict[str, Any]) -> None:
+        write_json_atomic(run_path(out_dir, inc, tail), result)
+        extra = ""
+        if "end_reason" in result:
+            extra = (f": {result['end_reason']}, {result['live_days']} days, {result['s_per_day']:.2f} s/day")
+        log(f"  [{n}/{len(todo)}] {inc} {tail}{extra}, {time.perf_counter() - started:.0f} s elapsed")
+
+    if workers == 0:
+        for n, (inc, tail) in enumerate(todo, start=1):
+            try:
+                if job is not None:
+                    result = job(inc, tail)
+                else:
+                    result = worker_job(inc.isoformat(), tail, float(coupons[inc]), max_days, parity)
+            except Exception as err:
+                _record_failure(out_dir, inc, tail, err, log)
+                failed.append(f"{inc}__{tail}")
+                continue
+            done(n, inc, tail, result)
+    else:
+        if job is not None:
+            raise ValidationError("a custom job runs in-process only (workers=0)")
+        if coupons is None:
+            raise ValidationError("coupons are required")
+        guard = RssGuard(rss_limit_bytes, poll_s)
+        guard.start()
+        try:
+            ctx = mp.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=init_worker,
+                                     initargs=(str(CHAIN_PATH),)) as pool:
+                futures = {
+                    pool.submit(worker_job, inc.isoformat(), tail, float(coupons[inc]), max_days, parity): (inc, tail)
+                    for inc, tail in todo
+                }
+                for n, fut in enumerate(as_completed(futures), start=1):
+                    inc, tail = futures[fut]
+                    try:
+                        result = fut.result()
+                    except Exception as err:
+                        if guard.tripped.is_set():
+                            pool.shutdown(wait=False, cancel_futures=True)
+                            raise RssLimitExceeded(
+                                f"group RSS above {rss_limit_bytes / 1024 ** 3:.0f} GB") from None
+                        _record_failure(out_dir, inc, tail, err, log)
+                        failed.append(f"{inc}__{tail}")
+                        continue
+                    done(n, inc, tail, result)
+        finally:
+            guard.stop()
+        if guard.tripped.is_set():
+            raise RssLimitExceeded(f"group RSS above {rss_limit_bytes / 1024 ** 3:.0f} GB")
+        log(f"peak group RSS {guard.peak / 1024 ** 3:.2f} GB (polled every {poll_s:.0f} s)")
+    if failed:
+        raise RunsFailed(f"{len(failed)} of {len(todo)} runs failed (see their .error.json): {', '.join(failed)}")
     return [run_path(out_dir, inc, tail) for inc, tail in wanted]

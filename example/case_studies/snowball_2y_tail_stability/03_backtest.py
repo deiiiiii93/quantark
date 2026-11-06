@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from s2ts import ANCHOR_WINDOW, OUTPUT_DIR, RATE  # noqa: E402
 from s2ts.chain import load_chain  # noqa: E402
 from s2ts.note import NoteLife, build_note, build_terms, inception_dates, make_env  # noqa: E402
-from s2ts.runner import RssLimitExceeded, coupons_for, run_all  # noqa: E402
+from s2ts.runner import OutDirLocked, RssLimitExceeded, RunsFailed, coupons_for, run_all  # noqa: E402
 from s2ts.tails import TAILS, anchor_series, build_curve  # noqa: E402
 
 COUPONS_PATH = OUTPUT_DIR / "coupons.json"
@@ -142,6 +142,12 @@ def main() -> int:
     except RssLimitExceeded as err:
         print(f"ABORTED: {err}", file=sys.stderr)
         return 3
+    except RunsFailed as err:
+        print(f"FAILED RUNS (every other run completed; re-run to retry them): {err}", file=sys.stderr)
+        return 2
+    except OutDirLocked as err:
+        print(f"REFUSED: {err}", file=sys.stderr)
+        return 4
     if args.quick:
         print_quick(paths)
     flagged = [p.name for p in paths if (json.loads(p.read_text()).get("parity") or {}).get("flag")]
