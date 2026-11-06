@@ -26,15 +26,42 @@ measure must agree with the daily one.
 
 ## Headline numbers
 
-To be filled from `results/stability.json` and `results/backtest.json` after the overnight run
-(`04_report.py` prints the run summary and the qualifying tails).
+Run of 2026-11-06/07: 13 quarterly inceptions (2023-10-09 → 2026-10-08) × 6 tails = 78 runs,
+0 failed, 0 V1 parity flags; 11 knocked out, 2 truncated at data end (2026-11-06), so the terminal
+measure uses 11 completed runs. Wall 11,598 s on 4 workers, no system sleep in the window; peak group
+RSS 4.9 GB. Hedge numbers are daily hedged P&L in bp of notional, short desk.
 
-| tail | std Δq(2Y), bp | Book A pooled std, bp | Book B pooled std, bp | A n_lower/n | B n_lower/n | verdict |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| hold forward carry | _tbd_ | _tbd_ | _tbd_ | – | – | baseline |
-| converge hl 0.25Y | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
-| converge hl 0.50Y | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
-| converge hl 1.00Y | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+**Qualifying tail: `converge_hl100`** (half-life 1.0Y) — the only half-life that passes all three
+criteria in both books.
+
+| tail | std Δq(2Y), bp/day | Book A pooled std | Book B pooled std | A / B daily lower | A / B terminal std | A / B \|terminal\| lower | verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| hold forward carry | 68.1 | 66.1 | 90.3 | – | 473 / 400 | – | baseline |
+| hold carry yield (ref.) | 61.7 | 43.0 | 56.8 | 13/13 · 13/13 | 367 / 350 | 8/11 · 7/11 | reference (κ → 0 limit) |
+| zero carry (ref.) | 28.9 | 35.7 | 40.9 | 13/13 · 13/13 | 579 / 567 | 4/11 · 5/11 | reference; terminal disagrees |
+| converge hl 0.25Y | 38.7 | 37.0 | 44.3 | 13/13 · 13/13 | 361 / 356 | 7/11 · **5/11** | Book A only (B fails terminal) |
+| converge hl 0.50Y | 45.4 | 38.5 | 47.8 | 13/13 · 13/13 | 361 / 353 | 7/11 · **5/11** | Book A only (B fails terminal) |
+| converge hl 1.00Y | 51.6 | 40.1 | 51.2 | 13/13 · 13/13 | 363 / 351 | 8/11 · 7/11 | **beats hold-forward** |
+
+What the table says:
+
+- **The daily measure is not close.** Every non-hold-forward tail cuts the pooled daily std in every
+  one of the 13 inceptions in both books (Holm-adjusted p ≈ 1e-6 in Book A, 3e-5 in Book B; optimistic, as the inceptions overlap). Book A
+  falls 66 → 37–40 bp, Book B 90 → 44–51 bp. The cause is visible in the basis regression: hold-forward's
+  Book A P&L loads |β| ≈ 147 bp on the far-IM basis change, the converging tails ≈ 46.
+- **The terminal measure picks the half-life.** Terminal std falls ~110 bp (A) and ~45 bp (B) for all
+  three half-lives; the split is the \|terminal\| count in Book B, 5/11 for 0.25Y and 0.5Y vs 7/11 for 1.0Y.
+  That is a 2-run margin out of 11 overlapping runs: `converge_hl100` is the adopted tail by the
+  pre-registered rule, not a sharply identified optimum.
+- **The two-measure rule did its job on `zero_carry`:** lowest daily std in both books, highest terminal
+  std (579 / 567 vs hold-forward 473 / 400). Smoother marks there are not a better hedge.
+- **`converge_hl100` vs `hold_yield`** (descriptive, not a tested comparison): 40.1 vs 43.0 (A) and 51.2 vs
+  56.8 (B) daily, terminal std about level. Most of the gain over hold-forward is already in "stop extending
+  the last forward carry"; the anchor adds a modest further cut.
+- **Calendar spread (Book B) vs single far IM (Book A):** the pillar book halves the basis loading
+  (|β_far| 46 → 32 for hl100, basis R² 0.38 → 0.20) and the roll-day jump (54 → 21 bp), but its total
+  daily std is *higher* in every tail (e.g. 51 vs 40 for hl100) and it costs more (12.9 vs 8.1 bp). It
+  mitigates the basis oscillation; it does not lower total hedging variance on this history.
 
 Reading notes (fixed before the run):
 
@@ -74,7 +101,10 @@ from `runs_quick`). Long runs: `nohup caffeinate -i -m -s`. In a worktree, prefi
 
 ## Open items
 
-- Headline table and report conclusions: pending the overnight run.
+- The half-life choice rests on a 2-run margin in Book B's \|terminal\| count (5/11 vs 7/11); re-check after
+  more inceptions complete before promoting a half-life.
+- `converge_hl100` vs `hold_yield` was not part of the pre-registered tests; a paired test would settle
+  whether the anchor earns its parameter.
 - Overlapping inceptions make the paired tests optimistic; truncated runs are excluded from the terminal measure.
 - One flat vol per day, flat r; vega is unhedged in both books.
 - Promotion of the converging tail into `CarryCurve` is a later decision from this study's table.
