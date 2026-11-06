@@ -269,16 +269,15 @@ q(T_mat) off the shocked curve and re-prices, and the flat Greek predicts rho_fl
 cross-check on the six PVs</dd>
 <dt>Bumps</dt><dd>spot ±1% of S · pillar forward ±0.1% of F_i ·
 q ±10 bp (rho reported per +1% q) · scenarios 1%</dd>
-<dt>Runtime</dt><dd>stage 02 96 s · stage 03 1,730 s
-(≈29 min): a QUAD re-price at a new spot rebuilds the engine's spot-keyed cache, ≈13 s
-against ≈0.8 s at the cached spot (engine-side; open item)</dd>
+<dt>Runtime</dt><dd>stage 02 96 s · stage 03 227 s
+(≈4 min): 261 QUAD prices at ≈0.87 s each, wall clock</dd>
 </dl>
 <h3 class="sub">Dashboard rows</h3>
 <div class="scroll"><table class="text"><thead><tr><th>row</th><th>revision id</th><th>content hash</th></tr></thead><tbody><tr><td>IM2611</td><td>1318449</td><td><code>edb368c4e71d3531…</code></td></tr><tr><td>IM2612</td><td>1318695</td><td><code>dc97802afe8809c7…</code></td></tr><tr><td>IM2703</td><td>1318941</td><td><code>1f8a3ad4785ffe92…</code></td></tr><tr><td>IM2706</td><td>1319187</td><td><code>0236e4aa12eb24a3…</code></td></tr><tr><td>SYN_FUT_20270917.SH (cross-check)</td><td>1319397</td><td><code>bbc20bdcad748acd…</code></td></tr></tbody></table></div>
 <h3 class="sub">Rerun</h3>
 <pre>python example/case_studies/snowball_2y_carry_curve/01_snapshot.py   # live: dashboard DB + CFFEX CSV (--db, --cffex-csv)
 python example/case_studies/snowball_2y_carry_curve/02_pricing.py    # ≈1.6 min → results/pricing.json
-python example/case_studies/snowball_2y_carry_curve/03_greeks.py     # ≈29 min → results/greeks.json
+python example/case_studies/snowball_2y_carry_curve/03_greeks.py     # ≈4 min → results/greeks.json
 python example/case_studies/snowball_2y_carry_curve/04_report.py     # → results/report.html</pre>
 <p class="note">Stages 02–04 run offline from data/market_20261105.json. In a worktree prefix every command with
 <code>env PYTHONPATH=&lt;worktree&gt;</code>.</p>

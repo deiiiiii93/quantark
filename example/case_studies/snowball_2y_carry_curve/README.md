@@ -55,7 +55,7 @@ The full write-up, with every table and chart, is `results/report.html`
 ```bash
 python example/case_studies/snowball_2y_carry_curve/01_snapshot.py   # live: dashboard DB + CFFEX CSV (--db, --cffex-csv)
 python example/case_studies/snowball_2y_carry_curve/02_pricing.py    # ~1.5 min -> results/pricing.json
-python example/case_studies/snowball_2y_carry_curve/03_greeks.py     # ~29 min  -> results/greeks.json
+python example/case_studies/snowball_2y_carry_curve/03_greeks.py     # ~4 min   -> results/greeks.json (261 QUAD prices)
 python example/case_studies/snowball_2y_carry_curve/04_report.py     # results/report.html
 ```
 
@@ -77,8 +77,5 @@ main checkout's `quantark`). Stage tests: `test/test_snowball_2y_carry_curve_stu
 ## Open items
 
 - Historical curve replay / hedging backtest: deferred (static Greeks only).
-- Stage 03 takes ~29 min because a QUAD re-price at a new spot rebuilds the
-  engine's spot-keyed cache (~13 s vs ~0.8 s at the cached spot). Engine-side,
-  out of scope here.
 - One flat vol, flat r: smile, local/stochastic vol and a bootstrapped rate
   curve are out of scope.

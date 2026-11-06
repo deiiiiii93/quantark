@@ -49,9 +49,10 @@ SERIES = {"hold_forward": "var(--s1)", "hold_yield": "var(--s2)", "zero_carry": 
 CURVE_X_MAX = 2.1
 CURVE_GRID = np.linspace(0.005, CURVE_X_MAX, 421)
 CURVE_TABLE_T = (0.25, 0.5, 0.75, 1.0, 1.5)
-#: Stage-03 cost profile measured while building it (engine-side, out of scope).
-QUAD_RESPOT_SECONDS = 13.0
-QUAD_CACHED_SECONDS = 0.8
+#: Stage-03 price count and per-price cost, measured by timing every engine call
+#: (2026-11-06: 261 prices, 0.77–0.96 s each, no difference between new and base spot).
+STAGE03_PRICES = 261
+QUAD_PRICE_SECONDS = 0.87
 
 
 # ---------------------------------------------------------------------------
@@ -766,8 +767,7 @@ cross-check on the six PVs</dd>
 <dt>Bumps</dt><dd>spot ±{num(100 * b["spot_rel"], 0)}% of S · pillar forward ±{num(100 * b["forward_rel"], 1)}% of F_i ·
 q ±{num(1e4 * b["q"], 0)} bp (rho reported per {esc(b["rho_unit"])}) · scenarios {num(100 * b["scenario_shock"], 0)}%</dd>
 <dt>Runtime</dt><dd>stage 02 {num(pr["runtime_seconds"], 0)} s · stage 03 {num(gk["runtime_seconds"], 0)} s
-(≈{num(g_min, 0)} min): a QUAD re-price at a new spot rebuilds the engine's spot-keyed cache, ≈{num(QUAD_RESPOT_SECONDS, 0)} s
-against ≈{num(QUAD_CACHED_SECONDS, 1)} s at the cached spot (engine-side; open item)</dd>
+(≈{num(g_min, 0)} min): {STAGE03_PRICES} QUAD prices at ≈{num(QUAD_PRICE_SECONDS, 2)} s each, wall clock</dd>
 </dl>
 <h3 class="sub">Dashboard rows</h3>
 {table(["row", "revision id", "content hash"], prov, text=True)}
