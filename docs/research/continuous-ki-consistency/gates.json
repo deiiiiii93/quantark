@@ -1,0 +1,9 @@
+{
+  "rows": 60,
+  "deterministic_price_gate_per_100": 0.01,
+  "deterministic_probability_gate": 0.0005,
+  "mc_probability_gate": "95% binomial sampling interval plus deterministic probability gate",
+  "max_deterministic_price_difference": 0.004981560427111731,
+  "max_deterministic_probability_difference": 0.00043295666322673565,
+  "passed": true
+}

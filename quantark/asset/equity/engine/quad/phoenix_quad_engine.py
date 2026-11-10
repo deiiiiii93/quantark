@@ -156,6 +156,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             [rec.observation_time for rec in ki_records],
             maturity,
         )
+        if ki_continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
+            times = self._merge_times(times, (), maturity)
         if not times:
             raise PricingError("Observation time grid is empty for PhoenixQuadEngine.")
 
@@ -796,6 +800,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             survival_probability=stats.survival_probability,
             expected_discounted_ko_cashflow=ko_cash,
             ki_probability=stats.ki_probability,
+            ki_ever_probability=stats.ki_ever_probability,
+            ki_survive_knocked_in_probability=stats.ki_survive_knocked_in_probability,
             expected_discounted_maturity_cashflow=0.0,
             reconciliation_error=0.0,
             ki_times=stats.ki_times,
@@ -814,6 +820,86 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         return PhoenixEventStats(**fields)
 
+    def _event_stats_alignment_log(
+        self, spot, product, ki_barrier_override=None, ko_candidates_override=None,
+        pricing_env=None,
+    ):
+        records = product.resolve_ko_observations(pricing_env)
+        candidates = ko_candidates_override
+        reachable = [r for r in records if candidates is None or r.barrier in candidates]
+        coupons = [self._coupon_barrier_for_obs(product, i) for i in range(len(records))]
+        ki_records = (product.resolve_ki_observations(pricing_env)
+                      if product.has_ki_barrier and not product.barrier_config.ki_continuous
+                      else [])
+        return self._select_alignment_log(
+            spot, reachable, coupon_barriers=coupons, ki_records=ki_records, product=product,
+        )
+
+    def _event_stats_barrier_logs(self, spot, product, ko_records, ki_records, continuous_barrier):
+        return self._barrier_logs(
+            spot, [r.barrier for r in ko_records],
+            [self._coupon_barrier_for_obs(product, i) for i in range(len(ko_records))],
+            [r.barrier for r in ki_records], product.barrier_config.ki_barrier,
+        )
+
+    def _apply_observation(
+        self, product, grid, spot_grid, spot, width, v_out, v_in, *,
+        ko_record=None, ko_value=0.0, ko_weight=None, ki_record=None,
+        ki_barrier_continuous=None, coupon_index=None, n_ko=0,
+        coupon_record=None, observation_index=None,
+    ):
+        # These are indicator columns, independent of coupon memory amounts.
+        # Nevertheless every column must see the price's joint coupon/KI/KO
+        # projection: even a non-jumping continuation is averaged at its breaks.
+        record = coupon_record
+        if record is None:
+            return super()._apply_observation(
+                product, grid, spot_grid, spot, width, v_out, v_in,
+                ki_record=ki_record, ki_barrier_continuous=ki_barrier_continuous,
+            )
+        index = observation_index
+        barrier = self._coupon_barrier_for_obs(product, index)
+        pay_out, pay_in = v_out.copy(), v_in.copy()
+        breach_miss = np.zeros_like(v_out) + ko_value
+        breach_pay = breach_miss.copy()
+        if coupon_index is not None:
+            row = n_ko + coupon_index
+            pay_out[row] = pay_in[row] = 1.0
+            breach_pay[row] = 1.0
+        if self._use_cell_average_events():
+            v_out, v_in = self._project_joint_phoenix_event(
+                grid=grid, spot=spot, is_reverse=product.is_reverse,
+                coupon_barrier=barrier,
+                ko_barrier=record.barrier if ko_record is not None else None,
+                ki_barrier=ki_record.barrier if ki_record is not None else None,
+                val_miss_out=v_out, val_pay_out=pay_out,
+                val_miss_in=v_in, val_pay_in=pay_in,
+                ko_value_without_coupon=breach_miss, ko_value_with_coupon=breach_pay,
+                disable_ko_after_ki=product.barrier_config.disable_ko_after_ki,
+            )
+            ki_record = None
+        else:
+            pay_weight = self._event_weight(
+                grid, barrier, spot, width, trigger_is_down=product.is_reverse,
+            )
+            v_out = pay_weight * pay_out + (1.0 - pay_weight) * v_out
+            v_in = pay_weight * pay_in + (1.0 - pay_weight) * v_in
+            if ko_record is not None:
+                breach = pay_weight * breach_pay + (1.0 - pay_weight) * breach_miss
+                v_out = ko_weight * breach + (1.0 - ko_weight) * v_out
+                if not product.barrier_config.disable_ko_after_ki:
+                    v_in = ko_weight * breach + (1.0 - ko_weight) * v_in
+            if ki_record is not None:
+                v_out = self._blend_ki_transition(
+                    v_out, v_in, grid, spot_grid, ki_record.barrier, spot,
+                    width, product.is_reverse, ko_weight=ko_weight,
+                )
+                ki_record = None
+        return super()._apply_observation(
+            product, grid, spot_grid, spot, width, v_out, v_in,
+            ki_record=ki_record, ki_barrier_continuous=ki_barrier_continuous,
+        )
+
     def _n_extra_quad_rows(self, n_ko: int) -> int:
         # One coupon-trigger indicator row per observation.
         return n_ko
@@ -823,38 +909,6 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         if isinstance(cb, list):
             return float(cb[obs_index])
         return float(cb)
-
-    def _set_extra_quad_indicators(
-        self, v_in, v_out, spot_grid, n_ko, ko_index, ko_record, obs_time,
-        rate, product, disable_ko_after_ki, math_utils, smoothing_width,
-    ) -> None:
-        barrier = self._coupon_barrier_for_obs(product, ko_index)
-        coup_row = n_ko + ko_index
-        # Resolution-aware coupon-hit weight (undiscounted indicator at the
-        # observation); the probability is recovered by dividing by exp(-r*obs) at
-        # extraction, matching the Phoenix MC reference
-        # (coupon_probability = mean(coupon_hit)).
-        #
-        # Each coupon row is a dedicated indicator for THIS observation and is
-        # OVERWRITTEN with the full pay weight *after* KO absorption has scaled the
-        # rows by (1 - ko_w). The overwrite is deliberate: a coupon on a
-        # simultaneous KO is still paid (MC's `alive_before` includes
-        # first_ko_idx >= obs_idx), so the coupon-on-KO weight is the full pay_w,
-        # not ko_w*pay_w. Coupons are paid while ALIVE regardless of KI state, so we
-        # set BOTH surfaces; disable_ko_after_ki only suppresses future KO.
-        #
-        # Accuracy note: the earlier "~5-7% Brownian-bridge approximation" here was
-        # a MISDIAGNOSIS. The gap came from the hard 0/1 barrier masks in the
-        # event-stats recursion (O(h) discretization at barriers near spot, esp.
-        # the first KO), not the KI bridge. The smoothed weights below — the same
-        # ones price() uses — close it (coupon probability to within ~0.6% of MC).
-        # See spec 2026-07-01.
-        pay_w = self._event_weight(
-            math_utils.grid, barrier, math_utils.spot, smoothing_width,
-            trigger_is_down=product.is_reverse,
-        )
-        v_out[coup_row] = pay_w
-        v_in[coup_row] = pay_w
 
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
@@ -932,7 +986,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # Coupon probability = integral of the coupon-hit weight against the
         # alive density at the observation (read BEFORE KO absorption — a
         # coupon on a simultaneous KO is still paid; see the stacked
-        # _set_extra_quad_indicators note). Coupons pay regardless of KI
+        # _apply_observation note). Coupons pay regardless of KI
         # state, so the density is p_out + p_in.
         barrier = self._coupon_barrier_for_obs(product, ko_index)
         pay_w = self._event_weight(
@@ -1059,10 +1113,15 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             out_branches.append(branch_out)
             in_branches.append(branch_in)
 
-        return (
-            project_piecewise_event(grid, breaks, out_branches),
-            project_piecewise_event(grid, breaks, in_branches),
-        )
+        stacked = np.asarray(val_miss_out).ndim > 1
+
+        def project(branches):
+            if stacked:
+                branches = [np.moveaxis(np.asarray(branch), -1, 0) for branch in branches]
+            result = project_piecewise_event(grid, breaks, branches)
+            return np.moveaxis(result, 0, -1) if stacked else result
+
+        return project(out_branches), project(in_branches)
 
     def _select_alignment_log(
         self,

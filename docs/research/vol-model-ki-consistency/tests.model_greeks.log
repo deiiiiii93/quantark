@@ -1,0 +1,18 @@
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 39%]
+........................................................................ [ 78%]
+.......................................                                  [100%]
+============================= slowest 10 durations =============================
+178.98s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_greek_n_x_sweep_reverse[slv-114.45]
+174.51s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_greek_n_x_sweep_reverse[slv-139.8]
+165.53s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_greek_n_x_sweep_reverse[slv-125.0]
+149.76s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_greek_n_x_sweep_reverse[heston-114.45]
+146.61s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_greek_n_x_sweep_reverse[heston-125.0]
+141.18s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_greek_n_x_sweep_reverse[heston-139.8]
+33.80s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_continuous_ki_pv_and_greeks[standard-slv-139.8]
+33.79s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_continuous_ki_pv_and_greeks[reverse-slv-114.45]
+33.62s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_continuous_ki_pv_and_greeks[standard-slv-114.45]
+33.60s call     test/test_asset/equity/engine_pde/test_vol_pde_reverse_continuous_ki.py::test_production_continuous_ki_pv_and_greeks[reverse-slv-139.8]
+183 passed in 533.41s (0:08:53)

@@ -1,0 +1,136 @@
+{
+  "backend": "c",
+  "linearity": [
+    {
+      "method": "clipped_cubic_control",
+      "spot": 80.0,
+      "pv": 79.59278304010876,
+      "ki_settlement": 0.9731953798070064,
+      "folded_increment": 0.9732376506737666,
+      "difference": 4.227086676011904e-05
+    },
+    {
+      "method": "clipped_cubic_control",
+      "spot": 90.0,
+      "pv": 92.86582106926863,
+      "ki_settlement": 0.6019434431210496,
+      "folded_increment": 0.6020103622135764,
+      "difference": 6.691909252676265e-05
+    },
+    {
+      "method": "clipped_cubic_control",
+      "spot": 100.0,
+      "pv": 99.68298126277138,
+      "ki_settlement": 0.2019676390889149,
+      "folded_increment": 0.20197802927468445,
+      "difference": 1.0390185769537652e-05
+    },
+    {
+      "method": "linear_characteristic",
+      "spot": 80.0,
+      "pv": 79.59065017051154,
+      "ki_settlement": 0.9726725288612658,
+      "folded_increment": 0.9726725288612528,
+      "difference": -1.2989609388114332e-14
+    },
+    {
+      "method": "linear_characteristic",
+      "spot": 90.0,
+      "pv": 92.93773441171066,
+      "ki_settlement": 0.5999682280216067,
+      "folded_increment": 0.5999682280216234,
+      "difference": 1.6764367671839864e-14
+    },
+    {
+      "method": "linear_characteristic",
+      "spot": 100.0,
+      "pv": 99.73076735660713,
+      "ki_settlement": 0.20073297523421074,
+      "folded_increment": 0.2007329752342315,
+      "difference": 2.0761170560490427e-14
+    }
+  ],
+  "refinement": [
+    {
+      "scheme": "semi_lagrangian",
+      "n_x": 160,
+      "n_v": 48,
+      "n_t": 192,
+      "pv": 92.80153786838663,
+      "ki_settlement": 0.6042304425458066,
+      "ki_ever": 0.6563258323425745
+    },
+    {
+      "scheme": "semi_lagrangian",
+      "n_x": 160,
+      "n_v": 96,
+      "n_t": 192,
+      "pv": 92.7827663321464,
+      "ki_settlement": 0.6047069221743483,
+      "ki_ever": 0.6568385415362736
+    },
+    {
+      "scheme": "semi_lagrangian",
+      "n_x": 160,
+      "n_v": 192,
+      "n_t": 192,
+      "pv": 92.77422465960858,
+      "ki_settlement": 0.6049048840706687,
+      "ki_ever": 0.6570001050455798
+    },
+    {
+      "scheme": "adaptive_upwind",
+      "n_x": 160,
+      "n_v": 192,
+      "n_t": 192,
+      "pv": 92.76650346730709,
+      "ki_settlement": 0.6051161632668809,
+      "ki_ever": 0.6571830789784894
+    }
+  ],
+  "checks": [
+    {
+      "n_v": 96,
+      "field": "pv",
+      "difference": 0.01626286483930528,
+      "allowance": 0.01,
+      "passed": false
+    },
+    {
+      "n_v": 96,
+      "field": "ki_settlement",
+      "difference": 0.00040924109253259733,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "n_v": 96,
+      "field": "ki_ever",
+      "difference": 0.0003445374422157421,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "n_v": 192,
+      "field": "pv",
+      "difference": 0.0077211923014886,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "n_v": 192,
+      "field": "ki_settlement",
+      "difference": 0.0002112791962122218,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "n_v": 192,
+      "field": "ki_ever",
+      "difference": 0.0001829739329095581,
+      "allowance": 0.0005,
+      "passed": true
+    }
+  ],
+  "passed": false
+}

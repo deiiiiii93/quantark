@@ -1,0 +1,37 @@
+{
+  "scope": "native 1D GBM continuous KI, Snowball, Phoenix, Memory Phoenix, absolute KO-reset",
+  "tests": {
+    "selected": 525,
+    "passed": 525,
+    "failed": 0,
+    "seconds": 67.82,
+    "workers": 4
+  },
+  "timing": {
+    "repetitions": 3,
+    "aggregation": "median",
+    "context": "cold, new engine each call",
+    "threads": 1,
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "comparison": "retained pointwise survival integral versus reflected native grid"
+  },
+  "source_sha256": {
+    "quantark/asset/equity/engine/continuous_ki_support.py": "181f94fab8454176fffe9982c7312cded9ac712626ea11b88e2ebe0e590399a7",
+    "quantark/asset/equity/engine/mc/snowball_mc_engine.py": "49057c926444a42819594be07df93932988f65f59d14d12258aded59794c8a11",
+    "quantark/asset/equity/engine/mc/phoenix_mc_engine.py": "98c6b4300851628921a9755e77ad16d20e4c8353fb3ee98e1c2ef35e58927a4d",
+    "quantark/asset/equity/engine/pde/core/prepare.py": "6808c2a0a0c0c06c5991f586a58dc80c7b0fd850c1e63cf94ce90f1346f6bffb",
+    "quantark/asset/equity/engine/pde/core/statistics/terminal.py": "831e2e10b838969b7ea0a8af89a50eb029ae49e79d4c295ca82b5b2aa0a12d89",
+    "quantark/asset/equity/engine/quad/snowball_quad_engine.py": "9c7864353a0985b3f1fa71c5576239adf4a7c9a26a0bdfe2ad9fab5b0f62d76f",
+    "quantark/asset/equity/engine/quad/phoenix_quad_engine.py": "3a40d20399a8e0ab44a806d5da8ba5d3cff1481e159fac4696fa2e905f2fc865",
+    "quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py": "20ef5a013f5e31537cccc9de78d4adfbc0f2e3972f20adb83e0fc3ffd2812270",
+    "quantark/asset/equity/engine/quad/v2/adapters.py": "7d6cf432c9d8a7692cdde6c312a27556d0ff2ec0b7300a522ef74e247c926647",
+    "quantark/asset/equity/engine/quad/v2/context.py": "4ed867636d87772374b409481a42179f6d326c9cfbe4e103042d27aab2dcc1ff",
+    "quantark/asset/equity/engine/quad/v2/continuous.py": "916efdfc9eaad901914ab3be4710ae018e202d772d82208f039ab6beda544ea1",
+    "quantark/asset/equity/engine/quad/v2/engine.py": "2292ea355c3fb2df779ad2ca5af489fa5d347e199c680cbf1839e77adc94fdbf",
+    "quantark/asset/equity/param/engine_params.py": "e08c9ab79d364d15e9db22f5531c75fa4f1bc2ade9421f50cabff0adfe38fe3d",
+    "quantark/asset/equity/param/quad_v2_params.py": "3db58cb86a671fc5fa6ec19232605af89506fef2daa3e391462b981be759a9e4",
+    "test/test_asset/equity/engine_quad/test_continuous_ki_capability_consistency.py": "b4ca111db983f39d89fd205216171f91b87c70415a65b36f7cf14af7fc5ed995"
+  },
+  "prior_failed_or_partial_ledgers_preserved": true
+}

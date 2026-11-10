@@ -213,17 +213,20 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         greek_min_n_v: int = 0,
         greek_min_steps_per_year: int = 0,
         barrier_greek_min_n_x: int = 0,
-        statistics: str = "refuse",
+        statistics: str = "native",
+        column_backend: str = "auto",
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
-        # spec 3B §5.6: the event statistics of a 2D solver are the flat-vol 1D march, reported
-        # only on request ("flat_vol_surrogate") with their provenance, or refused
-        if statistics not in ("refuse", "flat_vol_surrogate"):
+        # Native ADI statistics are the default; the legacy surrogate remains explicit.
+        if statistics not in ("native", "refuse", "flat_vol_surrogate"):
             raise ValidationError(
-                f"statistics must be 'refuse' or 'flat_vol_surrogate', got {statistics!r}"
+                f"statistics must be 'native', 'refuse' or 'flat_vol_surrogate', got {statistics!r}"
             )
         self._statistics = statistics
+        if column_backend not in ("auto", "scalar"):
+            raise ValidationError("column_backend must be auto or scalar")
+        self.column_backend = column_backend
         super().__init__(params=params or PDEParams())
         try:
             scheme = ADIScheme[scheme.upper()] if isinstance(scheme, str) else scheme
@@ -438,8 +441,8 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         clone._frozen_x_layout = clone._layer_binder().bind(request, market)
         return clone
 
-    def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
-        t_grid = np.linspace(0.0, float(T), self.n_t + 1)
+    def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float, time_grid=None):
+        t_grid = np.linspace(0.0, float(T), self.n_t + 1) if time_grid is None else np.asarray(time_grid, dtype=float)
         market = TermMarketContext.from_env(
             env,
             t_grid,
@@ -455,7 +458,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             self.model_params,
             self.n_x,
             self.n_v,
-            self.n_t,
+            len(t_grid) - 1,
             market_context=market,
             leverage=None,
             eta=1.0,
@@ -565,10 +568,15 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         npv: Optional[float] = None,
         streams: Optional[frozenset] = None,
     ):
-        if not isinstance(product, SnowballOption):
+        if not isinstance(product, self._event_stats_product_type()):
             return None
         if pricing_env is None:
             return None
+        if float(product.get_maturity(pricing_env)) <= 0.0:
+            return None
+        if self._statistics == "native":
+            from .vol_model_statistics import native_adi
+            return native_adi(self, product, pricing_env, event_stats=True, streams=streams, npv=npv)
         if self._statistics == "refuse":
             raise StatisticsRefused(
                 f"statistics for a 2D solver are not native; pass statistics='flat_vol_surrogate' to "
@@ -603,6 +611,12 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         from quantark.asset.equity.engine.pde.base_pde_solver import (
             PDESessionOutputs,
         )
+
+        if want_events and self._statistics == "native":
+            stats = self.calculate_event_stats(product, pricing_env, streams=streams)
+            if stats is not None:
+                return PDESessionOutputs(npv=float(stats.pv), solution=None,
+                    event_stats=stats, event_distribution=EventDistribution.from_autocallable_stats(stats))
 
         npv = float(self.price(product, pricing_env))
         stats = None
@@ -958,62 +972,8 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         knocked_in: bool,
     ):
         """Solve the live V0/V1 system and return its reusable readout surface."""
-        spot = float(pricing_env.spot)
-        # Valuation-date readout state: events at t=0 are deterministic at
-        # the known spot, so the readout uses the smooth 0+ surface captured
-        # by the hooks instead of interpolating across the nodal t=0 jump.
-        self._t0_pre_U = None
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        self._prepare_state(product, pricing_env, T, ki_continuous)
-
-        core = self._make_core(product, pricing_env, T)
-        if not (core.S_grid[0] <= spot <= core.S_grid[-1]):
-            raise ValidationError("spot falls outside the Heston/SLV Snowball PDE grid")
-        self._prepare_2d_continuous_ki_correction(core, product)
-
-        v1_snapshots: dict[float, np.ndarray] = {}
-        event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        from quantark.asset.equity.engine.pde.route_applicability import check_route_applicability
-        check_route_applicability(self.params, "2D")
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["2D"])
-        damped_keys = event_damped_step_keys(st, event_maps, core.N_T)
-
-        terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
-        U1 = core.solve(
-            is_call=True,
-            scheme=self.scheme,
-            theta=float(st.theta),
-            rannacher=st.terminal_damping_steps > 0,
-            terminal_override=terminal_v1,
-            boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=True),
-            step_hook=self._v1_hook(core, product, pricing_env, T, event_maps, v1_snapshots),
-            damped_step_keys=damped_keys,
-            damped_step_theta=float(st.event_theta),
-        )
-
-        if knocked_in:
-            surface = U1
-        else:
-            terminal_v0 = self._terminal_surface(core, product, pricing_env, knocked_in=False)
-            surface = core.solve(
-                is_call=True,
-                scheme=self.scheme,
-                theta=float(st.theta),
-                rannacher=st.terminal_damping_steps > 0,
-                terminal_override=terminal_v0,
-                boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=False),
-                step_hook=self._v0_hook(
-                    core, product, pricing_env, T, event_maps, v1_snapshots
-                ),
-                damped_step_keys=damped_keys,
-                damped_step_theta=float(st.event_theta),
-            )
-
-        read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface
-        return core, read_surface
+        from .vol_model_statistics import native_adi
+        return native_adi(self, product, pricing_env, fold=self._fold, return_surface=True)
 
     def _capture_t0_pre_event_surface(self, U, tau, T, event_maps) -> None:
         """Capture the smooth 0+ surface before valuation-date events land.
@@ -1251,8 +1211,8 @@ class HestonSLVSnowballPDESolver(SLVBarrierLeverageMixin, _Heston2DSnowballPDEBa
         super().__init__(model_params=model_params, **kwargs)
         self.leverage_surface = leverage_surface
 
-    def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
-        t_grid = np.linspace(0.0, float(T), self.n_t + 1)
+    def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float, time_grid=None):
+        t_grid = np.linspace(0.0, float(T), self.n_t + 1) if time_grid is None else np.asarray(time_grid, dtype=float)
         market = TermMarketContext.from_env(
             env,
             t_grid,
@@ -1268,7 +1228,7 @@ class HestonSLVSnowballPDESolver(SLVBarrierLeverageMixin, _Heston2DSnowballPDEBa
             self.model_params,
             self.n_x,
             self.n_v,
-            self.n_t,
+            len(t_grid) - 1,
             market_context=market,
             leverage=self.leverage_surface,
             eta=self.eta,

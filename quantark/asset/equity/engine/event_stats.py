@@ -181,8 +181,8 @@ class AutocallableEventStats:
         expected_discounted_ko_cashflow: Expected discounted KO redemption cashflow at each observation.
         ki_probability: LEGACY KI probability whose *definition differs by engine* — kept
             for backward compatibility. QUAD/PDE report P(KI ever AND never KO)
-            (the KI indicator is absorbed to 0 on any KO), while MC reports
-            P(KI ever). Prefer the two unambiguous, cross-engine-consistent fields
+            (the KI indicator is absorbed to 0 on any KO), while MC and legacy
+            QUAD V1 KO-reset report P(KI ever). Prefer the two explicit fields
             below; ``ki_probability`` is retained only so existing callers do not
             break.
         expected_discounted_maturity_cashflow: Expected discounted maturity cashflow (conditional on no KO).

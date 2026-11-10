@@ -178,6 +178,13 @@ def _geometry(adapter, solver, product, env, request, tau):
     adapter.market_checks(product, env, tau)                              # _solve's guard, before the grid
     market = solver.market_snapshot(product, env)                         # step 3
     grid_request = adapter.grid_request(product, market, tau, request)    # step 4
+    from .adapters.snowball import SnowballAdapter
+    from .adapters.base import continuous_knock_in
+    if isinstance(adapter, SnowballAdapter) and adapter.statistics_model == "flat_vol_1d" and continuous_knock_in(product):
+        from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+        nodes, solver._continuous_ki_model = continuous_time_grid(env, [tau], solver.params)
+        extra = tuple(sorted(set(grid_request.extra_times) | {t for t in nodes if 0 < t < tau}))
+        grid_request = replace(grid_request, extra_times=extra)
     return solve_state, market, grid_request
 
 

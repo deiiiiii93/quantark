@@ -6,19 +6,11 @@ terminal delay factor), and the valuation-instant short-circuits. One solve pric
 legs together; the product twins (AC14) pin that the folded cash is weighted exactly as the
 product's own cash.
 
-v1's event route is not one discretization with the v1 price everywhere, and the tests say where:
-
-* Snowball knock-out probabilities are read off the price lattice's own event weights, so
-  knock-out cash folds to round-off against the route (AC4 / AC5 at the spec bar).
-* The Snowball / Phoenix knock-in probability is a separate hard-mask estimator, first order in
-  the spacing (the price recursion's own knock-in weight barely moves with the grid). Cash that
-  splits the two maturity branches is checked against the route with its knock-in split replaced
-  by the price recursion's own weight (round-off), and the raw gap is shown to halve per doubling.
-* The Phoenix route runs the Snowball event recursion on the Snowball lattice alignment, not the
-  Phoenix price's joint coupon/knock-out projection on its own alignment: the knock-out gap is
-  third order in the spacing (shown) and the Phoenix parity bar is set by it.
-* KO-reset v1 reports one maturity outcome, so KO-reset parity is checked against the PDE 1D event
-  route at the engine-pair tolerance (spec AC6), with v1 at the 2001+ node grids those tests use.
+V1 KO and KI-settlement probabilities now use the pricing event operations,
+including the Phoenix coupon-inclusive lattice and joint projection. AC4 checks
+folded outcome cash against the actual reported probabilities at round-off.
+KO-reset still reports one maturity outcome, so its full cash-leg parity uses
+the PDE 1D event route at the engine-pair tolerance (spec AC6).
 """
 from copy import deepcopy
 from dataclasses import replace
@@ -53,13 +45,10 @@ CONVERGING = QuadParams(grid_points=501, auto_converge=True, convergence_rel_tol
 KO_RESET_V1 = QuadParams(grid_points=4001)
 #: the engine-pair tolerance of those tests (5e-3 on a 100 notional), relative to trade notional
 KO_RESET_PAIR = 5e-5
-#: the Phoenix route's lattice gap at 1001 nodes (third order in the spacing): on P_KO up to 1e-5
-#: near the knock-in level (3e-7 at the money); on 1e6 of legs 2.8e-8 of notional at the money and
-#: 2.3e-6 knocked in
-PHOENIX_P_GAP = 2e-5
-PHOENIX_LATTICE = 1e-7
-PHOENIX_KNOCKED_IN = 5e-6
-
+#: Price and statistics share event operations; allow floating-point readout error only.
+PHOENIX_P_GAP = 1e-10
+PHOENIX_LATTICE = 1e-9
+PHOENIX_KNOCKED_IN = 1e-9
 
 def _snowball(spot=100.0):
     return SnowballQuadEngine, make_snowball(ko_dates=(0.25, 0.5, 0.75, 1.0)), make_env(spot=spot)
@@ -100,8 +89,7 @@ FAMILIES = {**AUTOCALLABLES, **KO_RESETS, "converging_snowball": _converging_sno
 SPOTS = {"snowball": (100.0, 102.5, 76.0), "phoenix": (100.0, 104.5, 71.0),
          "dated_snowball": (100.0, 102.5, 76.0), "dated_phoenix": (100.0, 102.5, 76.0),
          "ko_reset": (100.0, 102.5, 81.0), "dated_ko_reset": (100.0, 102.5, 76.0)}
-#: the route's hard-mask knock-in estimator gap at 1001 nodes: continuous vs discrete knock-in
-KI_GAP = {"snowball": 2e-3, "phoenix": 2e-3, "dated_snowball": 1.5e-2, "dated_phoenix": 1.5e-2}
+KI_GAP = {family: 1e-10 for family in AUTOCALLABLES}
 
 
 def _hand_overlay(product, env, *, ko=0.0, no_ki=0.0, ki=0.0):
@@ -174,15 +162,6 @@ def _ki_weight(engine_factory, product, env):
     return (engine_factory().price(twin, env) - engine_factory().price(product, env)) / pay_df
 
 
-def _ki_corrected(dist, weight):
-    """The route's distribution with its knock-in split replaced by the price recursion's weight."""
-    maturity = _p(dist, EventType.MATURITY_NO_KO) + _p(dist, EventType.MATURITY_WITH_KI)
-    return replace(dist, probabilities={**dist.probabilities, EventType.MATURITY_WITH_KI: weight,
-                                        EventType.MATURITY_NO_KO: maturity - weight})
-
-
-# --- contract ----------------------------------------------------------------------------------
-
 def test_v1_engines_declare_folding():
     for engine in (SnowballQuadEngine, PhoenixQuadEngine, KOResetSnowballQuadEngine):
         assert engine.supports_cash_leg_folding is True
@@ -236,7 +215,7 @@ def test_knock_out_cash_adds_c_times_the_routes_knock_out_probability(family, sp
 
 @pytest.mark.parametrize("family", list(PHOENIXES))
 @pytest.mark.parametrize("spot_index", [0, 1, 2])
-def test_phoenix_knock_out_cash_matches_its_route_up_to_the_lattice_gap(family, spot_index):
+def test_phoenix_knock_out_cash_matches_its_route(family, spot_index):
     engine_cls, product, env = FAMILIES[family](SPOTS[family][spot_index])
     c = 2.5
     dist = _route(engine_cls(), product, env).event_distribution
@@ -245,7 +224,7 @@ def test_phoenix_knock_out_cash_matches_its_route_up_to_the_lattice_gap(family, 
 
 
 @pytest.mark.parametrize("family, spot", [("phoenix", 100.0), ("dated_phoenix", 100.0), ("dated_phoenix", 76.0)])
-def test_the_phoenix_route_gap_is_a_third_order_lattice_difference(family, spot):
+def test_phoenix_ko_probability_matches_price_on_each_lattice(family, spot):
     _, product, env = FAMILIES[family](spot)
     gaps = []
     for n in (1001, 2001, 4001):
@@ -253,12 +232,12 @@ def test_the_phoenix_route_gap_is_a_third_order_lattice_difference(family, spot)
         dist = _route(engine(), product, env).event_distribution
         weight = engine().price_folded(product, env, _hand_overlay(product, env, ko=1.0)) - engine().price(product, env)
         gaps.append(weight - _p(dist, EventType.KO))
-    assert gaps[0] / gaps[1] > 5.0 and gaps[1] / gaps[2] > 5.0
+    np.testing.assert_allclose(gaps, 0.0, rtol=0.0, atol=1e-11)
 
 
 @pytest.mark.parametrize("family", list(AUTOCALLABLES))
 @pytest.mark.parametrize("spot_index", [0, 1, 2])
-def test_knock_in_branch_weight_is_the_routes_up_to_its_estimator_gap(family, spot_index):
+def test_knock_in_branch_weight_matches_the_route(family, spot_index):
     """Knock-in cash adds c × the price recursion's own knock-in weight, additively with knock-out cash."""
     engine_cls, product, env = FAMILIES[family](SPOTS[family][spot_index])
     c = 2.5
@@ -271,9 +250,8 @@ def test_knock_in_branch_weight_is_the_routes_up_to_its_estimator_gap(family, sp
 
 
 @pytest.mark.parametrize("family", ["snowball", "dated_snowball"])
-def test_the_route_knock_in_gap_is_its_own_first_order_error(family):
-    """Doubling the lattice halves the gap while the price's own weight barely moves: it is the route's
-    hard-mask estimator, not the fold."""
+def test_snowball_ki_probability_matches_price_on_each_lattice(family):
+    """The route uses the price's KI projection at every grid resolution."""
     engine_cls, product, env = FAMILIES[family]()
     gaps, weights = [], []
     for n in (1001, 2001):
@@ -281,8 +259,7 @@ def test_the_route_knock_in_gap_is_its_own_first_order_error(family):
         dist = _route(factory(), product, env).event_distribution
         weights.append(_ki_weight(factory, product, env))
         gaps.append(weights[-1] - _p(dist, EventType.MATURITY_WITH_KI))
-    assert 0.35 < gaps[1] / gaps[0] < 0.65
-    assert abs(weights[1] - weights[0]) < 0.1 * abs(gaps[1])
+    np.testing.assert_allclose(gaps, 0.0, rtol=0.0, atol=1e-11)
 
 
 # --- AC5: parity with v1's own event route (Snowball / Phoenix) ---------------------------------
@@ -310,23 +287,17 @@ def test_folded_trade_matches_the_v1_event_route(family, quantity):
 
 
 @pytest.mark.parametrize("family", list(AUTOCALLABLES))
-def test_branch_splitting_legs_match_the_knock_in_corrected_route(family):
-    """With the route's knock-in split replaced by the price recursion's own weight, every leg agrees;
-    against the raw route the trade differs only by that estimator gap on the knock-in branch cash."""
+def test_branch_splitting_legs_match_the_unmodified_event_route(family):
+    """Use the reported KI split directly for cash-leg valuation."""
     engine_cls, product, env = FAMILIES[family]()
     route = _route(engine_cls(), product, env)
     dist = route.event_distribution
     legs = _legs(dist, env, splitting=True)
     assert any(_splits_maturity_branches(leg) for leg in legs)
-    weight = _ki_weight(engine_cls, product, env)
     overlay = fold_cash_legs(legs, product, env, quantity=1.0, unit_notional=100.0)
     folded = engine_cls().price_folded(product, env, overlay) + overlay.constant_pv
-    exact = route.npv + sum(leg.value(_ki_corrected(dist, weight), env, 100.0) for leg in legs)
-    assert abs(folded - exact) <= _parity_tolerance(family) * UNIT
-    raw = route.npv + sum(leg.value(dist, env, 100.0) for leg in legs)
-    ki_cash = overlay.maturity_ki.amount * env.get_discount_factor(overlay.maturity_ki.payment_time)
-    gap = weight - _p(dist, EventType.MATURITY_WITH_KI)
-    assert abs((folded - raw) - ki_cash * gap) <= _parity_tolerance(family) * UNIT
+    expected = route.npv + sum(leg.value(dist, env, 100.0) for leg in legs)
+    assert abs(folded - expected) <= _parity_tolerance(family) * UNIT
 
 
 # --- AC6: KO-reset against the PDE 1D event route -----------------------------------------------

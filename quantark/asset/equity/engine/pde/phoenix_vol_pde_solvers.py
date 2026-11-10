@@ -128,17 +128,20 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         grid_focus: str = "auto",
         pin_critical_spots: bool = False,
         v0_boundary: str = "degenerate_pde",
-        statistics: str = "refuse",
+        statistics: str = "native",
+        column_backend: str = "auto",
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
-        # spec 3B §5.6: the event statistics of a 2D solver are the flat-vol 1D march, reported
-        # only on request ("flat_vol_surrogate") with their provenance, or refused
-        if statistics not in ("refuse", "flat_vol_surrogate"):
+        # Native ADI statistics are the default; the legacy surrogate remains explicit.
+        if statistics not in ("native", "refuse", "flat_vol_surrogate"):
             raise ValidationError(
-                f"statistics must be 'refuse' or 'flat_vol_surrogate', got {statistics!r}"
+                f"statistics must be 'native', 'refuse' or 'flat_vol_surrogate', got {statistics!r}"
             )
         self._statistics = statistics
+        if column_backend not in ("auto", "scalar"):
+            raise ValidationError("column_backend must be auto or scalar")
+        self.column_backend = column_backend
         super().__init__(params=params or PDEParams())
         try:
             scheme = ADIScheme[scheme.upper()] if isinstance(scheme, str) else scheme
@@ -230,8 +233,8 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         clone._frozen_x_layout = clone._layer_binder().bind(request, market)
         return clone
 
-    def _make_core(self, product: PhoenixOption, env: PricingEnvironment, T: float):
-        t_grid = np.linspace(0.0, float(T), self.n_t + 1)
+    def _make_core(self, product: PhoenixOption, env: PricingEnvironment, T: float, time_grid=None):
+        t_grid = np.linspace(0.0, float(T), self.n_t + 1) if time_grid is None else np.asarray(time_grid, dtype=float)
         market = TermMarketContext.from_env(env, t_grid, ref_strike=None)
         x_nodes = self._layer_x_nodes(product, env, T)
         return HestonSLVADICore(
@@ -243,7 +246,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             self.model_params,
             self.n_x,
             self.n_v,
-            self.n_t,
+            len(t_grid) - 1,
             market_context=market,
             leverage=None,
             eta=1.0,
@@ -362,6 +365,11 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             return None
         if pricing_env is None:
             return None
+        if float(product.get_maturity(pricing_env)) <= 0.0:
+            return None
+        if self._statistics == "native":
+            from .vol_model_statistics import native_adi
+            return native_adi(self, product, pricing_env, event_stats=True, streams=streams, npv=npv)
         if self._statistics == "refuse":
             raise StatisticsRefused(
                 f"statistics for a 2D solver are not native; pass statistics='flat_vol_surrogate' to "
@@ -402,6 +410,12 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             PDESessionOutputs,
         )
 
+        if want_events and self._statistics == "native":
+            stats = self.calculate_event_stats(product, pricing_env, streams=streams)
+            if stats is not None:
+                return PDESessionOutputs(npv=float(stats.pv), solution=None,
+                    event_stats=stats, event_distribution=EventDistribution.from_autocallable_stats(stats))
+
         npv = float(self.price(product, pricing_env))
         stats = None
         dist = None
@@ -421,12 +435,8 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         return BaseEngine.calculate_greeks(self, product, pricing_env)
 
     def _refuse_unsupported_product(self, product) -> None:
-        """The 2D route marches no coupon memory: refuse it before any valuation-instant short-circuit."""
-        if product.has_memory_coupon:
-            raise ValidationError(
-                f"{self._solver_name} supports non-memory Phoenix coupons only; "
-                "use PhoenixPDESolver or a Phoenix MC engine for memory coupons."
-            )
+        # Coupon memory uses the family's native arrears-linear event fan.
+        return None
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -443,77 +453,8 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             return self._calculate_terminal_value(product, spot, pricing_env)
         if self._valuation_decision(product, pricing_env).knocked_out:
             return self._get_immediate_ko_payoff(product, pricing_env)
-        # Valuation-date readout state: events at t=0 are deterministic at the
-        # known spot, so the readout uses the smooth 0+ surface captured by
-        # the hooks (plus a pointwise coupon transition) instead of
-        # interpolating across the nodal t=0 jump.
-        self._t0_pre_U = None
-        self._t0_readout_override = None
-
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        knocked_in = self._is_knocked_in_at_valuation(
-            product, spot, pricing_env, ki_continuous=ki_continuous
-        )
-        self._prepare_state(product, pricing_env, T, ki_continuous)
-
-        core = self._make_core(product, pricing_env, T)
-        if not (core.S_grid[0] <= spot <= core.S_grid[-1]):
-            raise ValidationError("spot falls outside the Heston/SLV Phoenix PDE grid")
-        self._prepare_2d_continuous_ki_correction(core, product)
-
-        event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        from quantark.asset.equity.engine.pde.route_applicability import check_route_applicability
-        check_route_applicability(self.params, "2D")
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["2D"])
-        damped_keys = event_damped_step_keys(st, event_maps, core.N_T)
-        v1_snapshots: dict[float, np.ndarray] = {}
-
-        terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
-        U1 = core.solve(
-            is_call=True,
-            scheme=self.scheme,
-            theta=float(st.theta),
-            rannacher=st.terminal_damping_steps > 0,
-            terminal_override=terminal_v1,
-            boundary_hook=self._boundary_hook(
-                core, product, pricing_env, knocked_in=True
-            ),
-            step_hook=self._v1_hook(
-                core, product, pricing_env, T, event_maps, v1_snapshots
-            ),
-            damped_step_keys=damped_keys,
-            damped_step_theta=float(st.event_theta),
-        )
-
-        if knocked_in:
-            surface = U1
-        else:
-            terminal_v0 = self._terminal_surface(
-                core, product, pricing_env, knocked_in=False
-            )
-            surface = core.solve(
-                is_call=True,
-                scheme=self.scheme,
-                theta=float(st.theta),
-                rannacher=st.terminal_damping_steps > 0,
-                terminal_override=terminal_v0,
-                boundary_hook=self._boundary_hook(
-                    core, product, pricing_env, knocked_in=False
-                ),
-                step_hook=self._v0_hook(
-                    core, product, pricing_env, T, event_maps, v1_snapshots
-                ),
-                damped_step_keys=damped_keys,
-                damped_step_theta=float(st.event_theta),
-            )
-
-        if self._t0_readout_override is not None:
-            return float(self._t0_readout_override)
-        read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface
-        return float(core.interpolate(read_surface, np.log(spot), self.model_params.v0))
+        from .vol_model_statistics import native_adi
+        return native_adi(self, product, pricing_env, fold=self._fold)
 
     def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
         """Per-unit NPV with ``overlay``'s cash legs folded into the 2D march (``price_folded_2d``)."""
@@ -1011,9 +952,10 @@ class HestonSLVPhoenixPDESolver(SLVBarrierLeverageMixin, _Heston2DPhoenixPDEBase
         self.leverage_surface = leverage_surface
         self.eta = float(eta)
 
-    def _make_core(self, product: PhoenixOption, env: PricingEnvironment, T: float):
-        t_grid = np.linspace(0.0, float(T), self.n_t + 1)
+    def _make_core(self, product: PhoenixOption, env: PricingEnvironment, T: float, time_grid=None):
+        t_grid = np.linspace(0.0, float(T), self.n_t + 1) if time_grid is None else np.asarray(time_grid, dtype=float)
         market = TermMarketContext.from_env(env, t_grid, ref_strike=None)
+        x_nodes = self._layer_x_nodes(product, env, T)
         return HestonSLVADICore(
             float(env.spot),
             float(product.strike),
@@ -1023,7 +965,7 @@ class HestonSLVPhoenixPDESolver(SLVBarrierLeverageMixin, _Heston2DPhoenixPDEBase
             self.model_params,
             self.n_x,
             self.n_v,
-            self.n_t,
+            len(t_grid) - 1,
             market_context=market,
             leverage=self.leverage_surface,
             eta=self.eta,
@@ -1035,4 +977,5 @@ class HestonSLVPhoenixPDESolver(SLVBarrierLeverageMixin, _Heston2DPhoenixPDEBase
                 if self.pin_critical_spots
                 else None
             ),
+            x_nodes=x_nodes,
         )

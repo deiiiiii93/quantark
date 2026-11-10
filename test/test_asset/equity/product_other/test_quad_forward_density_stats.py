@@ -320,7 +320,10 @@ def test_forward_knocked_in_at_valuation_latches():
         valuation_date=datetime(2026, 6, 30),
     )
     stacked, forward = _stats_pair(SnowballQuadEngine, product, e)
-    assert forward.ki_probability == 1.0 == stacked.ki_probability
+    # Carried KI latches the monitoring state, not survival through future KO.
+    for stats in (stacked, forward):
+        assert stats.ki_probability == pytest.approx(1.0 - stats.ko_probability.sum(), abs=1e-8)
+        assert stats.ki_survive_knocked_in_probability == stats.ki_probability
     assert forward.ki_ever_probability == 1.0
     assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
 

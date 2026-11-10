@@ -776,7 +776,7 @@ def test_snowball_vol_model_pde_engines_calculate_event_stats():
         HestonSLVSnowballPDESolver(hp, _unit_leverage(), n_x=48, n_v=18, n_t=16, statistics="flat_vol_surrogate"),
     ]
     with pytest.raises(StatisticsRefused):
-        HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16).calculate_event_stats(product, env)
+        HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16, statistics="refuse").calculate_event_stats(product, env)
 
     for engine in engines:
         price = float(engine.price(product, env))

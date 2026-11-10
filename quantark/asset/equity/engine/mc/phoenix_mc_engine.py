@@ -556,6 +556,11 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
         # ulp apart become one node; a grid without such a pair is the sorted set of its times, bit for bit.
         all_times = merge_time_nodes(ko_grid_times + ki_grid_times + [T], pin=T)
 
+        if ki_continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            all_times, self._continuous_ki_model = continuous_time_grid(pricing_env, all_times, self.params)
+            all_times = merge_time_nodes(all_times, pin=T)
+
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
 
@@ -612,6 +617,10 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
             vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
         else:
             vol_in, rrf_in, div_in = sigma, r, q
+
+        # The continuous bridge must use the same interval variance as GBM.
+        # This is one vector, not another paths-sized allocation.
+        self._native_ki_step_variance = np.square(np.asarray(vol_in)) * dt_array
 
         generator = GBMPathGenerator(
             initial_value=S,
@@ -702,7 +711,11 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
         the scalar ``sigma`` the bridge was handed is the right one, which it
         is exactly when the diffusion is that constant.
         """
-        return None
+        variance = getattr(self, "_native_ki_step_variance", None)
+        n_steps = paths.shape[1] - 1
+        if variance is None or len(variance) < n_steps:
+            return None
+        return np.broadcast_to(variance[:n_steps], (len(paths), n_steps))
 
     def _check_ki_barriers_continuous_with_bridge(
         self,

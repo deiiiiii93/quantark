@@ -1,0 +1,1314 @@
+{
+  "date": "2026-11-10",
+  "method": "Incremental cash through actual price_folded on unchanged original products; MC 40000 paths, seed 917",
+  "results": {
+    "ordinary_before": [
+      {
+        "case": "snowball",
+        "engine": "SnowballMCEngine",
+        "ki_ever": 0.2348,
+        "ki_reported": 0.195,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6350000000000051,
+          "ki": 0.1950000000000074,
+          "no_ki": 0.1700000000000017
+        },
+        "ki_gap": 7.382983113757291e-15,
+        "ko_gap": 5.218048215738236e-15,
+        "independent_partition_sum": 1.0000000000000142,
+        "mixed_partition_sum": 1.0000000000000016,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.11916300002485514
+      },
+      {
+        "case": "snowball",
+        "engine": "SnowballPDESolver",
+        "ki_ever": 0.23513143210308943,
+        "ki_reported": 0.19698305593766033,
+        "ko_reported": 0.6336403480028633,
+        "price_probabilities": {
+          "ko": 0.6336403480027855,
+          "ki": 0.19698305593757937,
+          "no_ki": 0.1693765961954341
+        },
+        "ki_gap": -8.096301407078954e-14,
+        "ko_gap": -7.782663402622347e-14,
+        "independent_partition_sum": 1.000000000135799,
+        "mixed_partition_sum": 1.0000000001359577,
+        "ledger_residual": 1.3500311979441904e-13,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.4369944999925792
+      },
+      {
+        "case": "snowball",
+        "engine": "SnowballQuadEngine",
+        "ki_ever": 0.24965324296116256,
+        "ki_reported": 0.20009797502334223,
+        "ko_reported": 0.6339278289512114,
+        "price_probabilities": {
+          "ko": 0.6339278289512009,
+          "ki": 0.19746607845171127,
+          "no_ki": 0.16860609259701675
+        },
+        "ki_gap": -0.0026318965716309595,
+        "ko_gap": -1.0436096431476471e-14,
+        "independent_partition_sum": 0.999999999999929,
+        "mixed_partition_sum": 1.0026318965715704,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.019905374851077795
+      },
+      {
+        "case": "snowball",
+        "engine": "SnowballQuadEngineV2",
+        "ki_ever": 0.2002835938958799,
+        "ki_reported": 0.1969860411093002,
+        "ko_reported": 0.6336432049914508,
+        "price_probabilities": {
+          "ko": 0.633643204991472,
+          "ki": 0.19698604110931228,
+          "no_ki": 0.16937075389924416
+        },
+        "ki_gap": 1.2073675392798577e-14,
+        "ko_gap": 2.120525977034049e-14,
+        "independent_partition_sum": 1.0000000000000284,
+        "mixed_partition_sum": 0.9999999999999951,
+        "ledger_residual": 1.4210854715202004e-14,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.0407482092268765
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixMCEngine",
+        "ki_ever": 0.049425,
+        "ki_reported": 0.04595,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6349999999999999,
+          "ki": 0.045949999999999935,
+          "no_ki": 0.31905
+        },
+        "ki_gap": -6.245004513516506e-17,
+        "ko_gap": 0.0,
+        "independent_partition_sum": 0.9999999999999998,
+        "mixed_partition_sum": 1.0,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.38124545803293586
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixPDESolver",
+        "ki_ever": 0.04977197831909888,
+        "ki_reported": 0.04604770547996273,
+        "ko_reported": 0.6336403530993381,
+        "price_probabilities": {
+          "ko": 0.6336403530993372,
+          "ki": 0.04604770547996284,
+          "no_ki": 0.3203119415567172
+        },
+        "ki_gap": 1.1102230246251565e-16,
+        "ko_gap": -8.881784197001252e-16,
+        "independent_partition_sum": 1.0000000001360172,
+        "mixed_partition_sum": 1.000000000136018,
+        "ledger_residual": 8.881784197001252e-16,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.5104736252687871
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixQuadEngine",
+        "ki_ever": 0.04507640393408277,
+        "ki_reported": 0.041099266912713296,
+        "ko_reported": 0.6339125638992871,
+        "price_probabilities": {
+          "ko": 0.6339311348008625,
+          "ki": 0.04636203049907195,
+          "no_ki": 0.3197068347000851
+        },
+        "ki_gap": 0.005262763586358653,
+        "ko_gap": 1.857090157542096e-05,
+        "independent_partition_sum": 1.0000000000000195,
+        "mixed_partition_sum": 0.9947186655120854,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.04516429174691439
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_ever": 0.04605034578102256,
+        "ki_reported": 0.046042909687427636,
+        "ko_reported": 0.6336432049914507,
+        "price_probabilities": {
+          "ko": 0.6336432049914513,
+          "ki": 0.04604290968742819,
+          "no_ki": 0.3203138853211215
+        },
+        "ki_gap": 5.551115123125783e-16,
+        "ko_gap": 6.661338147750939e-16,
+        "independent_partition_sum": 1.0000000000000009,
+        "mixed_partition_sum": 0.9999999999999998,
+        "ledger_residual": 5.551115123125783e-16,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.058582209050655365
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixMCEngine",
+        "ki_ever": 0.049425,
+        "ki_reported": 0.04595,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6349999999999999,
+          "ki": 0.045950000000000046,
+          "no_ki": 0.31905
+        },
+        "ki_gap": 4.85722573273506e-17,
+        "ko_gap": 0.0,
+        "independent_partition_sum": 1.0,
+        "mixed_partition_sum": 1.0,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.3856958341784775
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixPDESolver",
+        "ki_ever": 0.04977197831909888,
+        "ki_reported": 0.04604770547996273,
+        "ko_reported": 0.6336403530993381,
+        "price_probabilities": {
+          "ko": 0.6336403530993383,
+          "ki": 0.046047705479963175,
+          "no_ki": 0.32031194155671877
+        },
+        "ki_gap": 4.440892098500626e-16,
+        "ko_gap": 2.220446049250313e-16,
+        "independent_partition_sum": 1.0000000001360203,
+        "mixed_partition_sum": 1.0000000001360196,
+        "ledger_residual": 2.220446049250313e-16,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.6678813747130334
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixQuadEngine",
+        "ki_ever": 0.04507640393408277,
+        "ki_reported": 0.041099266912713296,
+        "ko_reported": 0.6339125638992871,
+        "price_probabilities": {
+          "ko": 0.6339311348008406,
+          "ki": 0.04636203049906029,
+          "no_ki": 0.31970683470007694
+        },
+        "ki_gap": 0.005262763586346995,
+        "ko_gap": 1.8570901553549568e-05,
+        "independent_partition_sum": 0.9999999999999778,
+        "mixed_partition_sum": 0.9947186655120772,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.06877241702750325
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_ever": 0.04605034578102256,
+        "ki_reported": 0.046042909687427636,
+        "ko_reported": 0.6336432049914507,
+        "price_probabilities": {
+          "ko": 0.6336432049914509,
+          "ki": 0.0460429096874273,
+          "no_ki": 0.3203138853211218
+        },
+        "ki_gap": -3.3306690738754696e-16,
+        "ko_gap": 2.220446049250313e-16,
+        "independent_partition_sum": 1.0,
+        "mixed_partition_sum": 1.0,
+        "ledger_residual": 1.2212453270876722e-15,
+        "price_vs_stats_pv": -1.1102230246251565e-16,
+        "seconds": 0.2613605000078678
+      },
+      {
+        "case": "ko_reset",
+        "engine": "SnowballMCEngine",
+        "ki_ever": 0.156525,
+        "ki_reported": 0.108775,
+        "ko_reported": 0.660375,
+        "price_probabilities": {
+          "ko": 0.6603750000000019,
+          "ki": 0.10877499999999429,
+          "no_ki": 0.23085000000000377
+        },
+        "ki_gap": -5.703770789011742e-15,
+        "ko_gap": 1.887379141862766e-15,
+        "independent_partition_sum": 1.0,
+        "mixed_partition_sum": 1.0000000000000038,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.4747018329799175
+      },
+      {
+        "case": "ko_reset",
+        "engine": "KOResetSnowballPDESolver",
+        "ki_ever": 0.15770510085444306,
+        "ki_reported": 0.11049802431896437,
+        "ko_reported": 0.6617897891052469,
+        "price_probabilities": {
+          "ko": 0.661789789105157,
+          "ki": 0.11049802431884359,
+          "no_ki": 0.22771218947242744
+        },
+        "ki_gap": -1.2077838729140922e-13,
+        "ko_gap": -8.992806499463768e-14,
+        "independent_partition_sum": 1.000000002896428,
+        "mixed_partition_sum": 1.0000000028966387,
+        "ledger_residual": 8.08242361927114e-14,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 3.3766813748516142
+      },
+      {
+        "case": "ko_reset",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_ever": 0.1576317559941174,
+        "ki_reported": 0.11040896688884423,
+        "ko_reported": 0.6620455756200369,
+        "price_probabilities": {
+          "ko": 0.6620455756201977,
+          "ki": 0.1104089668890822,
+          "no_ki": 0.22754545749131694
+        },
+        "ki_gap": 2.379624275405945e-13,
+        "ko_gap": 1.6087131626818518e-13,
+        "independent_partition_sum": 1.0000000000005969,
+        "mixed_partition_sum": 1.000000000000198,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 1.124042958021164
+      },
+      {
+        "case": "ko_reset",
+        "engine": "KOResetSnowballQuadEngineV2",
+        "ki_ever": 0.13950598014703708,
+        "ki_reported": 0.11050838283844046,
+        "ko_reported": 0.6618144337412799,
+        "price_probabilities": {
+          "ko": 0.6618144337413412,
+          "ki": 0.11050838283847497,
+          "no_ki": 0.22767718342034016
+        },
+        "ki_gap": 3.4514058278034554e-14,
+        "ko_gap": 6.128431095930864e-14,
+        "independent_partition_sum": 1.0000000000001563,
+        "mixed_partition_sum": 1.0000000000000604,
+        "ledger_residual": -1.2789769243681803e-13,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 1.1224799160845578
+      }
+    ],
+    "ordinary_after": [
+      {
+        "case": "snowball",
+        "engine": "SnowballMCEngine",
+        "ki_ever": 0.2348,
+        "ki_reported": 0.195,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6350000000000051,
+          "ki": 0.1950000000000074,
+          "no_ki": 0.1700000000000017
+        },
+        "ki_gap": 7.382983113757291e-15,
+        "ko_gap": 5.218048215738236e-15,
+        "independent_partition_sum": 1.0000000000000142,
+        "mixed_partition_sum": 1.0000000000000016,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.13708241609856486
+      },
+      {
+        "case": "snowball",
+        "engine": "SnowballPDESolver",
+        "ki_ever": 0.23513143210308943,
+        "ki_reported": 0.19698305593766033,
+        "ko_reported": 0.6336403480028633,
+        "price_probabilities": {
+          "ko": 0.6336403480027855,
+          "ki": 0.19698305593757937,
+          "no_ki": 0.1693765961954341
+        },
+        "ki_gap": -8.096301407078954e-14,
+        "ko_gap": -7.782663402622347e-14,
+        "independent_partition_sum": 1.000000000135799,
+        "mixed_partition_sum": 1.0000000001359577,
+        "ledger_residual": 1.3500311979441904e-13,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.4627104583196342
+      },
+      {
+        "case": "snowball",
+        "engine": "SnowballQuadEngine",
+        "ki_ever": 0.2357567387913592,
+        "ki_reported": 0.19746607845173542,
+        "ko_reported": 0.6339278289512114,
+        "price_probabilities": {
+          "ko": 0.6339278289512009,
+          "ki": 0.19746607845171127,
+          "no_ki": 0.16860609259701675
+        },
+        "ki_gap": -2.4147350785597155e-14,
+        "ko_gap": -1.0436096431476471e-14,
+        "independent_partition_sum": 0.999999999999929,
+        "mixed_partition_sum": 0.9999999999999636,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.01885120803490281
+      },
+      {
+        "case": "snowball",
+        "engine": "SnowballQuadEngineV2",
+        "ki_ever": 0.23513567153089437,
+        "ki_reported": 0.1969860411093002,
+        "ko_reported": 0.6336432049914508,
+        "price_probabilities": {
+          "ko": 0.633643204991472,
+          "ki": 0.19698604110931228,
+          "no_ki": 0.16937075389924416
+        },
+        "ki_gap": 1.2073675392798577e-14,
+        "ko_gap": 2.120525977034049e-14,
+        "independent_partition_sum": 1.0000000000000284,
+        "mixed_partition_sum": 0.9999999999999951,
+        "ledger_residual": 1.4210854715202004e-14,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.04952620901167393
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixMCEngine",
+        "ki_ever": 0.049425,
+        "ki_reported": 0.04595,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6349999999999999,
+          "ki": 0.045949999999999935,
+          "no_ki": 0.31905
+        },
+        "ki_gap": -6.245004513516506e-17,
+        "ko_gap": 0.0,
+        "independent_partition_sum": 0.9999999999999998,
+        "mixed_partition_sum": 1.0,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.38606191612780094
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixPDESolver",
+        "ki_ever": 0.04977197831909888,
+        "ki_reported": 0.04604770547996273,
+        "ko_reported": 0.6336403530993381,
+        "price_probabilities": {
+          "ko": 0.6336403530993372,
+          "ki": 0.04604770547996284,
+          "no_ki": 0.3203119415567172
+        },
+        "ki_gap": 1.1102230246251565e-16,
+        "ko_gap": -8.881784197001252e-16,
+        "independent_partition_sum": 1.0000000001360172,
+        "mixed_partition_sum": 1.000000000136018,
+        "ledger_residual": 8.881784197001252e-16,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.5336568746715784
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixQuadEngine",
+        "ki_ever": 0.050045336574797566,
+        "ki_reported": 0.04636203049906792,
+        "ko_reported": 0.6339311348008558,
+        "price_probabilities": {
+          "ko": 0.6339311348008625,
+          "ki": 0.04636203049907195,
+          "no_ki": 0.3197068347000851
+        },
+        "ki_gap": 4.0314973581701e-15,
+        "ko_gap": 6.661338147750939e-15,
+        "independent_partition_sum": 1.0000000000000195,
+        "mixed_partition_sum": 1.0000000000000089,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.054451874922961
+      },
+      {
+        "case": "phoenix",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_ever": 0.049766373655096556,
+        "ki_reported": 0.046042909687427636,
+        "ko_reported": 0.6336432049914507,
+        "price_probabilities": {
+          "ko": 0.6336432049914513,
+          "ki": 0.04604290968742819,
+          "no_ki": 0.3203138853211215
+        },
+        "ki_gap": 5.551115123125783e-16,
+        "ko_gap": 6.661338147750939e-16,
+        "independent_partition_sum": 1.0000000000000009,
+        "mixed_partition_sum": 0.9999999999999998,
+        "ledger_residual": 5.551115123125783e-16,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.08607437508180737
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixMCEngine",
+        "ki_ever": 0.049425,
+        "ki_reported": 0.04595,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6349999999999999,
+          "ki": 0.045950000000000046,
+          "no_ki": 0.31905
+        },
+        "ki_gap": 4.85722573273506e-17,
+        "ko_gap": 0.0,
+        "independent_partition_sum": 1.0,
+        "mixed_partition_sum": 1.0,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.39196775015443563
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixPDESolver",
+        "ki_ever": 0.04977197831909888,
+        "ki_reported": 0.04604770547996273,
+        "ko_reported": 0.6336403530993381,
+        "price_probabilities": {
+          "ko": 0.6336403530993383,
+          "ki": 0.046047705479963175,
+          "no_ki": 0.32031194155671877
+        },
+        "ki_gap": 4.440892098500626e-16,
+        "ko_gap": 2.220446049250313e-16,
+        "independent_partition_sum": 1.0000000001360203,
+        "mixed_partition_sum": 1.0000000001360196,
+        "ledger_residual": 2.220446049250313e-16,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.7121254587545991
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixQuadEngine",
+        "ki_ever": 0.050045336574797566,
+        "ki_reported": 0.04636203049906792,
+        "ko_reported": 0.6339311348008558,
+        "price_probabilities": {
+          "ko": 0.6339311348008406,
+          "ki": 0.04636203049906029,
+          "no_ki": 0.31970683470007694
+        },
+        "ki_gap": -7.625844400394044e-15,
+        "ko_gap": -1.5210055437364645e-14,
+        "independent_partition_sum": 0.9999999999999778,
+        "mixed_partition_sum": 1.0000000000000007,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.10310308262705803
+      },
+      {
+        "case": "phoenix_memory",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_ever": 0.049766373655096556,
+        "ki_reported": 0.046042909687427636,
+        "ko_reported": 0.6336432049914507,
+        "price_probabilities": {
+          "ko": 0.6336432049914509,
+          "ki": 0.0460429096874273,
+          "no_ki": 0.3203138853211218
+        },
+        "ki_gap": -3.3306690738754696e-16,
+        "ko_gap": 2.220446049250313e-16,
+        "independent_partition_sum": 1.0,
+        "mixed_partition_sum": 1.0,
+        "ledger_residual": 1.2212453270876722e-15,
+        "price_vs_stats_pv": -1.1102230246251565e-16,
+        "seconds": 0.32036508340388536
+      },
+      {
+        "case": "ko_reset",
+        "engine": "SnowballMCEngine",
+        "ki_ever": 0.156525,
+        "ki_reported": 0.108775,
+        "ko_reported": 0.660375,
+        "price_probabilities": {
+          "ko": 0.6603750000000019,
+          "ki": 0.10877499999999429,
+          "no_ki": 0.23085000000000377
+        },
+        "ki_gap": -5.703770789011742e-15,
+        "ko_gap": 1.887379141862766e-15,
+        "independent_partition_sum": 1.0,
+        "mixed_partition_sum": 1.0000000000000038,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 0.4813107503578067
+      },
+      {
+        "case": "ko_reset",
+        "engine": "KOResetSnowballPDESolver",
+        "ki_ever": 0.15770510085444306,
+        "ki_reported": 0.11049802431896437,
+        "ko_reported": 0.6617897891052469,
+        "price_probabilities": {
+          "ko": 0.661789789105157,
+          "ki": 0.11049802431884359,
+          "no_ki": 0.22771218947242744
+        },
+        "ki_gap": -1.2077838729140922e-13,
+        "ko_gap": -8.992806499463768e-14,
+        "independent_partition_sum": 1.000000002896428,
+        "mixed_partition_sum": 1.0000000028966387,
+        "ledger_residual": 8.08242361927114e-14,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 3.4607548750936985
+      },
+      {
+        "case": "ko_reset",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_ever": 0.1576317559941174,
+        "ki_reported": 0.11040896688884423,
+        "ko_reported": 0.6620455756200369,
+        "price_probabilities": {
+          "ko": 0.6620455756201977,
+          "ki": 0.1104089668890822,
+          "no_ki": 0.22754545749131694
+        },
+        "ki_gap": 2.379624275405945e-13,
+        "ko_gap": 1.6087131626818518e-13,
+        "independent_partition_sum": 1.0000000000005969,
+        "mixed_partition_sum": 1.000000000000198,
+        "ledger_residual": 0.0,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 1.1403523748740554
+      },
+      {
+        "case": "ko_reset",
+        "engine": "KOResetSnowballQuadEngineV2",
+        "ki_ever": 0.15772483092777567,
+        "ki_reported": 0.11050838283844046,
+        "ko_reported": 0.6618144337412799,
+        "price_probabilities": {
+          "ko": 0.6618144337413412,
+          "ki": 0.11050838283847497,
+          "no_ki": 0.22767718342034016
+        },
+        "ki_gap": 3.4514058278034554e-14,
+        "ko_gap": 6.128431095930864e-14,
+        "independent_partition_sum": 1.0000000000001563,
+        "mixed_partition_sum": 1.0000000000000604,
+        "ledger_residual": -1.2789769243681803e-13,
+        "price_vs_stats_pv": 0.0,
+        "seconds": 1.636042125057429
+      }
+    ],
+    "edges_before": [
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballMCEngine",
+        "ki_reported": 0.365,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6349999999999909,
+          "ki": 0.3649999999999949,
+          "no_ki": 0.0
+        },
+        "ki_gap": -5.10702591327572e-15,
+        "ko_gap": -8.992806499463768e-15,
+        "mixed_sum": 0.9999999999999999
+      },
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballPDESolver",
+        "ki_reported": 0.3663596770849597,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336403230510576,
+        "price_probabilities": {
+          "ko": 0.6336403230510825,
+          "ki": 0.36635967708502903,
+          "no_ki": 0.0
+        },
+        "ki_gap": 6.933342788784103e-14,
+        "ko_gap": 2.4980018054066022e-14,
+        "mixed_sum": 1.0000000001360172
+      },
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballQuadEngine",
+        "ki_reported": 1.0,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6339124472716149,
+        "price_probabilities": {
+          "ko": 0.6339124472715838,
+          "ki": 0.36608755272834514,
+          "no_ki": 0.0
+        },
+        "ki_gap": -0.6339124472716549,
+        "ko_gap": -3.108624468950438e-14,
+        "mixed_sum": 1.6339124472716149
+      },
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballQuadEngineV2",
+        "ki_reported": 0.36635679500854906,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336432049914508,
+        "price_probabilities": {
+          "ko": 0.6336432049914862,
+          "ki": 0.36635679500855645,
+          "no_ki": 0.0
+        },
+        "ki_gap": 7.382983113757291e-15,
+        "ko_gap": 3.5416114485542494e-14,
+        "mixed_sum": 0.9999999999999998
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixMCEngine",
+        "ki_reported": 0.365,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6350000000000002,
+          "ki": 0.3650000000000002,
+          "no_ki": 0.0
+        },
+        "ki_gap": 2.220446049250313e-16,
+        "ko_gap": 3.3306690738754696e-16,
+        "mixed_sum": 0.9999999999999999
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixPDESolver",
+        "ki_reported": 0.36635964721031444,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336403529257034,
+        "price_probabilities": {
+          "ko": 0.6336403529257013,
+          "ki": 0.3663596472103152,
+          "no_ki": 0.0
+        },
+        "ki_gap": 7.771561172376096e-16,
+        "ko_gap": -2.1094237467877974e-15,
+        "mixed_sum": 1.0000000001360179
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixQuadEngine",
+        "ki_reported": 1.0,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6339124472716149,
+        "price_probabilities": {
+          "ko": 0.6339311348008585,
+          "ki": 0.3660688651991446,
+          "no_ki": 0.0
+        },
+        "ki_gap": -0.6339311348008554,
+        "ko_gap": 1.8687529243610612e-05,
+        "mixed_sum": 1.6339124472716149
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_reported": 0.36635679500854845,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336432049914507,
+        "price_probabilities": {
+          "ko": 0.6336432049914551,
+          "ki": 0.36635679500855245,
+          "no_ki": 0.0
+        },
+        "ki_gap": 3.9968028886505635e-15,
+        "ko_gap": 4.440892098500626e-15,
+        "mixed_sum": 0.9999999999999991
+      },
+      {
+        "case": "ko_reset_overlapping_barriers_default",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_reported": 0.004907650239687806,
+        "ki_ever": 0.3024712905468692,
+        "ko_reported": 0.9950923497603493,
+        "price_probabilities": {
+          "ko": 0.995964292853543,
+          "ki": 0.004035707146442746,
+          "no_ki": 0.0
+        },
+        "ki_gap": -0.0008719430932450593,
+        "ko_gap": 0.0008719430931937167,
+        "mixed_sum": 1.000000000000037
+      },
+      {
+        "case": "ko_reset_overlapping_barriers_hard",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_reported": 0.0045394999270398795,
+        "ki_ever": 0.30719073031644206,
+        "ko_reported": 0.9954605000729976,
+        "price_probabilities": {
+          "ko": 0.9954605000729799,
+          "ki": 0.004539499927034285,
+          "no_ki": 0.0
+        },
+        "ki_gap": -5.594483210025203e-15,
+        "ko_gap": -1.765254609153999e-14,
+        "mixed_sum": 1.0000000000000375
+      },
+      {
+        "case": "snowball_V2_ever_definition",
+        "reported_ever": 0.2002835938958799,
+        "full_path_ever": 0.23513567153089393
+      },
+      {
+        "case": "phoenix_V2_ever_definition",
+        "reported_ever": 0.04605034578102256,
+        "full_path_ever": 0.049766373655096605
+      },
+      {
+        "case": "phoenix_memory_V2_ever_definition",
+        "reported_ever": 0.04605034578102256,
+        "full_path_ever": 0.049766373655096605
+      },
+      {
+        "case": "ko_reset_V2_ever_definition",
+        "reported_ever": 0.13950598014703708,
+        "full_path_ever": 0.15772483092777553
+      },
+      {
+        "case": "V2_continuous_KI",
+        "ki_ever": null,
+        "ki_survive": 0.1482452134419407
+      }
+    ],
+    "edges_after": [
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballMCEngine",
+        "ki_reported": 0.365,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6349999999999909,
+          "ki": 0.3649999999999949,
+          "no_ki": 0.0
+        },
+        "ki_gap": -5.10702591327572e-15,
+        "ko_gap": -8.992806499463768e-15,
+        "mixed_sum": 0.9999999999999999
+      },
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballPDESolver",
+        "ki_reported": 0.3663596770849597,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336403230510576,
+        "price_probabilities": {
+          "ko": 0.6336403230510825,
+          "ki": 0.36635967708502903,
+          "no_ki": 0.0
+        },
+        "ki_gap": 6.933342788784103e-14,
+        "ko_gap": 2.4980018054066022e-14,
+        "mixed_sum": 1.0000000001360172
+      },
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballQuadEngine",
+        "ki_reported": 0.366087552728384,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6339124472716149,
+        "price_probabilities": {
+          "ko": 0.6339124472715838,
+          "ki": 0.36608755272834514,
+          "no_ki": 0.0
+        },
+        "ki_gap": -3.885780586188048e-14,
+        "ko_gap": -3.108624468950438e-14,
+        "mixed_sum": 0.9999999999999989
+      },
+      {
+        "case": "snowball_carried_KI",
+        "engine": "SnowballQuadEngineV2",
+        "ki_reported": 0.36635679500854906,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336432049914508,
+        "price_probabilities": {
+          "ko": 0.6336432049914862,
+          "ki": 0.36635679500855645,
+          "no_ki": 0.0
+        },
+        "ki_gap": 7.382983113757291e-15,
+        "ko_gap": 3.5416114485542494e-14,
+        "mixed_sum": 0.9999999999999998
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixMCEngine",
+        "ki_reported": 0.365,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6349999999999999,
+        "price_probabilities": {
+          "ko": 0.6350000000000002,
+          "ki": 0.3650000000000002,
+          "no_ki": 0.0
+        },
+        "ki_gap": 2.220446049250313e-16,
+        "ko_gap": 3.3306690738754696e-16,
+        "mixed_sum": 0.9999999999999999
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixPDESolver",
+        "ki_reported": 0.36635964721031444,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336403529257034,
+        "price_probabilities": {
+          "ko": 0.6336403529257013,
+          "ki": 0.3663596472103152,
+          "no_ki": 0.0
+        },
+        "ki_gap": 7.771561172376096e-16,
+        "ko_gap": -2.1094237467877974e-15,
+        "mixed_sum": 1.0000000001360179
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixQuadEngine",
+        "ki_reported": 0.36606886519914306,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6339311348008558,
+        "price_probabilities": {
+          "ko": 0.6339311348008585,
+          "ki": 0.3660688651991446,
+          "no_ki": 0.0
+        },
+        "ki_gap": 1.5543122344752192e-15,
+        "ko_gap": 2.6645352591003757e-15,
+        "mixed_sum": 0.9999999999999989
+      },
+      {
+        "case": "phoenix_carried_KI",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_reported": 0.36635679500854845,
+        "ki_ever": 1.0,
+        "ko_reported": 0.6336432049914507,
+        "price_probabilities": {
+          "ko": 0.6336432049914551,
+          "ki": 0.36635679500855245,
+          "no_ki": 0.0
+        },
+        "ki_gap": 3.9968028886505635e-15,
+        "ko_gap": 4.440892098500626e-15,
+        "mixed_sum": 0.9999999999999991
+      },
+      {
+        "case": "ko_reset_overlapping_barriers_default",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_reported": 0.0040357071464381744,
+        "ki_ever": 0.3024712905468692,
+        "ko_reported": 0.9959642928535993,
+        "price_probabilities": {
+          "ko": 0.995964292853543,
+          "ki": 0.004035707146442746,
+          "no_ki": 0.0
+        },
+        "ki_gap": 4.571863720936875e-15,
+        "ko_gap": -5.6288307348495437e-14,
+        "mixed_sum": 1.0000000000000375
+      },
+      {
+        "case": "ko_reset_overlapping_barriers_hard",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_reported": 0.0045394999270398795,
+        "ki_ever": 0.30986913029249896,
+        "ko_reported": 0.9954605000729976,
+        "price_probabilities": {
+          "ko": 0.9954605000729799,
+          "ki": 0.004539499927034285,
+          "no_ki": 0.0
+        },
+        "ki_gap": -5.594483210025203e-15,
+        "ko_gap": -1.765254609153999e-14,
+        "mixed_sum": 1.0000000000000375
+      },
+      {
+        "case": "snowball_V2_ever_definition",
+        "reported_ever": 0.23513567153089437,
+        "full_path_ever": 0.23513567153089393
+      },
+      {
+        "case": "phoenix_V2_ever_definition",
+        "reported_ever": 0.049766373655096556,
+        "full_path_ever": 0.049766373655096605
+      },
+      {
+        "case": "phoenix_memory_V2_ever_definition",
+        "reported_ever": 0.049766373655096556,
+        "full_path_ever": 0.049766373655096605
+      },
+      {
+        "case": "ko_reset_V2_ever_definition",
+        "reported_ever": 0.15772483092777567,
+        "full_path_ever": 0.15772483092777553
+      },
+      {
+        "case": "V2_continuous_KI",
+        "ki_ever": null,
+        "ki_survive": 0.1482452134419407
+      }
+    ],
+    "continuous_and_overlap_after": [
+      {
+        "case": "snowball_continuous",
+        "engine": "SnowballMCEngine",
+        "ki_reported": 0.14625,
+        "ki_ever": 0.15225,
+        "ko_reported": 0.519,
+        "price_probabilities": {
+          "ko": 0.5190000000000055,
+          "ki": 0.14624999999999488,
+          "no_ki": 0.33474999999999966
+        },
+        "ki_gap": -5.10702591327572e-15,
+        "ko_gap": 5.440092820663267e-15,
+        "mixed_sum": 0.9999999999999997
+      },
+      {
+        "case": "snowball_continuous",
+        "engine": "SnowballPDESolver",
+        "ki_reported": 0.14837076392719784,
+        "ki_ever": 0.1538387568422906,
+        "ko_reported": 0.5194115411794897,
+        "price_probabilities": {
+          "ko": 0.5194115411793945,
+          "ki": 0.14837076392723247,
+          "no_ki": 0.33221769519539635
+        },
+        "ki_gap": 3.4638958368304884e-14,
+        "ko_gap": -9.525713551283843e-14,
+        "mixed_sum": 1.000000000302084
+      },
+      {
+        "case": "snowball_continuous",
+        "engine": "SnowballQuadEngine",
+        "ki_reported": 0.1485024220467033,
+        "ki_ever": 0.15395744725414304,
+        "ko_reported": 0.5196551173262781,
+        "price_probabilities": {
+          "ko": 0.519655117326252,
+          "ki": 0.14850242204670394,
+          "no_ki": 0.3318424606270156
+        },
+        "ki_gap": 6.38378239159465e-16,
+        "ko_gap": -2.609024107869118e-14,
+        "mixed_sum": 0.999999999999997
+      },
+      {
+        "case": "snowball_continuous",
+        "engine": "SnowballQuadEngineV2",
+        "ki_reported": 0.1482452134419407,
+        "ki_ever": null,
+        "ko_reported": 0.5194136447136395,
+        "price_probabilities": {
+          "ko": 0.5194136447136231,
+          "ki": 0.14824521344195318,
+          "no_ki": 0.33234114184442376
+        },
+        "ki_gap": 1.2490009027033011e-14,
+        "ko_gap": -1.6431300764452317e-14,
+        "mixed_sum": 1.000000000000004
+      },
+      {
+        "case": "phoenix_continuous",
+        "engine": "PhoenixMCEngine",
+        "ki_reported": 0.01055,
+        "ki_ever": 0.0107,
+        "ko_reported": 0.519,
+        "price_probabilities": {
+          "ko": 0.5189999999999999,
+          "ki": 0.010550000000000018,
+          "no_ki": 0.47045000000000003
+        },
+        "ki_gap": 1.734723475976807e-17,
+        "ko_gap": -1.1102230246251565e-16,
+        "mixed_sum": 1.0
+      },
+      {
+        "case": "phoenix_continuous",
+        "engine": "PhoenixPDESolver",
+        "ki_reported": 0.010531995749181055,
+        "ki_ever": 0.010581532334827936,
+        "ko_reported": 0.5194115421189837,
+        "price_probabilities": {
+          "ko": 0.519411542118983,
+          "ki": 0.01053199574918183,
+          "no_ki": 0.47005646243411625
+        },
+        "ki_gap": 7.754213937616328e-16,
+        "ko_gap": -6.661338147750939e-16,
+        "mixed_sum": 1.0000000003022809
+      },
+      {
+        "case": "phoenix_continuous",
+        "engine": "PhoenixQuadEngine",
+        "ki_reported": 0.010618282352396194,
+        "ki_ever": 0.010661444322274415,
+        "ko_reported": 0.519655709194387,
+        "price_probabilities": {
+          "ko": 0.5196557091943876,
+          "ki": 0.010618282352387695,
+          "no_ki": 0.4697260084532129
+        },
+        "ki_gap": -8.498410308810378e-15,
+        "ko_gap": 6.661338147750939e-16,
+        "mixed_sum": 0.999999999999996
+      },
+      {
+        "case": "phoenix_continuous",
+        "engine": "PhoenixQuadEngineV2",
+        "ki_reported": 0.010535986598789238,
+        "ki_ever": null,
+        "ko_reported": 0.5194136447135802,
+        "price_probabilities": {
+          "ko": 0.5194136447135804,
+          "ki": 0.010535986598789737,
+          "no_ki": 0.47005036868762895
+        },
+        "ki_gap": 4.996003610813204e-16,
+        "ko_gap": 2.220446049250313e-16,
+        "mixed_sum": 0.9999999999999984
+      },
+      {
+        "case": "ko_reset_continuous",
+        "engine": "SnowballMCEngine",
+        "ki_reported": 0.04375,
+        "ki_ever": 0.048875,
+        "ko_reported": 0.526525,
+        "price_probabilities": {
+          "ko": 0.5265250000000066,
+          "ki": 0.04375000000000284,
+          "no_ki": 0.4297250000000048
+        },
+        "ki_gap": 2.8449465006019636e-15,
+        "ko_gap": 6.5503158452884236e-15,
+        "mixed_sum": 1.0000000000000049
+      },
+      {
+        "case": "ko_reset_continuous",
+        "engine": "KOResetSnowballPDESolver",
+        "ki_reported": 0.04366106898173692,
+        "ki_ever": 0.048576533386718565,
+        "ko_reported": 0.5236685649307445,
+        "price_probabilities": {
+          "ko": 0.5236685649307162,
+          "ki": 0.043661068981720064,
+          "no_ki": 0.4326703664511058
+        },
+        "ki_gap": -1.6854573292590658e-14,
+        "ko_gap": -2.8310687127941492e-14,
+        "mixed_sum": 1.0000000003635874
+      },
+      {
+        "case": "ko_reset_continuous",
+        "engine": "KOResetSnowballQuadEngine",
+        "ki_reported": 0.043687345374637476,
+        "ki_ever": 0.04867231003395781,
+        "ko_reported": 0.5253635109918465,
+        "price_probabilities": {
+          "ko": 0.5253635109918235,
+          "ki": 0.04368734537459318,
+          "no_ki": 0.4309491436334838
+        },
+        "ki_gap": -4.4297898682543746e-14,
+        "ko_gap": -2.298161660974074e-14,
+        "mixed_sum": 0.9999999999999678
+      },
+      {
+        "case": "ko_reset_continuous",
+        "engine": "KOResetSnowballQuadEngineV2",
+        "ki_reported": 0.04364377672094896,
+        "ki_ever": null,
+        "ko_reported": 0.5236575764575497,
+        "price_probabilities": {
+          "ko": 0.5236575764575377,
+          "ki": 0.04364377672094122,
+          "no_ki": 0.4326986468214926
+        },
+        "ki_gap": -7.743805596760467e-15,
+        "ko_gap": -1.199040866595169e-14,
+        "mixed_sum": 0.9999999999999913
+      },
+      {
+        "case": "ko_reset_overlapping_barriers",
+        "engine": "SnowballMCEngine",
+        "ki_reported": 0.004175,
+        "ki_ever": 0.299925,
+        "ko_reported": 0.995825,
+        "price_probabilities": {
+          "ko": 0.9958250000000106,
+          "ki": 0.0041750000000035925,
+          "no_ki": 0.0
+        },
+        "ki_gap": 3.5926123187479675e-15,
+        "ko_gap": 1.0658141036401503e-14,
+        "mixed_sum": 1.0
+      },
+      {
+        "case": "ko_reset_overlapping_barriers",
+        "engine": "KOResetSnowballPDESolver",
+        "ki_reported": 0.0039967248195774225,
+        "ki_ever": 0.3020643425043179,
+        "ko_reported": 0.996003276013844,
+        "price_probabilities": {
+          "ko": 0.9960032760137665,
+          "ki": 0.003996724819501196,
+          "no_ki": 0.0
+        },
+        "ki_gap": -7.622635161963487e-14,
+        "ko_gap": -7.749356711883593e-14,
+        "mixed_sum": 1.0000000008334213
+      },
+      {
+        "case": "ko_reset_overlapping_barriers",
+        "engine": "KOResetSnowballQuadEngineV2",
+        "ki_reported": 0.003982945752583183,
+        "ki_ever": 0.3021697431963286,
+        "ko_reported": 0.9960170542474145,
+        "price_probabilities": {
+          "ko": 0.9960170542474458,
+          "ki": 0.003982945752625255,
+          "no_ki": 0.0
+        },
+        "ki_gap": 4.20722484628655e-14,
+        "ko_gap": 3.1308289294429414e-14,
+        "mixed_sum": 0.9999999999999977
+      }
+    ],
+    "frozen_2y_after": [
+      {
+        "engine": "SnowballQuadEngine",
+        "pv": 7.704670963412586e-10,
+        "ki_survive": 0.2869307064623794,
+        "ki_ever": 0.6265449687278071,
+        "price_consistent_ki": 0.28693070625327854,
+        "gap": -2.09100847747834e-10,
+        "seconds": 8.03437816631049
+      },
+      {
+        "engine": "SnowballQuadEngineV2",
+        "pv": -27.630619533114373,
+        "ki_survive": 0.28695053048160546,
+        "ki_ever": 0.626530239176319,
+        "price_consistent_ki": 0.2869505355965778,
+        "gap": 5.114972334574475e-09,
+        "seconds": 11.516557332593948
+      },
+      {
+        "engine": "SnowballPDESolver",
+        "pv": -30.01668902908557,
+        "ki_survive": 0.2869522106546871,
+        "ki_ever": 0.6265120815472699,
+        "price_consistent_ki": 0.2869522100493107,
+        "gap": -6.053764156632724e-10,
+        "seconds": 13.115739792119712
+      },
+      {
+        "engine": "SnowballMCEngine",
+        "pv": 4486.60676430576,
+        "ki_survive": 0.28405,
+        "ki_ever": 0.626675,
+        "price_consistent_ki": 0.2840499999701933,
+        "gap": -2.980671265362389e-11,
+        "seconds": 0.9021008750423789
+      }
+    ],
+    "v1_prices_vs_head": [
+      {
+        "family": "snowball",
+        "carried": false,
+        "before": 99.82907681547849,
+        "after": 99.82907681547849,
+        "difference": 0.0
+      },
+      {
+        "family": "snowball",
+        "carried": true,
+        "before": 96.23930011760001,
+        "after": 96.23930011760001,
+        "difference": 0.0
+      },
+      {
+        "family": "phoenix",
+        "carried": false,
+        "before": -0.7591806207091158,
+        "after": -0.7591806207091158,
+        "difference": 0.0
+      },
+      {
+        "family": "phoenix",
+        "carried": true,
+        "before": -4.201456430226143,
+        "after": -4.201456430226143,
+        "difference": 0.0
+      },
+      {
+        "family": "phoenix_memory",
+        "carried": false,
+        "before": -0.7396807808660611,
+        "after": -0.7396807808660611,
+        "difference": 0.0
+      },
+      {
+        "family": "phoenix_memory",
+        "carried": true,
+        "before": -4.181956590383097,
+        "after": -4.181956590383097,
+        "difference": 0.0
+      },
+      {
+        "family": "ko_reset",
+        "carried": false,
+        "before": 98.05507515419166,
+        "after": 98.05507515419166,
+        "difference": 0.0
+      },
+      {
+        "family": "ko_reset",
+        "carried": true,
+        "before": 98.17790493652303,
+        "after": 98.17790493652303,
+        "difference": 0.0
+      }
+    ]
+  },
+  "test_runs": [
+    {
+      "scope": "Initial existing suite plus 18 new regressions",
+      "passed": 433,
+      "failed": 6,
+      "resolution": "Replaced expectations for old first/third order probability gaps and carried KI=1 with shared-price invariants."
+    },
+    {
+      "scope": "Expanded existing suite, forward-density tests, and 40 new regressions",
+      "passed": 481,
+      "failed": 1,
+      "resolution": "KO-reset intentionally never auto-converges. Removed an incorrect new convergence hook during this running test process."
+    },
+    {
+      "scope": "Final focused rerun of all new regressions after KO-reset correction and cleanup",
+      "passed": 40,
+      "failed": 0
+    }
+  ]
+}

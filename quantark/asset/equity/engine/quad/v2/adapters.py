@@ -326,7 +326,10 @@ def compile_contract(
         len(pre) + initial_memory + 1 if phoenix and product.has_memory_coupon else 1
     )
     expiry = phoenix and product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-    n_states = 2 * n_memory + (2 if expiry else 0)
+    # One independent first-hit state keeps underlying KI monitoring alive
+    # after the note autocalls. Continuous first passage remains unavailable.
+    monitor_ki = statistics and not continuous
+    n_states = 2 * n_memory + (2 if expiry else 0) + int(monitor_ki)
     if n_states > params.max_states:
         raise NumericalError(
             f"QUAD V2 requires {n_states} states; max_states={params.max_states}"
@@ -350,6 +353,9 @@ def compile_contract(
         # Unit-at-termination values carry accrued coupons without another
         # earned-amount state dimension. Dedicated coupon channels stay independent.
         names += ["termination_alive", "termination_ki"]
+    monitor_state = len(names)
+    if monitor_ki:
+        names += ["underlying_ki_monitor"]
     coupon_amounts, coupon_prefix, coupon_barriers = [], np.zeros(1), []
     if phoenix:
         # Resolve original schedule indices when earlier observations expired.
@@ -457,7 +463,7 @@ def compile_contract(
             sample_logs = [np.log(product.initial_price)]
         point_spots = {float(np.log(level)): float(level) for level in levels}
 
-        def action(state, x, lo, hi, point=False):
+        def note_action(state, x, lo, hi, point=False):
             is_w = state >= w_offset
             hit = bool(state - w_offset) if is_w else state >= n_memory
             mem = 0 if is_w else state % n_memory
@@ -630,6 +636,42 @@ def compile_contract(
                     c += coupon_cash(earned * coupon_df, payment_channel)
             return Action(tuple(terms), tuple(c), tuple(a), tuple(channel_terms))
 
+        def action(state, x, lo, hi, point=False):
+            if not monitor_ki:
+                return note_action(state, x, lo, hi, point)
+            ki_channel = channels.index("ki_ever")
+            # KO-reset monitors KI only on the pre schedule; an underlying
+            # path continues monitoring there even if the note autocalls.
+            monitor_end = pre_maturity if reset else maturity
+            touch = t <= monitor_end and kr is not None and (
+                x >= np.log(kr[1]) if product.is_reverse else x <= np.log(kr[1])
+            )
+            monitor_cash = 1 / env.get_discount_factor(t) if touch else 0.0
+            monitor_terms = (
+                ((monitor_state, 1.0, (ki_channel,)),)
+                if not touch and t < monitor_end else ()
+            )
+            if state == monitor_state:
+                c = np.zeros(n_channels)
+                c[ki_channel] = monitor_cash
+                return Action(cash=tuple(c), asset=zeros, channel_terms=monitor_terms)
+            base = note_action(state, x, lo, hi, point)
+            if state >= w_offset:
+                return base
+            # Note continuation carries contractual channels only. The
+            # underlying first-hit channel follows its own state at every
+            # event, including KO and maturity actions that terminate the note.
+            selected = tuple(i for i in range(n_channels) if i != ki_channel)
+            c = list(base.cash)
+            c[ki_channel] = monitor_cash
+            a = list(base.asset)
+            a[ki_channel] = 0.0
+            terms = tuple((i, weight, selected) for i, weight in base.terms)
+            return Action(
+                cash=tuple(c), asset=tuple(a),
+                channel_terms=terms + base.channel_terms + monitor_terms,
+            )
+
         rows, boundaries = [], []
         for state in range(len(names)):
             row = tuple(
@@ -671,5 +713,6 @@ def compile_contract(
             "terminal_delay": terminal.payment_time - terminal.determination_time,
             "initial_ki": initial_hit,
             "expiry_coupons": expiry,
+            "ki_monitoring_end": (pre_maturity if reset else maturity) if statistics and continuous else None,
         },
     )

@@ -333,7 +333,7 @@ def test_phoenix_vol_model_pde_engines_calculate_event_stats():
     ]
     # the 2D solvers report statistics only on request (spec 3B decision 8)
     with pytest.raises(StatisticsRefused):
-        HestonPhoenixPDESolver(hp, n_x=48, n_v=18, n_t=16, grid_style="uniform").calculate_event_stats(product, env)
+        HestonPhoenixPDESolver(hp, n_x=48, n_v=18, n_t=16, grid_style="uniform", statistics="refuse").calculate_event_stats(product, env)
 
     for engine in engines:
         price = float(engine.price(product, env))
@@ -389,11 +389,14 @@ def test_phoenix_heston_pde_auto_grid_focuses_coupon_without_ki():
     assert solver._grid_concentration_spot(product, _env()) == pytest.approx(92.0)
 
 
-def test_phoenix_heston_pde_rejects_memory_coupons():
-    with pytest.raises(ValidationError, match="non-memory Phoenix coupons only"):
-        HestonPhoenixPDESolver(_heston(), n_x=30, n_v=12, n_t=10).price(
-            _phoenix(memory_coupon=True), _env()
-        )
+def test_phoenix_heston_pde_prices_memory_coupons():
+    engine = HestonPhoenixPDESolver(_heston(), n_x=48, n_v=18, n_t=24)
+    product = _phoenix(memory_coupon=True)
+    price = engine.price(product, _env())
+    stats = engine.calculate_event_stats(product, _env())
+    assert np.isfinite(price)
+    assert stats.pv == pytest.approx(price)
+    assert not stats.provenance.surrogate
 
 
 def test_phoenix_vol_model_engines_reject_non_phoenix_products():

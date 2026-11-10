@@ -412,25 +412,31 @@ def test_a_ko_reset_product_is_not_refused_for_its_engine_but_its_cash_cannot_bi
         _heston_snowball().price_folded(product, env, _hand_overlay(product, env, ko=1.0))
 
 
-def test_a_memory_phoenix_is_refused_as_price_refuses_it():
+def test_memory_phoenix_folding_matches_native_probabilities():
     product, env = dated_phoenix(CAL, T0), _dated_env()
     assert product.has_memory_coupon
-    with pytest.raises(ValidationError, match="non-memory"):
-        _heston_phoenix().price_folded(product, env, _hand_overlay(product, env, ko=1.0))
+    e = _heston_phoenix()
+    base = e.price(product, env)
+    stats = e.calculate_event_stats(product, env)
+    rise = e.price_folded(product, env, _hand_overlay(product, env, ko=1.0)) - base
+    assert rise == pytest.approx(stats.ko_probability.sum(), abs=2e-10)
 
 
 @pytest.mark.parametrize("state", ["ko-decided-at-valuation", "expired"])
-def test_a_memory_phoenix_is_refused_on_every_short_circuit_as_price_refuses_it(state):
-    """CP3: the product refusal runs before the valuation-instant short-circuits, as in ``price``."""
+def test_memory_phoenix_folding_uses_the_same_terminal_rules_as_price(state):
     from intraday.conftest import flat_env
-
     product = dated_phoenix(CAL, T0)
     dates = [r.observation_date for r in product.barrier_config.ko_observation_schedule.records]
-    env = flat_env(dates[2], spot=110.0) if state == "ko-decided-at-valuation" else flat_env(dates[-1], spot=90.0)
-    with pytest.raises(ValidationError, match="non-memory"):
-        _heston_phoenix().price(product, env)
-    with pytest.raises(ValidationError, match="non-memory"):
-        _heston_phoenix().price_folded(product, env, _hand_overlay(product, env, ko=1.0))
+    env = flat_env(dates[2], spot=110.0) if state == "ko-decided-at-valuation" else flat_env(product.exercise_date, spot=90.0)
+    e = _heston_phoenix()
+    assert np.isfinite(e.price(product, env))
+    overlay = _hand_overlay(product, env, no_ki=1.0) if state == "expired" else _hand_overlay(product, env, ko=1.0)
+    if state == "expired":
+        from quantark.execution.errors import CapabilityError
+        with pytest.raises(CapabilityError):
+            e.price_folded(product, env, overlay)
+    else:
+        assert e.price_folded(product, env, overlay)-e.price(product, env) == pytest.approx(1., abs=2e-10)
 
 
 def test_a_lifecycle_state_is_refused_as_price_refuses_it():

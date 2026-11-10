@@ -1,84 +1,14 @@
 """Constant-coefficient continuous KI with full survival-kernel derivatives."""
+from dataclasses import dataclass
 import numpy as np
-from quantark.param import FlatRateCurve, FlatVolSurface, ContinuousDividendYield
-from quantark.param.rrf.rate_curve import LogLinearRateCurve, ParallelShiftRateCurve
-from quantark.param.vol.vol_surface import (
-    TermStructureVolSurface,
-    ParallelShiftVolSurface,
-)
-from quantark.param.div.dividend_yield import NoDividend, ParallelShiftDividendYield
-from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.exceptions import NumericalError
 from .basis import gauss
 from .contract import Function, Piece, Source
 from .gaussian import readout
 
 
-def continuous_time_grid(env, times, params):
-    """Split at known coefficient knots; arbitrary terms require explicit approximation.
-
-    Log-linear discount factors and piecewise-linear total variance imply
-    constant coefficients between knots. Linear zero-yield curves generally
-    do not. Merely sampling two equal endpoints is never an exactness test.
-    """
-    rate, div, vol = env.rate_curve, env.div_yield, env.vol_surface
-    while type(rate) is ParallelShiftRateCurve:
-        rate = rate.base_curve
-    while type(div) is ParallelShiftDividendYield:
-        div = div.base
-    unwrapped_vol = vol
-    while type(unwrapped_vol) is ParallelShiftVolSurface:
-        unwrapped_vol = unwrapped_vol.base
-    # A shift of flat volatility is still constant. A shift applied to the
-    # interpolated term vol need not preserve piecewise-linear total variance.
-    exact_vol = (
-        type(vol) in {FlatVolSurface, TermStructureVolSurface}
-        or type(unwrapped_vol) is FlatVolSurface
-    )
-    exact = (
-        type(rate) in {FlatRateCurve, LogLinearRateCurve}
-        and type(div) in {ContinuousDividendYield, NoDividend}
-        and exact_vol
-    )
-    if not exact and params.continuous_term_structure != "piecewise_constant":
-        raise NotImplementedError(
-            "continuous KI with these term curves requires continuous_term_structure='piecewise_constant' and a time-refinement qualification"
-        )
-    if not times or any(not np.isfinite(t) or t < 0 for t in times):
-        raise ValidationError("event times must be finite and nonnegative")
-    maturity = max(times)
-    nodes = set(times) | {0.0}
-    for curve in (rate, div, unwrapped_vol):
-        nodes.update(
-            float(t) for t in getattr(curve, "times", ()) if 0 < float(t) < maturity
-        )
-        nodes.update(
-            float(p[0])
-            for p in getattr(curve, "pillars", ())
-            if 0 < float(p[0]) < maturity
-        )
-    if len(nodes) - (0.0 not in times) > params.max_events:
-        raise NumericalError("QUAD V2 event count exceeds max_events")
-    if not exact:
-        base = sorted(nodes)
-        subdivisions = []
-        predicted = len(nodes) - (0.0 not in times)
-        for a, b in zip(base[:-1], base[1:]):
-            count = max(1, int(np.ceil((b - a) * params.continuous_steps_per_year)))
-            predicted += count - 1
-            if predicted > params.max_events:
-                raise NumericalError(
-                    f"QUAD V2 continuous subdivision requires at least {predicted} events; max_events={params.max_events}"
-                )
-            subdivisions.append((a, b, count))
-        for a, b, count in subdivisions:
-            nodes.update(a + (b - a) * j / count for j in range(1, count))
-    nodes.discard(0.0)
-    if 0.0 in times:
-        nodes.add(0.0)
-    return (
-        sorted(nodes),
-        "piecewise_constant_exact" if exact else "piecewise_constant_approximation",
-    )
+# All native engines use the same coefficient-model classification and knots.
+from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
 
 
 def _difference(alive, hit, barrier, reverse):
@@ -211,3 +141,126 @@ def deterministic_continuous(states, pairs, barrier, reverse, mean):
         p = next(p for p in states[hit].pieces if p.lo <= boundary < p.hi)
         result[alive] = Function(tuple(pieces), ((boundary, p),))
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class ContinuousKIMonitor:
+    """One-channel KO-independent no-touch claim, owned by a prepared context."""
+    function: object
+    mean: float
+    variance: float
+    discount: float
+    barrier: float
+    reverse: bool
+    params: object
+    method: str
+
+    def probability(self, spots):
+        from .contract import affine
+
+        survival = continuous_readout(
+            self.function, affine([0.0]), np.log(spots), self.mean,
+            self.variance, self.discount, self.barrier, self.reverse, self.params,
+        )[0, 0]
+        probability = 1.0 - survival
+        if np.any(~np.isfinite(probability)) or np.any(
+            (probability < -2e-8) | (probability > 1.0 + 2e-8)
+        ):
+            raise NumericalError("continuous KI monitoring probability is outside [0, 1]")
+        return np.clip(probability, 0.0, 1.0)
+
+
+def prepare_continuous_ki_monitor(contract, means, variances, discounts, mesh, params, op):
+    """Reuse the price clock and mesh, with no note/memory states or cash channels.
+
+    Constant drift per variance admits one analytic reflection readout after
+    a deterministic time change. Otherwise march one no-touch column through
+    the native survival kernel. Neither path performs another note solve.
+    """
+    from .contract import affine, grid_function
+
+    end = contract.metadata.get("ki_monitoring_end")
+    if end is None:
+        return None
+    times = np.array([event.time for event in contract.events])
+    indices = np.flatnonzero(times <= end)
+    if not len(indices) or end == 0.0:
+        return ContinuousKIMonitor(
+            affine([1.0]), 0.0, 0.0, 1.0, contract.continuous_barrier,
+            contract.reverse, params, "valuation_fixing",
+        )
+    last = int(indices[-1])
+    mm, vv, dd = means[:last + 1], variances[:last + 1], discounts[:last + 1]
+    barrier, reverse = contract.continuous_barrier, contract.reverse
+    positive = vv > 0.0
+    ratios = mm[positive] / vv[positive]
+    proportional = (positive.any() and np.all(mm[~positive] == 0.0)
+                    and np.allclose(ratios, ratios[0], rtol=1e-12, atol=1e-12))
+    terminal = affine([1.0 / float(np.prod(dd))])
+    if proportional:
+        return ContinuousKIMonitor(
+            terminal, float(mm.sum()), float(vv.sum()), float(np.prod(dd)),
+            barrier, reverse, params, "analytic_time_change",
+        )
+    zero = affine([0.0])
+    function = terminal
+    for i in range(last, 0, -1):
+        if vv[i] == 0.0:
+            function = deterministic_continuous(
+                (function.shifted(mm[i], dd[i]), zero), ((0, 1),),
+                barrier, reverse, mm[i],
+            )[0]
+        else:
+            values = continuous_grid_readout(
+                function, zero, mm[i], vv[i], dd[i], barrier, reverse, op,
+            )
+            function = grid_function(mesh, values)
+    return ContinuousKIMonitor(
+        function, float(mm[0]), float(vv[0]), float(dd[0]),
+        barrier, reverse, params, "native_survival_recursion",
+    )
+
+
+def continuous_grid_readout(alive, hit, mean, variance, discount, barrier, reverse, op, rolled_hit=None):
+    """Value-only reflection on the barrier-aligned Gaussian grid.
+
+    Reflection permutes Gaussian nodes exactly. Plain native convolutions can
+    therefore supply both terms; only mirrored queries outside the mesh and
+    extreme reflection multipliers need the existing pointwise integral.
+    """
+    mesh, params = op.mesh, op.params
+    x = mesh.nodes.ravel()
+    coordinate = (2*barrier - 2*mesh.lo) / mesh.h
+    aligned = abs(coordinate - round(coordinate)) <= 1e-9
+    shifted = any(s.shift != 0 or s.grid.mesh != mesh for f in (alive, hit) for p in f.pieces for s in p.sources)
+    if params.continuous_grid_backend == 'pointwise' or not aligned or shifted:
+        return continuous_readout(alive, hit, x, mean, variance, discount, barrier, reverse, params)[0].reshape(alive.channels, mesh.cells, mesh.order)
+    base = op.integrate(hit, mean, variance, discount) if rolled_hit is None else rolled_hit
+    result = base.reshape(alive.channels, -1).copy()
+    safe = x < barrier if reverse else x > barrier
+    indices = np.flatnonzero(safe)
+    if not len(indices):
+        return result.reshape(alive.channels, mesh.cells, mesh.order)
+    diff = _difference(alive, hit, barrier, reverse)
+    forward = op.integrate(diff, mean, variance, 1.0)
+    cells = indices // mesh.order
+    nodes = indices % mesh.order
+    mirror_cells = int(round(coordinate)) - cells - 1
+    mirror_nodes = mesh.order - nodes - 1
+    inside = (mirror_cells >= 0) & (mirror_cells < mesh.cells)
+    image = np.zeros((alive.channels, len(indices)))
+    if inside.any():
+        image[:, inside] = forward[:, mirror_cells[inside], mirror_nodes[inside]]
+    if (~inside).any():
+        image[:, ~inside] = readout(diff, 2*barrier-x[indices[~inside]], mean, variance, 1.0, params)[0]
+    log_weight = -2*mean/variance * (x[indices]-barrier)
+    ordinary = np.abs(log_weight) < 500
+    result[:, indices[ordinary]] += discount * (
+        forward.reshape(alive.channels, -1)[:, indices[ordinary]] - np.exp(log_weight[ordinary])*image[:, ordinary]
+    )
+    if (~ordinary).any():
+        result[:, indices[~ordinary]] = continuous_readout(
+            alive, hit, x[indices[~ordinary]], mean, variance, discount, barrier, reverse, params,
+        )[0]
+    op.backends_used.add('continuous_reflection_grid')
+    return result.reshape(alive.channels, mesh.cells, mesh.order)

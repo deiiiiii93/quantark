@@ -27,7 +27,7 @@ def test_surrogate_carries_provenance_and_the_route_check():
 
 def test_unknown_option_value_is_refused():
     with pytest.raises(ValidationError, match="statistics"):
-        HestonPhoenixPDESolver(HP, statistics="native", **SMALL)
+        HestonPhoenixPDESolver(HP, statistics="invalid", **SMALL)
 
 
 def test_native_1d_provenance_is_not_a_surrogate():
@@ -43,11 +43,11 @@ def test_refuse_mode_refuses_from_both_entry_points():
         s.price_with_events(snowball(), env_flat())
 
 
-def test_default_refuses_but_a_plain_price_with_events_does_not():
+def test_default_is_native_and_price_only_emits_a_trivial_distribution():
     from quantark.cashleg.event_distribution import EventType
     s = HestonSnowballPDESolver(HP, **SMALL)
-    with pytest.raises(StatisticsRefused, match="flat_vol_surrogate"):
-        s.calculate_event_stats(snowball(), env_flat())
+    stats = s.calculate_event_stats(snowball(), env_flat())
+    assert stats.provenance == StatisticsProvenance("heston_adi_2d", "heston_adi_2d")
     res = s.price_with_events(snowball(), env_flat(), emit_distribution=False)     # Review Focus 4
     assert res.npv == s.price(snowball(), env_flat())
     assert res.event_distribution.probabilities.keys() == {EventType.MATURITY_NO_KO}

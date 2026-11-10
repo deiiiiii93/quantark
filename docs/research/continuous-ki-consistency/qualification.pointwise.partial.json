@@ -1,0 +1,134 @@
+[
+  {
+    "case": "flat_overlap_disabled",
+    "family": "snowball",
+    "engine": "SnowballQuadEngine",
+    "reference": false,
+    "pv": 100.82850984171833,
+    "ki_ever": 0.32595431121474727,
+    "ki_settlement": 0.011637736549938696,
+    "ko": 0.9883622634500615,
+    "seconds": 0.033143042121082544
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "snowball",
+    "engine": "SnowballQuadEngineV2",
+    "reference": false,
+    "pv": 100.8297082347443,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.011571555467387085,
+    "ko": 0.9884284445326129,
+    "seconds": 6.4041712917387486
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "snowball",
+    "engine": "SnowballQuadEngineV2",
+    "reference": true,
+    "pv": 100.8297082347443,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.011571555467387196,
+    "ko": 0.9884284445326129,
+    "seconds": 18.943185708951205
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "snowball",
+    "engine": "SnowballPDESolver",
+    "reference": false,
+    "pv": 100.82997165368934,
+    "ki_ever": 0.32601078398809774,
+    "ki_settlement": 0.011562263119648674,
+    "ko": 0.988437737041937,
+    "seconds": 0.2740741251036525
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "snowball",
+    "engine": "SnowballMCEngine",
+    "reference": false,
+    "pv": 100.82115221528666,
+    "ki_ever": 0.32451,
+    "ki_settlement": 0.01179,
+    "ko": 0.98821,
+    "seconds": 0.6301358747296035
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix",
+    "engine": "PhoenixQuadEngine",
+    "reference": false,
+    "pv": -0.014326197805912206,
+    "ki_ever": 0.32595431121474727,
+    "ki_settlement": 0.011637736549938696,
+    "ko": 0.9883622634500615,
+    "seconds": 0.06404154235497117
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix",
+    "engine": "PhoenixQuadEngineV2",
+    "reference": false,
+    "pv": -0.013299211414476986,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.011571555467387085,
+    "ko": 0.9884284445326129,
+    "seconds": 12.084793291054666
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix",
+    "engine": "PhoenixQuadEngineV2",
+    "reference": true,
+    "pv": -0.013299211414476986,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.011571555467387196,
+    "ko": 0.9884284445326129,
+    "seconds": 34.63578512473032
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix",
+    "engine": "PhoenixPDESolver",
+    "reference": false,
+    "pv": -0.00927793969453656,
+    "ki_ever": 0.32601039416498817,
+    "ki_settlement": 0.011316862113424673,
+    "ko": 0.9886831380479908,
+    "seconds": 0.35667216684669256
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix",
+    "engine": "PhoenixMCEngine",
+    "reference": false,
+    "pv": -0.021418134983666424,
+    "ki_ever": 0.32451,
+    "ki_settlement": 0.01179,
+    "ko": 0.98821,
+    "seconds": 0.6519047501496971
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix_memory",
+    "engine": "PhoenixQuadEngine",
+    "reference": false,
+    "pv": -0.012511543075361288,
+    "ki_ever": 0.32595431121474727,
+    "ki_settlement": 0.011637736549938696,
+    "ko": 0.9883622634500615,
+    "seconds": 0.10565441660583019
+  },
+  {
+    "case": "flat_overlap_disabled",
+    "family": "phoenix_memory",
+    "engine": "PhoenixQuadEngineV2",
+    "reference": false,
+    "pv": -0.011494952276473569,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.011571555467387085,
+    "ko": 0.9884284445326129,
+    "seconds": 79.03790825000033
+  }
+]

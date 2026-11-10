@@ -1,0 +1,46 @@
+[
+  {
+    "family": "snowball",
+    "density": 192,
+    "pv": 98.60149595599225,
+    "ki_ever": 0.32676127240326247,
+    "ki_settlement": 0.2523954428348415,
+    "price_change": 1.3119419563167867e-05,
+    "ki_ever_change": -1.5394195528317667e-06,
+    "ki_settlement_change": -9.549455990409683e-07,
+    "seconds": 0.5278460001572967
+  },
+  {
+    "family": "phoenix",
+    "density": 192,
+    "pv": -1.157274415151094,
+    "ki_ever": 0.07636476941255288,
+    "ki_settlement": 0.06825991379634372,
+    "price_change": -1.3527699963322704e-05,
+    "ki_ever_change": 6.559499706737526e-07,
+    "ki_settlement_change": 4.726431311330437e-07,
+    "seconds": 0.656665958929807
+  },
+  {
+    "family": "phoenix_memory",
+    "density": 192,
+    "pv": -1.1383216720523652,
+    "ki_ever": 0.07636476941255288,
+    "ki_settlement": 0.06825991379634372,
+    "price_change": -1.3527699985527164e-05,
+    "ki_ever_change": 6.559499706737526e-07,
+    "ki_settlement_change": 4.726431311330437e-07,
+    "seconds": 4.003094332758337
+  },
+  {
+    "family": "ko_reset",
+    "density": 192,
+    "pv": 98.12667712247192,
+    "ki_ever": 0.17337143887397244,
+    "ki_settlement": 0.11179398068894661,
+    "price_change": -1.0382688699905884e-05,
+    "ki_ever_change": 1.607283306448437e-07,
+    "ki_settlement_change": 4.339293909749742e-07,
+    "seconds": 2.045785083901137
+  }
+]

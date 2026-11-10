@@ -211,14 +211,30 @@ class EngineParams:
         bump_config: Factor-specific bump configuration. If None, defaults to
                      ``BumpConfig()`` (or the legacy bump_size when that is set).
         bus_days_in_year: Number of business days per year (default: 252)
+        continuous_term_structure: "exact" rejects unrecognized continuous-KI
+            coefficient models; "piecewise_constant" permits approximation.
+            This controls the model representation, not an output error bound.
+        continuous_steps_per_year: Additional smooth-model time subdivision.
+            Zero keeps native density while retaining coefficient-change knots.
     """
 
     bump_size: Optional[float] = None
     bump_config: Optional[BumpConfig] = None
     bus_days_in_year: int = 252
 
+    # The native routes keep their own time density. Zero adds coefficient
+    # knots only; positive values also subdivide smooth coefficient models.
+    continuous_term_structure: str = "piecewise_constant"
+    continuous_steps_per_year: int = 0
+
     def __post_init__(self):
         """Validate parameters and create bump_config if needed."""
+        if self.continuous_term_structure not in {"exact", "piecewise_constant"}:
+            raise ValidationError("continuous_term_structure must be exact or piecewise_constant")
+        if (isinstance(self.continuous_steps_per_year, bool)
+                or not isinstance(self.continuous_steps_per_year, int)
+                or self.continuous_steps_per_year < 0):
+            raise ValidationError("continuous_steps_per_year must be a nonnegative integer")
         if self.bump_size is not None:
             # Legacy bump_size validation (historic bounds kept as-is)
             if self.bump_size <= 0:
@@ -723,8 +739,9 @@ class QuadParams(EngineParams):
             the performance motivation only exists for dense schedules.
         event_stats_mode: Event-distribution algorithm: "stacked"
             (per-observation indicator rows, default) or "forward_density"
-            (forward transition-density march; distribution values differ at
-            finite grid, npv identical; see spec 2026-08-24).
+            (diagnostic forward transition-density march; outcome probabilities
+            need not match price at finite grid, and provenance identifies a
+            different statistics model; see spec 2026-08-24).
         readout: How the scalar price is recovered from the nodal surface,
             one of QUAD_READOUT_MODES. "legacy_linear" (default) interpolates
             linearly between the straddling nodes; "transition" evaluates the

@@ -1,0 +1,58 @@
+[
+  {
+    "model": "heston",
+    "family": "snowball",
+    "pv": 99.5662623737404,
+    "rich_pv": 99.5662623737404,
+    "provenance": "StatisticsProvenance(statistics_model='heston_adi_2d', price_model='heston_adi_2d')"
+  },
+  {
+    "model": "heston",
+    "family": "phoenix",
+    "pv": -1.0819310773681674,
+    "rich_pv": -1.0819310773681674,
+    "provenance": "StatisticsProvenance(statistics_model='heston_adi_2d', price_model='heston_adi_2d')"
+  },
+  {
+    "model": "heston",
+    "family": "phoenix_memory",
+    "pv": -1.0655736806736267,
+    "rich_pv": -1.0655736806736267,
+    "provenance": "StatisticsProvenance(statistics_model='heston_adi_2d', price_model='heston_adi_2d')"
+  },
+  {
+    "model": "heston",
+    "family": "ko_reset",
+    "pv": 98.60877201771771,
+    "rich_pv": 98.60877201771771,
+    "provenance": "StatisticsProvenance(statistics_model='heston_adi_2d', price_model='heston_adi_2d')"
+  },
+  {
+    "model": "slv",
+    "family": "snowball",
+    "pv": 99.5662623737404,
+    "rich_pv": 99.5662623737404,
+    "provenance": "StatisticsProvenance(statistics_model='slv_adi_2d', price_model='slv_adi_2d')"
+  },
+  {
+    "model": "slv",
+    "family": "phoenix",
+    "pv": -1.0819310773681674,
+    "rich_pv": -1.0819310773681674,
+    "provenance": "StatisticsProvenance(statistics_model='slv_adi_2d', price_model='slv_adi_2d')"
+  },
+  {
+    "model": "slv",
+    "family": "phoenix_memory",
+    "pv": -1.0655736806736267,
+    "rich_pv": -1.0655736806736267,
+    "provenance": "StatisticsProvenance(statistics_model='slv_adi_2d', price_model='slv_adi_2d')"
+  },
+  {
+    "model": "slv",
+    "family": "ko_reset",
+    "pv": 98.60877201771771,
+    "rich_pv": 98.60877201771771,
+    "provenance": "StatisticsProvenance(statistics_model='slv_adi_2d', price_model='slv_adi_2d')"
+  }
+]

@@ -1,0 +1,162 @@
+[
+  {
+    "family": "snowball",
+    "engine": "SnowballQuadEngine",
+    "pv": 98.40331603077391,
+    "ki_ever": 0.3258952747651709,
+    "ki_settlement": 0.25881685658638387,
+    "ko": 0.6336676341536972,
+    "price_seconds": 0.0052292076870799065,
+    "stats_seconds": 0.018221292179077864
+  },
+  {
+    "family": "snowball",
+    "engine": "SnowballQuadEngineV2",
+    "pv": 98.4041250629743,
+    "ki_ever": null,
+    "ki_settlement": 0.2588110039215778,
+    "ko": 0.6336432049914794,
+    "price_seconds": 0.0014556250534951687,
+    "stats_seconds": 0.0032560830004513264
+  },
+  {
+    "family": "snowball",
+    "engine": "SnowballPDESolver",
+    "pv": 98.40283430893807,
+    "ki_ever": 0.326010981330896,
+    "ki_settlement": 0.25889454099796105,
+    "ko": 0.6336390852147008,
+    "price_seconds": 0.0463087921962142,
+    "stats_seconds": 0.22626645816490054
+  },
+  {
+    "family": "snowball",
+    "engine": "SnowballMCEngine",
+    "pv": 98.47860811387469,
+    "ki_ever": 0.323525,
+    "ki_settlement": 0.257625,
+    "ko": 0.6299000000000001,
+    "price_seconds": 0.1515837498009205,
+    "stats_seconds": 0.16130883432924747
+  },
+  {
+    "family": "phoenix",
+    "engine": "PhoenixQuadEngine",
+    "pv": -1.2271544423578864,
+    "ki_ever": 0.07638931287426773,
+    "ki_settlement": 0.07000192758794879,
+    "ko": 0.6336681746271385,
+    "price_seconds": 0.020221832673996687,
+    "stats_seconds": 0.037310083862394094
+  },
+  {
+    "family": "phoenix",
+    "engine": "PhoenixQuadEngineV2",
+    "pv": -1.2267903058210048,
+    "ki_ever": null,
+    "ki_settlement": 0.06998992114813746,
+    "ko": 0.6336432049914487,
+    "price_seconds": 0.0021686251275241375,
+    "stats_seconds": 0.006337875034660101
+  },
+  {
+    "family": "phoenix",
+    "engine": "PhoenixPDESolver",
+    "pv": -1.229431272604996,
+    "ki_ever": 0.07654850831797311,
+    "ki_settlement": 0.07014016770627053,
+    "ko": 0.6336391150886843,
+    "price_seconds": 0.05667012510821223,
+    "stats_seconds": 0.3294660421088338
+  },
+  {
+    "family": "phoenix",
+    "engine": "PhoenixMCEngine",
+    "pv": -1.2466136145472735,
+    "ki_ever": 0.076325,
+    "ki_settlement": 0.0705,
+    "ko": 0.6299000000000001,
+    "price_seconds": 0.2798517500050366,
+    "stats_seconds": 0.28385191736742854
+  },
+  {
+    "family": "phoenix_memory",
+    "engine": "PhoenixQuadEngine",
+    "pv": -1.207804627221158,
+    "ki_ever": 0.07638931287426773,
+    "ki_settlement": 0.07000192758794879,
+    "ko": 0.6336681746271385,
+    "price_seconds": 0.03586679184809327,
+    "stats_seconds": 0.047660499811172485
+  },
+  {
+    "family": "phoenix_memory",
+    "engine": "PhoenixQuadEngineV2",
+    "pv": -1.2074385488508668,
+    "ki_ever": null,
+    "ki_settlement": 0.06998992114813746,
+    "ko": 0.6336432049914487,
+    "price_seconds": 0.004001916851848364,
+    "stats_seconds": 0.009395166765898466
+  },
+  {
+    "family": "phoenix_memory",
+    "engine": "PhoenixPDESolver",
+    "pv": -1.2100800805576344,
+    "ki_ever": 0.07654850831797311,
+    "ki_settlement": 0.07014016770627053,
+    "ko": 0.6336391150886843,
+    "price_seconds": 0.08829312538728118,
+    "stats_seconds": 0.41949329199269414
+  },
+  {
+    "family": "phoenix_memory",
+    "engine": "PhoenixMCEngine",
+    "pv": -1.2270520601747474,
+    "ki_ever": 0.076325,
+    "ki_settlement": 0.0705,
+    "ko": 0.6299000000000001,
+    "price_seconds": 0.28377979202196,
+    "stats_seconds": 0.285648874938488
+  },
+  {
+    "family": "ko_reset",
+    "engine": "KOResetSnowballQuadEngine",
+    "pv": 97.89943202194712,
+    "ki_ever": 0.17288017717931267,
+    "ki_settlement": 0.1175321819470029,
+    "ko": 0.6672659242011422,
+    "price_seconds": 0.009499875362962484,
+    "stats_seconds": 0.047069833148270845
+  },
+  {
+    "family": "ko_reset",
+    "engine": "KOResetSnowballQuadEngineV2",
+    "pv": 97.89889478426062,
+    "ki_ever": null,
+    "ki_settlement": 0.11755602039703769,
+    "ko": 0.6668933110748251,
+    "price_seconds": 0.00241741631180048,
+    "stats_seconds": 0.006642417050898075
+  },
+  {
+    "family": "ko_reset",
+    "engine": "KOResetSnowballPDESolver",
+    "pv": 97.8953932299625,
+    "ki_ever": 0.173157326779045,
+    "ki_settlement": 0.11771656701849004,
+    "ko": 0.6670220305293025,
+    "price_seconds": 0.12520566722378135,
+    "stats_seconds": 0.7086597504094243
+  },
+  {
+    "family": "ko_reset",
+    "engine": "SnowballMCEngine",
+    "pv": 97.89770526822218,
+    "ki_ever": 0.172425,
+    "ki_settlement": 0.117575,
+    "ko": 0.6680499999999999,
+    "price_seconds": 0.19997429102659225,
+    "stats_seconds": 0.21390895824879408
+  }
+]

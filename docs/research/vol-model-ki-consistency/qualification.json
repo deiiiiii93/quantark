@@ -1,0 +1,550 @@
+[
+  {
+    "model": "lv",
+    "family": "snowball",
+    "config": "coarse",
+    "seconds": 0.10689091729000211,
+    "pv": 98.47088851327729,
+    "ki_ever": 0.30471368587737935,
+    "ki_settlement": 0.2239128306365762,
+    "ko": 0.6993667499813305,
+    "reconciliation": -5.3290705182007514e-14,
+    "grid": {
+      "accuracy": "standard"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "snowball",
+    "config": "fine",
+    "seconds": 0.30184370931237936,
+    "pv": 98.46941925928891,
+    "ki_ever": 0.30480684213918807,
+    "ki_settlement": 0.22393739115836325,
+    "ko": 0.6994250158505233,
+    "reconciliation": 4.973799150320701e-14,
+    "grid": {
+      "accuracy": "high"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "snowball",
+    "config": "mc",
+    "seconds": 2.0004598340019584,
+    "pv": 98.49568934194855,
+    "ki_ever": 0.30425,
+    "ki_settlement": 0.2226,
+    "ko": 0.7002900000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": 98.49568934194855,
+    "price_standard_error": 0.03366152759704286
+  },
+  {
+    "model": "lv",
+    "family": "phoenix",
+    "config": "coarse",
+    "seconds": 0.15453287493437529,
+    "pv": -1.872319753065574,
+    "ki_ever": 0.11086998567421591,
+    "ki_settlement": 0.09592610715942723,
+    "ko": 0.6993668889965322,
+    "reconciliation": 0.0,
+    "grid": {
+      "accuracy": "standard"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "phoenix",
+    "config": "fine",
+    "seconds": 0.4856101246550679,
+    "pv": -1.8728321247599222,
+    "ki_ever": 0.1108838384782958,
+    "ki_settlement": 0.09592602995525346,
+    "ko": 0.6994250329196687,
+    "reconciliation": 4.440892098500626e-16,
+    "grid": {
+      "accuracy": "high"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "phoenix",
+    "config": "mc",
+    "seconds": 2.3717909161932766,
+    "pv": -1.8715745766252145,
+    "ki_ever": 0.11042,
+    "ki_settlement": 0.09609,
+    "ko": 0.7002900000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": -1.8715745766252145,
+    "price_standard_error": 0.025058875433551637
+  },
+  {
+    "model": "lv",
+    "family": "phoenix_memory",
+    "config": "coarse",
+    "seconds": 0.1800543749704957,
+    "pv": -1.8520045324658423,
+    "ki_ever": 0.11086998567421591,
+    "ki_settlement": 0.09592610715942723,
+    "ko": 0.6993668889965322,
+    "reconciliation": -1.3322676295501878e-15,
+    "grid": {
+      "accuracy": "standard"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "phoenix_memory",
+    "config": "fine",
+    "seconds": 0.5346570839174092,
+    "pv": -1.8525189195819876,
+    "ki_ever": 0.1108838384782958,
+    "ki_settlement": 0.09592602995525346,
+    "ko": 0.6994250329196687,
+    "reconciliation": 1.7763568394002505e-15,
+    "grid": {
+      "accuracy": "high"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "phoenix_memory",
+    "config": "mc",
+    "seconds": 2.382412707898766,
+    "pv": -1.8511427984998539,
+    "ki_ever": 0.11042,
+    "ki_settlement": 0.09609,
+    "ko": 0.7002900000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": -1.8511427984998539,
+    "price_standard_error": 0.02503474501802896
+  },
+  {
+    "model": "lv",
+    "family": "ko_reset",
+    "config": "coarse",
+    "seconds": 0.35266808280721307,
+    "pv": 98.06379846024122,
+    "ki_ever": 0.18836036798880634,
+    "ki_settlement": 0.09475746871686061,
+    "ko": 0.758519129053494,
+    "reconciliation": -2.6645352591003757e-14,
+    "grid": {
+      "accuracy": "standard"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "ko_reset",
+    "config": "fine",
+    "seconds": 0.8862831671722233,
+    "pv": 98.06596890629216,
+    "ki_ever": 0.18799648819764464,
+    "ki_settlement": 0.09467310275105449,
+    "ko": 0.7583884908995808,
+    "reconciliation": -1.2168044349891716e-13,
+    "grid": {
+      "accuracy": "high"
+    }
+  },
+  {
+    "model": "lv",
+    "family": "ko_reset",
+    "config": "mc",
+    "seconds": 2.1673360420390964,
+    "pv": 98.04788987340503,
+    "ki_ever": 0.1874,
+    "ki_settlement": 0.09434,
+    "ko": 0.75869,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": 98.04788987340503,
+    "price_standard_error": 0.03608843722471735
+  },
+  {
+    "model": "heston",
+    "family": "snowball",
+    "config": "coarse",
+    "seconds": 1.6099721253849566,
+    "pv": 99.52273587498492,
+    "ki_ever": 0.2689150298173781,
+    "ki_settlement": 0.20323974831373592,
+    "ko": 0.6720513860058271,
+    "reconciliation": -2.842170943040401e-14,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "heston",
+    "family": "snowball",
+    "config": "fine",
+    "seconds": 7.482350832782686,
+    "pv": 99.52599288766325,
+    "ki_ever": 0.2685720413025072,
+    "ki_settlement": 0.20311755390593078,
+    "ko": 0.6718949013292204,
+    "reconciliation": 2.842170943040401e-14,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "heston",
+    "family": "snowball",
+    "config": "mc",
+    "seconds": 2.63968125032261,
+    "pv": 99.49397976817068,
+    "ki_ever": 0.26862,
+    "ki_settlement": 0.20392,
+    "ko": 0.6718400000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": 99.49397976817068,
+    "price_standard_error": 0.032146960224655664
+  },
+  {
+    "model": "heston",
+    "family": "phoenix",
+    "config": "coarse",
+    "seconds": 3.5792415412142873,
+    "pv": -1.1237363911763485,
+    "ki_ever": 0.07724381191454746,
+    "ki_settlement": 0.06633116954631325,
+    "ko": 0.6718774515744997,
+    "reconciliation": -1.3322676295501878e-15,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "heston",
+    "family": "phoenix",
+    "config": "fine",
+    "seconds": 16.055310791824013,
+    "pv": -1.1236103648053588,
+    "ki_ever": 0.07718326755166295,
+    "ki_settlement": 0.06632577128922439,
+    "ko": 0.6719232287894491,
+    "reconciliation": -1.1102230246251565e-15,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "heston",
+    "family": "phoenix",
+    "config": "mc",
+    "seconds": 2.9425450419075787,
+    "pv": -1.125171928737532,
+    "ki_ever": 0.0773,
+    "ki_settlement": 0.06606,
+    "ko": 0.6718400000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": -1.125171928737532,
+    "price_standard_error": 0.020466849616717422
+  },
+  {
+    "model": "heston",
+    "family": "phoenix_memory",
+    "config": "coarse",
+    "seconds": 5.0993411666713655,
+    "pv": -1.1073697372585716,
+    "ki_ever": 0.07724381191454746,
+    "ki_settlement": 0.06633116954631325,
+    "ko": 0.6718774515744997,
+    "reconciliation": -8.881784197001252e-16,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "heston",
+    "family": "phoenix_memory",
+    "config": "fine",
+    "seconds": 22.827880083117634,
+    "pv": -1.10724479430412,
+    "ki_ever": 0.07718326755166295,
+    "ki_settlement": 0.06632577128922439,
+    "ko": 0.6719232287894491,
+    "reconciliation": -1.5543122344752192e-15,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "heston",
+    "family": "phoenix_memory",
+    "config": "mc",
+    "seconds": 3.019078250043094,
+    "pv": -1.1087349476498047,
+    "ki_ever": 0.0773,
+    "ki_settlement": 0.06606,
+    "ko": 0.6718400000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": -1.1087349476498047,
+    "price_standard_error": 0.02045411157281712
+  },
+  {
+    "model": "heston",
+    "family": "ko_reset",
+    "config": "coarse",
+    "seconds": 4.084403750021011,
+    "pv": 98.50622059319828,
+    "ki_ever": 0.1498940767567443,
+    "ki_settlement": 0.09140687540642997,
+    "ko": 0.7037134414738487,
+    "reconciliation": 0.0,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "heston",
+    "family": "ko_reset",
+    "config": "fine",
+    "seconds": 18.533012750092894,
+    "pv": 98.50355639826259,
+    "ki_ever": 0.15008949270589275,
+    "ki_settlement": 0.091454824288275,
+    "ko": 0.7037964563466185,
+    "reconciliation": -1.687538997430238e-14,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "heston",
+    "family": "ko_reset",
+    "config": "mc",
+    "seconds": 2.759805334266275,
+    "pv": 98.52121756403002,
+    "ki_ever": 0.14758,
+    "ki_settlement": 0.08988,
+    "ko": 0.70309,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": 98.52121756403002,
+    "price_standard_error": 0.02906141122453647
+  },
+  {
+    "model": "slv",
+    "family": "snowball",
+    "config": "coarse",
+    "seconds": 1.6321725421585143,
+    "pv": 98.77642139745662,
+    "ki_ever": 0.3037573790909284,
+    "ki_settlement": 0.22003897149271906,
+    "ko": 0.6808630012927782,
+    "reconciliation": 3.197442310920451e-14,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "slv",
+    "family": "snowball",
+    "config": "fine",
+    "seconds": 7.433000292163342,
+    "pv": 98.77854871162931,
+    "ki_ever": 0.30346013231924873,
+    "ki_settlement": 0.21996573385427529,
+    "ko": 0.6806931286450058,
+    "reconciliation": 1.4210854715202004e-14,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "slv",
+    "family": "snowball",
+    "config": "mc",
+    "seconds": 2.319012084044516,
+    "pv": 98.80143858912722,
+    "ki_ever": 0.30113,
+    "ki_settlement": 0.21911,
+    "ko": 0.6796900000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": 98.80143858912722,
+    "price_standard_error": 0.03340516173308514
+  },
+  {
+    "model": "slv",
+    "family": "phoenix",
+    "config": "coarse",
+    "seconds": 3.7208996671251953,
+    "pv": -1.5987377956037707,
+    "ki_ever": 0.10089254302846892,
+    "ki_settlement": 0.08463474854250388,
+    "ko": 0.6807213723054495,
+    "reconciliation": 8.881784197001252e-16,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "slv",
+    "family": "phoenix",
+    "config": "fine",
+    "seconds": 16.424445957876742,
+    "pv": -1.599096611909506,
+    "ki_ever": 0.10085089995923195,
+    "ki_settlement": 0.08465680913527121,
+    "ko": 0.6807243012670506,
+    "reconciliation": 0.0,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "slv",
+    "family": "phoenix",
+    "config": "mc",
+    "seconds": 2.7018259167671204,
+    "pv": -1.6162582980396238,
+    "ki_ever": 0.10047,
+    "ki_settlement": 0.08485,
+    "ko": 0.6796900000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": -1.6162582980396238,
+    "price_standard_error": 0.023364836565555425
+  },
+  {
+    "model": "slv",
+    "family": "phoenix_memory",
+    "config": "coarse",
+    "seconds": 5.3774198750033975,
+    "pv": -1.5794414482332741,
+    "ki_ever": 0.10089254302846892,
+    "ki_settlement": 0.08463474854250388,
+    "ko": 0.6807213723054495,
+    "reconciliation": 8.881784197001252e-16,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "slv",
+    "family": "phoenix_memory",
+    "config": "fine",
+    "seconds": 22.640571209136397,
+    "pv": -1.5797957280095631,
+    "ki_ever": 0.10085089995923195,
+    "ki_settlement": 0.08465680913527121,
+    "ko": 0.6807243012670506,
+    "reconciliation": 1.3322676295501878e-15,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "slv",
+    "family": "phoenix_memory",
+    "config": "mc",
+    "seconds": 2.7698543746955693,
+    "pv": -1.5975829457391035,
+    "ki_ever": 0.10047,
+    "ki_settlement": 0.08485,
+    "ko": 0.6796900000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": -1.5975829457391035,
+    "price_standard_error": 0.02334867631866451
+  },
+  {
+    "model": "slv",
+    "family": "ko_reset",
+    "config": "coarse",
+    "seconds": 4.041690083220601,
+    "pv": 98.08539746073603,
+    "ki_ever": 0.1808544006493249,
+    "ki_settlement": 0.10294259397113267,
+    "ko": 0.7219447536019149,
+    "reconciliation": -1.9539925233402755e-14,
+    "grid": {
+      "n_x": 160,
+      "n_v": 32,
+      "n_t": 192
+    }
+  },
+  {
+    "model": "slv",
+    "family": "ko_reset",
+    "config": "fine",
+    "seconds": 18.953112499788404,
+    "pv": 98.08314866262431,
+    "ki_ever": 0.18102315795544738,
+    "ki_settlement": 0.10296832075886968,
+    "ko": 0.722003416880088,
+    "reconciliation": -5.240252676230739e-14,
+    "grid": {
+      "n_x": 240,
+      "n_v": 48,
+      "n_t": 384
+    }
+  },
+  {
+    "model": "slv",
+    "family": "ko_reset",
+    "config": "mc",
+    "seconds": 2.4665270410478115,
+    "pv": 98.07183112456221,
+    "ki_ever": 0.18042,
+    "ki_settlement": 0.10341,
+    "ko": 0.7202800000000001,
+    "reconciliation": 0.0,
+    "paths": 100000,
+    "seed": 917,
+    "price_check": 98.07183112456221,
+    "price_standard_error": 0.03232388718016314
+  }
+]

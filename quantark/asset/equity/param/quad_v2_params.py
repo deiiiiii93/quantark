@@ -29,6 +29,7 @@ class QuadV2Params(EngineParams):
     event_time_tolerance: float = 0.0
     continuous_steps_per_year: int = 48
     continuous_term_structure: str = "exact"
+    continuous_grid_backend: str = "auto"
 
     def __post_init__(self):
         super().__post_init__()
@@ -56,6 +57,8 @@ class QuadV2Params(EngineParams):
             raise ValidationError("require tail_sd >= 8 and domain_sd >= tail_sd + 0.5")
         if self.backend not in {"auto", "direct", "fft"}:
             raise ValidationError("backend must be auto, direct or fft")
+        if self.continuous_grid_backend not in {"auto", "pointwise"}:
+            raise ValidationError("continuous_grid_backend must be auto or pointwise")
         if self.continuous_term_structure not in {"exact", "piecewise_constant"}:
             raise ValidationError(
                 "continuous_term_structure must be exact or piecewise_constant"

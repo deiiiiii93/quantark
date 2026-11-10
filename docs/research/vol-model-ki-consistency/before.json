@@ -1,0 +1,18 @@
+[
+  {
+    "engine": "HestonSnowballPDESolver",
+    "pv": 974403.009683025,
+    "seconds": 0.3273288747295737,
+    "n_x": 120,
+    "n_v": 24,
+    "n_t": 100
+  },
+  {
+    "engine": "HestonPhoenixPDESolver",
+    "pv": 983433.5973183734,
+    "seconds": 0.21271083410829306,
+    "n_x": 120,
+    "n_v": 24,
+    "n_t": 100
+  }
+]

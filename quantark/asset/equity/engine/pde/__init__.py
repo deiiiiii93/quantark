@@ -40,8 +40,16 @@ from .phoenix_vol_pde_solvers import (
     HestonPhoenixPDESolver,
     HestonSLVPhoenixPDESolver,
 )
+from .ko_reset_vol_pde_solvers import (
+    LocalVolKOResetSnowballPDESolver,
+    HestonKOResetSnowballPDESolver,
+    HestonSLVKOResetSnowballPDESolver,
+)
 
 __all__ = [
+    "LocalVolKOResetSnowballPDESolver",
+    "HestonKOResetSnowballPDESolver",
+    "HestonSLVKOResetSnowballPDESolver",
     "GridBinder",
     "GridConfig",
     "GridRequest",

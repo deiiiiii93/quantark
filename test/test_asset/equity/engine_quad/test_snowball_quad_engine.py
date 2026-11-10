@@ -316,7 +316,9 @@ def test_quad_applies_immediate_ki_at_valuation_observation():
 
     stats = engine.calculate_event_stats(product, env)
     assert stats is not None
-    assert stats.ki_probability == pytest.approx(1.0)
+    assert stats.ki_ever_probability == pytest.approx(1.0)
+    assert stats.ki_probability == pytest.approx(1.0 - stats.ko_probability.sum(), abs=1e-10)
+    assert stats.ki_survive_knocked_in_probability == stats.ki_probability
     assert stats.ki_times[0] == pytest.approx(0.0)
 
 

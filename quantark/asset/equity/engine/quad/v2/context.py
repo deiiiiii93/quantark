@@ -29,6 +29,7 @@ class PreparedQuad:
     diagnostics: object
     pending_pv: float = 0.0
     _continuous: object = field(default=None, repr=False)
+    _ki_monitor: object = field(default=None, repr=False)
 
     def evaluate(self, spots):
         spots = np.asarray(spots, dtype=float).reshape(-1)
@@ -80,6 +81,8 @@ class PreparedQuad:
                 name: r[0, i].copy() for i, name in enumerate(self.channels) if i
             }
             result["components"]["pending"] = np.full(len(spots), self.pending_pv)
+            if self._ki_monitor is not None:
+                result["components"]["ki_ever"] = self._ki_monitor.probability(spots)
         return result
 
 
@@ -136,9 +139,12 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
         np.log(spots), means, variances, params, align=contract.continuous_barrier
     )
     n_states, n_channels = len(contract.state_names), len(contract.channels)
+    workspace_columns = n_states * n_channels + int(
+        contract.metadata.get("ki_monitoring_end") is not None
+    )
     if (
         mesh
-        and n_states * n_channels * mesh.cells * mesh.order * 8 * 4
+        and workspace_columns * mesh.cells * mesh.order * 8 * 4
         > params.max_work_bytes
     ):
         raise NumericalError("QUAD V2 state arrays exceed workspace budget")
@@ -170,25 +176,28 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
                     means[i],
                 )
         else:
+            # The survival kernel below replaces the alive transition in full.
+            # Avoid computing a plain transition that would be discarded.
+            alive_indices = {alive for alive, _ in contract.ki_pairs} if contract.continuous_barrier is not None else set()
             rolled = [
-                op.integrate(f, means[i], variances[i], discounts[i]) for f in functions
+                None if state in alive_indices else op.integrate(f, means[i], variances[i], discounts[i])
+                for state, f in enumerate(functions)
             ]
             if contract.continuous_barrier is not None:
-                from .continuous import continuous_readout
+                from .continuous import continuous_grid_readout
 
                 for alive, hit in contract.ki_pairs:
-                    rolled[alive] = continuous_readout(
-                        functions[alive],
-                        functions[hit],
-                        mesh.nodes.ravel(),
-                        means[i],
-                        variances[i],
-                        discounts[i],
-                        contract.continuous_barrier,
-                        contract.reverse,
-                        params,
-                    )[0].reshape(n_channels, mesh.cells, mesh.order)
+                    rolled[alive] = continuous_grid_readout(
+                        functions[alive], functions[hit], means[i], variances[i],
+                        discounts[i], contract.continuous_barrier, contract.reverse,
+                        op, rolled_hit=rolled[hit],
+                    )
             states = tuple(grid_function(mesh, values) for values in rolled)
+    from .continuous import prepare_continuous_ki_monitor
+
+    ki_monitor = prepare_continuous_ki_monitor(
+        contract, means, variances, discounts, mesh, params, op,
+    )
     diagnostics = MappingProxyType(
         {
             "nodes": 0 if mesh is None else mesh.cells * mesh.order,
@@ -200,6 +209,7 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
             "kernel_cache_bytes": 0 if op is None else op.cache.bytes,
             "backends": () if op is None else tuple(sorted(op.backends_used)),
             "model": "deterministic Gaussian log increments",
+            "ki_monitoring_method": None if ki_monitor is None else ki_monitor.method,
             "qualification": "requires independent accuracy/refinement evidence",
             **contract.metadata,
         }
@@ -215,4 +225,5 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
         diagnostics,
         float(pending_pv),
         continuous_pair,
+        ki_monitor,
     )

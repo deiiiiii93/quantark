@@ -89,20 +89,80 @@ carried knock-in state:
 - `ki_survive_knocked_in_probability` = P(knocked in **and** survives to maturity
   without knocking out): the note settles knocked in. It is never P(not knocked in).
 - `ki_ever_probability` = P(the barrier is breached at any time in the contract's
-  monitoring window). MC, QUAD and PDE all count a breach *after* a knock-out, which a
-  paying note never experiences; this is a definition, consistent across engines.
+  monitoring window), including after a knock-out. Discrete QUAD V2 uses an
+  independent underlying-monitoring state for this definition. Continuous V2
+  uses a separate one-channel survival claim, with an analytic first-passage
+  shortcut when available. All native 1D GBM routes report continuous KI-ever,
+  including after a valuation-date KO. KO-reset's KI window ends on its pre
+  schedule.
 - The legacy `ki_probability` is "settles knocked in" on PDE and QUAD and "ever
-  breached" on MC; prefer the two explicit fields.
+  breached" on MC (legacy V1 KO-reset also uses "ever breached"); prefer the two
+  explicit fields.
+
+### QUAD V1 consistency
+
+The default stacked KO and KI-settlement columns use the price's event
+projection and order. Phoenix includes coupon barriers in the price/statistics
+lattice and applies the same joint coupon/KI/KO projection. A carried KI reads
+the surviving KI column; a valuation-date KO has KI-settlement probability zero.
+
+Opt-in `event_stats_mode="forward_density"` uses a different finite-grid
+discretization. Its provenance is
+`StatisticsProvenance("quad_v1_forward_density", "quad_v1")`; its outcome
+probabilities are diagnostic approximations and need not equal folded-price
+increments. V1's residual maturity cash and missing memory-coupon cash
+attribution remain legacy limitations. See
+[`autocallable-ki-consistency`](../../../../../docs/plans/2026-11-10-autocallable-ki-consistency.md)
+for the repair and qualification evidence.
+
+### Continuous KI: common native 1D capabilities
+
+MC, PDE, QUAD V1 and QUAD V2 retain their numerical methods but share required
+coefficient-change knots and coefficient-model controls:
+`continuous_term_structure="exact" | "piecewise_constant"` and
+`continuous_steps_per_year`. Exact mode rejects unrecognized smooth coefficient
+models; piecewise mode supports them with time-refinement qualification.
+Historical engine-specific default densities remain. Native MC uses its path
+generator's interval variance in the crossing bridge. V2 uses accelerated grid
+reflection with a retained `continuous_grid_backend="pointwise"` reference.
+
+See [continuous KI qualification and timings](../../../../../docs/research/continuous-ki-consistency/README.md)
+for the 60-case matrix, accuracy gates, 525-test result and matched-grid speed
+measurements. That report covers native 1D GBM. Native local-volatility and Heston/SLV
+qualification is recorded in `docs/research/vol-model-ki-consistency/README.md`.
+First-hit time distributions are separate work.
 
 ### Provenance and 2D solvers
 Every PDE result carries `provenance = StatisticsProvenance(statistics_model, price_model)`
 (`EventDistribution.provenance` copies it). It names the implementation, not an accuracy.
-The 2D Heston / SLV solvers have no native statistics: by default
-(`statistics="refuse"`) `calculate_event_stats` and `price_with_events` raise
-`StatisticsRefused`. With `statistics="flat_vol_surrogate"` they return the flat-vol 1D
-statistics at the environment's vol with the 2D price as `pv`, provenance
-`("flat_vol_1d", "heston_adi_2d" | "slv_adi_2d")`, and `reconciliation_error` the model
-difference.
+The Heston/SLV autocallable PDE solvers default to `statistics="native"`.
+Probability and cashflow columns use the same native ADI operator, product event
+stages, boundary allocation and bilinear readout as pricing. Native provenance
+is `("heston_adi_2d", "heston_adi_2d")` or `("slv_adi_2d", "slv_adi_2d")`.
+Memory Phoenix uses the arrears-linear fan; deferred coupons retain actual KO
+or maturity payment buckets. KI-ever has a separate underlying-monitoring
+claim and damping schedule, so it continues after KO. Absolute KO-reset stops
+KI monitoring at pre maturity.
+
+`column_backend="auto"` batches ADI claims. `"scalar"` retains the identical
+single-claim sweeps for comparisons; sparse/characteristic variance transport
+retains scalar directional sweeps. Native characteristic transport uses fixed
+positive linear weights to preserve outcome-cash linearity; refine the variance
+grid for accuracy. Deterministic discounting is integrated exactly outside the
+spatial generator. Price-only calls allocate no statistics or
+KI-ever companion. Refine the native ADI controls `n_x`, `n_v`, `n_t` for
+stochastic-volatility accuracy; local-volatility uses the 1D PDE grid controls.
+The bridge/first-passage corrections freeze local coefficients within an
+interval and require refinement for non-flat volatility models.
+
+`statistics="refuse"` still raises `StatisticsRefused`.
+`statistics="flat_vol_surrogate"` retains the labelled 1D implied-volatility
+approximation with the native 2D PV. It remains a different statistics model.
+
+Dedicated absolute KO-reset PDE classes are `LocalVolKOResetSnowballPDESolver`,
+`HestonKOResetSnowballPDESolver` and `HestonSLVKOResetSnowballPDESolver`.
+Rebased schedules remain unsupported. MC vol-model Snowball engines already
+route KO-reset contracts through their pre/post path masks.
 
 ## Implementations
 - `SnowballMCEngine.calculate_event_stats()` provides a Monte Carlo implementation today.

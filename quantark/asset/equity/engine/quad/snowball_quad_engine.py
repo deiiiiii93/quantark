@@ -18,6 +18,7 @@ from quantark.asset.equity.engine.settlement_support import validate_settlement_
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import (
     AutocallableEventStats,
+    StatisticsProvenance,
     payment_aware_cashflow_fields,
 )
 from quantark.asset.equity.engine.pde.grid.events import (
@@ -380,6 +381,10 @@ class SnowballQuadEngine(BaseEngine):
             [rec.observation_time for rec in ki_records],
             maturity,
         )
+        if ki_continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
+            times = self._merge_times(times, (), maturity)
         if not times:
             raise PricingError("Observation time grid is empty for SnowballQuadEngine.")
 
@@ -534,65 +539,14 @@ class SnowballQuadEngine(BaseEngine):
                     if ko_is_reachable
                     else np.zeros_like(grid)
                 )
-            # The knock-out wins a tie with a knock-in OBSERVED at the same instant. While it survives
-            # a knock-in the knocked-in surface carries it too, so the knock-in copy keeps it. Under
-            # disable_ko_after_ki that surface does not, and the copy would overwrite the knock-out
-            # wherever both levels are breached: it is then applied to the not-knocked-in surface
-            # AFTER the knock-in. (A continuously monitored knock-in breached at a node was touched
-            # before the observation, so it did come first. The two events write disjoint nodes
-            # unless the knock-out level is at or below the knock-in level.)
-            ki_record = (
-                self._match_record(obs_time, ki_records)
-                if ki_records and not (ki_continuous and log_ki_barrier is not None)
-                else None
+            ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            v_out, v_in = self._apply_observation(
+                product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
+                ko_record=ko_record if ko_record is not None and ko_is_reachable else None,
+                ko_value=ko_value if ko_record is not None else 0.0,
+                ko_weight=ko_weight, ki_record=ki_record,
+                ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
             )
-            ko_out_last = (
-                ko_record is not None and ki_record is not None and disable_ko_after_ki
-            )
-
-            def knock_out(surface):
-                if self._use_cell_average_events():
-                    return self._project_quad_event(
-                        grid,
-                        ko_record.barrier,
-                        spot,
-                        v_survive=surface,
-                        v_breach=ko_value,
-                        breach_up=not product.is_reverse,
-                    )
-                return ko_weight * ko_value + (1.0 - ko_weight) * surface
-
-            if ko_record is not None and ko_is_reachable:
-                # KO always applies to the not-yet-KI surface; KI surface only if enabled.
-                if not ko_out_last:
-                    v_out = knock_out(v_out)
-                if not disable_ko_after_ki:
-                    v_in = knock_out(v_in)
-
-            if ki_continuous and log_ki_barrier is not None:
-                ki_mask = (
-                    spot_grid >= ki_barrier_continuous
-                    if product.is_reverse
-                    else spot_grid <= ki_barrier_continuous
-                )
-                v_out[ki_mask] = v_in[ki_mask]
-            elif ki_record is not None:
-                v_out = self._blend_ki_transition(
-                    v_out,
-                    v_in,
-                    grid,
-                    spot_grid,
-                    ki_record.barrier,
-                    spot,
-                    smoothing_width,
-                    product.is_reverse,
-                    ko_weight=(
-                        ko_weight if not disable_ko_after_ki else None
-                    ),
-                )
-
-            if ko_out_last and ko_is_reachable:
-                v_out = knock_out(v_out)
 
             # Post-event continuation surfaces AT obs_time (before diffusing back to
             # the previous step): v_out = value of a not-yet-knocked-in contract,
@@ -816,7 +770,20 @@ class SnowballQuadEngine(BaseEngine):
             return None
         if pricing_env is None:
             raise PricingError("PricingEnvironment is required for SnowballQuadEngine.")
+        if self.params.auto_converge:
+            return self._event_stats_on_converged_grid(product, pricing_env, streams=streams)
         return self._compute_event_stats(product, pricing_env, streams=streams)
+
+    def _event_stats_on_converged_grid(self, product, pricing_env, *, streams=None):
+        """Use the accepted price grid for every statistical column."""
+        self.price(product, pricing_env)
+        params = replace(
+            self.params, auto_converge=False,
+            grid_points=self._last_convergence_info["grid_points"],
+        )
+        candidate = self.__class__(params=params)
+        candidate.record_backward_grids = self.record_backward_grids
+        return candidate.calculate_event_stats(product, pricing_env, streams=streams)
 
     def price_with_events(
         self,
@@ -862,12 +829,56 @@ class SnowballQuadEngine(BaseEngine):
         """Construct the event-stats dataclass (overridable by subclasses)."""
         return AutocallableEventStats(**fields)
 
+    def _apply_observation(
+        self, product, grid, spot_grid, spot, width, v_out, v_in, *,
+        ko_record=None, ko_value=0.0, ko_weight=None, ki_record=None,
+        ki_barrier_continuous=None, coupon_index=None, n_ko=0,
+        coupon_record=None, observation_index=None,
+    ):
+        """Apply the value's event order and projection to any number of columns."""
+        disable = product.barrier_config.disable_ko_after_ki
+        ko_last = ko_record is not None and ki_record is not None and disable
+
+        def knock_out(surface):
+            if self._use_cell_average_events():
+                return self._project_quad_event(
+                    grid, ko_record.barrier, spot, v_survive=surface,
+                    v_breach=ko_value, breach_up=not product.is_reverse,
+                )
+            return ko_weight * ko_value + (1.0 - ko_weight) * surface
+
+        if ko_record is not None:
+            if not ko_last:
+                v_out = knock_out(v_out)
+            if not disable:
+                v_in = knock_out(v_in)
+        if ki_barrier_continuous is not None:
+            mask = (spot_grid >= ki_barrier_continuous if product.is_reverse
+                    else spot_grid <= ki_barrier_continuous)
+            v_out[..., mask] = v_in[..., mask]
+        elif ki_record is not None:
+            v_out = self._blend_ki_transition(
+                v_out, v_in, grid, spot_grid, ki_record.barrier, spot,
+                width, product.is_reverse,
+                ko_weight=ko_weight if not disable else None,
+            )
+        if ko_last:
+            v_out = knock_out(v_out)
+        return v_out, v_in
+
+    def _event_stats_barrier_logs(self, spot, product, ko_records, ki_records, continuous_barrier):
+        return self._barrier_logs(
+            spot, [r.barrier for r in ko_records],
+            continuous_barrier if continuous_barrier is not None else [r.barrier for r in ki_records],
+        )
+
     def _event_stats_alignment_log(
         self,
         spot: float,
         product,
         ki_barrier_override: Optional[float] = None,
         ko_candidates_override: Optional[Sequence[float]] = None,
+        pricing_env=None,
     ) -> Optional[float]:
         """Grid-alignment log used by event stats.
 
@@ -888,13 +899,6 @@ class SnowballQuadEngine(BaseEngine):
     def _n_extra_quad_rows(self, n_ko: int) -> int:
         """Extra stacked indicator rows beyond the ``n_ko`` KO rows."""
         return 0
-
-    def _set_extra_quad_indicators(
-        self, v_in, v_out, spot_grid, n_ko, ko_index, ko_record, obs_time,
-        rate, product, disable_ko_after_ki, math_utils, smoothing_width,
-    ) -> None:
-        """Set extra indicator rows at a KO observation (no-op for Snowball)."""
-        return None
 
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
@@ -968,13 +972,21 @@ class SnowballQuadEngine(BaseEngine):
         )
 
         if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
-            return self._build_immediate_ko_event_stats(
+            stats = self._build_immediate_ko_event_stats(
                 product,
                 pricing_env,
                 ko_records,
                 ko_record_0,
                 knocked_in_at_valuation,
             )
+            if not want_ki:
+                stats = replace(
+                    stats, ki_probability=0.0, ki_ever_probability=0.0,
+                    ki_survive_knocked_in_probability=0.0,
+                    ki_times=np.array([]), ki_event_probability=np.array([]),
+                    ki_survival_probability=np.array([]),
+                )
+            return stats
 
         if ki_records and (
             self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION
@@ -990,6 +1002,10 @@ class SnowballQuadEngine(BaseEngine):
             [rec.observation_time for rec in ki_records],
             maturity,
         )
+        if ki_continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
+            times = self._merge_times(times, (), maturity)
         dt = self._build_dt(times)
 
         rate_vec, div_vec, vol_vec = self._term_step_params(
@@ -1017,13 +1033,10 @@ class SnowballQuadEngine(BaseEngine):
                 for record, active in zip(ko_records, reachable_ko)
                 if active and record.barrier is not None
             ],
+            pricing_env=pricing_env,
         )
-        barrier_logs = self._barrier_logs(
-            spot,
-            [record.barrier for record in ko_records],
-            ki_barrier_continuous
-            if ki_barrier_continuous is not None
-            else [record.barrier for record in ki_records],
+        barrier_logs = self._event_stats_barrier_logs(
+            spot, product, ko_records, ki_records, ki_barrier_continuous
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
@@ -1109,22 +1122,14 @@ class SnowballQuadEngine(BaseEngine):
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
 
-        # --- Fused KI-probability surfaces (formerly a second time loop) ---
-        # Four 1D indicator surfaces ride the SAME loop, step parameters and
-        # omega/prefactor kernels as the stacked recursion, but keep their
-        # historical 1D diffusion calls: numpy's complex multiply is not
-        # bitwise-commutative (FMA slotting depends on operand order), and the
-        # batched convolution computes u_fft * omega_fft while the 1D path
-        # computes omega_fft * u_fft — appending these rows to the stack would
-        # drift the KI fields at ULP level. Separate 1D calls keep the fusion
-        # bit-identical to the pre-fusion second walk.
-        fuse_ki = (
-            product.has_ki_barrier and want_ki and not knocked_in_at_valuation
-        )
+        # The maturity KI indicator is another column of the same event stack.
+        # A carried KI selects v_in at readout; it does not imply no future KO.
+        ki_col = n_rows
+        if want_ki and product.has_ki_barrier:
+            v_in = np.vstack((v_in, np.ones(grid.size)))
+            v_out = np.vstack((v_out, np.zeros(grid.size)))
+        fuse_ki = product.has_ki_barrier and want_ki and not knocked_in_at_valuation
         if fuse_ki:
-            # KI-pair terminal condition: knocked-in surface = 1, not-yet = 0.
-            v_in_ki = np.ones(grid.size, dtype=float)
-            v_out_ki = np.zeros(grid.size, dtype=float)
             v_in_ever = np.ones(grid.size, dtype=float)
             v_out_ever = np.zeros(grid.size, dtype=float)
 
@@ -1142,7 +1147,6 @@ class SnowballQuadEngine(BaseEngine):
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
-            ko_mask = None
             ko_w = None
             ko_index = None
             ko_record = None
@@ -1152,116 +1156,34 @@ class SnowballQuadEngine(BaseEngine):
                     ko_record = rec
                     break
 
+            ko_is_reachable = ko_record is not None and bool(reachable_ko[int(ko_index)])
+            ko_breach = np.zeros_like(v_out)
             if ko_record is not None:
-                ko_is_reachable = bool(reachable_ko[int(ko_index)])
                 discount_delay = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local
                 )
-                ko_w = (
-                    self._event_weight(
-                        grid,
-                        ko_record.barrier,
-                        spot,
-                        smoothing_width,
-                        trigger_is_down=product.is_reverse,
-                    )
-                    if ko_is_reachable
-                    else np.zeros_like(grid)
+                ko_breach[int(ko_index)] = float(discount_delay)
+                ko_w = self._event_weight(
+                    grid, ko_record.barrier, spot, smoothing_width,
+                    trigger_is_down=product.is_reverse,
+                ) if ko_is_reachable else np.zeros_like(grid)
+            ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            v_out, v_in = self._apply_observation(
+                product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
+                ko_record=ko_record if ko_is_reachable else None,
+                ko_value=ko_breach, ko_weight=ko_w, ki_record=ki_record,
+                ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                coupon_index=ko_index if want_coupon else None, n_ko=n_ko,
+                coupon_record=ko_record, observation_index=ko_index,
+            )
+            if fuse_ki:
+                # Underlying monitoring continues after KO. Use the KI event's
+                # price operator, but no contractual KO absorption.
+                v_out_ever, v_in_ever = SnowballQuadEngine._apply_observation(
+                    self, product, grid, spot_grid, spot, smoothing_width,
+                    v_out_ever, v_in_ever, ki_record=ki_record,
+                    ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
                 )
-                if self._use_cell_average_events() and ko_is_reachable:
-                    breach = np.zeros_like(v_out)
-                    breach[int(ko_index)] = float(discount_delay)
-                    v_out = self._project_quad_event(
-                        grid,
-                        ko_record.barrier,
-                        spot,
-                        v_survive=v_out,
-                        v_breach=breach,
-                        breach_up=not product.is_reverse,
-                    )
-                    if not disable_ko_after_ki:
-                        v_in = self._project_quad_event(
-                            grid,
-                            ko_record.barrier,
-                            spot,
-                            v_survive=v_in,
-                            v_breach=breach,
-                            breach_up=not product.is_reverse,
-                        )
-                elif ko_is_reachable:
-                    # KO always applies to not-yet-KI surface; KI surface only
-                    # if enabled.
-                    v_out *= (1.0 - ko_w)
-                    v_out[int(ko_index)] += ko_w * float(discount_delay)
-                    if not disable_ko_after_ki:
-                        v_in *= (1.0 - ko_w)
-                        v_in[int(ko_index)] += ko_w * float(discount_delay)
-                # Extra rows (coupon) are set AFTER the KO scaling so a coupon at a
-                # simultaneous KO is retained; future-coupon rows stay scaled by KO.
-                if want_coupon:
-                    self._set_extra_quad_indicators(
-                        v_in, v_out, spot_grid, n_ko, int(ko_index), ko_record,
-                        obs_time, rate, product, disable_ko_after_ki,
-                        math_utils, smoothing_width,
-                    )
-                if fuse_ki:
-                    # Hard KO absorption for the KI-probability surfaces —
-                    # applied whenever the record matches (no reachability
-                    # gate, no cell-average variant), exactly as the old
-                    # second walk did. The "ever" surfaces carry NO KO
-                    # absorption: KI-ever is a pure first-passage statistic
-                    # of the underlying, counted whether or not the note
-                    # autocalls (matching MC's ki_triggered).
-                    ko_mask = (
-                        spot_grid <= ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= ko_record.barrier
-                    )
-                    v_out_ki[ko_mask] = 0.0
-                    if not disable_ko_after_ki:
-                        v_in_ki[ko_mask] = 0.0
-
-            if ki_continuous:
-                # KI transition handled via Brownian bridge in diffusion step.
-                pass
-            elif ki_records:
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    # Smoothed discrete-KI transition, consistent with the smoothed
-                    # KO absorption above and with the price() path. Blending is
-                    # required (not just a copy): when disable_ko_after_ki=True, v_in
-                    # is NOT KO-scaled while v_out IS, so a hard `v_out[ki]=v_in[ki]`
-                    # copy would mix the soft KO partition with an un-scaled surface
-                    # and corrupt KO/maturity attribution near a KO/KI-adjacent
-                    # barrier. KO precedence via ko_weight narrowing when
-                    # `not disable_ko_after_ki` — the smoothed analog of the old
-                    # `ki_mask & ~ko_mask`, reducing EXACTLY to it at width 0.
-                    v_out = self._blend_ki_transition(
-                        v_out,
-                        v_in,
-                        grid,
-                        spot_grid,
-                        ki_record.barrier,
-                        spot,
-                        smoothing_width,
-                        product.is_reverse,
-                        ko_weight=(ko_w if not disable_ko_after_ki else None),
-                    )
-                    if fuse_ki:
-                        # Hard discrete-KI transfer for the fused surfaces.
-                        # "ever" transitions on the raw KI touch (a KI counts
-                        # regardless of a simultaneous KO); the no-KO surface
-                        # uses the mask narrowed by ~ko_mask, exactly as the
-                        # old second walk did.
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        v_out_ever[ki_mask] = v_in_ever[ki_mask]
-                        if ko_mask is not None and not disable_ko_after_ki:
-                            ki_mask = ki_mask & ~ko_mask
-                        v_out_ki[ki_mask] = v_in_ki[ki_mask]
 
             tau_step = float(tau[step_index])
             alpha = float(alpha_vec[step_index])
@@ -1279,7 +1201,7 @@ class SnowballQuadEngine(BaseEngine):
                     "kernel": (prefactor, alpha, beta, tau_step),
                     "in": v_in,
                     "out": v_out,
-                    "out_ki": v_out_ki if fuse_ki else None,
+                    "ki": (v_in if knocked_in_at_valuation else v_out)[ki_col] if want_ki and product.has_ki_barrier else None,
                     "out_ever": v_out_ever if fuse_ki else None,
                 }
 
@@ -1333,22 +1255,6 @@ class SnowballQuadEngine(BaseEngine):
                 )
 
             if fuse_ki:
-                # Fused KI-surface transport: identical step kernel
-                # (omega_array/prefactor above), historical 1D call paths
-                # (see the allocation comment for why these stay 1D).
-                v_in_ki_at_obs = v_in_ki
-                v_in_ki = self._diffuse_fft(
-                    v_in_ki,
-                    math_utils,
-                    omega_array,
-                    prefactor,
-                    full_p_lr,
-                    full_p_ur,
-                    full_p0,
-                    alpha,
-                    beta,
-                    tau_step,
-                )
                 v_in_ever_at_obs = v_in_ever
                 v_in_ever = self._diffuse_fft(
                     v_in_ever,
@@ -1364,23 +1270,6 @@ class SnowballQuadEngine(BaseEngine):
                 )
                 if ki_continuous:
                     log_ki_barrier = safe_log(ki_barrier_continuous / spot)
-                    v_out_ki = self._diffuse_with_bridge(
-                        v_out_ki,
-                        v_in_ki_at_obs,
-                        math_utils,
-                        omega_array,
-                        prefactor,
-                        full_p_lr,
-                        full_p_ur,
-                        full_p0,
-                        log_ki_barrier,
-                        alpha,
-                        beta,
-                        vol_step,
-                        dt[step_index],
-                        tau_step,
-                        product.is_reverse,
-                    )
                     v_out_ever = self._diffuse_with_bridge(
                         v_out_ever,
                         v_in_ever_at_obs,
@@ -1399,18 +1288,6 @@ class SnowballQuadEngine(BaseEngine):
                         product.is_reverse,
                     )
                 else:
-                    v_out_ki = self._diffuse_fft(
-                        v_out_ki,
-                        math_utils,
-                        omega_array,
-                        prefactor,
-                        full_p_lr,
-                        full_p_ur,
-                        full_p0,
-                        alpha,
-                        beta,
-                        tau_step,
-                    )
                     v_out_ever = self._diffuse_fft(
                         v_out_ever,
                         math_utils,
@@ -1463,62 +1340,38 @@ class SnowballQuadEngine(BaseEngine):
         pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
-        # KI probability. Two definitions are computed side by side on parallel
-        # indicator surfaces (investigation 2026-07-01):
-        #   * "no-KO"  (v_*_ki)   -> P(KI ever AND never KO) = the note settles
-        #     knocked-in. KO absorbs the indicator to 0 on BOTH surfaces, so a
-        #     path that knocks in and later autocalls is NOT counted. This is the
-        #     economically relevant "downside exposure" quantity.
-        #   * "ever"   (v_*_ever) -> P(the underlying breaches the KI barrier at
-        #     any point in [0, T], independent of the note's KO/autocall). The
-        #     ever surfaces carry NO KO absorption at all — it is a pure
-        #     first-passage statistic of the underlying process, matching MC's
-        #     `mean(ki_triggered)` (which is likewise computed over the full path,
-        #     independent of KO).
-        # The legacy scalar `ki_probability` keeps QUAD's historical "no-KO"
-        # meaning; the two unambiguous fields are reported alongside it and match
-        # the MC engine to MC noise. This is a DEFINITIONAL split, not a
-        # discretization effect (an independent fine-grid MC reproduces both
-        # numbers by pure path counting), so the no-KO KO/KI masks stay hard here.
         ki_probability = 0.0
         ki_ever_probability = 0.0
         ki_survive_knocked_in_probability = 0.0
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
-        if knocked_in_at_valuation:
-            ki_probability = 1.0
-            ki_ever_probability = 1.0
-            # Latched KI: every surviving path settles knocked-in. Reporting 1.0
-            # keeps the downstream min(maturity_prob, ki_survive) attribution
-            # identical to the legacy ki_probability=1.0 convention.
-            ki_survive_knocked_in_probability = 1.0
-            ki_times = np.array([0.0], dtype=float)
-            ki_event_probability = np.array([1.0], dtype=float)
-            ki_survival_probability = np.array([0.0], dtype=float)
-        elif product.has_ki_barrier and want_ki:
-            # Readouts from the fused KI surfaces: their whole recursion now
-            # rides the main stacked loop above (one time loop instead of
-            # two), bit-identical to the historical second walk.
+        if product.has_ki_barrier and want_ki:
             df_T = float(df_local(maturity))
             if final_transition is not None:
                 prefactor, alpha, beta, tau_step = final_transition["kernel"]
-                pv_ki_no_ko, pv_ki_ever = (
-                    float(
-                        self._readout_at_spot(
-                            final_transition[key], math_utils, prefactor,
-                            full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
-                        )
-                    )
-                    for key in ("out_ki", "out_ever")
-                )
+                pv_ki_no_ko = float(self._readout_at_spot(
+                    final_transition["ki"], math_utils, prefactor,
+                    full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
+                ))
             else:
-                pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
-                pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
-            if df_T > 0:
-                ki_probability = float(pv_ki_no_ko / df_T)
-                ki_survive_knocked_in_probability = ki_probability
-                ki_ever_probability = float(pv_ki_ever / df_T)
+                pv_ki_no_ko = float(math_utils.interpolate(initial_surface[ki_col], x=0.0))
+            ki_probability = pv_ki_no_ko / df_T
+            ki_survive_knocked_in_probability = ki_probability
+            if knocked_in_at_valuation:
+                ki_ever_probability = 1.0
+                ki_times = np.array([0.0])
+                ki_event_probability = np.array([1.0])
+                ki_survival_probability = np.array([0.0])
+            else:
+                if final_transition is not None:
+                    pv_ki_ever = float(self._readout_at_spot(
+                        final_transition["out_ever"], math_utils, prefactor,
+                        full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
+                    ))
+                else:
+                    pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
+                ki_ever_probability = pv_ki_ever / df_T
 
         if want_coupon:
             extra_fields = self._extract_extra_quad_stats(
@@ -1647,6 +1500,11 @@ class SnowballQuadEngine(BaseEngine):
             ki_survival_probability=ki_survival_probability,
             ki_ever_probability=ki_ever_probability,
             ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
+            provenance=StatisticsProvenance(
+                "quad_v1_forward_density" if self.params.event_stats_mode == "forward_density"
+                else "quad_v1",
+                "quad_v1",
+            ),
             **cashflow_fields,
             **extra_fields,
         )
@@ -2389,10 +2247,10 @@ class SnowballQuadEngine(BaseEngine):
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
-        if knocked_in_at_valuation:
-            ki_probability = 1.0
+        if knocked_in_at_valuation and want_ki:
+            ki_probability = self._density_integral(math_utils, p_in)
             ki_ever_probability = 1.0
-            ki_survive_knocked_in_probability = 1.0
+            ki_survive_knocked_in_probability = ki_probability
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
@@ -2739,9 +2597,7 @@ class SnowballQuadEngine(BaseEngine):
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
-        ki_probability = 0.0
         if knocked_in_at_valuation:
-            ki_probability = 1.0
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
@@ -2776,13 +2632,21 @@ class SnowballQuadEngine(BaseEngine):
             ],
         )
 
+        ever = 1.0 if knocked_in_at_valuation else None
+        continuous = product.has_ki_barrier and (product.barrier_config.ki_continuous
+                     or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS)
+        if continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_ki_ever
+            ever = continuous_ki_ever(product, pricing_env, self.params)
         return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
             ko_probability=ko_probability,
             survival_probability=survival_probability,
             expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=ki_probability,
+            ki_probability=0.0,
+            ki_ever_probability=ever,
+            ki_survive_knocked_in_probability=0.0,
             expected_discounted_maturity_cashflow=0.0,
             reconciliation_error=0.0,
             ki_times=ki_times,

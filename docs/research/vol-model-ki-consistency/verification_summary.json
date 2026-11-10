@@ -1,0 +1,74 @@
+{
+  "utc": "2026-11-10T14:23:50.794563+00:00",
+  "head": "c7a7e2f15da6da882476b0f898366725eea000b7",
+  "tests": {
+    "numpy": {
+      "passed": 237,
+      "seconds": 26.23
+    },
+    "c": {
+      "passed": 237,
+      "seconds": 16.06
+    },
+    "model_greeks": {
+      "passed": 183,
+      "seconds": 533.41,
+      "note": "exact-discounting model and Greek gates before the final cache, terminal and variance-batch optimizations"
+    },
+    "variance_policy": {
+      "log": "tests.variance_policy.log",
+      "passed": 13,
+      "seconds": 1.34
+    }
+  },
+  "qualification": {
+    "records": 36,
+    "checks": 96,
+    "passed": true,
+    "adi_backend": "c",
+    "paths": 100000,
+    "seed": 917
+  },
+  "transport": {
+    "qualified_variance_nodes": 192,
+    "refinement_reference_variance_nodes": 384,
+    "passed": true,
+    "coarser_96_node_price_gate": "failed and preserved",
+    "price_error_per_100": 0.00817558582396316,
+    "ki_settlement_error": 0.00022275666458848598,
+    "ki_ever_error": 0.0001956500284934215,
+    "linearity_error_max": 2.0761170560490427e-14
+  },
+  "timing": {
+    "backend": "numpy",
+    "grid": {
+      "n_x": 120,
+      "n_v": 24,
+      "n_t": 96
+    },
+    "repeats": 3,
+    "cold_engine": true,
+    "numerical_threads": 1,
+    "full_greeks_timing": false
+  },
+  "checks": {
+    "compileall": true,
+    "diff_check": true
+  },
+  "source_sha256": {
+    "quantark/asset/equity/engine/__init__.py": "13a96a83e7ef94ada3438bab7c1b58a4f361980159bfc23151eff3b05e80453f",
+    "quantark/asset/equity/engine/pde/__init__.py": "ddbb13bdb67e95fbb7b5907e706c42f9b960671b0b2f4cfe416c2101a333bab1",
+    "quantark/asset/equity/engine/pde/adi_columns.py": "36d7fc892d4dea821ca2b6a68340f35b3b614ae993a52342911bdeeca56139bd",
+    "quantark/asset/equity/engine/pde/vol_model_statistics.py": "c0cd1339947127fb17078ee2931c5252a786ec1e53317b9f9ad8c5e805041b3e",
+    "quantark/asset/equity/engine/pde/ko_reset_vol_pde_solvers.py": "9e40da66c56fdafb6ca00bf4357da87657254f13142a04649b3a23112179bb13",
+    "quantark/asset/equity/engine/pde/snowball_vol_pde_solvers.py": "f2670ff8c963569bff9a165ff1f448c32562652a8b767ec4e978fc89781dd2c1",
+    "quantark/asset/equity/engine/pde/phoenix_vol_pde_solvers.py": "5159a2489f0c8ee3570ef8200c70464c0065203c4746b884792db26637cb40b4",
+    "quantark/asset/equity/engine/pde/vol_continuous_ki.py": "3cfb6fd4b6757334b229ce5e8a05b0bc523283c8e98d2f88ed57977d51ff9f7e",
+    "quantark/asset/equity/engine/pde/core/statistics/terminal.py": "e4c468d91eaacbe4a9a32bab51410bb9accd089fdb6b861441d7e150640ac86a",
+    "test/pde_statistics/test_vol_model_ki_consistency.py": "3fa85653732222e4be67f7461c880af620bfd0d151c5d768c453bd8d3b2356a7",
+    "docs/research/vol-model-ki-consistency/qualify_engines.py": "fdc0337e9f408c2da2dcced7b95695e646dce46d8e9c088adfcd9278cc0725a0",
+    "docs/research/vol-model-ki-consistency/qualify_transport.py": "6ba058db94b8cbf452de6db45a678bc9c3c994a848ee92a340579e44cd0f5d0c",
+    "docs/research/vol-model-ki-consistency/benchmark_columns.py": "f532526edf55dc2119f8ff8fd8f37e60ebcc5c4d16232e4c5ee04decd2767cc7",
+    "quantark/asset/equity/engine/docs/autocallable_event_stats_api.md": "bf50c9e3cf6276a9ed94a05a1a66395073a7b6cf7e1260f23fd0ecf90dbbcda9"
+  }
+}

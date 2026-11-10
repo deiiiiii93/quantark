@@ -1,0 +1,869 @@
+{
+  "checks": [
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 9.31562618087245e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 2.4560521787064804e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 5.82658691927751e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.0014692539883753852,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.0005568421391880518,
+      "allowance": 0.003351661500073247,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0013373911583632603,
+      "allowance": 0.0030783443532313524,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.0008649841494767774,
+      "allowance": 0.003339524698468812,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.02627008265963582,
+      "allowance": 0.075976594090204,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 1.3852804079894643e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 7.720417377621303e-08,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 5.814392313652217e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.000512371694348257,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.00046383847829579994,
+      "allowance": 0.0024425510817009674,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0001639700447465392,
+      "allowance": 0.0023266601885272476,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.000864967080331347,
+      "allowance": 0.003339524698468812,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.0012575481347076867,
+      "allowance": 0.05911539584976121,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 1.3852804079894643e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 7.720417377621303e-08,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 5.814392313652217e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.0005143871161452651,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.00046383847829579994,
+      "allowance": 0.0024425510817009674,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0001639700447465392,
+      "allowance": 0.0023266601885272476,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.000864967080331347,
+      "allowance": 0.003339524698468812,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.0013761210821336967,
+      "allowance": 0.05906810023533676,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 0.0003638797911617031,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 8.436596580611855e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 0.00013063815391312072,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.002170446050939745,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.000596488197644629,
+      "allowance": 0.00291868479050909,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.00033310275105449816,
+      "allowance": 0.0023117013198621895,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.0003015091004191506,
+      "allowance": 0.0031520146028071565,
+      "passed": true
+    },
+    {
+      "model": "lv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.018079032887129642,
+      "allowance": 0.080733336960446,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 0.0003429885148708567,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 0.0001221944078051429,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 0.0001564846766067829,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.0032570126783326714,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 4.795869749280035e-05,
+      "allowance": 0.0032472411550079835,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0008024460940692091,
+      "allowance": 0.0029972633253979447,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ko",
+      "difference": 5.4901329220258255e-05,
+      "allowance": 0.003410260209876498,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "snowball",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.032013119492575015,
+      "allowance": 0.0730080420403251,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 6.054436288450982e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 5.398257088867764e-06,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 4.577721494936071e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.00012602637098968472,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.00011673244833704244,
+      "allowance": 0.0021552975742627064,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0002657712892243924,
+      "allowance": 0.002039518259385838,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ko",
+      "difference": 8.322878944899692e-05,
+      "allowance": 0.003410260209876498,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.0015615639321731045,
+      "allowance": 0.05011502524876615,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 6.054436288450982e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 5.398257088867764e-06,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 4.577721494936071e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.0001249429544516456,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.00011673244833704244,
+      "allowance": 0.0021552975742627064,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0002657712892243924,
+      "allowance": 0.002039518259385838,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ko",
+      "difference": 8.322878944899692e-05,
+      "allowance": 0.003410260209876498,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.0014901533456848082,
+      "allowance": 0.05009005868272156,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 0.0001954159491484586,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 4.794888184503354e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 8.301487276973774e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.002664194935690034,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.002509492705892763,
+      "allowance": 0.0026983489978931008,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0015748242882750035,
+      "allowance": 0.0022727068884645313,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.0007064563466184781,
+      "allowance": 0.0033318741187048553,
+      "passed": true
+    },
+    {
+      "model": "heston",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.017661165767435705,
+      "allowance": 0.06696036600009148,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 0.0002972467716796934,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 7.323763844377384e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 0.00016987264777246214,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.002127314172696515,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.0023301323192487233,
+      "allowance": 0.0033433562876659688,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0008557338542752868,
+      "allowance": 0.0030637879468252437,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.0010031286450056243,
+      "allowance": 0.003391989822565494,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "snowball",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.022889877497902944,
+      "allowance": 0.07547411699684686,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 4.164306923697125e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 2.2060592767325637e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 2.928961601145197e-06,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.00035881630573531,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.00038089995923194786,
+      "allowance": 0.0023632970589537246,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.00019319086472878444,
+      "allowance": 0.002227142363454733,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.001034301267050508,
+      "allowance": 0.003391989822565494,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.017161686130117815,
+      "allowance": 0.05579507966848864,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 4.164306923697125e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 2.2060592767325637e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 2.928961601145197e-06,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.00035427977628899043,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.00038089995923194786,
+      "allowance": 0.0023632970589537246,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.00019319086472878444,
+      "allowance": 0.002227142363454733,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.001034301267050508,
+      "allowance": 0.003391989822565494,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "phoenix_memory",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.017787217729540394,
+      "allowance": 0.05576340558458244,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ki_ever",
+      "difference": 0.00016875730612248008,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ki_settlement",
+      "difference": 2.572678773700432e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "ko",
+      "difference": 5.86632781730545e-05,
+      "allowance": 0.0005,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "coarse",
+      "field": "pv",
+      "difference": 0.0022487981117222944,
+      "allowance": 0.01,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ki_ever",
+      "difference": 0.0006031579554473809,
+      "allowance": 0.0028833843677043784,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ki_settlement",
+      "difference": 0.0004416792411303244,
+      "allowance": 0.002387271083578191,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "ko",
+      "difference": 0.0017234168800878136,
+      "allowance": 0.003282072920860558,
+      "passed": true
+    },
+    {
+      "model": "slv",
+      "family": "ko_reset",
+      "config": "mc",
+      "field": "pv",
+      "difference": 0.011317538062101562,
+      "allowance": 0.07335481887311975,
+      "passed": true
+    }
+  ],
+  "passed": true
+}

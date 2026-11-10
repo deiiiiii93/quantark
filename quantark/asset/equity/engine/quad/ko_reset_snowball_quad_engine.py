@@ -225,6 +225,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             [rec.observation_time for rec in ki_records],
             maturity,
         )
+        if ki_continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
+            times = self._merge_times(times, (), maturity)
         if not times:
             raise PricingError("Observation time grid is empty for KOResetSnowballQuadEngine.")
 
@@ -345,98 +349,20 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 v_out = v_out_terminal.copy()
                 v_out_seeded = True
 
-            pre_ko_weight = None
-            pre_ko_last = False
-            pre_ko_record = self._match_record(obs_time, pre_ko_records)
-            if pre_ko_record is not None:
-                discount = event_delay_by_record[id(pre_ko_record)]
-                if fold_ko is None:
-                    ko_value = pre_ko_record.payoff * discount
-                else:
-                    ko_value = (pre_ko_record.payoff + fold_ko[id(pre_ko_record)]) * discount
-                ko_weight = self._smooth_step_weight(
-                    grid,
-                    pre_ko_record.barrier,
-                    spot,
-                    smoothing_width,
-                    trigger_is_down=product.is_reverse,
-                )
-                if ko_weight is None:
-                    ko_mask = (
-                        spot_grid <= pre_ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= pre_ko_record.barrier
-                    )
-                    ko_weight = ko_mask.astype(float)
+            pre_record = self._match_record(obs_time, pre_ko_records)
+            post_record = self._match_record(obs_time, post_ko_records)
 
-                pre_ko_weight = ko_weight
-                pre_ko_value = ko_value
-                # The first-schedule knock-out wins a tie with a knock-in OBSERVED at the same
-                # instant. The knocked-in surface never carries that knock-out (it carries the second
-                # schedule's), so a knock-in copy made after it would overwrite it wherever both
-                # levels are breached: next to a discrete knock-in it is applied last, below. (A
-                # continuously monitored knock-in breached at a node was touched before the
-                # observation. The two events write disjoint nodes unless the first-schedule level
-                # is at or below the knock-in level.)
-                pre_ko_last = bool(
-                    out_live
-                    and not ki_continuous
-                    and self._match_record(obs_time, ki_records) is not None
-                )
-                if not pre_ko_last:
-                    v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
+            def ko_cash(record):
+                if record is None:
+                    return 0.0
+                extra = 0.0 if fold_ko is None else fold_ko[id(record)]
+                return (record.payoff + extra) * event_delay_by_record[id(record)]
 
-            post_ko_record = self._match_record(obs_time, post_ko_records)
-            if post_ko_record is not None and not disable_ko_after_ki:
-                discount = event_delay_by_record[id(post_ko_record)]
-                if fold_ko is None:
-                    ko_value = post_ko_record.payoff * discount
-                else:
-                    ko_value = (post_ko_record.payoff + fold_ko[id(post_ko_record)]) * discount
-                ko_weight = self._smooth_step_weight(
-                    grid,
-                    post_ko_record.barrier,
-                    spot,
-                    smoothing_width,
-                    trigger_is_down=product.is_reverse,
-                )
-                if ko_weight is None:
-                    ko_mask = (
-                        spot_grid <= post_ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= post_ko_record.barrier
-                    )
-                    ko_weight = ko_mask.astype(float)
-
-                v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
-
-            if out_live and ki_continuous and log_ki_barrier is not None:
-                ki_mask = (
-                    spot_grid >= product.barrier_config.ki_barrier
-                    if product.is_reverse
-                    else spot_grid <= product.barrier_config.ki_barrier
-                )
-                v_out[ki_mask] = v_in[ki_mask]
-            elif out_live and ki_records:
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    # Resolution-aware smoothed KI transition (same O(h)
-                    # bias fix as SnowballQuadEngine), narrowed by the
-                    # pre-KO weight on simultaneous observations.
-                    v_out = self._blend_ki_transition(
-                        v_out,
-                        v_in,
-                        grid,
-                        spot_grid,
-                        ki_record.barrier,
-                        spot,
-                        smoothing_width,
-                        product.is_reverse,
-                        ko_weight=None if pre_ko_last else pre_ko_weight,
-                    )
-
-            if pre_ko_last:
-                v_out = pre_ko_weight * pre_ko_value + (1.0 - pre_ko_weight) * v_out
+            v_out, v_in = self._apply_reset_observation(
+                product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
+                obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
+                ki_continuous, log_ki_barrier, ko_cash(pre_record), ko_cash(post_record),
+            )
 
             # Post-event continuation surfaces at obs_time (v_out = pre-KI/not-yet-KI,
             # v_in = post-KI/knocked-in), before diffusing back to the previous step.
@@ -540,6 +466,100 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
         return math_utils.interpolate(value_surface, x=0.0)
 
+    def _apply_reset_observation(
+        self, product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
+        obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
+        ki_continuous, log_ki_barrier, pre_value, post_value,
+    ):
+        """Shared price/statistics event ordering, including overlapping barriers."""
+        disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
+        pre_ko_weight = None
+        pre_ko_last = False
+        pre_ko_record = self._match_record(obs_time, pre_ko_records)
+        if pre_ko_record is not None:
+            ko_value = pre_value
+            ko_weight = self._smooth_step_weight(
+                grid,
+                pre_ko_record.barrier,
+                spot,
+                smoothing_width,
+                trigger_is_down=product.is_reverse,
+            )
+            if ko_weight is None:
+                ko_mask = (
+                    spot_grid <= pre_ko_record.barrier
+                    if product.is_reverse
+                    else spot_grid >= pre_ko_record.barrier
+                )
+                ko_weight = ko_mask.astype(float)
+
+            pre_ko_weight = ko_weight
+            pre_ko_value = ko_value
+            # The first-schedule knock-out wins a tie with a knock-in OBSERVED at the same
+            # instant. The knocked-in surface never carries that knock-out (it carries the second
+            # schedule's), so a knock-in copy made after it would overwrite it wherever both
+            # levels are breached: next to a discrete knock-in it is applied last, below. (A
+            # continuously monitored knock-in breached at a node was touched before the
+            # observation. The two events write disjoint nodes unless the first-schedule level
+            # is at or below the knock-in level.)
+            pre_ko_last = bool(
+                out_live
+                and not ki_continuous
+                and self._match_record(obs_time, ki_records) is not None
+            )
+            if not pre_ko_last:
+                v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
+
+        post_ko_record = self._match_record(obs_time, post_ko_records)
+        if post_ko_record is not None and not disable_ko_after_ki:
+            ko_value = post_value
+            ko_weight = self._smooth_step_weight(
+                grid,
+                post_ko_record.barrier,
+                spot,
+                smoothing_width,
+                trigger_is_down=product.is_reverse,
+            )
+            if ko_weight is None:
+                ko_mask = (
+                    spot_grid <= post_ko_record.barrier
+                    if product.is_reverse
+                    else spot_grid >= post_ko_record.barrier
+                )
+                ko_weight = ko_mask.astype(float)
+
+            v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
+
+        if out_live and ki_continuous and log_ki_barrier is not None:
+            ki_mask = (
+                spot_grid >= product.barrier_config.ki_barrier
+                if product.is_reverse
+                else spot_grid <= product.barrier_config.ki_barrier
+            )
+            v_out[..., ki_mask] = v_in[..., ki_mask]
+        elif out_live and ki_records:
+            ki_record = self._match_record(obs_time, ki_records)
+            if ki_record is not None:
+                # Resolution-aware smoothed KI transition (same O(h)
+                # bias fix as SnowballQuadEngine), narrowed by the
+                # pre-KO weight on simultaneous observations.
+                v_out = self._blend_ki_transition(
+                    v_out,
+                    v_in,
+                    grid,
+                    spot_grid,
+                    ki_record.barrier,
+                    spot,
+                    smoothing_width,
+                    product.is_reverse,
+                    ko_weight=None if pre_ko_last else pre_ko_weight,
+                )
+
+        if pre_ko_last:
+            v_out = pre_ko_weight * pre_ko_value + (1.0 - pre_ko_weight) * v_out
+
+        return v_out, v_in
+
     def _align_to_the_level_in_force(self, spot, product, carried_knock_in: bool):
         """The lattice is pinned to the knock-out level in force: the second schedule's once knocked in.
 
@@ -622,6 +642,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             return self._decided_ko_event_stats(
                 product, pricing_env, pre_ko_records, post_ko_records, decision
             )
+        if not (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        ):
+            carried_knock_in = decision.knocked_in
         # An ended schedule is legal: past the first, only a carried knock-in is alive (``require_alive``);
         # an aged-out second leaves a knock-in no knock-out before maturity. The recursion reads either
         # as no records on that side.
@@ -633,7 +658,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
         ki_records: Sequence = []
-        if product.has_ki_barrier and not ki_continuous:
+        if product.has_ki_barrier and not ki_continuous and not carried_knock_in:
             ki_records = product.resolve_ki_observations(pricing_env)
 
         times = self._merge_times(
@@ -642,6 +667,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             [rec.observation_time for rec in ki_records],
             maturity,
         )
+        if ki_continuous:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
+            times = self._merge_times(times, (), maturity)
         if not times:
             return None
 
@@ -730,84 +759,33 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
             )
 
-            pre_ko_weight = None
-            pre_ko_record = self._match_record(obs_time, pre_ko_records)
-            if pre_ko_record is not None:
-                pre_idx = pre_ko_records.index(pre_ko_record)
-                ko_weight = self._smooth_step_weight(
-                    grid,
-                    pre_ko_record.barrier,
-                    spot,
-                    smoothing_width,
-                    trigger_is_down=product.is_reverse,
+            pre_record = self._match_record(obs_time, pre_ko_records)
+            post_record = self._match_record(obs_time, post_ko_records)
+            pre_value = np.zeros_like(v_out)
+            post_value = np.zeros_like(v_in)
+            if pre_record is not None:
+                pre_value[pre_ko_records.index(pre_record)] = self._ko_discount(
+                    rate, obs_time, pre_record.settlement_time, df_fn=df_local,
                 )
-                if ko_weight is None:
-                    ko_mask = (
-                        spot_grid <= pre_ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= pre_ko_record.barrier
-                    )
-                    ko_weight = ko_mask.astype(float)
-
-                pre_ko_weight = ko_weight
-                ever_before = v_out[ki_ever_col].copy()
-                v_out *= 1.0 - ko_weight
-                v_out[pre_idx] += ko_weight * float(
-                    self._ko_discount(rate, obs_time, pre_ko_record.settlement_time, df_fn=df_local)
+            if post_record is not None:
+                post_value[post_offset + post_ko_records.index(post_record)] = self._ko_discount(
+                    rate, obs_time, post_record.settlement_time, df_fn=df_local,
                 )
-                v_out[ki_ever_col] = ever_before
-
-            post_ko_record = self._match_record(obs_time, post_ko_records)
-            if post_ko_record is not None and not disable_ko_after_ki:
-                post_idx = post_ko_records.index(post_ko_record)
-                ko_weight = self._smooth_step_weight(
-                    grid,
-                    post_ko_record.barrier,
-                    spot,
-                    smoothing_width,
-                    trigger_is_down=product.is_reverse,
-                )
-                if ko_weight is None:
-                    ko_mask = (
-                        spot_grid <= post_ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= post_ko_record.barrier
-                    )
-                    ko_weight = ko_mask.astype(float)
-
-                ever_before = v_in[ki_ever_col].copy()
-                v_in *= 1.0 - ko_weight
-                v_in[post_offset + post_idx] += ko_weight * float(
-                    self._ko_discount(rate, obs_time, post_ko_record.settlement_time, df_fn=df_local)
-                )
-                v_in[ki_ever_col] = ever_before
-
-            if out_live and ki_continuous and log_ki_barrier is not None:
-                ki_mask = (
-                    spot_grid >= product.barrier_config.ki_barrier
-                    if product.is_reverse
-                    else spot_grid <= product.barrier_config.ki_barrier
-                )
-                v_out[:, ki_mask] = v_in[:, ki_mask]
-            elif out_live and ki_records:
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    # Smoothed discrete-KI transition, consistent with the
-                    # smoothed KO absorption above and with the price() path;
-                    # narrowed by the pre-KO weight so KO keeps precedence at
-                    # a simultaneous observation (reduces to the hard mask at
-                    # width 0, where KO and KI regions are disjoint).
-                    v_out = self._blend_ki_transition(
-                        v_out,
-                        v_in,
-                        grid,
-                        spot_grid,
-                        ki_record.barrier,
-                        spot,
-                        smoothing_width,
-                        product.is_reverse,
-                        ko_weight=pre_ko_weight,
-                    )
+            ever_out, ever_in = v_out[ki_ever_col].copy(), v_in[ki_ever_col].copy()
+            v_out, v_in = self._apply_reset_observation(
+                product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
+                obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
+                ki_continuous, log_ki_barrier, pre_value, post_value,
+            )
+            # Independent underlying-monitoring column: KO never absorbs it.
+            ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            ever_out, ever_in = SnowballQuadEngine._apply_observation(
+                self, product, grid, spot_grid, spot, smoothing_width,
+                ever_out, ever_in, ki_record=ki_record if out_live else None,
+                ki_barrier_continuous=(product.barrier_config.ki_barrier
+                                       if out_live and ki_continuous else None),
+            )
+            v_out[ki_ever_col], v_in[ki_ever_col] = ever_out, ever_in
 
             tau_step = float(tau[step_index])
             alpha = float(alpha_vec[step_index])
@@ -975,6 +953,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         probability[index] = 1.0
         cashflow[index] = pv
         knocked_in = 1.0 if decision.knocked_in else 0.0
+        if product.barrier_config.ki_continuous or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS:
+            from quantark.asset.equity.engine.continuous_ki_support import continuous_ki_ever
+            knocked_in = continuous_ki_ever(product, pricing_env, self.params)
         return self._assemble_event_stats(
             product,
             pricing_env,

@@ -96,8 +96,9 @@ class Heston2DBarrierCrossingMixin:
             return
 
         n_t = int(core.N_T)
-        dt = float(core.dt)
-        if n_t < 2 or dt <= 0.0:
+        t_grid = np.asarray(core._time_grid, dtype=float)
+        dt = np.diff(t_grid)
+        if n_t < 2 or np.any(dt <= 0.0):
             return
         # The operator floors the variance grid identically; the v = 0 row
         # would otherwise hand the closed form a zero diffusion.
@@ -105,13 +106,13 @@ class Heston2DBarrierCrossingMixin:
         mu = np.empty((n_t, v.size), dtype=float)
         sig2 = np.empty((n_t, v.size), dtype=float)
         for j in range(n_t):
-            t_mid = (j + 0.5) * dt
+            t_mid = 0.5 * (t_grid[j] + t_grid[j+1])
             r_step, q_step = core.forward_rates_at(t_mid)
             lev = float(self._barrier_leverage(barrier, t_mid))
             sig2[j, :] = (lev * lev) * v
             mu[j, :] = (r_step - q_step) - 0.5 * sig2[j, :]
         self._ki_fp = _ContinuousKIFirstPassage(
-            dt=np.full(n_t, dt, dtype=float),
+            dt=dt,
             mu=mu,
             sig2=sig2,
             is_reverse=bool(product.is_reverse),

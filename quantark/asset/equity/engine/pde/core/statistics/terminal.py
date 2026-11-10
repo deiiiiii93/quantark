@@ -36,12 +36,23 @@ def _wanted(request):
     return EventType.COUPON in request.streams
 
 
-def _ki_fields(product):
+def _ki_fields(product, env, solver, request):
     """A knocked-out note settles nothing knocked in: ``ki_probability`` (= ki_survive) is 0 whatever the
     streams; a carried knock-in is ``ki_ever`` 1 at time 0, else no knock-in happened."""
+    from .snowball import _want
+    if not _want(request.streams)[0]:
+        empty = np.array([], dtype=float)
+        return (0.0, 0.0, empty, empty, empty)
     if bool(getattr(product, "_otc_lifecycle_knocked_in", False)):
         return (0.0, 1.0, np.array([0.0], dtype=float), np.array([1.0], dtype=float), np.array([0.0], dtype=float))
     empty = np.array([], dtype=float)
+    from ..adapters.base import continuous_knock_in
+    if solver.adapter.statistics_model == "flat_vol_1d" and continuous_knock_in(product):
+        from quantark.asset.equity.engine.continuous_ki_support import continuous_ki_ever
+        return (0.0, continuous_ki_ever(product, env, solver.params), empty, empty, empty)
+    if solver.adapter.statistics_model == "local_vol_1d" and continuous_knock_in(product):
+        from ...vol_model_statistics import local_vol_ki_ever
+        return (0.0, local_vol_ki_ever(solver, product, env), empty, empty, empty)
     return (0.0, 0.0, empty, empty, empty)
 
 
@@ -53,7 +64,7 @@ def knocked_out_statistics(solver, product, env, request, decision, pv=None):
               else solver._knocked_out_value(product, env, decision))
     want_coupon = _wanted(request)
     if isinstance(product, KnockOutResetSnowballOption):
-        return _ko_reset_statistics(solver, product, env, decision, float(pv))
+        return _ko_reset_statistics(solver, product, env, decision, float(pv), request)
     tau = float(product.get_maturity(env))
     ko_records = solver._filter_observations_by_tau(product.resolve_ko_observations(env), tau)
     n_ko = len(ko_records)
@@ -69,7 +80,7 @@ def knocked_out_statistics(solver, product, env, request, decision, pv=None):
         extra_fields, coupon_rows = _knocked_out_coupon(solver, product, env, ko_records, rec0_pos, df_delay0,
                                                         want_coupon)
     return assemble_autocallable(solver, product, env, pv=pv, ko_records=ko_records, ed_unit=ed_unit,
-                                 ki=_ki_fields(product), extra_fields=extra_fields, maturity=0.0,
+                                 ki=_ki_fields(product, env, solver, request), extra_fields=extra_fields, maturity=0.0,
                                  coupon_rows=coupon_rows)
 
 
@@ -104,7 +115,7 @@ def _knocked_out_coupon(solver, product, env, ko_records, rec0_pos, df_delay0, w
     return extra, coupon_rows
 
 
-def _ko_reset_statistics(solver, product, env, decision, pv):
+def _ko_reset_statistics(solver, product, env, decision, pv, request):
     """``KOResetEventStats`` with the decision's record in its schedule's fields (``decision.ko_regime``),
     paid as ``_knocked_out_value`` pays it, and both maturity buckets 0 at their times."""
     tau = float(product.get_maturity(env))
@@ -141,7 +152,7 @@ def _ko_reset_statistics(solver, product, env, decision, pv):
         payment_dates=[*(r.settlement_date for r in pre), *(r.settlement_date for r in post),
                        None, terminal.payment_date],
     )
-    ki_probability, ki_ever, ki_times, ki_event, ki_survival = _ki_fields(product)
+    ki_probability, ki_ever, ki_times, ki_event, ki_survival = _ki_fields(product, env, solver, request)
     return solver._make_event_stats(
         pv=pv,
         ko_times=pre_t,

@@ -531,13 +531,27 @@ class AutocallableQuadEngineV2(BaseEngine):
             raise NotImplementedError(
                 "terminated V2 contracts use the realized lifecycle ledger, not a prospective event distribution"
             )
-        context = self._context(
-            product,
-            pricing_env,
-            components="events",
-            lifecycle_state=lifecycle_state,
-            event_phase=event_phase,
-        )
+        cached = self._prepared
+        width = self.spot_width()
+        outside_default = min(spots) < pricing_env.spot * (1-width) or max(spots) > pricing_env.spot * (1+width)
+        if outside_default and (cached is None or min(spots) < cached.spot_range[0] or max(spots) > cached.spot_range[1]):
+            context = self.prepare(
+                product, pricing_env, [min(spots), max(spots)], components="events",
+                lifecycle_state=lifecycle_state, event_phase=event_phase,
+            )
+        else:
+            context = self._context(
+                product,
+                pricing_env,
+                components="events",
+                lifecycle_state=lifecycle_state,
+                event_phase=event_phase,
+            )
+        if min(spots) < context.spot_range[0] or max(spots) > context.spot_range[1]:
+            context = self.prepare(
+                product, pricing_env, [min(spots), max(spots)], components="events",
+                lifecycle_state=lifecycle_state, event_phase=event_phase,
+            )
         result = context.evaluate(spots)
         return [
             self._event_stats_from_result(
@@ -616,11 +630,7 @@ class AutocallableQuadEngineV2(BaseEngine):
             expected_discounted_maturity_cashflow=term,
             reconciliation_error=float(result["price"][index]) - sum(flows),
             ki_ever_probability=(
-                None
-                if metadata["continuous"]
-                else 1.0
-                if metadata["initial_ki"]
-                else values["ki_ever"]
+                1.0 if metadata["initial_ki"] else values["ki_ever"]
             ),
             ki_survive_knocked_in_probability=values["terminal_ki_probability"],
             **payment_aware_cashflow_fields(

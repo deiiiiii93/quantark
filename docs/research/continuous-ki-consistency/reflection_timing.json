@@ -1,0 +1,68 @@
+[
+  {
+    "family": "snowball",
+    "backend": "pointwise",
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "price_cold_seconds": 0.6814649170264602,
+    "price": 98.4041250629743,
+    "stats_cold_seconds": 2.419707833789289,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.2588110039215778
+  },
+  {
+    "family": "snowball",
+    "backend": "auto",
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "price_cold_seconds": 0.006427124608308077,
+    "price": 98.40412506297432,
+    "stats_cold_seconds": 0.018473667092621326,
+    "ki_ever": 0.32589044193995464,
+    "ki_settlement": 0.25881100392158074
+  },
+  {
+    "family": "phoenix_memory",
+    "backend": "pointwise",
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "price_cold_seconds": 7.859123583883047,
+    "price": -1.2074385488508668,
+    "stats_cold_seconds": 44.844484500121325,
+    "ki_ever": 0.07638110315768998,
+    "ki_settlement": 0.06998992114813746
+  },
+  {
+    "family": "phoenix_memory",
+    "backend": "auto",
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "price_cold_seconds": 0.043146457988768816,
+    "price": -1.2074385488509023,
+    "stats_cold_seconds": 0.2741930834017694,
+    "ki_ever": 0.07638110315768998,
+    "ki_settlement": 0.0699899211481389
+  },
+  {
+    "family": "ko_reset",
+    "backend": "pointwise",
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "price_cold_seconds": 2.960578083060682,
+    "price": 97.89889478426062,
+    "stats_cold_seconds": 20.280879666097462,
+    "ki_ever": 0.17278697621817285,
+    "ki_settlement": 0.11755602039703769
+  },
+  {
+    "family": "ko_reset",
+    "backend": "auto",
+    "order": 8,
+    "cells_per_sd": 2.0,
+    "price_cold_seconds": 0.015190375037491322,
+    "price": 97.89889478426058,
+    "stats_cold_seconds": 0.08785258419811726,
+    "ki_ever": 0.17278697621817285,
+    "ki_settlement": 0.11755602039703902
+  }
+]
