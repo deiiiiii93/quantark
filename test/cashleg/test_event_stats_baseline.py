@@ -469,6 +469,77 @@ _T11_TERMINATED = tuple(
                 "fixed_at_maturity_no_ko", "fixed_at_maturity_any")
 )
 
+# --- moves (T12: PDE 1D Snowball / Phoenix / KO-reset produce EventStatistics) ---------------------------------
+#
+# A grid engine has no same-path reference: each check pins the move to the product's own valuation-date decision
+# or to the legacy converter's definitional layout undone on the live distribution, never to the statistics object
+# it checks.
+
+
+def _knocked_out_at_valuation_has_no_knock_in_row(live: dict, banked: dict, record: dict) -> None:
+    """Cause (e), PDE 1D. Base carried no KI stream (the legacy PDE table was empty and the converter dropped it), so
+    the AT_KI leg raised. A note knocked out at valuation without a carried knock-in has, by the product's own
+    valuation-date decision (DESIGN §4.5), no knock-in at all: the KI stream exists on its own axis and is empty, so
+    the leg is exactly 0. The decision is read from the product, independent of the statistics."""
+    from quantark.cashleg import EventType
+
+    assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv"), record["engine_kind"]
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
+    _, product, env = _case(record["case"]).fresh()
+    carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+    decision = product.decide_observations_at_valuation(env.spot, env, knocked_in=carried)
+    assert decision.knocked_out and not decision.knocked_in, f"{record['id']}: not knocked out at valuation alone"
+    assert "value" in live, f"{record['id']}: still raises {live}"
+    dist, _ = _live_distribution(record)
+    assert np.asarray(dist.stream_times[EventType.KI]).size == 0, dist.stream_times[EventType.KI]
+    assert EventType.KI not in dist.flagged_streams, dist.flagged_streams
+    assert float(live["value"]) == 0.0, f"{record['id']}: live {live['value']!r} != 0 (no knock-in row)"
+
+
+def _knocked_in_settlement_marched_directly(live: dict, banked: dict, record: dict) -> None:
+    """Cause (d), PDE 1D, a note knocked in at valuation. Base converted the legacy statistics by the one-maturity
+    split ``(1 - ΣKO - ki, ki)`` with ``ki`` clipped to ``1 - ΣKO`` -- on a knocked-in note the marched settlement unit
+    exceeds ``1 - ΣKO`` by the march's discount residual, so base's MATURITY_WITH_KI was ``1 - ΣKO``. Now it is the
+    marched column itself and the residual is carried (D16; MATURITY_NO_KO is exactly 0 and cannot absorb it). With
+    the legacy split undone on the live distribution the leg gives back its banked value; the move is the residual,
+    more than round-off."""
+    from dataclasses import replace
+
+    from quantark.cashleg import EventType
+    from quantark.util.numerical import Tolerance
+
+    assert "value" in banked and "value" in live, (live, banked)
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv") and record["features"].get("knocked_in_at_valuation")
+    dist, env = _live_distribution(record)
+    residual = dist.probability_residual
+    assert residual < 0.0 and abs(residual) <= Tolerance.PROBABILITY, residual
+    assert dist.probabilities[EventType.MATURITY_NO_KO] == 0.0
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    stats = engine.calculate_event_stats(product, env)
+    assert dist.probabilities[EventType.MATURITY_WITH_KI] == stats.ki_settlement.probability
+    assert stats.maturity.probability == 0.0                       # a knocked-in note never matures not knocked in
+    leg = _leg(record)
+    assert leg.value(dist, env, cases.UNIT) == float(live["value"])
+    ko_total = float(np.sum(dist.probabilities[EventType.KO]))
+    legacy = replace(dist, probabilities={**dist.probabilities, EventType.MATURITY_WITH_KI: max(0.0, 1.0 - ko_total)})
+    tol = GOLDEN_REL_TOL * abs(float(banked["value"]))
+    assert close(leg.value(legacy, env, cases.UNIT), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: the legacy split undone does not give back the banked value")
+    assert abs(float(live["value"]) - float(banked["value"])) > tol / 100.0, (
+        f"{record['id']}: the move is round-off, not the residual")
+
+
+_T12_KO_AT_VALUATION = ("pde_snowball__snowball_cki_ko_at_valuation", "pde_phoenix__phoenix_mem_instant_ko_at_valuation")
+_T12_KNOCKED_IN_SETTLEMENT = tuple(
+    f"{case}__{leg}__event"
+    for case in ("pde_snowball__snowball_cki_knocked_in", "pde_snowball__snowball_cki_knocked_in_no_ko_after_ki",
+                 "pde_phoenix__phoenix_mem_instant_knocked_in")
+    for leg in ("fixed_at_maturity_with_ki", "fixed_at_maturity_any")
+)
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
@@ -485,6 +556,10 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__autocallable_backend_interest_coupon__event": MovedBy("h", _dcn_coupon_stream_now_native)
        for case in _T11_DCN_CASES},
     **{rid: MovedBy("h", _dcn_terminated_state_has_no_event) for rid in _T11_TERMINATED},
+    # T12: PDE 1D statistics
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _knocked_out_at_valuation_has_no_knock_in_row)
+       for case in _T12_KO_AT_VALUATION},
+    **{rid: MovedBy("d", _knocked_in_settlement_marched_directly) for rid in _T12_KNOCKED_IN_SETTLEMENT},
 }
 
 
