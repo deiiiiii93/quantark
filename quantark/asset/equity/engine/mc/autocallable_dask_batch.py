@@ -10,7 +10,7 @@ reducer; behavior — messages, arithmetic order, result fields, lazy
 """
 import math
 from dataclasses import dataclass
-from typing import Callable, Dict, Mapping, Optional
+from typing import Callable, Dict, Mapping, Optional, Sequence
 
 from quantark.util.exceptions import PricingError, ValidationError
 
@@ -37,6 +37,7 @@ def run_autocallable_dask_batches(
     total_paths: int,
     batch_fn: Callable[..., Dict[str, float]],
     batch_kwargs: Mapping[str, object],
+    on_batch_results: Optional[Callable[[Sequence[Mapping]], None]] = None,
 ) -> DaskBatchTotals:
     """Fan ``batch_fn`` out over Dask delayed batches and reduce the totals.
 
@@ -46,6 +47,11 @@ def run_autocallable_dask_batches(
     ``ko_count``, ``v0_count``, ``v1_count``, ``ko_time_sum``,
     ``ko_time_count``. Validation stays lazy: this function is only reached
     once the engine has entered its Dask path.
+
+    ``on_batch_results`` (optional) receives the computed per-batch dicts in
+    batch order before the reduction (the engines' event-statistics recorder
+    collects the records a recorded price's batches return); it reads them
+    only, so the reduction is unchanged.
     """
     # Dask is optional; the engines verify availability before dispatching
     # here, so this import cannot fail on the reachable path.
@@ -81,6 +87,8 @@ def run_autocallable_dask_batches(
 
     # Compute all batches in parallel
     results = compute(*batch_results)
+    if on_batch_results is not None:
+        on_batch_results(results)
 
     total_n = 0
     total_sum_x = 0.0

@@ -102,6 +102,29 @@ class DCNMCResult:
         return d
 
 
+def _dcn_batch_record(cf, obs_times: np.ndarray, n_obs: int) -> dict:
+    """One batch's event-statistics sums (BUYER-perspective, unsigned, discounted), read-only on the
+    batch's path cashflows: the batch-mean standard errors of landing 2 need them batch by batch."""
+    ko_mask = cf.ko_obs_row >= 0
+    rows = np.maximum(cf.ko_obs_row, 0)
+    survive = ~ko_mask
+    return {
+        "kind": "native",
+        "n": int(cf.ko_obs_row.size),
+        "pv_sum": float(cf.total_pv.sum()),
+        "fixed_disc_cash": float(cf.fixed_coupon_pv.sum()),
+        "fixed_disc_cash_by_period": cf.fixed_coupon_pv_by_period.sum(axis=0),
+        "ko_count": np.bincount(rows[ko_mask], minlength=n_obs).astype(float)[:n_obs],
+        "ko_disc_cash": np.bincount(rows[ko_mask], weights=cf.ko_pv[ko_mask], minlength=n_obs)[:n_obs],
+        "coupon_count": cf.coupon_paid.sum(axis=0).astype(float),
+        "loss_disc_cash": float(cf.loss_pv.sum()),
+        "ki_count": float(cf.knocked_in.sum()),
+        "survive_no_ki_count": float((survive & ~cf.knocked_in).sum()),
+        "survive_ki_count": float((survive & cf.knocked_in).sum()),
+        "life_sum": float(np.where(ko_mask, obs_times[rows], obs_times[-1]).sum()),
+    }
+
+
 @dataclass
 class _LegAccumulator:
     """Running sums over batches (BUYER-perspective, unsigned)."""
@@ -120,6 +143,8 @@ class _LegAccumulator:
     survive_no_ki_count: int = 0
     survive_ki_count: int = 0
     life_sum: float = 0.0
+    #: one record of per-batch sums per added batch, in batch order (the statistics' batch means)
+    batch_records: list = field(default_factory=list)
 
     def __post_init__(self):
         self.fixed_by_period_sum = np.zeros(self.n_obs)
@@ -128,6 +153,7 @@ class _LegAccumulator:
         self.ko_timing_count = np.zeros(self.n_obs)
 
     def add(self, cf, obs_times: np.ndarray) -> None:
+        self.batch_records.append(_dcn_batch_record(cf, obs_times, self.n_obs))
         n_b = cf.ko_obs_row.size
         self.n += n_b
         self.totals.append(cf.total_pv)
@@ -352,6 +378,9 @@ class DCNMCEngine(BaseEngine):
     # ``(n_dims, n_paths, batch_id) -> ndarray | None`` consulted before the
     # engine's own generators; None on every direct-path engine.
     _draw_provider = None
+    #: the per-batch statistics records of the last simulated price (``price_detailed``), batch order;
+    #: empty when the price simulated nothing (a settled final row or receivables only)
+    _last_stats_records: tuple = ()
 
     def __init__(
         self,
@@ -455,6 +484,7 @@ class DCNMCEngine(BaseEngine):
                 f"got {type(product).__name__}"
             )
         t0 = time.perf_counter()
+        self._last_stats_records = ()
         receivables = resolve_dcn_lifecycle_state(
             product, pricing_env, lifecycle_state
         )
@@ -513,6 +543,8 @@ class DCNMCEngine(BaseEngine):
             cashflows = [run_batch(b) for b in range(self.num_batches)]
         for cf in cashflows:
             acc.add(cf, obs_times)
+        # the statistics' batch records of this price (one per batch, batch order)
+        self._last_stats_records = tuple(acc.batch_records)
 
         sign = product.direction_sign
         n = acc.n

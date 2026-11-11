@@ -296,7 +296,132 @@ def conditional_standard_snowball_moments(
     )
 
 
+def conditional_standard_snowball_event_record(
+    *,
+    product: SnowballOption,
+    pricing_env: PricingEnvironment,
+    base_paths: np.ndarray,
+    log_spot_factor_loadings: np.ndarray,
+    ko_indices: np.ndarray,
+    ki_indices: np.ndarray,
+    maturity: float,
+    discount_factors: Callable[[np.ndarray], np.ndarray],
+) -> dict:
+    """One batch's event-statistics record for the exact one-factor estimator (MC event statistics on
+    ``price()``'s paths, unified event statistics spec AC2).
+
+    The estimator prices ``E[payoff | base path]`` by integrating the shared Gaussian factor ``Z``; its
+    native outcomes are intervals of ``Z`` on the same base paths. The record holds, summed over the
+    batch's rows, each outcome's exact conditional probability and conditional discounted / undiscounted
+    cash, on the same thresholds :func:`conditional_standard_snowball_moments` integrates:
+
+    - knock-out at record ``j``: ``Z`` in ``[threshold_j, min_{i<j} threshold_i)``;
+    - first knock-in at record ``j`` (whatever happens to the knock-out): ``Z`` in
+      ``(max_{i<j} ki_threshold_i, ki_threshold_j]``; knock-in ever: ``Z <= max_j ki_threshold_j``;
+    - the maturity branches as the moments split them (never knocked in / knocked in, no knock-out).
+
+    Keys and meaning follow the native kernel's record (``kind = "conditional"``: sums of probabilities,
+    not path counts). Whether a knock-in preceded the knock-out is not resolved here (no
+    ``ki_before_ko_count``). Read-only: the price's moments are computed separately and unchanged.
+    """
+    _validate_supported_product(product)
+    base = np.asarray(base_paths, dtype=float)
+    loading = np.asarray(log_spot_factor_loadings, dtype=float)
+    ko_indices = np.asarray(ko_indices, dtype=int)
+    ki_indices = np.asarray(ki_indices, dtype=int)
+    n_rows = base.shape[0]
+
+    ko_profile = product.get_ko_observation_profile(pricing_env)
+    ko_barriers = np.asarray(ko_profile["barriers"], dtype=float)
+    ko_payoffs = np.asarray(ko_profile["payoffs"], dtype=float)
+    ko_settlement_times = np.asarray(ko_profile["settlement_times"], dtype=float)
+    n_ko = ko_indices.size
+    ko_dfs = np.asarray(discount_factors(ko_settlement_times), dtype=float)
+    if ko_dfs.shape == ():
+        ko_dfs = np.full(n_ko, float(ko_dfs), dtype=float)
+
+    ko_count = np.zeros(n_ko, dtype=float)
+    ko_disc_cash = np.zeros(n_ko, dtype=float)
+    ko_cash = np.zeros(n_ko, dtype=float)
+    survivor_upper = np.full(n_rows, np.inf, dtype=float)
+    for j, column in enumerate(ko_indices + 1):
+        threshold = (np.log(ko_barriers[j]) - np.log(base[:, column])) / loading[:, column]
+        event_probability = _normal_interval_probability(threshold, survivor_upper)
+        mass = float(event_probability.sum())
+        ko_count[j] = mass
+        ko_cash[j] = mass * ko_payoffs[j]
+        ko_disc_cash[j] = mass * ko_payoffs[j] * ko_dfs[j]
+        survivor_upper = np.minimum(survivor_upper, threshold)
+    survivor_probability = ndtr(survivor_upper)
+
+    already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+    ki_row_times = np.zeros(0, dtype=float)
+    ki_first_count = np.zeros(0, dtype=float)
+    if already_knocked_in:
+        ki_upper = np.full(n_rows, np.inf, dtype=float)
+    elif product.has_ki_barrier:
+        ki_profile = product.get_ki_observation_profile(pricing_env)
+        ki_barriers = np.asarray(ki_profile["barriers"], dtype=float)
+        ki_row_times = np.asarray(ki_profile["observation_times"], dtype=float)
+        ki_first_count = np.zeros(ki_indices.size, dtype=float)
+        previous = np.full(n_rows, -np.inf, dtype=float)
+        for j, column in enumerate(ki_indices + 1):
+            threshold = (np.log(ki_barriers[j]) - np.log(base[:, column])) / loading[:, column]
+            ki_first_count[j] = float(_normal_interval_probability(previous, threshold).sum())
+            previous = np.maximum(previous, threshold)
+        ki_upper = previous if ki_indices.size else np.full(n_rows, -np.inf, dtype=float)
+    else:
+        ki_upper = np.full(n_rows, -np.inf, dtype=float)
+
+    v1_upper = np.minimum(survivor_upper, ki_upper)
+    v1_probability = ndtr(v1_upper)
+    v0_probability = np.clip(survivor_probability - v1_probability, 0.0, 1.0)
+
+    maturity_df = float(
+        np.asarray(discount_factors(np.array([float(maturity)], dtype=float)), dtype=float).reshape(-1)[0]
+    )
+    v0_payoff = float(product.get_maturity_payoff_v0(product.strike, pricing_env))
+    v1_principal = float(product.get_maturity_payoff_v1(product.strike, pricing_env))
+    probe = min(1.0, 0.5 * float(product.strike))
+    v1_below = float(product.get_maturity_payoff_v1(product.strike - probe, pricing_env))
+    downside_slope = (v1_principal - v1_below) / probe
+    terminal_base = base[:, -1]
+    terminal_loading = loading[:, -1]
+    strike_threshold = (np.log(float(product.strike)) - np.log(terminal_base)) / terminal_loading
+    downside_upper = np.minimum(v1_upper, strike_threshold)
+    downside_probability = ndtr(downside_upper)
+    truncated_spot = _truncated_lognormal_first_moment(terminal_base, terminal_loading, downside_upper)
+    v1_expectation = v1_principal * v1_probability + downside_slope * (
+        truncated_spot - float(product.strike) * downside_probability
+    )
+    v0_cash = float((v0_payoff * v0_probability).sum())
+    v1_cash = float(v1_expectation.sum())
+    v0_disc_cash = maturity_df * v0_cash
+    v1_disc_cash = maturity_df * v1_cash
+    ki_count = float(ndtr(ki_upper).sum())
+    return {
+        "kind": "conditional",
+        "n": int(n_rows),
+        "pv_sum": float(ko_disc_cash.sum() + v0_disc_cash + v1_disc_cash),
+        "ko_count": ko_count,
+        "ko_disc_cash": ko_disc_cash,
+        "ko_cash": ko_cash,
+        "v0_count": float(v0_probability.sum()),
+        "v1_count": float(v1_probability.sum()),
+        "v0_disc_cash": v0_disc_cash,
+        "v1_disc_cash": v1_disc_cash,
+        "v0_cash": v0_cash,
+        "v1_cash": v1_cash,
+        "ki_count": ki_count,
+        "ki_no_ko_count": float(v1_probability.sum()),
+        "ki_before_ko_count": None,
+        "ki_first_count": ki_first_count,
+        "ki_row_times": ki_row_times,
+    }
+
+
 __all__ = [
     "ConditionalSnowballMoments",
+    "conditional_standard_snowball_event_record",
     "conditional_standard_snowball_moments",
 ]

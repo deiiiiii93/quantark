@@ -31,9 +31,17 @@ from quantark.asset.equity.engine.event_stats import (
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
 )
+from quantark.asset.equity.engine.mc._event_stats_recorder import (
+    STATS_RECORDS_KEY,
+    EventStatsRecordingMixin,
+    aggregate_records,
+    grouped_sums,
+    row_sums,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from quantark.montecarlo.conditional_snowball import (
+    conditional_standard_snowball_event_record,
     conditional_standard_snowball_moments,
 )
 from quantark.montecarlo.qmc_rqmc_driver import RQMCRunSpec, run_rqmc
@@ -227,7 +235,7 @@ def _ki_level_breached(spots: np.ndarray, ki_barrier: float, is_reverse: bool) -
     return spots >= ki_barrier if is_reverse else spots <= ki_barrier
 
 
-class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
+class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
     """
     Monte Carlo pricing engine for Snowball (autocallable) options.
 
@@ -405,6 +413,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         # simulated (a 1e-10-year cut decided an observation 3 ms ahead on the spot, review 2026-09-21 R1).
         if T <= 0.0:
             self._refuse_expired_fold()
+            self._note_stats_expired()
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
             if type(product) is SnowballOption:
                 # The observations still pending at this instant are decided on the known spot, as
@@ -685,120 +694,51 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
         """
-        Provide per-observation event probabilities and expected discounted cashflows.
+        Per-observation event probabilities and expected discounted cashflows, on ``price()``'s paths.
 
-        This is a Monte Carlo implementation for Snowball. QUAD/PDE engines can
-        optionally implement the same API later to provide faster risk-neutral
-        event stats without Monte Carlo.
+        Runs this engine's own ``price`` under a statistics recorder (unified event statistics spec
+        AC2, D14, D23): every payoff-kernel batch of that price deposits its outcome sums, so the
+        statistics describe exactly the paths, seeds, bridge seeds, batches and estimator of the price
+        on every route (serial, Dask batches, adaptive RQMC, the conditional-moment estimators), and
+        ``pv`` IS the value ``price`` returned. The fields keep their definitions: Snowball maturity
+        cash is ``pv`` minus the knock-out cash, so a conditional-moment estimator's difference between
+        its price and the native path outcomes sits there, as before. At zero time to maturity
+        ``price`` decides the claim on the spot and no path is priced: the statistics are ``None`` (the
+        documented expired rule). The batch records stay on ``_last_stats_records``.
         """
-        if isinstance(product, KnockOutResetSnowballOption):
-            return self._calculate_event_stats_ko_reset(product, pricing_env)
-        if not isinstance(product, SnowballOption):
+        if not isinstance(product, (SnowballOption, KnockOutResetSnowballOption)):
             return None
+        with self._recording_event_stats() as recorder:
+            pv = self.price(product, pricing_env)
+        if recorder.expired:
+            return None
+        if not recorder.records:
+            raise PricingError(
+                f"{type(self).__name__}.price recorded no priced batch for the event statistics"
+            )
+        totals = aggregate_records(recorder.records)
+        if isinstance(product, KnockOutResetSnowballOption):
+            return self._ko_reset_event_stats(product, pricing_env, float(pv), totals)
+        return self._snowball_event_stats(product, pricing_env, float(pv), totals)
 
-        S = pricing_env.spot
-        T = product.get_maturity(pricing_env)
-        r = pricing_env.get_rate(T)
-        q = pricing_env.get_div_yield(T)
-        sigma = pricing_env.get_vol(product.strike, T)
-        # Term-structure context for this entry point (see term_inputs.py)
-        self._term_ctx = (pricing_env, product.strike)
-        self._df = make_df_fn(pricing_env)
-        self._prepare_payment_timings(product, pricing_env)
-        self._validate_inputs(S, T, r, q, sigma, product)
-
-        all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
-            product, pricing_env, T
-        )
-        generator = self._create_path_generator(S, r, q, sigma, T, dt_array)
-        paths, _ = generator.generate_paths(return_aux=False)
-
+    def _snowball_event_stats(
+        self,
+        product: SnowballOption,
+        pricing_env: PricingEnvironment,
+        pv: float,
+        totals: dict,
+    ) -> AutocallableEventStats:
+        """``AutocallableEventStats`` from the aggregated batch records of one recorded price."""
+        n = totals["n"]
         ko_profile = product.get_ko_observation_profile(pricing_env)
         ko_times = np.array(ko_profile["observation_times"], dtype=float)
-        ko_barriers = np.array(ko_profile["barriers"], dtype=float)
         ko_payoffs = np.array(ko_profile["payoffs"], dtype=float)
         timings = self._payment_timings
-        ko_settlement_times = np.asarray(
-            timings.observation_payment_times,
-            dtype=float,
-        )
 
-        ko_triggered, first_ko_idx = self._check_ko_barriers(
-            paths, ko_indices, ko_barriers, product.is_reverse
-        )
-
-        ki_triggered = np.zeros(len(paths), dtype=bool)
-        first_ki_idx = np.full(len(paths), -1, dtype=int)
-        ki_event_times = np.array([], dtype=float)
-        if product.has_ki_barrier:
-            ki_continuous = (
-                product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-                or product.barrier_config.ki_continuous
-            )
-            ki_profile = product.get_ki_observation_profile(pricing_env)
-            ki_barriers_val = np.array(ki_profile["barriers"], dtype=float)
-            if ki_continuous:
-                ki_event_times = np.array(all_times, dtype=float)
-                if ki_barriers_val.shape not in ((), (1,)):
-                    raise ValidationError(
-                        "Continuous KI monitoring requires a scalar ki_barrier."
-                    )
-                ki_barrier_scalar = float(ki_barriers_val.reshape(-1)[0])
-                ki_triggered, first_ki_idx = (
-                    self._check_ki_barriers_continuous_with_bridge(
-                        paths=paths,
-                        all_times=all_times,
-                        ki_barrier=ki_barrier_scalar,
-                        sigma=float(sigma),
-                        is_reverse=product.is_reverse,
-                        rng_seed=int(self.params.seed) + 1337,
-                    )
-                )
-            else:
-                ki_event_times = np.array(ki_profile["observation_times"], dtype=float)
-                ki_triggered, first_ki_idx = self._check_ki_barriers(
-                    paths, ki_indices, ki_barriers_val, product.is_reverse
-                )
-
-        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-        if already_knocked_in:
-            ki_triggered[:] = True
-            first_ki_idx[:] = 0
-
-        if product.barrier_config.disable_ko_after_ki and (
-            product.has_ki_barrier or already_knocked_in
-        ):
-            if already_knocked_in:
-                ko_valid = np.zeros_like(ko_triggered)
-            else:
-                ko_trigger_times = np.where(
-                    first_ko_idx >= 0, ko_times[first_ko_idx], np.inf
-                )
-                if len(ki_event_times) > 0:
-                    ki_trigger_times = np.where(
-                        first_ki_idx >= 0, ki_event_times[first_ki_idx], np.inf
-                    )
-                else:
-                    ki_trigger_times = np.full(len(paths), np.inf, dtype=float)
-                # A knock-out and a knock-in observed at the SAME instant: the knock-out wins, so the
-                # knock-in observed with it does not disable it. A continuously monitored knock-in is
-                # different: a touch found inside a step happened BEFORE the observation closing it.
-                ko_valid = ko_triggered & _knock_out_first(
-                    ko_trigger_times, ki_trigger_times, ki_continuous
-                )
-        else:
-            ko_valid = ko_triggered
-
-        is_ko = ko_valid
-        is_v0 = ~is_ko & ~ki_triggered
-        is_v1 = ~is_ko & ki_triggered
-
-        ko_probability = np.zeros(len(ko_times), dtype=float)
+        ko_probability = np.asarray(totals["ko_count"], dtype=float) / n
         expected_discounted_ko_cashflow = np.zeros(len(ko_times), dtype=float)
         for i in range(len(ko_times)):
-            hit_i = is_ko & (first_ko_idx == i)
-            p_i = float(np.mean(hit_i))
-            ko_probability[i] = p_i
+            p_i = float(ko_probability[i])
             if p_i > 0.0:
                 df = timings.observation_payment_dfs[i]
                 expected_discounted_ko_cashflow[i] = p_i * float(ko_payoffs[i]) * df
@@ -809,6 +749,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             cumulative_ko += ko_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
 
+        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        ki_event_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
         if already_knocked_in:
@@ -816,51 +758,16 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
         elif product.has_ki_barrier:
+            ki_event_times = np.asarray(totals["ki_row_times"], dtype=float)
             if ki_event_times.size:
-                ki_event_probability = np.zeros(len(ki_event_times), dtype=float)
-                for i in range(len(ki_event_times)):
-                    ki_event_probability[i] = float(
-                        np.mean(ki_triggered & (first_ki_idx == i))
-                    )
+                ki_event_probability = np.asarray(totals["ki_first_count"], dtype=float) / n
                 ki_survival_probability = np.maximum(
                     0.0, 1.0 - np.cumsum(ki_event_probability)
                 )
 
-        maturity_spots = paths[:, -1]
-        maturity_df = timings.terminal.payment_df
-        maturity_payoff_all = np.zeros(len(paths), dtype=float)
-        if is_v0.any():
-            maturity_payoff_all[is_v0] = np.array(
-                [
-                    product.get_maturity_payoff_v0(float(s), pricing_env)
-                    for s in maturity_spots[is_v0]
-                ],
-                dtype=float,
-            )
-        if is_v1.any():
-            maturity_payoff_all[is_v1] = np.array(
-                [
-                    product.get_maturity_payoff_v1(float(s), pricing_env)
-                    for s in maturity_spots[is_v1]
-                ],
-                dtype=float,
-            )
-        # Total discounted payoff PV from the same simulation.
-        total_discounted = np.zeros(len(paths), dtype=float)
-        if is_ko.any():
-            payoff = ko_payoffs[first_ko_idx[is_ko]]
-            settle = ko_settlement_times[first_ko_idx[is_ko]]
-            dfs = np.array(
-                [pricing_env.get_discount_factor(float(t)) for t in settle], dtype=float
-            )
-            total_discounted[is_ko] = payoff * dfs
-        total_discounted[~is_ko] = maturity_payoff_all[~is_ko] * maturity_df
-
-        pv = float(np.mean(total_discounted))
         expected_discounted_maturity_cashflow = float(
             pv - np.sum(expected_discounted_ko_cashflow)
         )
-        reconciliation_error = 0.0
 
         records = product.resolve_ko_observations(pricing_env)
         terminal = timings.terminal
@@ -899,13 +806,11 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             ],
         )
 
-        # Unambiguous, cross-engine-consistent KI definitions (investigation
-        # 2026-07-01): ki_ever = P(KI ever, KO-independent); ki_survive =
-        # P(KI ever AND never KO) = settles knocked-in. Legacy ki_probability keeps
-        # MC's historical "KI ever" meaning.
+        # ki_ever = P(KI ever, KO-independent); ki_survive = P(KI ever AND never KO) = settles
+        # knocked-in (investigation 2026-07-01). Legacy ki_probability keeps MC's "KI ever" meaning.
         if product.has_ki_barrier or already_knocked_in:
-            ki_ever_probability = float(np.mean(ki_triggered))
-            ki_survive_knocked_in_probability = float(np.mean(ki_triggered & ~is_ko))
+            ki_ever_probability = float(totals["ki_count"] / n)
+            ki_survive_knocked_in_probability = float(totals["ki_no_ko_count"] / n)
         else:
             ki_ever_probability = 0.0
             ki_survive_knocked_in_probability = 0.0
@@ -918,7 +823,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
             ki_probability=ki_ever_probability,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
-            reconciliation_error=float(reconciliation_error),
+            reconciliation_error=0.0,
             ki_times=ki_event_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
@@ -927,76 +832,33 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             **cashflow_fields,
         )
 
-    def _calculate_event_stats_ko_reset(
+    def _ko_reset_event_stats(
         self,
         product: KnockOutResetSnowballOption,
         pricing_env: PricingEnvironment,
+        pv: float,
+        totals: dict,
     ) -> KOResetEventStats:
-        S = pricing_env.spot
-        T = product.get_max_maturity_time(pricing_env)
-        r = pricing_env.get_rate(T)
-        q = pricing_env.get_div_yield(T)
-        sigma = pricing_env.get_vol(product.strike, T)
-        # Term-structure context for this entry point (see term_inputs.py)
-        self._term_ctx = (pricing_env, product.strike)
-        self._df = make_df_fn(pricing_env)
-        self._prepare_payment_timings(product, pricing_env)
-        self._validate_inputs(S, T, r, q, sigma, product)
+        """``KOResetEventStats`` from the aggregated batch records of one recorded price."""
+        n = totals["n"]
+        pre_profile = product.get_pre_ko_observation_profile(pricing_env)
+        post_profile = product.get_post_ko_observation_profile(pricing_env)
+        pre_times = np.array(pre_profile["observation_times"], dtype=float)
+        post_times = np.array(post_profile["observation_times"], dtype=float)
+        post_mode = post_profile["mode"]
 
-        grid = self._build_time_grid_ko_reset(product, pricing_env, T)
-        generator = self._create_path_generator(S, r, q, sigma, T, grid["dt_array"])
-        paths, _ = generator.generate_paths(return_aux=False)
-
-        payoffs, settlement_times, _stats, extra = self._compute_payoffs_ko_reset(
-            product,
-            pricing_env,
-            paths,
-            grid,
-            r,
-            T,
-            sigma,
-            rng_seed=int(self.params.seed) + 1337,
-        )
-
-        is_pre_ko = extra["is_pre_ko"]
-        is_post_ko = extra["is_post_ko"]
-        is_ko = is_pre_ko | is_post_ko
-        ki_triggered = extra["ki_triggered"]
-        is_v0 = ~is_ko & ~ki_triggered
-        is_v1 = ~is_ko & ki_triggered
-
-        pre_times = grid["pre_times"]
-        post_times = grid["post_times"]
-        post_mode = grid["post_profile"]["mode"]
-        post_maturity_abs = (
-            product.get_post_maturity_time(pricing_env)
-            if post_mode == PostKOScheduleMode.ABSOLUTE
-            else None
-        )
-        post_max_offset = (
-            float(max(post_times)) if len(post_times) else 0.0
-        )
-
-        pre_prob = np.zeros(len(pre_times), dtype=float)
-        for i in range(len(pre_times)):
-            pre_prob[i] = float(np.mean(is_pre_ko & (extra["first_pre_idx"] == i)))
-
-        post_prob = np.zeros(len(post_times), dtype=float)
-        for i in range(len(post_times)):
-            post_prob[i] = float(np.mean(is_post_ko & (extra["first_post_idx"] == i)))
-
+        pre_prob = np.asarray(totals["pre_count"], dtype=float) / n
+        post_prob = np.asarray(totals["post_count"], dtype=float) / n
         pre_prob_total = float(pre_prob.sum())
         post_prob_total = float(post_prob.sum())
 
-        pre_profile = grid["pre_profile"]
         pre_rates = np.array(pre_profile["rates"], dtype=float)
-        pre_records = pre_profile["records"]
         pre_maturity = product.get_pre_maturity_time(pricing_env)
         pre_payoffs, pre_settlement_times = self._compute_ko_schedule_payoffs(
             product,
             pre_times,
             pre_rates,
-            pre_records,
+            pre_profile["records"],
             pricing_env,
             pre_maturity,
         )
@@ -1008,78 +870,24 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             df = pricing_env.get_discount_factor(float(pre_settlement_times[i]))
             expected_discounted_ko_cashflow[i] = pre_prob[i] * float(pre_payoffs[i]) * df
 
-        expected_discounted_post_ko_cashflow = 0.0
-        if is_post_ko.any():
-            dfs = np.array(
-                [pricing_env.get_discount_factor(float(t)) for t in settlement_times[is_post_ko]],
-                dtype=float,
-            )
-            expected_discounted_post_ko_cashflow = float(
-                np.sum(payoffs[is_post_ko] * dfs) / len(paths)
-            )
-
-        dfs_all = np.array(
-            [pricing_env.get_discount_factor(float(t)) for t in settlement_times],
-            dtype=float,
+        expected_discounted_post_ko_cashflow = float(
+            np.sum(totals["post_disc_cash"]) / n
         )
-        maturity_payoff_all = np.zeros(len(paths), dtype=float)
-        maturity_payoff_all[~is_ko] = payoffs[~is_ko]
         expected_discounted_maturity_cashflow = float(
-            np.mean(maturity_payoff_all * dfs_all)
+            (totals["v0_disc_cash"] + totals["v1_disc_cash"]) / n
         )
 
-        total_discounted = payoffs * dfs_all
-        pv = float(np.mean(total_discounted))
-        reconciliation_error = 0.0
-
+        # The ledger: first-schedule knock-outs per record, then the path-dependent cash grouped by
+        # (determination, payment) -- second-schedule knock-outs, then the maturity branches.
         determination_ledger = list(np.asarray(pre_times, dtype=float))
         payment_ledger = list(np.asarray(pre_settlement_times, dtype=float))
         discounted_ledger = list(expected_discounted_ko_cashflow)
-
-        def _append_grouped_path_cashflows(mask, determination_times):
-            indices = np.flatnonzero(mask)
-            if indices.size == 0:
-                return
-            grouped = {}
-            for path_index, determination_time in zip(
-                indices,
-                np.asarray(determination_times, dtype=float),
-            ):
-                payment_time = float(settlement_times[path_index])
-                key = (float(determination_time), payment_time)
-                discounted = float(
-                    payoffs[path_index]
-                    * pricing_env.get_discount_factor(payment_time)
-                    / len(paths)
-                )
-                grouped[key] = grouped.get(key, 0.0) + discounted
-            for (determination_time, payment_time), discounted in sorted(
-                grouped.items()
-            ):
-                determination_ledger.append(determination_time)
-                payment_ledger.append(payment_time)
-                discounted_ledger.append(discounted)
-
-        _append_grouped_path_cashflows(
-            is_post_ko,
-            extra["ko_time"][is_post_ko],
-        )
-        if post_mode == PostKOScheduleMode.ABSOLUTE:
-            terminal_determination = np.where(
-                is_v0,
-                float(pre_maturity),
-                float(post_maturity_abs),
-            )
-        else:
-            terminal_determination = np.where(
-                is_v0,
-                float(pre_maturity),
-                extra["post_end_time"],
-            )
-        _append_grouped_path_cashflows(
-            ~is_ko,
-            terminal_determination[~is_ko],
-        )
+        grouped = totals.get("ledger", {})
+        for tag in ("post", "terminal"):
+            for key in sorted(k for k in grouped if k[0] == tag):
+                determination_ledger.append(key[1])
+                payment_ledger.append(key[2])
+                discounted_ledger.append(grouped[key][0] / n)
 
         cashflow_fields = payment_aware_cashflow_fields(
             pricing_env,
@@ -1107,26 +915,27 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             cumulative_ko += pre_prob[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
 
+        ki_ever_probability = float(totals["ki_count"] / n)
         return KOResetEventStats(
             pv=pv,
             ko_times=pre_times,
             ko_probability=pre_prob,
             survival_probability=survival_probability,
             expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=float(np.mean(ki_triggered)),
+            ki_probability=ki_ever_probability,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
-            reconciliation_error=float(reconciliation_error),
-            # ki_ever = P(KI ever, KO-independent); ki_survive = P(KI ever AND
-            # never KO'd, pre- or post-reset). Legacy ki_probability stays "KI ever".
-            ki_ever_probability=float(np.mean(ki_triggered)),
-            ki_survive_knocked_in_probability=float(np.mean(ki_triggered & ~is_ko)),
+            reconciliation_error=0.0,
+            # ki_ever = P(KI ever, KO-independent); ki_survive = P(KI ever AND never KO'd, pre- or
+            # post-reset). Legacy ki_probability stays "KI ever".
+            ki_ever_probability=ki_ever_probability,
+            ki_survive_knocked_in_probability=float(totals["ki_no_ko_count"] / n),
             pre_ko_times=pre_times,
             pre_ko_probability=pre_prob,
             post_ko_times=post_times,
             post_ko_probability=post_prob,
             pre_ko_probability_total=pre_prob_total,
             post_ko_probability_total=post_prob_total,
-            expected_discounted_post_ko_cashflow=float(expected_discounted_post_ko_cashflow),
+            expected_discounted_post_ko_cashflow=expected_discounted_post_ko_cashflow,
             # F6: each knock-out's settlement; a REBASED post schedule holds offsets from the
             # knock-in time, so it has no payment time and says so
             pre_ko_payment_times=np.asarray(pre_settlement_times, dtype=float),
@@ -1136,8 +945,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 self._compute_ko_schedule_payoffs(
                     product,
                     post_times,
-                    np.array(grid["post_profile"]["rates"], dtype=float),
-                    grid["post_profile"]["records"],
+                    np.array(post_profile["rates"], dtype=float),
+                    post_profile["records"],
                     pricing_env,
                     float(product.get_post_maturity_time(pricing_env)),
                 )[1]
@@ -1147,6 +956,110 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             post_ko_times_are_offsets=post_mode != PostKOScheduleMode.ABSOLUTE,
             **cashflow_fields,
         )
+
+    def _snowball_batch_record(
+        self,
+        *,
+        payoffs: np.ndarray,
+        settlement_times: np.ndarray,
+        is_ko: np.ndarray,
+        is_v0: np.ndarray,
+        is_v1: np.ndarray,
+        first_ko_idx: np.ndarray,
+        ko_times: np.ndarray,
+        ki_triggered: np.ndarray,
+        first_ki_idx: np.ndarray,
+        ki_row_times: np.ndarray,
+        ki_path_times: Optional[np.ndarray],
+        ki_continuous: bool,
+        carried_knock_in: bool,
+    ) -> dict:
+        """One native batch's outcome sums (read-only on the kernel's finished arrays)."""
+        discounted = payoffs * np.asarray(self._df(settlement_times), dtype=float)
+        n_ko = len(ko_times)
+        if carried_knock_in:
+            ki_before_ko = ki_triggered.copy()
+        elif ki_path_times is None:
+            ki_before_ko = np.zeros_like(ki_triggered)
+        else:
+            ko_path_times = np.where(is_ko, ko_times[np.maximum(first_ko_idx, 0)], np.inf)
+            ki_before_ko = ki_triggered & ~(
+                is_ko & _knock_out_first(ko_path_times, ki_path_times, ki_continuous)
+            )
+        ki_rows = 0 if carried_knock_in else len(ki_row_times)
+        return {
+            "kind": "native",
+            "n": int(len(payoffs)),
+            "pv_sum": float(discounted.sum()),
+            "ko_count": row_sums(first_ko_idx, n_ko, is_ko),
+            "ko_disc_cash": row_sums(first_ko_idx, n_ko, is_ko, discounted),
+            "ko_cash": row_sums(first_ko_idx, n_ko, is_ko, payoffs),
+            "v0_count": float(is_v0.sum()),
+            "v1_count": float(is_v1.sum()),
+            "v0_disc_cash": float(discounted[is_v0].sum()),
+            "v1_disc_cash": float(discounted[is_v1].sum()),
+            "v0_cash": float(payoffs[is_v0].sum()),
+            "v1_cash": float(payoffs[is_v1].sum()),
+            "ki_count": float(ki_triggered.sum()),
+            "ki_no_ko_count": float((ki_triggered & ~is_ko).sum()),
+            "ki_before_ko_count": float(ki_before_ko.sum()),
+            "ki_first_count": row_sums(first_ki_idx, ki_rows, ki_triggered),
+            "ki_row_times": np.asarray(ki_row_times, dtype=float),
+        }
+
+    def _ko_reset_batch_record(
+        self,
+        *,
+        payoffs: np.ndarray,
+        settlement_times: np.ndarray,
+        is_pre_ko: np.ndarray,
+        is_post_ko: np.ndarray,
+        is_v0: np.ndarray,
+        is_v1: np.ndarray,
+        first_pre_idx: np.ndarray,
+        first_post_idx: np.ndarray,
+        n_pre: int,
+        n_post: int,
+        ko_time: np.ndarray,
+        terminal_determination: np.ndarray,
+        ki_triggered: np.ndarray,
+        first_ki_idx: np.ndarray,
+        ki_row_times: np.ndarray,
+    ) -> dict:
+        """One KO-reset batch's outcome sums (read-only on the kernel's finished arrays). Second-schedule
+        knock-outs count per schedule-2 record (an offset under REBASED); the path-dependent cash (second
+        schedule, maturity branches) is grouped by (determination, payment) for the ledger."""
+        discounted = payoffs * np.asarray(self._df(settlement_times), dtype=float)
+        is_ko = is_pre_ko | is_post_ko
+        ledger = grouped_sums("post", is_post_ko, ko_time, settlement_times, discounted, payoffs)
+        ledger.update(
+            grouped_sums("terminal", ~is_ko, terminal_determination, settlement_times, discounted, payoffs)
+        )
+        return {
+            "kind": "native",
+            "n": int(len(payoffs)),
+            "pv_sum": float(discounted.sum()),
+            "pre_count": row_sums(first_pre_idx, n_pre, is_pre_ko),
+            "pre_disc_cash": row_sums(first_pre_idx, n_pre, is_pre_ko, discounted),
+            "pre_cash": row_sums(first_pre_idx, n_pre, is_pre_ko, payoffs),
+            "post_count": row_sums(first_post_idx, n_post, is_post_ko),
+            "post_disc_cash": row_sums(first_post_idx, n_post, is_post_ko, discounted),
+            "post_cash": row_sums(first_post_idx, n_post, is_post_ko, payoffs),
+            "v0_count": float(is_v0.sum()),
+            "v1_count": float(is_v1.sum()),
+            "v0_disc_cash": float(discounted[is_v0].sum()),
+            "v1_disc_cash": float(discounted[is_v1].sum()),
+            "v0_cash": float(payoffs[is_v0].sum()),
+            "v1_cash": float(payoffs[is_v1].sum()),
+            "ki_count": float(ki_triggered.sum()),
+            "ki_no_ko_count": float((ki_triggered & ~is_ko).sum()),
+            # a second-schedule knock-out needs a knock-in first: knocked in before any knock-out is
+            # knocked in and not knocked out on the first schedule
+            "ki_before_ko_count": float((ki_triggered & ~is_pre_ko).sum()),
+            "ki_first_count": row_sums(first_ki_idx, len(ki_row_times), ki_triggered),
+            "ki_row_times": np.asarray(ki_row_times, dtype=float),
+            "ledger": ledger,
+        }
 
     def _validate_inputs(
         self,
@@ -2073,6 +1986,46 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             stats["ko_time_sum"] = 0.0
             stats["ko_time_count"] = 0
 
+        if self._stats_recording():
+            # event statistics of a recorded price (calculate_event_stats): this batch's outcome sums
+            has_ki_rows = ki_barriers_val is not None
+            if not has_ki_rows:
+                ki_row_times = np.zeros(0, dtype=float)
+                ki_path_times = None
+            else:
+                node_times = np.concatenate([[0.0], np.asarray(all_times, dtype=float)])
+                ki_row_times = (
+                    np.asarray(all_times, dtype=float)
+                    if ki_continuous
+                    else np.asarray(ki_profile["observation_times"], dtype=float)
+                )
+                ki_path_times = (
+                    np.where(
+                        ki_triggered,
+                        node_times[np.asarray(ki_indices, dtype=int)[np.maximum(first_ki_idx, 0)] + 1],
+                        np.inf,
+                    )
+                    if len(ki_indices) > 0
+                    else np.full(num_paths, np.inf, dtype=float)
+                )
+            self._record_stats_batch(
+                self._snowball_batch_record(
+                    payoffs=payoffs,
+                    settlement_times=settlement_times,
+                    is_ko=is_ko,
+                    is_v0=is_v0,
+                    is_v1=is_v1,
+                    first_ko_idx=first_ko_idx,
+                    ko_times=np.asarray(ko_times, dtype=float),
+                    ki_triggered=ki_triggered,
+                    first_ki_idx=first_ki_idx,
+                    ki_row_times=ki_row_times,
+                    ki_path_times=ki_path_times,
+                    ki_continuous=bool(has_ki_rows and ki_continuous),
+                    carried_knock_in=already_knocked_in,
+                )
+            )
+
         return payoffs, settlement_times, stats
 
     @staticmethod
@@ -2502,6 +2455,40 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             "ko_time": ko_time,
         }
 
+        if self._stats_recording():
+            # event statistics of a recorded price (calculate_event_stats): this batch's outcome sums
+            if post_mode == PostKOScheduleMode.ABSOLUTE:
+                terminal_determination = np.where(
+                    is_v0, float(pre_maturity), float(post_maturity_abs)
+                )
+            else:
+                terminal_determination = np.where(is_v0, float(pre_maturity), post_end_time)
+            if carried_knock_in or ki_barriers_val is None:
+                ki_row_times = np.zeros(0, dtype=float)
+            elif ki_continuous:
+                ki_row_times = np.asarray(all_times[: ki_horizon_idx + 1], dtype=float)
+            else:
+                ki_row_times = np.asarray(ki_times, dtype=float)
+            self._record_stats_batch(
+                self._ko_reset_batch_record(
+                    payoffs=payoffs,
+                    settlement_times=settlement_times,
+                    is_pre_ko=is_pre_ko,
+                    is_post_ko=is_post_ko,
+                    is_v0=is_v0,
+                    is_v1=is_v1,
+                    first_pre_idx=first_pre_idx,
+                    first_post_idx=first_post_idx,
+                    n_pre=len(pre_times),
+                    n_post=len(post_times),
+                    ko_time=ko_time,
+                    terminal_determination=terminal_determination,
+                    ki_triggered=ki_triggered,
+                    first_ki_idx=first_ki_idx,
+                    ki_row_times=ki_row_times,
+                )
+            )
+
         return payoffs, settlement_times, stats, extra
 
     def _antithetic_pairs_in_paths(self) -> bool:
@@ -2649,19 +2636,21 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         # Generate paths
         paths, _ = generator.generate_paths(return_aux=False, batch_id=batch_id)
 
-        # Compute payoffs
-        payoffs, settlement_times, stats = self._compute_payoffs(
-            product,
-            pricing_env,
-            paths,
-            all_times,
-            ko_indices,
-            ki_indices,
-            r,
-            T,
-            sigma,
-            rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
-        )
+        # Compute payoffs (a recorded price captures this batch's statistics record: the batch may run
+        # in another process, so it travels back inside the batch result)
+        with self._stats_batch_capture() as captured:
+            payoffs, settlement_times, stats = self._compute_payoffs(
+                product,
+                pricing_env,
+                paths,
+                all_times,
+                ko_indices,
+                ki_indices,
+                r,
+                T,
+                sigma,
+                rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
+            )
 
         # Discount payoffs
         discount_factors = self._df(settlement_times)
@@ -2672,7 +2661,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         sum_x = float(discounted_payoffs.sum())
         sum_x2 = float(np.square(discounted_payoffs).sum())
 
-        return {
+        result = {
             "n": n,
             "sum_x": sum_x,
             "sum_x2": sum_x2,
@@ -2682,6 +2671,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             "ko_time_sum": float(stats.get("ko_time_sum", 0.0)),
             "ko_time_count": int(stats.get("ko_time_count", 0)),
         }
+        if captured is not None:
+            result[STATS_RECORDS_KEY] = captured
+        return result
 
     def _price_single_batch_ko_reset(
         self,
@@ -2704,16 +2696,17 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         )
 
         paths, _ = generator.generate_paths(return_aux=False, batch_id=batch_id)
-        payoffs, settlement_times, stats, _ = self._compute_payoffs_ko_reset(
-            product,
-            pricing_env,
-            paths,
-            grid,
-            r,
-            T,
-            sigma,
-            rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
-        )
+        with self._stats_batch_capture() as captured:
+            payoffs, settlement_times, stats, _ = self._compute_payoffs_ko_reset(
+                product,
+                pricing_env,
+                paths,
+                grid,
+                r,
+                T,
+                sigma,
+                rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
+            )
 
         discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors
@@ -2723,7 +2716,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
         sum_x = float(discounted_payoffs.sum())
         sum_x2 = float(np.square(discounted_payoffs).sum())
 
-        return {
+        result = {
             "n": n,
             "sum_x": sum_x,
             "sum_x2": sum_x2,
@@ -2733,6 +2726,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             "ko_time_sum": float(stats.get("ko_time_sum", 0.0)),
             "ko_time_count": int(stats.get("ko_time_count", 0)),
         }
+        if captured is not None:
+            result[STATS_RECORDS_KEY] = captured
+        return result
 
     def _price_parallel(
         self,
@@ -2769,6 +2765,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 ko_indices=ko_indices,
                 ki_indices=ki_indices,
             ),
+            on_batch_results=self._deposit_captured_stats,
         )
 
         return SnowballMCResult(
@@ -2811,6 +2808,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                 sigma=sigma,
                 grid=grid,
             ),
+            on_batch_results=self._deposit_captured_stats,
         )
 
         return SnowballMCResult(
@@ -2916,6 +2914,21 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             """Pricer function for RQMC driver."""
             moments = affine_moments(paths, aux)
             if moments is not None:
+                if self._stats_recording():
+                    # the exact conditional expectations of the native outcomes on the same paths
+                    # and spot-factor loadings the price integrates (recording only)
+                    self._record_stats_batch(
+                        conditional_standard_snowball_event_record(
+                            product=product,
+                            pricing_env=pricing_env,
+                            base_paths=paths,
+                            log_spot_factor_loadings=aux["log_spot_factor_loadings"],
+                            ko_indices=ko_indices,
+                            ki_indices=ki_indices,
+                            maturity=T,
+                            discount_factors=self._df,
+                        )
+                    )
                 return collapse_conditional_outer(
                     moments.discounted_payoff, aux
                 )
@@ -2952,7 +2965,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                     "Heston conditional-control metadata is incomplete: "
                     + ", ".join(missing)
                 )
-            sampled_control = native_discounted(aux["control_paths"])
+            # the control's proxy paths are no batch of the price's own paths: not recorded
+            with self._without_stats_recording():
+                sampled_control = native_discounted(aux["control_paths"])
             exact_control = raw_conditional_control_payoffs(paths, aux)
             residual = discounted - sampled_control
             group_size = int(aux.get("conditional_group_size", 1))
@@ -3011,18 +3026,20 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
                     ),
                     batches_used=result.batches_used,
                 )
-            _, _, stats = self._compute_payoffs(
-                product,
-                pricing_env,
-                paths,
-                all_times,
-                ko_indices,
-                ki_indices,
-                r,
-                T,
-                sigma,
-                rng_seed=int(self.params.seed) + 1337,
-            )
+            # a result-assembly rerun of batch 0, not a priced batch: not recorded
+            with self._without_stats_recording():
+                _, _, stats = self._compute_payoffs(
+                    product,
+                    pricing_env,
+                    paths,
+                    all_times,
+                    ko_indices,
+                    ki_indices,
+                    r,
+                    T,
+                    sigma,
+                    rng_seed=int(self.params.seed) + 1337,
+                )
 
             return SnowballMCResult(
                 price=result.price,
@@ -3159,16 +3176,18 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
 
         def finalize(result):
             paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
-            _, _, stats, _ = self._compute_payoffs_ko_reset(
-                product,
-                pricing_env,
-                paths,
-                grid,
-                r,
-                T,
-                sigma,
-                rng_seed=int(self.params.seed) + 1337,
-            )
+            # a result-assembly rerun of batch 0, not a priced batch: not recorded
+            with self._without_stats_recording():
+                _, _, stats, _ = self._compute_payoffs_ko_reset(
+                    product,
+                    pricing_env,
+                    paths,
+                    grid,
+                    r,
+                    T,
+                    sigma,
+                    rng_seed=int(self.params.seed) + 1337,
+                )
 
             return SnowballMCResult(
                 price=result.price,
