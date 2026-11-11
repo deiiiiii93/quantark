@@ -24,6 +24,7 @@ from quantark.asset.equity.engine._event_stats_transition import (
 )
 from quantark.asset.equity.engine.event_stats import (
     AutocallableEventStats,
+    StatisticUnavailable,
     DCNEventStats,
     EventStatistics,
     KOResetEventStats,
@@ -116,16 +117,33 @@ def test_legacy_provenance_is_kept():
     assert _from_legacy_snowball(_legacy_snowball(provenance=prov)).provenance == prov
 
 
-def test_legacy_ki_arrays_become_a_ki_table_on_their_own_axis():
-    """The base drop: a KI stream whose length differed from the KO grid vanished from the distribution."""
+def test_a_legacy_ki_ever_table_off_the_ko_grid_is_not_carried():
+    """Legacy MC KI arrays count a knock-in after a knock-out (KI-ever): kept only where base kept them."""
     times = np.linspace(0.1, 1.0, 10)
     legacy = _legacy_snowball(**_ki_arrays(times, np.full(10, 0.02)))
     stats = _from_legacy_snowball(legacy)
-    np.testing.assert_array_equal(stats.ki_table.times, times)
-    np.testing.assert_array_equal(stats.ki_table.payment_times, times)          # D8
-    assert stats.unavailable["ki_table"] == LEGACY_REASON                         # legacy KI definition
+    assert stats.ki_table is None and stats.unavailable["ki_table"] == LEGACY_REASON
+    assert EventType.KI not in EventDistribution.from_autocallable_stats(legacy).probabilities
+
+
+def test_a_legacy_ki_table_on_the_ko_grid_is_kept_as_base_and_flagged():
+    legacy = _legacy_snowball(**_ki_arrays(KO, (0.01, 0.02, 0.03, 0.04)))
+    stats = _from_legacy_snowball(legacy)
+    np.testing.assert_array_equal(stats.ki_table.times, KO)
+    assert stats.unavailable["ki_table"] == LEGACY_REASON
     dist = EventDistribution.from_autocallable_stats(legacy)
-    np.testing.assert_array_equal(dist.stream_times[EventType.KI], times)
+    np.testing.assert_array_equal(dist.payment_times_for(EventType.KI), KO)
+    assert dist.flagged_streams[EventType.KI] == LEGACY_REASON
+
+
+def test_the_carried_knock_in_row_is_kept_unflagged():
+    """Already knocked in: one row at t = 0 with probability 1 is the new definition exactly."""
+    legacy = _legacy_snowball(ki_survive_knocked_in_probability=0.5, **_ki_arrays([0.0], [1.0]))
+    stats = _from_legacy_snowball(legacy)
+    np.testing.assert_array_equal(stats.ki_table.times, [0.0])
+    np.testing.assert_array_equal(stats.ki_table.probability, [1.0])
+    assert "ki_table" not in stats.unavailable
+    assert EventType.KI not in EventDistribution.from_autocallable_stats(legacy).flagged_streams
 
 
 def test_legacy_converter_routes_through_the_transition_module():
@@ -265,3 +283,50 @@ def test_a_legacy_dcn_ledger_must_be_laid_out_as_before():
     bad = dataclasses.replace(_legacy_dcn(), **_ledger([0.1], [0.1], [1.0]))
     with pytest.raises(ValidationError, match="ledger"):
         _from_legacy_dcn(bad)
+
+
+# --- CP2: the guarded accessor ----------------------------------------------------------------------
+
+
+def _all_paths(stats):
+    paths = []
+    for f in dataclasses.fields(stats):
+        paths.append(f.name)
+        value = getattr(stats, f.name)
+        if dataclasses.is_dataclass(value) and f.name != "provenance":     # T5 key format: table/row components
+            paths.extend(f"{f.name}.{g.name}" for g in dataclasses.fields(value))
+    return paths
+
+
+@pytest.mark.parametrize("make", [
+    lambda: _from_legacy_snowball(_legacy_snowball()),
+    lambda: _from_legacy_snowball(_legacy_snowball(**_ki_arrays([0.0], [1.0]))),
+    lambda: _from_legacy_phoenix(_legacy_phoenix()),
+    lambda: _from_legacy_phoenix(_legacy_phoenix(path_dependent=True, coupon_probability=())),
+    lambda: _from_legacy_ko_reset(_legacy_ko_reset(True)),
+    lambda: _from_legacy_ko_reset(_legacy_ko_reset(False)),
+    lambda: _from_legacy_dcn(_legacy_dcn()),
+], ids=["snowball", "snowball_carried_ki", "phoenix", "phoenix_expiry_no_coupon_p", "ko_reset_buckets",
+        "ko_reset_one_maturity", "dcn"])
+def test_every_flagged_path_raises_through_the_accessor_and_every_other_returns(make):
+    stats = make()
+    flagged = 0
+    for path in _all_paths(stats):
+        head = path.split(".")[0]
+        reason = stats.unavailable.get(path, stats.unavailable.get(head))
+        if reason is not None:
+            flagged += 1
+            with pytest.raises(StatisticUnavailable, match=reason) as info:
+                stats.require(path)
+            assert isinstance(info.value, ValueError) and isinstance(info.value, ValidationError)
+            assert stats.flag(path) == reason
+        else:
+            assert stats.require(path) is stats._resolve(path), path
+            assert stats.flag(path) is None
+    assert flagged >= 5
+
+
+def test_the_accessor_refuses_an_unknown_path():
+    stats = _from_legacy_snowball(_legacy_snowball())
+    with pytest.raises(ValidationError, match="field path"):
+        stats.require("maturity.nonsense")

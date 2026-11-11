@@ -118,20 +118,36 @@ def _dates_segment(dates, start: int, stop: int, size: int) -> Optional[tuple]:
     return tuple(dates[start:stop])
 
 
-def _legacy_ki_table(stats, unavailable: Dict[str, str]) -> Optional[KnockInTable]:
-    """The legacy per-date first-KI arrays as a table on their own axis (definition: legacy, may count a knock-in
-    after a knock-out). ``None`` when the legacy object has no such arrays or they do not form a table."""
-    unavailable["ki_table"] = LEGACY_REASON
+def _legacy_ki_table(stats, unavailable: Dict[str, str], ko_times: Optional[np.ndarray]) -> Optional[KnockInTable]:
+    """The legacy per-date first-KI arrays, kept only where they are safe to read (CP2 ruling).
+
+    Legacy KI arrays count a knock-in after a knock-out (KI-ever, MC), so they are not the table's definition
+    "first KI before any KO". Kept:
+
+    * the carried knock-in row (``times == [0]``, ``probability == [1]``): the new definition exactly, unflagged;
+    * a table on the KO grid itself (``ko_times`` given and equal): the legacy distribution kept exactly this
+      stream, so it is kept as base did, flagged ``LEGACY_REASON`` (the flag rides onto the distribution).
+
+    Anything else (a KI-ever table on its own axis, which base dropped) is ``None`` with ``LEGACY_REASON``.
+    """
     times = np.asarray(stats.ki_times, dtype=float)
     probability = np.asarray(stats.ki_event_probability, dtype=float)
     survival = np.asarray(stats.ki_survival_probability, dtype=float)
-    if times.size == 0 or not (times.size == probability.size == survival.size):
-        return None
-    if np.any(times < 0.0) or np.any(np.diff(times) <= 0.0) or np.any(np.diff(survival) > Tolerance.PROBABILITY) \
-            or np.any(probability < -Tolerance.PROBABILITY) or np.any(survival < -Tolerance.PROBABILITY):
-        return None
-    return KnockInTable(times=times, payment_times=times, probability=probability, survival=survival,
-                        interpolated=np.zeros(times.size, dtype=bool))
+    shaped = times.size > 0 and times.size == probability.size == survival.size
+
+    def table() -> KnockInTable:
+        return KnockInTable(times=times, payment_times=times, probability=probability, survival=survival,
+                            interpolated=np.zeros(times.size, dtype=bool))
+
+    if shaped and times.size == 1 and float(times[0]) == 0.0 and float(probability[0]) == 1.0:
+        return table()                              # already knocked in: one row at 0 with probability 1
+    unavailable["ki_table"] = LEGACY_REASON
+    on_ko_grid = (
+        shaped and ko_times is not None and times.size == ko_times.size and np.array_equal(times, ko_times)
+        and not np.any(np.diff(survival) > Tolerance.PROBABILITY)
+        and not np.any(probability < -Tolerance.PROBABILITY) and not np.any(survival < -Tolerance.PROBABILITY)
+    )
+    return table() if on_ko_grid else None
 
 
 def _legacy_maturity_split(ko_total: float, ki_settle: float) -> tuple[float, float]:
@@ -283,10 +299,12 @@ def _finish_rows(stats, family: str, observations: ObservationTable, coupons: Op
                  unavailable: Dict[str, str]) -> EventStatistics:
     final_time = float(observations.times[-1]) if observations.size else maturity.time
     terminal_mass = maturity.probability + ki_settlement.probability
+    # the legacy KO-reset converter never emitted a KI stream: no table is kept as base there
+    ko_grid = None if family == "ko_reset" else observations.times
     return _assemble(
         stats, family=family, observations=observations, coupons=coupons, maturity=maturity,
         ki_settlement=ki_settlement, knock_in=_knock_in(stats, ki_settlement.probability, unavailable),
-        ki_table=_legacy_ki_table(stats, unavailable), ledger=ledger,
+        ki_table=_legacy_ki_table(stats, unavailable, ko_grid), ledger=ledger,
         expected_lifetime=_expected_lifetime(observations, terminal_mass, final_time), unavailable=unavailable,
     )
 

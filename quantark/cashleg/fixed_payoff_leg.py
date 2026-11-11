@@ -71,6 +71,7 @@ class FixedPayoffLeg(CashLeg):
     ) -> float:
         """Return signed PV of this event-triggered amount."""
 
+        event_dist.ensure_live(f"FixedPayoffLeg ({self.trigger.value})")
         offset_yf = float(self.payment_offset_days) / 365.0
         if self.trigger is PaymentTrigger.AT_MATURITY_ANY:
             expected_df = sum(

@@ -38,6 +38,20 @@ _TERMINATION_EVENTS = {
 #: streams that always live on an axis (array probabilities)
 _ARRAY_STREAMS = frozenset({EventType.KO, EventType.KI, EventType.COUPON})
 _KO_EVENTS = ("ko_pre", "ko_post")
+#: the statistics field each stream is read from (for ``flagged_streams``)
+_STREAM_SOURCES = {
+    EventType.KO: "observations.probability",
+    EventType.COUPON: "coupons.probability",
+    EventType.KI: "ki_table",
+    EventType.MATURITY_NO_KO: "maturity.probability",
+    EventType.MATURITY_WITH_KI: "ki_settlement.probability",
+}
+_REBASED_SOURCES = {
+    EventType.KO: "termination",
+    EventType.MATURITY_WITH_KI: "termination",
+    EventType.MATURITY_NO_KO: "termination",
+    EventType.KI: "ki_table",
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -60,6 +74,12 @@ class EventDistribution:
             ``from_statistics`` (spec D16) and carried here so a reader sees it.
         rebased: a REBASED KO-reset (spec D13): events sit on the absolute candidate axis and legs value each
             event at its own time.
+        flagged_streams: stream -> the statistics' ``unavailable`` reason for the field the stream was built from
+            (e.g. a legacy producer's KI table kept as base kept it). The stream is present, but its numbers are
+            not the field's definition; a leg can see that here.
+        terminated: the note ended before the valuation (receivables only, spec §4.9c): no event is left, every
+            reader of events refuses (a leg riding an ended note settles with it; its value is not derivable
+            from events).
     """
 
     probabilities: Dict[EventType, Union[np.ndarray, float]]
@@ -76,6 +96,8 @@ class EventDistribution:
     provenance: Optional[StatisticsProvenance] = None
     probability_residual: float = 0.0
     rebased: bool = False
+    flagged_streams: Dict[EventType, str] = field(default_factory=dict)
+    terminated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "survival_times", np.asarray(self.survival_times, dtype=float))
@@ -133,6 +155,8 @@ class EventDistribution:
         )
         object.__setattr__(self, "probability_residual", float(self.probability_residual))
         object.__setattr__(self, "path_dependent_payment_events", frozenset(self.path_dependent_payment_events))
+        object.__setattr__(self, "flagged_streams", dict(self.flagged_streams))
+        object.__setattr__(self, "terminated", bool(self.terminated))
         self._validate_invariants()
 
     # --- construction ---------------------------------------------------------------------------------
@@ -168,7 +192,14 @@ class EventDistribution:
           its ``ki_settlement`` rows, both array streams on the absolute candidate axis; MATURITY_NO_KO the
           ``maturity`` row; survival the termination distribution's absolute curve.
         * Receivables are ledger rows, not events: they are not read.
+        * A terminated note (receivables only) is an empty distribution flagged ``terminated``; every reader of
+          events refuses it.
+        * Every stream records in ``flagged_streams`` the statistics' ``unavailable`` reason for the field it was
+          built from (``EventStatistics.flag``), so a flagged number never reaches a leg unmarked.
         """
+        if stats.terminated:
+            return cls(probabilities={}, survival_times=np.array([0.0]), survival_probability=np.array([0.0]),
+                       provenance=stats.provenance, probability_residual=0.0, terminated=True)
         if stats.termination is not None:
             return cls._from_rebased(stats)
         obs = stats.observations
@@ -220,7 +251,19 @@ class EventDistribution:
                                  EventType.MATURITY_WITH_KI: stats.ki_settlement.time},
             provenance=stats.provenance,
             probability_residual=stats.probability_residual,
+            flagged_streams=cls._flags(stats, probabilities, _STREAM_SOURCES),
         )
+
+    @staticmethod
+    def _flags(stats, probabilities, sources) -> Dict[EventType, str]:
+        """``unavailable`` reasons of the fields the emitted streams were read from."""
+        flags = {}
+        for event_type, path in sources.items():
+            if event_type in probabilities:
+                reason = stats.flag(path)
+                if reason is not None:
+                    flags[event_type] = reason
+        return flags
 
     @classmethod
     def _from_rebased(cls, stats) -> "EventDistribution":
@@ -272,6 +315,7 @@ class EventDistribution:
             provenance=stats.provenance,
             probability_residual=stats.probability_residual,
             rebased=True,
+            flagged_streams=cls._flags(stats, probabilities, _REBASED_SOURCES),
         )
 
     @staticmethod
@@ -328,12 +372,25 @@ class EventDistribution:
 
     # --- reading ----------------------------------------------------------------------------------------
 
+    def ensure_live(self, reader: str = "an event-dependent reader") -> None:
+        """Refuse a terminated note: no event is left, so nothing event-dependent can be valued from it.
+
+        Raises:
+            ValidationError: the distribution is ``terminated`` (receivables only).
+        """
+        if self.terminated:
+            raise ValidationError(
+                f"{reader} cannot read the event distribution of a terminated note (receivables only): no "
+                "event is left; a leg riding an ended note settles with it, its value is not derivable from events"
+            )
+
     def payment_times_for(
         self,
         event_type: EventType,
     ) -> Union[np.ndarray, float]:
         """Return fixed payment timing, or reject path-dependent settlement."""
 
+        self.ensure_live(f"payment_times_for({event_type.value})")
         if event_type in self.path_dependent_payment_events:
             raise NotImplementedError(
                 f"{event_type.value} payment timing is path-dependent; "
@@ -358,6 +415,7 @@ class EventDistribution:
         new origin — else 1.
         """
 
+        self.ensure_live("survival_at")
         t = float(t)
         time_grid, survival_grid = self.survival_times, self.survival_probability
         if is_zero(t):
@@ -375,6 +433,8 @@ class EventDistribution:
     def normalized(self) -> "EventDistribution":
         """Return a copy with tiny termination-probability drift normalized."""
 
+        if self.terminated:
+            return self
         total = self._termination_probability_total()
         drift = total - 1.0
         if almost_equal(drift, 0.0, tol=Tolerance.PROBABILITY):
@@ -407,12 +467,22 @@ class EventDistribution:
             provenance=self.provenance,
             probability_residual=self.probability_residual,
             rebased=self.rebased,
+            flagged_streams=self.flagged_streams,
         )
 
     # --- invariants -------------------------------------------------------------------------------------
 
     def _validate_invariants(self) -> None:
         self._validate_survival()
+        if self.terminated:
+            if self.probabilities or self.stream_times or self.payment_times or self.rebased:
+                raise NumericalError("a terminated EventDistribution carries no event streams")
+            if self.probability_residual != 0.0:
+                raise NumericalError("a terminated EventDistribution has no probability residual")
+            return
+        for event_type in self.flagged_streams:
+            if event_type not in self.probabilities:
+                raise NumericalError(f"EventDistribution flags {event_type.value}, which is not a stream")
         for event_type, probability in self.probabilities.items():
             arr = np.asarray(probability, dtype=float)
             if np.any(~np.isfinite(arr)):

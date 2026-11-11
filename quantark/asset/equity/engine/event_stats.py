@@ -175,6 +175,14 @@ class StatisticsRefused(PricingError):
     """A solver declines to report statistics it does not compute natively (spec 3B §5.6)."""
 
 
+class StatisticUnavailable(ValidationError, ValueError):
+    """A statistic listed in ``EventStatistics.unavailable`` was read through ``EventStatistics.require``.
+
+    The value may be present (a legacy producer's flagged number, kept so the type's identities hold) but is
+    not the field's definition; the message carries the ``unavailable`` reason.
+    """
+
+
 @dataclass(frozen=True)
 class AutocallableEventStats:
     """
@@ -1193,6 +1201,33 @@ class EventStatistics:
             frozen[key] = se
         return _FrozenMapping(frozen)
 
+    # ------------------------------------------------------------------ guarded reading
+
+    def flag(self, path: str) -> Optional[str]:
+        """The ``unavailable`` reason covering a dotted field path (the path itself or its component), else None.
+
+        Raises:
+            ValidationError: ``path`` is not a field path of this type.
+        """
+        if not isinstance(path, str) or not _is_field_path(path):
+            raise ValidationError(f"{path!r} is not a field path of {type(self).__name__}")
+        head = path.partition(".")[0]
+        reason = self.unavailable.get(path)
+        return reason if reason is not None else self.unavailable.get(head)
+
+    def require(self, path: str) -> Any:
+        """The value at a dotted field path (``"ki_settlement.discounted_cash"``), refusing a flagged one.
+
+        Raises:
+            StatisticUnavailable: the path (or its component) is listed in ``unavailable``; the message carries
+                the reason. A flagged value may be present but is not the field's definition.
+            ValidationError: ``path`` is not a field path of this type.
+        """
+        reason = self.flag(path)
+        if reason is not None:
+            raise StatisticUnavailable(f"{type(self).__name__}.{path} is unavailable: {reason}")
+        return self._resolve(path)
+
     def _resolve(self, path: str) -> Any:
         value: Any = self
         for part in path.split("."):
@@ -1408,6 +1443,7 @@ __all__ = [
     "SCHEDULE_TAGS",
     "StatisticsProvenance",
     "StatisticsRefused",
+    "StatisticUnavailable",
     "TERMINATION_EVENTS",
     "TerminationDistribution",
     "build_cash_ledger",

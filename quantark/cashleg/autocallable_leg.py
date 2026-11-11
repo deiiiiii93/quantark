@@ -166,6 +166,7 @@ class AutocallableCashLeg(CashLeg):
         note's actual settlement.
         """
 
+        event_dist.ensure_live(f"AutocallableCashLeg ({self.leg_type.value})")
         af = np.asarray(self.accrual_factors, dtype=float)
         contingent = 0.0
         if af.size:

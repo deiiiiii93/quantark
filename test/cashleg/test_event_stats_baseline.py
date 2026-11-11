@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import math
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -98,28 +97,28 @@ def _leg(record: dict):
     return next(spec.leg for spec in _case(record["case"]).legs() if spec.name == record["leg"])
 
 
-def _ki_stream_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
-    """Cause (e). At base the distribution dropped the KI stream (its length differed from the KO grid), so
-    the AT_KI leg raised. Now the KI stream sits on its own axis, paid at the KI observation (D8), and the leg
-    values exactly ``amount · Σ_k P_k · DF(t_k + offset)`` on it."""
+def _carried_knock_in_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
+    """Cause (e), pinned to the definition. At base the distribution dropped the KI stream of a note already
+    knocked in (one row against the KO grid), so the AT_KI leg raised. The carried knock-in is the KI table's
+    single row at t = 0 with probability 1 (DESIGN §4.5), on its own axis, paid at the KI time (D8): the stream
+    must be exactly [(0, 1)], unflagged, and the leg exactly ``amount · DF(offset)``. Any other probabilities
+    fail (a KI-ever table is never carried; those records reproduce their banked raise)."""
     from quantark.cashleg import EventType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
+    assert record["features"].get("knocked_in_at_valuation") is True, f"{record['id']}: not a carried knock-in"
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     assert "value" in live, f"{record['id']}: still raises {live}"
     dist, env = _live_distribution(record)
-    times = np.asarray(dist.stream_times[EventType.KI], dtype=float)
-    probability = np.asarray(dist.probabilities[EventType.KI], dtype=float)
-    np.testing.assert_array_equal(np.asarray(dist.payment_times_for(EventType.KI)), times)       # D8
-    assert times.size != base["n_event_times"] or not np.array_equal(times, base["event_times"]), (
-        f"{record['id']}: the KI stream sits on the KO grid; base would not have dropped it")
+    np.testing.assert_array_equal(np.asarray(dist.stream_times[EventType.KI], dtype=float), [0.0])
+    np.testing.assert_array_equal(np.asarray(dist.probabilities[EventType.KI], dtype=float), [1.0])
+    np.testing.assert_array_equal(np.asarray(dist.payment_times_for(EventType.KI), dtype=float), [0.0])   # D8
+    assert EventType.KI not in dist.flagged_streams, dist.flagged_streams
     leg = _leg(record)
-    offset = float(leg.payment_offset_days) / 365.0
-    expected = float(leg.amount) * math.fsum(
-        float(p) * env.get_discount_factor(float(t) + offset) for t, p in zip(times, probability))
+    expected = float(leg.amount) * env.get_discount_factor(float(leg.payment_offset_days) / 365.0)
     assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
-        f"{record['id']}: live {live['value']!r} != Σ P·DF on the KI axis {expected!r}")
+        f"{record['id']}: live {live['value']!r} != amount · DF(offset) {expected!r}")
 
 
 def _maturity_moves_by_the_residual(live: dict, banked: dict, record: dict) -> None:
@@ -149,21 +148,19 @@ def _maturity_moves_by_the_residual(live: dict, banked: dict, record: dict) -> N
         f"{record['id']}: the move is round-off, not the residual")
 
 
-#: T6: the KI stream that base dropped (every AT_KI event record that raised for it and now values)
+#: T6 (CP2): the carried knock-in base dropped: every AT_KI event record of a note already knocked in that
+#: raised for it and now values. Legacy KI-ever tables (MC continuous KI, KO at valuation without a knock-in)
+#: are not carried and reproduce their banked raise until the MC producers migrate.
 _KI_AXIS_MOVES = (
-    "mc_snowball__snowball_cki", "mc_phoenix__phoenix_mem_instant", "mc_phoenix__phoenix_nomem_instant",
-    "mc_phoenix__phoenix_mem_expiry", "mc_phoenix__phoenix_nomem_expiry", "mc_lv_snowball__snowball_cki",
-    "mc_lv_phoenix__phoenix_mem_instant", "mc_heston_snowball__snowball_cki", "mc_heston_phoenix__phoenix_mem_expiry",
     "mc_snowball__snowball_cki_knocked_in", "quad_v1_snowball__snowball_cki_knocked_in",
     "pde_snowball__snowball_cki_knocked_in", "adi_heston_snowball__snowball_cki_knocked_in",
     "mc_phoenix__phoenix_mem_instant_knocked_in", "quad_v1_phoenix__phoenix_mem_instant_knocked_in",
     "pde_phoenix__phoenix_mem_instant_knocked_in",
-    "mc_snowball__snowball_cki_ko_at_valuation", "mc_snowball__snowball_cki_knocked_in_ko_at_valuation",
+    "mc_snowball__snowball_cki_knocked_in_ko_at_valuation",
     "pde_snowball__snowball_cki_knocked_in_ko_at_valuation", "quad_v1_snowball__snowball_cki_knocked_in_ko_at_valuation",
-    "mc_phoenix__phoenix_mem_instant_ko_at_valuation", "mc_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
+    "mc_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
     "pde_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
     "quad_v1_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
-    "mc_snowball__snowball_reverse",
     "mc_snowball__snowball_cki_knocked_in_no_ko_after_ki", "pde_snowball__snowball_cki_knocked_in_no_ko_after_ki",
 )
 #: T6: D16 absorbs the PDE KO-reset buckets' march residual (-6.9e-10 .. -2.8e-9) into MATURITY_NO_KO; every
@@ -178,7 +175,7 @@ _RESIDUAL_MOVES = tuple(
 
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
-    **{f"{case}__fixed_at_ki__event": MovedBy("e", _ki_stream_on_its_own_axis) for case in _KI_AXIS_MOVES},
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
     **{rid: MovedBy("d", _maturity_moves_by_the_residual) for rid in _RESIDUAL_MOVES},
 }
 

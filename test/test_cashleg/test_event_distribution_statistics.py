@@ -424,3 +424,58 @@ def test_maturity_with_ki_is_scalar_unless_rebased():
             stream_times={EventType.MATURITY_WITH_KI: np.array([1.0])},
             survival_times=np.array([0.0, 1.0]), survival_probability=np.array([1.0, 1.0]),
         )
+
+
+# --- CP2: a terminated note; flags carried onto the distribution ---------------------------------------
+
+
+def _terminated() -> EventStatistics:
+    empty = _observations((), ())
+    receivables = ReceivablesTable(source=("ko",), decision_times=[-0.02], payment_times=[0.03],
+                                   discounted_cash=[104.0], cash_to_pay=[105.0])
+    return _stats(observations=empty, maturity=_row(1.0, 0.0), ki_settlement=_row(1.0, 0.0),
+                  ki_table=KnockInTable.empty(), receivables=receivables, knock_in_probability=0.0)
+
+
+def test_a_terminated_note_is_an_empty_distribution_flagged_terminated():
+    stats = _terminated()
+    assert stats.terminated
+    dist = EventDistribution.from_statistics(stats)
+    assert dist.terminated
+    assert dist.probabilities == {} and dist.stream_times == {}
+    assert dist.probability_residual == 0.0
+
+
+def test_event_dependent_legs_refuse_a_terminated_note_and_event_free_legs_still_value():
+    from quantark.cashleg import DeterministicLeg, PaymentConvention
+
+    dist = EventDistribution.from_statistics(_terminated())
+    env = _env()
+    period = dict(direction=LegDirection.BUYER_RECEIVES, rate=0.04,
+                  base=BaseAmount(value=1.0, mode=BaseAmountMode.ABSOLUTE),
+                  schedule=LegSchedule(period_starts=np.array([0.0]), period_ends=np.array([0.5]),
+                                       payment_times=np.array([0.5])))
+    refused = [
+        *(FixedPayoffLeg(direction=LegDirection.BUYER_RECEIVES, amount=1.0, trigger=t) for t in PaymentTrigger),
+        _rebased_leg(),
+        AccrualLeg(ko_behavior=KOBehavior.TRUNCATE_AT_KO, **period),
+        AccrualLeg(ko_behavior=KOBehavior.PAY_FULL_SCHEDULE, payment_convention=PaymentConvention.AT_MATURITY,
+                   **period),
+    ]
+    for leg in refused:
+        with pytest.raises(ValidationError, match="terminated"):
+            leg.value(dist, env, 0.0)
+    premium = DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=5.0, payment_time=0.1)
+    assert premium.value(dist, env, 0.0) == pytest.approx(-5.0 * _df(0.1))
+    full = AccrualLeg(ko_behavior=KOBehavior.PAY_FULL_SCHEDULE, **period)      # reads no event
+    assert full.value(dist, env, 0.0) == pytest.approx(0.04 * 0.5 * _df(0.5))
+
+
+def test_a_flagged_ki_table_carries_its_flag_onto_the_ki_stream():
+    stats = _stats(observations=_observations(KO_TIMES, KO_P), maturity=_row(1.0, 0.42),
+                   ki_settlement=_row(1.0, 0.08), ki_table=_ki_table(KO_TIMES, (0.01, 0.02, 0.03, 0.04)),
+                   unavailable={"ki_table": "transition: legacy producer"}, knock_in_probability=0.1)
+    dist = EventDistribution.from_statistics(stats)
+    assert EventType.KI in dist.probabilities
+    assert dist.flagged_streams[EventType.KI] == "transition: legacy producer"
+    assert EventType.KI not in EventDistribution.from_statistics(_snowball()).flagged_streams
