@@ -1007,6 +1007,27 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
         accrued = np.full(num_paths, arrears, dtype=float)
         expiry_coupon = np.zeros(num_paths, dtype=float)
 
+        # Coupon cash is the cash the payoff loop below pays, discounted where it pays it.
+        # INSTANT: at the observation's settlement, or at the knock-out settlement for a
+        # coupon paid with a knock-out. EXPIRY: rolled up and paid when the note ends, at
+        # each path's own settlement (its knock-out's, else the terminal payment).
+        coupon_instant = (
+            product.coupon_config.coupon_pay_type == CouponPayType.INSTANT
+        )
+        if collect_coupon_stats:
+            ko_settlement_dfs = np.asarray(self._df(ko_settlement_times), dtype=float)
+            if not coupon_instant:
+                path_end_dfs = np.asarray(
+                    self._df(
+                        np.where(
+                            is_ko,
+                            ko_settlement_times[np.maximum(first_ko_idx, 0)],
+                            float(timings.terminal.payment_time),
+                        )
+                    ),
+                    dtype=float,
+                )
+
         for obs_idx in range(num_obs):
             spot_obs = paths[:, ko_indices[obs_idx]]
             ko_at_obs = is_ko & (first_ko_idx == obs_idx)
@@ -1023,16 +1044,24 @@ class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
 
             if collect_coupon_stats:
                 coupon_probabilities[obs_idx] = float(np.mean(coupon_hit))
-                if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    df_obs = timings.observation_payment_dfs[obs_idx]
-                    coupon_cashflows[obs_idx] = float(
-                        np.mean(coupon_to_pay * coupon_hit) * df_obs
+                coupon_paid = np.where(coupon_hit, coupon_to_pay, 0.0)
+                if product.coupon_config.memory_coupon:
+                    # The release rule at a knock-out (as the payoff below): the arrears
+                    # whatever the spot, plus the current coupon where its barrier is met.
+                    coupon_paid = np.where(
+                        ko_at_obs,
+                        np.where(coupon_hit, current_coupon, 0.0) + accrued,
+                        coupon_paid,
+                    )
+                if coupon_instant:
+                    coupon_dfs = np.where(
+                        ko_at_obs,
+                        ko_settlement_dfs[obs_idx],
+                        float(timings.observation_payment_dfs[obs_idx]),
                     )
                 else:
-                    df_T = timings.terminal.payment_df
-                    coupon_cashflows[obs_idx] = float(
-                        np.mean(coupon_to_pay * coupon_hit) * df_T
-                    )
+                    coupon_dfs = path_end_dfs
+                coupon_cashflows[obs_idx] = float(np.mean(coupon_paid * coupon_dfs))
 
             non_ko_coupon = coupon_hit & ~ko_at_obs
             if non_ko_coupon.any():
