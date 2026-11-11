@@ -18,6 +18,7 @@ from quantark.util.enum import (
     PostKOScheduleMode,
 )
 from quantark.util.exceptions import ValidationError, NumericalError
+from quantark.util.numerical import is_close
 from .contract import Action, Event, CompiledContract
 
 
@@ -357,6 +358,8 @@ def compile_contract(
     if monitor_ki:
         names += ["underlying_ki_monitor"]
     coupon_amounts, coupon_prefix, coupon_barriers = [], np.zeros(1), []
+    # arrears owed at the pricing date and carried by the contract's amount (not a lifecycle count)
+    initial_arrears = 0.0
     if phoenix:
         # Resolve original schedule indices when earlier observations expired.
         raw = product.barrier_config.ko_observation_schedule.records
@@ -420,6 +423,25 @@ def compile_contract(
                     "aged Phoenix memory requires fixed_coupon_year_fraction or retained historical coupon dates"
                 )
         coupon_prefix = np.r_[0.0, np.cumsum(historic + coupon_amounts)]
+        # Memory arrears owed at the pricing date have two carriers (``CouponBarrierConfig.initial_coupon_arrears``):
+        # a lifecycle state's COUNT of missed periods (rebuilt above from the periods' own coupons) and the contract's
+        # AMOUNT, which every engine reads. A count, when present, carries them; an amount beside it must be
+        # the same debt (the intraday twin hands this engine both), else the two disagree and nothing says which
+        # holds. Without a count the amount is owed exactly as QUAD V1, the PDE solver and Monte Carlo owe it.
+        owed = (
+            float(product.coupon_config.initial_coupon_arrears)
+            if product.has_memory_coupon
+            else 0.0
+        )
+        if initial_memory and owed:
+            if not is_close(owed, float(coupon_prefix[initial_memory])):
+                raise ValidationError(
+                    f"Phoenix initial_coupon_arrears {owed!r} disagrees with the lifecycle state's "
+                    f"{initial_memory} missed coupons ({float(coupon_prefix[initial_memory])!r}): "
+                    "the two carriers of the memory arrears must state the same debt"
+                )
+        else:
+            initial_arrears = owed
     obs_index = {mapping[r[0]]: i for i, r in enumerate(pre)}
     disable = product.barrier_config.disable_ko_after_ki
     initial_hit = bool(
@@ -526,6 +548,13 @@ def compile_contract(
                 if phoenix and index is not None
                 else 0.0
             )
+            if initial_arrears and index is not None and mem == index:
+                # Every period since the pricing date has missed (a hit resets the memory to 0, a miss adds one), so
+                # the arrears owed then are still owed here: they join the memory exactly as QUAD V1's
+                # ``accumulated_before`` and the PDE solver's ``_state_arrears`` carry them -- released with a coupon
+                # hit, released at a knock-out whatever the coupon barrier says, carried on a miss. (The amount is
+                # used only without a lifecycle count, so the memory starts at 0 and the state index equals ``mem``.)
+                missed += initial_arrears
             earned = (coupon_amounts[index] + missed) if coupon_hit else 0.0
 
             def coupon_cash(value, payment_channel):

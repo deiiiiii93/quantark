@@ -244,7 +244,8 @@ def test_valuation_instant_observation_matches_quad_v2(first_barrier, pay_type):
 def test_memory_arrears_carried_into_the_valuation_instant(first_barrier, pay_type):
     """Initial arrears: paid now with the decided coupon, else carried into the later rows' release.
 
-    (QUAD V2 does not read ``initial_coupon_arrears``, so V1's own closing identity is the gate here.)
+    Gated by V1's own closing identity and, since QUAD V2 reads ``initial_coupon_arrears`` (T4b, spec D24), by V2
+    per row (``test_phoenix_quad_v2_arrears.py`` gates V2's price on arrears contracts against V1 and MC).
     """
     env = _env()
     arrears = 0.02
@@ -257,6 +258,8 @@ def test_memory_arrears_carried_into_the_valuation_instant(first_barrier, pay_ty
     cash = _coupon_cash(stats, 5)
     residual = float(np.sum(cash)) - (engine.price(product, env) - engine.price(zero, env))
     assert abs(residual) <= CLOSING_RESIDUAL[pay_type], f"closing residual {residual:+.3e}"
+    gap = cash - _coupon_cash(PhoenixQuadEngineV2().calculate_event_stats(product, env), 5)
+    assert np.max(np.abs(gap)) <= V2_ALLOWANCE, f"V1 - V2 per row: {gap}"
     if first_barrier == 85.0:
         # released now with the (empty-period) coupon: settled 0.1 year later, or at the note's end
         assert stats.coupon_probability[0] == 1.0
