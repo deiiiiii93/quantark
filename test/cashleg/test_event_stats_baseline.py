@@ -55,7 +55,9 @@ D9_CAUSES: Dict[str, str] = {
     "a": "KI-after-KO removal",
     "b": "coupon cash out of KO cash",
     "c": "fixed defects (T2-T4)",
-    "d": "maturity probability direct instead of 1 - sum(KO) - ki (moves by probability_residual)",
+    "d": "maturity outcome direct instead of 1 - sum(KO) - ki (moves by probability_residual) and on its own "
+         "determination/payment row (KO-reset ABSOLUTE: maturity row + F5 survival instead of the legacy "
+         "one-maturity layout; probabilities unchanged)",
     "e": "KI stream on its own axis (AT_KI legs pay on KI dates, or stop raising)",
     "f": "MC statistics on price() paths (T3, D14)",
     "g": "REBASED now supported",
