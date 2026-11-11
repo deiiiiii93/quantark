@@ -207,16 +207,22 @@ DCN_CONTRACT = dict(
 )
 
 
-def _dcn() -> DCNOption:
-    """``test/dcn_fixtures.py`` DCN_A (24 monthly observations, buyer)."""
+def _dcn(direction: DCNDirection = DCNDirection.BUYER) -> DCNOption:
+    """``test/dcn_fixtures.py`` DCN_A (24 monthly observations)."""
     schedule = build_dcn_schedule(calendar=create_calendar(CalendarType.CHINA_SSE), **DCN_CONTRACT)
     return DCNOption(
         notional=1_000_000.0, initial_price=6000.0, coupon_barrier_ratio=0.80, ko_barrier_ratio=1.00,
         ki_barrier_ratio=0.75, ki_put_strike_ratio=1.10, coupon_rate=0.12, ko_coupon_rate=0.12,
         participation=1.0, coupon_counted_days=30, coupon_days_denom=360,
-        settlement_date=DCN_CONTRACT["settlement_date"], direction=DCNDirection.BUYER, schedule=schedule,
+        settlement_date=DCN_CONTRACT["settlement_date"], direction=direction, schedule=schedule,
         knocked_in_at_valuation=False,
     )
+
+
+def _knocked_in(product):
+    """The trade already knocked in before valuation (the OTC lifecycle flag the engines read)."""
+    product._otc_lifecycle_knocked_in = True
+    return product
 
 
 @dataclass(frozen=True)
@@ -254,6 +260,16 @@ PRODUCTS: Dict[str, ProductSpec] = {
                                          post_ko_mode="REBASED"), 2.0),
     "dcn": ProductSpec("dcn", _dcn, dict(ki="discrete_daily_close", memory=None, coupon_pay="INSTANT",
                                          include_principal=None, direction="BUYER"), 2.0),
+    "dcn_seller": ProductSpec("dcn", lambda: _dcn(DCNDirection.SELLER),
+                              dict(ki="discrete_daily_close", memory=None, coupon_pay="INSTANT",
+                                   include_principal=None, direction="SELLER"), 2.0),
+    "snowball_cki_knocked_in": ProductSpec("snowball", lambda: _knocked_in(_snowball("continuous")),
+                                           dict(ki="continuous", memory=None, coupon_pay=None,
+                                                include_principal=True, knocked_in_at_valuation=True), 1.0),
+    "phoenix_mem_instant_knocked_in": ProductSpec("phoenix",
+                                                  lambda: _knocked_in(_phoenix(True, CouponPayType.INSTANT)),
+                                                  dict(ki="continuous", memory=True, coupon_pay="INSTANT",
+                                                       include_principal=True, knocked_in_at_valuation=True), 1.0),
 }
 
 # --- engines -----------------------------------------------------------------------------------
@@ -356,6 +372,13 @@ CASES: Tuple[Tuple[str, str], ...] = (
     ("pde_dcn", "dcn"),
     ("pde_lv_dcn", "dcn"),
     ("adi_heston_dcn", "dcn"),
+    # already knocked in at valuation; seller DCN
+    *((e, "snowball_cki_knocked_in") for e in ("mc_snowball", "quad_v1_snowball", "quad_v2_snowball",
+                                                "pde_snowball", "adi_heston_snowball")),
+    *((e, "phoenix_mem_instant_knocked_in") for e in ("mc_phoenix", "quad_v1_phoenix", "quad_v2_phoenix",
+                                                       "pde_phoenix")),
+    ("mc_dcn", "dcn_seller"),
+    ("pde_dcn", "dcn_seller"),
 )
 
 
@@ -377,7 +400,7 @@ class LegSpec:
 def _ko_axis(product_name: str, product) -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
     """The parent's knock-out event axis an ``AutocallableCashLeg`` must align to, and a leg settlement
     schedule on it (the leg settles 0.01y after each observation; DCN at the knock-out payment)."""
-    if product_name == "dcn":
+    if product_name.startswith("dcn"):
         ctx = build_dcn_grid_context(product)
         obs = tuple(float(t) for t in np.asarray(ctx.times[ctx.obs_cols], dtype=float))
         return obs, tuple(float(t) for t in ctx.ko_pay_times)
