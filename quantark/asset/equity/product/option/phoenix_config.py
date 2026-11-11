@@ -60,9 +60,10 @@ class CouponBarrierConfig:
 
     #: Cash amount of coupon periods already MISSED before this contract's own first
     #: observation, still owed and released by the next period that triggers. It is
-    #: how an aged memory Phoenix states its outstanding arrears to engines that take
-    #: no lifecycle state (PDE, MC); engines that do take one read the count from
-    #: there instead, so exactly one of the two carries it for any given route.
+    #: how an aged memory Phoenix states its outstanding arrears; every engine reads it
+    #: (MC, PDE, QUAD V1, QUAD V2). QUAD V2 also takes a lifecycle state: when that
+    #: state carries a count of missed periods the count carries the arrears, and this
+    #: amount, if set too, must state the same debt (else the engine refuses).
     initial_coupon_arrears: float = 0.0
 
     def __post_init__(self):

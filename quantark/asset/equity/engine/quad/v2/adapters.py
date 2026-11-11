@@ -129,6 +129,72 @@ def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity):
     return new_pre, new_post, branch_terminal
 
 
+def _active_coupon_records(product, env, event_phase):
+    """Source indices of the Phoenix KO/coupon records still to be observed (earlier ones expired)."""
+    raw = product.barrier_config.ko_observation_schedule.records
+    return [
+        i
+        for i, r in enumerate(raw)
+        if not (
+            (
+                r.observation_time is not None
+                and (
+                    r.observation_time < 0
+                    or (r.observation_time == 0 and event_phase == "after")
+                )
+            )
+            or (
+                r.observation_date is not None
+                and (
+                    r.observation_date < env.valuation_date
+                    or (
+                        r.observation_date == env.valuation_date
+                        and event_phase == "after"
+                    )
+                )
+            )
+        )
+    ]
+
+
+def _count_memory_coupons(product, active, count):
+    """The coupons of the ``count`` periods a lifecycle state says were missed before the first active record."""
+    historic = []
+    if count:
+        fixed = product.coupon_config.fixed_coupon_year_fraction
+        if fixed is not None:
+            historic = [
+                product.get_coupon_payoff(0, year_fraction=fixed)
+            ] * count
+        elif active and active[0] >= count:
+            # the missed periods are still in the schedule: their coupons are their own periods'. A missed
+            # period with no known start (a record before the contract's time origin) is missing contract
+            # terms, not an unsupported feature: refuse as such, saying what needs it.
+            try:
+                historic = [
+                    product.get_coupon_payoff(i)
+                    for i in range(active[0] - count, active[0])
+                ]
+            except ValidationError as err:
+                raise ValidationError(
+                    "aged Phoenix memory needs the missed periods' starts to pay their arrears "
+                    f"({err})"
+                ) from err
+        else:
+            raise NotImplementedError(
+                "aged Phoenix memory requires fixed_coupon_year_fraction or retained historical coupon dates"
+            )
+    return historic
+
+
+def count_memory_arrears(product, env, count, event_phase="before"):
+    """The memory arrears a lifecycle state's ``coupon_memory_count`` states for ``product`` at ``env``: the
+    amount QUAD V2 rebuilds from the count (the missed periods' own coupons, or the fixed-fraction coupon each),
+    summed in the order the compiler sums them. Theta uses it to move the debt onto the contract's amount."""
+    historic = _count_memory_coupons(product, _active_coupon_records(product, env, event_phase), count)
+    return float(np.cumsum(historic)[-1]) if historic else 0.0
+
+
 def compile_contract(
     product,
     env,
@@ -362,30 +428,7 @@ def compile_contract(
     initial_arrears = 0.0
     if phoenix:
         # Resolve original schedule indices when earlier observations expired.
-        raw = product.barrier_config.ko_observation_schedule.records
-        active = [
-            i
-            for i, r in enumerate(raw)
-            if not (
-                (
-                    r.observation_time is not None
-                    and (
-                        r.observation_time < 0
-                        or (r.observation_time == 0 and event_phase == "after")
-                    )
-                )
-                or (
-                    r.observation_date is not None
-                    and (
-                        r.observation_date < env.valuation_date
-                        or (
-                            r.observation_date == env.valuation_date
-                            and event_phase == "after"
-                        )
-                    )
-                )
-            )
-        ]
+        active = _active_coupon_records(product, env, event_phase)
         coupon_barriers = [product.get_coupon_barrier_at(i) for i in active]
         if len(coupon_barriers) != len(pre):
             raise ValidationError(
@@ -397,31 +440,7 @@ def compile_contract(
             product.get_coupon_payoff(i, year_fraction=f)
             for i, f in enumerate(fractions)
         ]
-        historic = []
-        if initial_memory:
-            fixed = product.coupon_config.fixed_coupon_year_fraction
-            if fixed is not None:
-                historic = [
-                    product.get_coupon_payoff(0, year_fraction=fixed)
-                ] * initial_memory
-            elif active and active[0] >= initial_memory:
-                # the missed periods are still in the schedule: their coupons are their own periods'. A missed
-                # period with no known start (a record before the contract's time origin) is missing contract
-                # terms, not an unsupported feature: refuse as such, saying what needs it.
-                try:
-                    historic = [
-                        product.get_coupon_payoff(i)
-                        for i in range(active[0] - initial_memory, active[0])
-                    ]
-                except ValidationError as err:
-                    raise ValidationError(
-                        "aged Phoenix memory needs the missed periods' starts to pay their arrears "
-                        f"({err})"
-                    ) from err
-            else:
-                raise NotImplementedError(
-                    "aged Phoenix memory requires fixed_coupon_year_fraction or retained historical coupon dates"
-                )
+        historic = _count_memory_coupons(product, active, initial_memory)
         coupon_prefix = np.r_[0.0, np.cumsum(historic + coupon_amounts)]
         # Memory arrears owed at the pricing date have two carriers (``CouponBarrierConfig.initial_coupon_arrears``):
         # a lifecycle state's COUNT of missed periods (rebuilt above from the periods' own coupons) and the contract's

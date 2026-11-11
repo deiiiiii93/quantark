@@ -98,6 +98,44 @@ def _autocallable_outcome(product, env, env_t1, time_bump, state):
     return knocked_in, fixed_pv, ended, getattr(decision, "arrears", None)
 
 
+def _memory_count_at_t0(product, env, state):
+    """``(product to decide t0 on, lifecycle state for the bumped price)``: ONE carrier of the memory debt.
+
+    A memory Phoenix's arrears owed at ``t0`` have two carriers: the contract's ``initial_coupon_arrears`` and a
+    lifecycle state's ``coupon_memory_count`` (QUAD V2 reads the count when present; an amount beside it must state
+    the same debt). ``decide_observations_at_valuation`` starts from the amount only, so with the debt on the count a
+    coupon decided at ``t0`` would neither release it (paid) nor join it (missed). When an observation is decided at
+    ``t0`` and the state carries a count, the decision starts from the count's debt (the amount QUAD V2 rebuilds from
+    it, on the ``t0`` schedule the count is indexed against) and the bumped valuation gets the outcome on the
+    contract's amount alone: the state passed on has its count, and the missed periods it lists, released. The amount
+    is the carrier every engine reads and needs no re-indexing against the shifted schedule; a count could not say
+    "k + 1 periods" exactly once the shift drops the ``t0`` record. Without a count or an observation at ``t0``
+    nothing changes."""
+    from quantark.asset.equity.product.option.observation_schedule import at_valuation_instant
+    from quantark.util.exceptions import ValidationError
+
+    count = getattr(state, "coupon_memory_count", 0) if state is not None else 0
+    if not count or not getattr(product, "has_memory_coupon", False):
+        return product, state
+    if not any(at_valuation_instant(rec.observation_time) for rec in product.resolve_ko_observations(env)):
+        return product, state
+    from quantark.asset.equity.engine.quad.v2.adapters import count_memory_arrears
+
+    owed = count_memory_arrears(product, env, count)
+    amount = float(product.coupon_config.initial_coupon_arrears)
+    if amount and not is_close(amount, owed):
+        raise ValidationError(
+            f"Phoenix initial_coupon_arrears {amount!r} disagrees with the lifecycle state's {count} missed coupons "
+            f"({owed!r}): the two carriers of the memory arrears must state the same debt")
+    decided_on = deepcopy(product)
+    decided_on.coupon_config = replace(decided_on.coupon_config, initial_coupon_arrears=owed)
+    released = deepcopy(state)
+    released.coupon_memory_count = 0
+    if hasattr(released, "missed_coupon_indices"):
+        released.missed_coupon_indices = set()
+    return decided_on, released
+
+
 def _ko_reset_schedule_1_end(product, env, time_bump):
     """The payment time when a KO-reset's schedule 1 ends within the bump un-knocked: it matured then (rule 2),
     paid with the terminal settlement lag after its last observation; else None."""
@@ -236,9 +274,11 @@ def shift_for_theta(product, pricing_env, time_bump: float, bumped_date, *, life
     knocked_in, fixed_pv, ended_pay, arrears = False, 0.0, None, None
     accumulator_ended = False
 
+    state_t1 = lifecycle_state
     if isinstance(product, (SnowballOption, PhoenixOption, KnockOutResetSnowballOption)):
+        decided_on, state_t1 = _memory_count_at_t0(product, pricing_env, lifecycle_state)
         knocked_in, fixed_pv, ended_pay, arrears = _autocallable_outcome(
-            product, pricing_env, env_t1, time_bump, lifecycle_state)
+            decided_on, pricing_env, env_t1, time_bump, lifecycle_state)
     elif isinstance(product, (BarrierOption, DoubleBarrierOption, OneTouchOption, DoubleOneTouchOption,
                               SingleSharkfinOption, DoubleSharkfinOption)):
         knocked_in, ended_pay = _barrier_outcome(product, pricing_env, lifecycle_state)
@@ -257,7 +297,7 @@ def shift_for_theta(product, pricing_env, time_bump: float, bumped_date, *, life
         shifted._otc_lifecycle_knocked_in = True
     if arrears is not None and getattr(shifted, "has_memory_coupon", False):
         shifted.coupon_config = replace(shifted.coupon_config, initial_coupon_arrears=float(arrears))
-    return ThetaShift(shifted, env_t1, lifecycle_state, fixed_pv, None, time_bump)
+    return ThetaShift(shifted, env_t1, state_t1, fixed_pv, None, time_bump)
 
 
 def carried_ended_value(shift: ThetaShift, value_t0: float) -> float:

@@ -115,8 +115,9 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
         if memory and fixed is None and product.is_coupon_rate_annualized:
             raise CapabilityError("aged Phoenix coupon memory needs fixed_coupon_year_fraction on the float-time twin")
         # Outstanding arrears reach the stateless engines (PDE, MC) on the twin itself;
-        # QUAD V2 takes the lifecycle state and rebuilds the same total from the count,
-        # so exactly one of the two carries it per route and neither double counts.
+        # QUAD V2 takes the lifecycle state too and rebuilds the same total from the count,
+        # which then carries it: the amount here must state the same debt, so neither
+        # carrier double counts.
         arrears = memory * float(product.get_coupon_payoff(0, year_fraction=1.0 if fixed is None else fixed))
     indices = [e.index for e in kos]
     bc = twin.barrier_config
