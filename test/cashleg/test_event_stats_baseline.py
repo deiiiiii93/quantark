@@ -202,6 +202,14 @@ def _first_knock_in_rows(record: dict, *, before_ko: bool = True):
     case = _case(record["case"])
     engine, product, env = case.fresh()
     family = BANKED["cases"][record["case"]]["family"]
+    if family == "dcn":
+        # T11: the DCN's own paths and contract rules (daily closes; never monitored after a knock-out)
+        ref = same_path.dcn_paths(engine, product, env, **case.kwargs())
+        if ref["carried"]:
+            return np.array([0.0]), np.array([1.0]), env
+        ctx, first = ref["ctx"], ref["first_col"]
+        counts = np.bincount(ref["ki_col"][ref["ki_col"] >= 0], minlength=ctx.times.size)[first:]
+        return np.asarray(ctx.times[first:], dtype=float), counts / ref["n"], env
     if family.startswith("ko_reset"):
         ref = same_path.ko_reset_paths(engine, product, env)
         mask = ref["ki_first"] if before_ko else (ref["ki_index"] >= 0)
@@ -383,6 +391,84 @@ _T10_KI_AXIS = ("mc_phoenix__phoenix_mem_instant", "mc_phoenix__phoenix_nomem_in
                 "mc_phoenix__phoenix_mem_instant_ko_at_valuation", "mc_lv_phoenix__phoenix_mem_instant",
                 "mc_heston_phoenix__phoenix_mem_expiry")
 
+# --- moves (T11: MC DCN and the vol-model DCN engines produce EventStatistics) -----------------------------------
+#
+# Base read the DCN MC statistics through the legacy converter: no KI stream (an AT_KI leg raised), no COUPON stream
+# (a COUPON-basis AutocallableCashLeg raised), and a knocked-out lifecycle state got the maturity-only trivial
+# distribution (its legs valued as if the note ran to maturity). KO, maturity and fold-route records reproduce (same
+# paths, same counts, the same DCN axis, spec D12).
+
+def _dcn_coupon_stream_now_native(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h). Base had no COUPON stream on DCN MC (the legacy statistics' coupon probability was flagged), so a
+    COUPON-basis AutocallableCashLeg raised. Now the coupon table is native: P(the row's fixed coupon is paid) on the
+    monthly rows, paid at the coupon payment. The leg is recomputed here by its own formula from the coupons and the
+    two survivor branches counted on the price's own paths (``dcn_paths``)."""
+    from quantark.cashleg import EventType
+    from quantark.cashleg.autocallable_leg import PvFormula
+
+    assert banked.get("raises") == "ValidationError" and "coupon stream" in banked.get("message", ""), banked
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert "COUPON" not in base["streams"], f"{record['id']}: base had a COUPON stream; the move is not cause (h)"
+    assert "value" in live, f"{record['id']}: still raises {live}"
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    ref = _same_path().dcn_paths(engine, product, env, **case.kwargs())
+    n = ref["n"]
+    leg = _leg(record)
+    assert leg.accrual_basis.value == "coupon" and leg.pv_formula is PvFormula.NORMAL
+    coupon = ref["coupon_paid"].sum(axis=0) / n
+    np.testing.assert_allclose(np.asarray(leg.observation_schedule, dtype=float),
+                               ref["ctx"].times[ref["ctx"].obs_cols], rtol=0, atol=1e-15)
+    contingent = float(np.sum(np.asarray(leg.accrual_factors) * coupon
+                              * np.array([env.get_discount_factor(float(t)) for t in leg.settlement_schedule])))
+    terminal = {EventType.MATURITY_NO_KO: np.count_nonzero(ref["maturity"]) / n,
+                EventType.MATURITY_WITH_KI: np.count_nonzero(ref["ki_settlement"]) / n}
+    contingent += float(leg.terminal_accrual_factor) * sum(terminal[e] for e in leg.terminal_events) * float(
+        env.get_discount_factor(float(leg.terminal_settlement_time)))
+    expected = leg.sign() * float(leg.notional) * float(leg.rate) * contingent
+    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
+        f"{record['id']}: live {live['value']!r} != same-path coupon-basis value {expected!r}")
+
+
+def _dcn_terminated_state_has_no_event(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h), AC17. A knocked-out lifecycle state: base had no statistics and handed legs the maturity-only
+    trivial distribution, so an event-dependent leg valued the note as if it ran to maturity -- the banked value is
+    exactly that leg on ``EventDistribution.trivial(T)``. Now the statistics are the receivables only (unpaid; their
+    rows are the ledger's flows) or ``None`` (settled), the distribution is the ended note's and the leg refuses it."""
+    from quantark.cashleg import EventDistribution
+
+    assert "value" in banked, banked
+    assert record["features"].get("lifecycle", "").startswith("terminated_"), record["id"]
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert base["streams"] == ["MATURITY_NO_KO"] and base["probability_totals"] == {"MATURITY_NO_KO": 1.0}, base
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    trivial = EventDistribution.trivial(max(float(product.get_maturity(env)), 0.0))
+    tol = GOLDEN_REL_TOL * max(abs(float(banked["value"])), 1.0)
+    assert close(_leg(record).value(trivial, env, cases.UNIT), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: the banked value is not the leg on the trivial distribution")
+    assert live.get("raises") == "ValidationError" and "terminated note" in live.get("message", ""), live
+    dist, _ = _live_distribution(record)
+    assert dist.terminated and dist.probabilities == {}
+    state = case.kwargs()["lifecycle_state"]
+    stats = case.fresh()[0].calculate_event_stats(product, env, lifecycle_state=state)
+    pending = state.ledger.pending(state.valuation_point)
+    if not pending:
+        assert stats is None
+        return
+    assert stats.terminated and stats.receivables.cash_to_pay.tolist() == [f.amount for f in pending]
+    assert stats.receivables.payment_dates == tuple(f.payment_date for f in pending)
+
+
+_T11_DCN_CASES = ("mc_dcn__dcn", "mc_dcn__dcn_seller", "mc_dcn__dcn_receivable_alive", "mc_lv_dcn__dcn",
+                  "mc_heston_dcn__dcn")
+_T11_TERMINATED = tuple(
+    f"mc_dcn__{case}__{leg}__event"
+    for case in ("dcn_ko_unpaid", "dcn_ko_settled")
+    for leg in ("accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
+                "fixed_at_maturity_no_ko", "fixed_at_maturity_any")
+)
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
@@ -394,6 +480,11 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{rid: MovedBy("g", _rebased_now_supported) for rid in _T9_REBASED},
     # T10: MC Phoenix statistics
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T10_KI_AXIS},
+    # T11: MC DCN statistics
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T11_DCN_CASES},
+    **{f"{case}__autocallable_backend_interest_coupon__event": MovedBy("h", _dcn_coupon_stream_now_native)
+       for case in _T11_DCN_CASES},
+    **{rid: MovedBy("h", _dcn_terminated_state_has_no_event) for rid in _T11_TERMINATED},
 }
 
 
