@@ -4,6 +4,16 @@ import numpy as np
 import pytest
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import (
+    EventStatistics,
+    KnockInStatistics,
+    KnockInTable,
+    ObservationTable,
+    OutcomeRow,
+    ReceivablesTable,
+    StatisticsProvenance,
+    build_cash_ledger,
+)
 from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
 from quantark.asset.equity.report import autocallable_risk_report as report
 from quantark.asset.equity.report.surfaces import GridSpec
@@ -49,17 +59,26 @@ def _patch_report(monkeypatch):
     )
 
     def _dummy_analyze(self, product, pricing_env):
-        return report.RiskNeutralSnowballEventStats(
-            pv_mc=1.0,
-            std_error=0.0,
-            num_paths=10,
-            ko_times=np.array([0.5, 1.0]),
-            ko_prob=np.array([0.1, 0.2]),
-            survive_prob=np.array([0.9, 0.7]),
-            expected_discounted_ko_cf=np.array([0.05, 0.1]),
-            ki_probability=0.3,
-            expected_discounted_maturity_cf=0.0,
-            reconciliation_error=0.0,
+        ko_p = np.array([0.1, 0.2])
+        observations = ObservationTable(
+            times=[0.5, 1.0], payment_times=[0.5, 1.0], is_ko_obs=[True, True], is_coupon_obs=[False, False],
+            probability=ko_p, survival=1.0 - np.cumsum(ko_p), discounted_cash=[0.05, 0.1],
+            cash_to_pay=[0.05, 0.1], payment_is_path_dependent=[False, False],
+        )
+        maturity = OutcomeRow(time=1.0, payment_time=1.0, probability=0.4, discounted_cash=0.85, cash_to_pay=0.86)
+        ki_settlement = OutcomeRow(time=1.0, payment_time=1.0, probability=0.3, discounted_cash=0.0, cash_to_pay=0.0)
+        receivables = ReceivablesTable.empty()
+        return EventStatistics(
+            product_family="snowball", pv=1.0, observations=observations, coupons=None, maturity=maturity,
+            ki_settlement=ki_settlement,
+            knock_in=KnockInStatistics(probability=0.35, probability_no_ko=0.3, expected_time=0.6,
+                                       expected_loss=0.2),
+            ki_table=KnockInTable(times=[0.5, 1.0], payment_times=[0.5, 1.0], probability=[0.2, 0.15],
+                                  survival=[0.7, 0.4], interpolated=[False, False]),
+            receivables=receivables,
+            ledger=build_cash_ledger(observations=observations, coupons=None, maturity=maturity,
+                                     ki_settlement=ki_settlement, receivables=receivables),
+            expected_lifetime=0.9, provenance=StatisticsProvenance("dummy", "dummy"),
         )
 
     monkeypatch.setattr(

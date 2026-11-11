@@ -63,8 +63,7 @@ def _as_event_statistics(obj) -> EventStatistics:
 
     Raises:
         NotImplementedError: a legacy REBASED KO-reset (post-KI rows as offsets; no absolute distribution).
-        ValidationError: an unknown type, the path analyzer's record, or a legacy object whose layout the
-            legacy converters also refused.
+        ValidationError: an unknown type, or a legacy object whose layout the legacy converters also refused.
     """
     if isinstance(obj, EventStatistics):
         return obj
@@ -76,13 +75,7 @@ def _as_event_statistics(obj) -> EventStatistics:
         return _from_legacy_snowball(obj)
     if isinstance(obj, DCNEventStats):
         return _from_legacy_dcn(obj)
-    name = type(obj).__name__
-    if name == "RiskNeutralSnowballEventStats":
-        raise ValidationError(
-            "RiskNeutralSnowballEventStats has no payment times, no knock-in split and no ledger; it is not "
-            "converted (the path analyzer produces EventStatistics once migrated)"
-        )
-    raise ValidationError(f"no event-statistics conversion for {name}")
+    raise ValidationError(f"no event-statistics conversion for {type(obj).__name__}")
 
 
 # --- shared pieces ---------------------------------------------------------------------------------------

@@ -2,43 +2,40 @@
 Path-based analysis utilities for autocallable products (Snowball-first).
 
 This module provides a Monte Carlo based analyzer that produces:
-- risk-neutral event probabilities (KO/KI) per observation
-- expected discounted cashflows and PV reconciliation
+- risk-neutral event statistics (:class:`EventStatistics`) from its own simulated paths
 - historical replay (shock-based) and parametric scenario PnL distributions
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 
-from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.event_stats import (
+    EventStatistics,
+    KnockInStatistics,
+    KnockInTable,
+    ObservationTable,
+    OutcomeRow,
+    ReceivablesTable,
+    StatisticsProvenance,
+    build_cash_ledger,
+)
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine, _ki_level_breached
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
 from quantark.util.exceptions import ValidationError
 
-
-@dataclass(frozen=True)
-class RiskNeutralSnowballEventStats:
-    """Risk-neutral event stats and cashflow attribution for a SnowballOption."""
-
-    pv_mc: float
-    std_error: float
-    num_paths: int
-
-    ko_times: np.ndarray
-    ko_prob: np.ndarray
-    survive_prob: np.ndarray
-    expected_discounted_ko_cf: np.ndarray
-
-    ki_probability: float
-    expected_discounted_maturity_cf: float
-
-    reconciliation_error: float
+#: ``provenance.statistics_model`` of the analyzer's statistics
+ANALYZER_STATISTICS_MODEL = "path_analyzer_mc"
+#: ``unavailable`` reason of the continuous-KI fields the analyzer cannot compute
+CONTINUOUS_KI_REASON = (
+    "path analyzer: a continuous knock-in is known only to its monitoring step, not its first-crossing time"
+)
 
 
 @dataclass(frozen=True)
@@ -85,13 +82,24 @@ class AutocallablePathAnalyzer:
         pricing_env: PricingEnvironment,
         *,
         seed_offset: int = 1337,
-    ) -> RiskNeutralSnowballEventStats:
+    ) -> EventStatistics:
         """
-        Compute risk-neutral event probabilities and expected discounted cashflows.
+        Risk-neutral event statistics of a Snowball from the analyzer's own simulated paths.
+
+        Every path ends in exactly one outcome: a knock-out at its first valid KO observation, the maturity
+        row (never knocked out, never knocked in) or the knock-in settlement row (knocked in, never knocked
+        out). A knock-in counts only before a knock-out (DESIGN §4.5); on one grid node the knock-out wins
+        unless ``disable_ko_after_ki`` invalidated that knock-out.
 
         Notes:
         - Uses the SnowballMCEngine's time grid builder and barrier checks.
-        - PV is computed as the expected discounted cashflows implied by simulated paths.
+        - ``pv`` is the MC engine's ``price()`` (spec D23); the analyzer's own cash sum differs from it by
+          ``reconciliation_error`` (separately simulated paths).
+        - Continuous KI: P(knock in) is exact on the analyzer's grid (a crossing inside a step precedes the
+          step's end), but the first-crossing time is known only to its step, so the per-date KI table and
+          the expected KI time are unavailable (:data:`CONTINUOUS_KI_REASON`).
+        - One path set is one batch: ``standard_errors`` is ``None`` (``"undefined: single batch"``).
+        - No dates are reported (times on the pricing axis only).
         """
         engine = SnowballMCEngine(params=self.mc_params)
         spot = pricing_env.spot
@@ -116,6 +124,7 @@ class AutocallablePathAnalyzer:
             paths, ko_indices, ko_barriers, product.is_reverse
         )
 
+        ki_continuous = False
         ki_triggered = np.zeros(len(paths), dtype=bool)
         first_ki_idx = np.full(len(paths), -1, dtype=int)
         if product.has_ki_barrier:
@@ -161,65 +170,110 @@ class AutocallablePathAnalyzer:
         is_v0 = ~is_ko & ~ki_triggered
         is_v1 = ~is_ko & ki_triggered
 
-        ko_prob = np.zeros(len(ko_times), dtype=float)
-        expected_discounted_ko_cf = np.zeros(len(ko_times), dtype=float)
-        for i in range(len(ko_times)):
-            hit_i = is_ko & (first_ko_idx == i)
-            ko_prob[i] = float(np.mean(hit_i))
-            if hit_i.any():
-                df = pricing_env.get_discount_factor(float(ko_settlement_times[i]))
-                expected_discounted_ko_cf[i] = float(np.mean(hit_i) * ko_payoffs[i] * df)
+        # Grid node of each path's first knock-out / knock-in (-1: decided at valuation; `never`: past the grid).
+        n_paths = len(paths)
+        never = len(all_times)
+        ko_node = np.where(is_ko, ko_indices[np.maximum(first_ko_idx, 0)], never)
+        if ki_continuous:
+            # a crossing inside step k (or a breach at its end) lies in (t_{k-1}, t_k]: node k; at valuation: -1
+            ki_node = np.where(ki_triggered, first_ki_idx, never)
+            ki_node[ki_triggered & _ki_level_breached(paths[:, 0], ki_barrier, product.is_reverse)] = -1
+            ki_first = ki_triggered & (ki_node <= ko_node)
+        elif len(ki_indices) > 0:
+            ki_node = np.where(ki_triggered, ki_indices[np.maximum(first_ki_idx, 0)], never)
+            ki_first = ki_triggered & (ki_node < ko_node)        # a knock-out on the same node wins
+        else:
+            ki_node = np.full(n_paths, never, dtype=int)
+            ki_first = np.zeros(n_paths, dtype=bool)
 
-        survive_prob = np.ones(len(ko_times), dtype=float)
-        cumulative_ko = 0.0
-        for i in range(len(ko_times)):
-            cumulative_ko += ko_prob[i]
-            survive_prob[i] = max(0.0, 1.0 - cumulative_ko)
+        # --- knock-out table: one row per KO observation, settled at its settlement time --------------------
+        rows = np.arange(ko_times.size)
+        ko_probability = np.array([float(np.mean(is_ko & (first_ko_idx == i))) for i in rows], dtype=float)
+        ko_survival = np.array([float(np.mean(~(is_ko & (first_ko_idx <= i)))) for i in rows], dtype=float)
+        ko_dfs = np.array([pricing_env.get_discount_factor(float(t)) for t in ko_settlement_times], dtype=float)
+        ko_cash_to_pay = ko_probability * ko_payoffs
+        observations = ObservationTable(
+            times=ko_times, payment_times=ko_settlement_times,
+            is_ko_obs=np.ones(rows.size, dtype=bool), is_coupon_obs=np.zeros(rows.size, dtype=bool),
+            probability=ko_probability, survival=ko_survival,
+            discounted_cash=ko_cash_to_pay * ko_dfs, cash_to_pay=ko_cash_to_pay,
+            payment_is_path_dependent=np.zeros(rows.size, dtype=bool),
+        )
 
+        # --- terminal outcomes, paid at maturity: never knocked in (V0) / knocked in (V1) -----------------
         maturity_spots = paths[:, -1]
         maturity_df = pricing_env.get_discount_factor(float(maturity))
-
-        # Compute ensured maturity expected CF as mean over all paths for stability.
-        maturity_payoff_all = np.zeros(len(paths), dtype=float)
+        maturity_payoff = np.zeros(n_paths, dtype=float)
         if is_v0.any():
-            maturity_payoff_all[is_v0] = np.array(
+            maturity_payoff[is_v0] = np.array(
                 [product.get_maturity_payoff_v0(float(s), pricing_env) for s in maturity_spots[is_v0]],
                 dtype=float,
             )
         if is_v1.any():
-            maturity_payoff_all[is_v1] = np.array(
+            maturity_payoff[is_v1] = np.array(
                 [product.get_maturity_payoff_v1(float(s), pricing_env) for s in maturity_spots[is_v1]],
                 dtype=float,
             )
-        expected_discounted_maturity_cf = float(np.mean(maturity_payoff_all * maturity_df))
 
-        pv_mc = float(np.sum(expected_discounted_ko_cf) + expected_discounted_maturity_cf)
+        def outcome(mask: np.ndarray) -> OutcomeRow:
+            cash = float(np.mean(np.where(mask, maturity_payoff, 0.0)))
+            return OutcomeRow(time=float(maturity), payment_time=float(maturity), probability=float(np.mean(mask)),
+                              discounted_cash=cash * maturity_df, cash_to_pay=cash)
 
-        # Standard error from discounted total payoff.
-        total_discounted = np.zeros(len(paths), dtype=float)
-        if is_ko.any():
-            payoff = ko_payoffs[first_ko_idx[is_ko]]
-            settle = ko_settlement_times[first_ko_idx[is_ko]]
-            df = np.array([pricing_env.get_discount_factor(float(t)) for t in settle], dtype=float)
-            total_discounted[is_ko] = payoff * df
-        total_discounted[~is_ko] = maturity_payoff_all[~is_ko] * maturity_df
+        maturity_row = outcome(is_v0)
+        ki_settlement = outcome(is_v1)
 
-        std_error = float(np.std(total_discounted, ddof=1) / np.sqrt(len(paths)))
+        # --- knock-in path statistics -----------------------------------------------------------------------
+        unavailable: Dict[str, str] = {"standard_errors": "undefined: single batch"}
+        # the knocked-in redemption is principal + downside (SnowballOption.get_maturity_payoff_v1): loss = -downside
+        principal = (
+            product.initial_price * product.contract_multiplier if product.payoff_config.include_principal else 0.0
+        )
+        expected_loss = float(np.mean(np.where(is_v1, principal - maturity_payoff, 0.0))) * maturity_df
+        p_ki = float(np.mean(ki_first))
+        ki_table: Optional[KnockInTable]
+        expected_time: Optional[float] = None
+        if not product.has_ki_barrier:
+            ki_table = KnockInTable.empty()
+        elif ki_continuous:
+            ki_table = None
+            unavailable["ki_table"] = CONTINUOUS_KI_REASON
+            if p_ki > 0.0:
+                unavailable["knock_in.expected_time"] = CONTINUOUS_KI_REASON
+        else:
+            nodes = np.unique(ki_indices)                       # the product's KI schedule on the grid
+            node_times = np.where(nodes < 0, 0.0, all_times[np.maximum(nodes, 0)])
+            first_here = ki_first[:, None] & (ki_node[:, None] == nodes[None, :])
+            ended_by = (ki_first[:, None] & (ki_node[:, None] <= nodes[None, :])) | (
+                is_ko[:, None] & (ko_node[:, None] <= nodes[None, :])
+            )
+            ki_probability = first_here.mean(axis=0)
+            ki_table = KnockInTable(times=node_times, payment_times=node_times, probability=ki_probability,
+                                    survival=(~ended_by).mean(axis=0), interpolated=np.zeros(nodes.size, dtype=bool))
+            if p_ki > 0.0:
+                expected_time = float(np.dot(node_times, ki_probability)) / p_ki
+        if p_ki == 0.0:
+            unavailable["knock_in.expected_time"] = "undefined: P(knock in) = 0"
+        knock_in = KnockInStatistics(probability=p_ki, probability_no_ko=ki_settlement.probability,
+                                     expected_time=expected_time, expected_loss=expected_loss)
 
-        engine_price = engine.price(product, pricing_env)
-        reconciliation_error = float(pv_mc - engine_price)
-
-        return RiskNeutralSnowballEventStats(
-            pv_mc=pv_mc,
-            std_error=std_error,
-            num_paths=int(len(paths)),
-            ko_times=ko_times,
-            ko_prob=ko_prob,
-            survive_prob=survive_prob,
-            expected_discounted_ko_cf=expected_discounted_ko_cf,
-            ki_probability=float(np.mean(ki_triggered)),
-            expected_discounted_maturity_cf=expected_discounted_maturity_cf,
-            reconciliation_error=reconciliation_error,
+        receivables = ReceivablesTable.empty()
+        terminal_mass = maturity_row.probability + ki_settlement.probability
+        return EventStatistics(
+            product_family="snowball",
+            pv=float(engine.price(product, pricing_env)),
+            observations=observations,
+            coupons=None,
+            maturity=maturity_row,
+            ki_settlement=ki_settlement,
+            knock_in=knock_in,
+            ki_table=ki_table,
+            receivables=receivables,
+            ledger=build_cash_ledger(observations=observations, coupons=None, maturity=maturity_row,
+                                     ki_settlement=ki_settlement, receivables=receivables),
+            expected_lifetime=float(np.dot(ko_probability, ko_times)) + terminal_mass * float(maturity),
+            provenance=StatisticsProvenance(ANALYZER_STATISTICS_MODEL, type(engine).__name__),
+            unavailable=unavailable,
         )
 
     def historical_shock_pnl(

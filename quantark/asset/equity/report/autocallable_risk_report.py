@@ -23,11 +23,11 @@ import pandas as pd
 
 from quantark.asset.equity.analysis.autocallable_path_analyzer import (
     AutocallablePathAnalyzer,
-    RiskNeutralSnowballEventStats,
     ShockPnLDistribution,
 )
+from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
 from quantark.asset.equity.engine.base_engine import BaseEngine
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
@@ -368,28 +368,61 @@ def _compute_delta_surface_sq(
     return delta
 
 
-def _render_event_stats_table(stats: RiskNeutralSnowballEventStats) -> pd.DataFrame:
-    df = pd.DataFrame(
-        {
-            "ko_time": stats.ko_times,
-            "p_ko": stats.ko_prob,
-            "p_survive": stats.survive_prob,
-            "ed_ko_cf": stats.expected_discounted_ko_cf,
-        }
-    )
-    return df
+#: the cash fields ``EventStatistics.reconciliation_error`` sums (its value means nothing when one is flagged)
+_RECONCILED_CASH = (
+    "observations.discounted_cash", "coupons.discounted_cash", "maturity.discounted_cash",
+    "ki_settlement.discounted_cash", "receivables",
+)
+#: every statistic the report shows besides ``pv`` (read through ``EventStatistics.require``)
+_REPORTED_STATISTICS = (
+    "observations.times", "observations.probability", "observations.survival", "observations.discounted_cash",
+    "knock_in.probability", "ki_settlement.probability",
+) + _RECONCILED_CASH
 
 
-def _render_engine_event_stats_table(stats: AutocallableEventStats) -> pd.DataFrame:
-    df = pd.DataFrame(
+def _statistic(stats: EventStatistics, path: str) -> tuple[Any, Optional[str]]:
+    """``(value, None)`` for an available statistic, ``(None, reason)`` for one listed in ``unavailable``."""
+    reason = stats.flag(path)
+    if reason is not None:
+        return None, reason
+    return stats.require(path), None
+
+
+def _statistic_text(stats: EventStatistics, path: str) -> str:
+    value, reason = _statistic(stats, path)
+    return f"unavailable ({reason})" if reason is not None else f"{float(value):.6f}"
+
+
+def _reconciliation_text(stats: EventStatistics) -> str:
+    """``pv - Σ outcome cash``, or unavailable when a summed cash field is flagged (it would sum a stand-in)."""
+    for path in _RECONCILED_CASH:
+        reason = stats.flag(path)
+        if reason is not None:
+            return f"unavailable ({reason})"
+    return f"{stats.reconciliation_error:.6g}"
+
+
+def _unavailable_text(stats: EventStatistics) -> str:
+    """The reported statistics the producer flags, with their reasons ("" when none is flagged)."""
+    flagged = [f"{path} ({stats.flag(path)})" for path in dict.fromkeys(_REPORTED_STATISTICS) if stats.flag(path)]
+    return f"- Unavailable statistics: {'; '.join(flagged)}\n" if flagged else ""
+
+
+def _ko_cash(stats: EventStatistics) -> np.ndarray:
+    """Expected discounted KO cash per observation row; NaN where the producer flags it unavailable."""
+    cash, _reason = _statistic(stats, "observations.discounted_cash")
+    return np.full(stats.observations.size, np.nan) if cash is None else np.asarray(cash, dtype=float)
+
+
+def _render_event_stats_table(stats: EventStatistics) -> pd.DataFrame:
+    return pd.DataFrame(
         {
-            "ko_time": stats.ko_times,
-            "p_ko": stats.ko_probability,
-            "p_survive": stats.survival_probability,
-            "ed_ko_cf": stats.expected_discounted_ko_cashflow,
+            "ko_time": stats.require("observations.times"),
+            "p_ko": stats.require("observations.probability"),
+            "p_survive": stats.require("observations.survival"),
+            "ed_ko_cf": _ko_cash(stats),
         }
     )
-    return df
 
 
 def _render_conditional_cashflow_table(
@@ -1340,14 +1373,15 @@ def build_snowball_risk_snapshot(
             ]
         )
 
-    engine_stats = engine.calculate_event_stats(product, pricing_env)
+    produced = engine.calculate_event_stats(product, pricing_env)
     conditional_cashflows: list[dict[str, Any]] = []
-    if engine_stats is not None:
+    if produced is not None:
+        engine_stats = _as_event_statistics(produced)
         conditional_cashflows = _records_payload(
             _render_conditional_cashflow_table(
-                engine_stats.ko_times,
-                engine_stats.ko_probability,
-                engine_stats.expected_discounted_ko_cashflow,
+                engine_stats.require("observations.times"),
+                engine_stats.require("observations.probability"),
+                _ko_cash(engine_stats),
             )
         )
 
@@ -1748,39 +1782,29 @@ def generate_snowball_risk_report(
     # Bucketed Greeks
     bucketed_df = _compute_bucketed_greeks(product, pricing_env, engine)
 
-    # Risk-neutral event stats / cashflow attribution:
-    # Prefer engine-provided stats (future QUAD/PDE implementations), else use MC analyzer.
-    engine_stats = engine.calculate_event_stats(product, pricing_env)
-    rn_stats: Optional[RiskNeutralSnowballEventStats] = None
+    # Risk-neutral event stats / cashflow attribution: the engine's statistics (read as
+    # EventStatistics), else the MC path analyzer's (the same type).
+    produced = engine.calculate_event_stats(product, pricing_env)
     analyzer: Optional[AutocallablePathAnalyzer] = None
-    if engine_stats is not None:
-        event_df = _render_engine_event_stats_table(engine_stats)
+    if produced is not None:
+        event_stats = _as_event_statistics(produced)
     else:
         if analyzer_mc_params is None:
             analyzer_mc_params = MCParams(num_paths=20000, time_steps=252)
         analyzer = AutocallablePathAnalyzer(
             mc_params=analyzer_mc_params, q_bump=grid_spec.q_bump_for_rho
         )
-        rn_stats = analyzer.analyze_snowball_risk_neutral(product, pricing_env)
-        event_df = _render_event_stats_table(rn_stats)
+        event_stats = analyzer.analyze_snowball_risk_neutral(product, pricing_env)
+    event_df = _render_event_stats_table(event_stats)
 
-    if engine_stats is not None:
-        prob_ki = float(engine_stats.ki_probability)
-        prob_ko_total = float(np.sum(engine_stats.ko_probability))
-        conditional_df = _render_conditional_cashflow_table(
-            engine_stats.ko_times,
-            engine_stats.ko_probability,
-            engine_stats.expected_discounted_ko_cashflow,
-        )
-    else:
-        assert rn_stats is not None
-        prob_ki = float(rn_stats.ki_probability)
-        prob_ko_total = float(np.sum(rn_stats.ko_prob))
-        conditional_df = _render_conditional_cashflow_table(
-            rn_stats.ko_times,
-            rn_stats.ko_prob,
-            rn_stats.expected_discounted_ko_cf,
-        )
+    prob_ki_text = _statistic_text(event_stats, "knock_in.probability")
+    prob_ki_settle_text = _statistic_text(event_stats, "ki_settlement.probability")
+    prob_ko_total = float(np.sum(event_stats.require("observations.probability")))
+    conditional_df = _render_conditional_cashflow_table(
+        event_stats.require("observations.times"),
+        event_stats.require("observations.probability"),
+        _ko_cash(event_stats),
+    )
 
     post_ki = _is_post_ki_state(base_spot, ki_level, product.is_reverse)
     if post_ki:
@@ -1792,7 +1816,8 @@ def generate_snowball_risk_report(
         lifecycle_context = (
             "Pre-KI state. Focus on KO vs KI probabilities.\n"
             f"- P(KO before maturity): {prob_ko_total:.6f}\n"
-            f"- P(KI before maturity): {prob_ki:.6f}"
+            f"- P(KI before any KO): {prob_ki_text}\n"
+            f"- P(matured knocked in): {prob_ki_settle_text}"
         )
 
     # Historical replay (optional): apply shocks to today's state (no roll-down)
@@ -1951,21 +1976,15 @@ def generate_snowball_risk_report(
         f"Vega: {base_vega:.6f}; Theta: {theta_line}\n"
         f"{barrier_watch}"
     )
-    if engine_stats is not None:
-        event_block = (
-            f"- PV (engine event stats): {engine_stats.pv:.6f}\n"
-            f"- KI probability: {engine_stats.ki_probability:.6f}\n"
-            f"- PV reconciliation error (PV - sum(expected discounted cashflows)): {engine_stats.reconciliation_error:.6g}\n\n"
-            f"{event_table_md}"
-        )
-    else:
-        assert rn_stats is not None
-        event_block = (
-            f"- MC PV (from expected discounted cashflows): {rn_stats.pv_mc:.6f} ± {rn_stats.std_error:.6f} (SE), paths={rn_stats.num_paths}\n"
-            f"- KI probability: {rn_stats.ki_probability:.6f}\n"
-            f"- PV reconciliation error (MC cashflows - MC engine price): {rn_stats.reconciliation_error:.6g}\n\n"
-            f"{event_table_md}"
-        )
+    # pv is read directly: it is the engine's price() (never listed in unavailable)
+    event_block = (
+        f"- PV (event statistics; statistics: {event_stats.provenance.statistics_model}): {event_stats.pv:.6f}\n"
+        f"- P(KI before any KO): {prob_ki_text}\n"
+        f"- P(matured knocked in): {prob_ki_settle_text}\n"
+        f"- PV reconciliation error (PV - sum(expected discounted cashflows)): {_reconciliation_text(event_stats)}\n"
+        f"{_unavailable_text(event_stats)}\n"
+        f"{event_table_md}"
+    )
     surface_mode = "point-greeks" if greeks_calculator is not None else "finite-difference"
     content = f"""# Autocallable Risk Profile Report (Snowball)
 

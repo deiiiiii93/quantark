@@ -25,8 +25,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
+from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
 from quantark.asset.equity.engine.base_engine import BaseEngine
-from quantark.asset.equity.engine.event_stats import StatisticsRefused
+from quantark.asset.equity.engine.event_stats import EventStatistics, StatisticsRefused
 from quantark.asset.equity.lifecycle import DCNLifecycleState, ValuationPoint, tracker_for
 from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
@@ -47,6 +48,13 @@ from .market import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _available(stats: EventStatistics, path: str) -> Any:
+    """The statistic at ``path`` read through ``EventStatistics.require``, or ``None`` when it is flagged unavailable."""
+    if stats.flag(path) is not None:
+        return None
+    return stats.require(path)
 
 
 def _env_with(
@@ -724,33 +732,57 @@ class ProductReplay:
     def record_event_probabilities(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment
     ) -> None:
-        stats, stats_engine = self._calculate_event_stats(product, env)
+        """One daily summary row and the KO / KI event rows of ``product`` on ``date``.
 
-        ko_probs = np.asarray(getattr(stats, "ko_probability", []), dtype=float)
-        ko_times = np.asarray(getattr(stats, "ko_times", []), dtype=float)
-        survival = np.asarray(getattr(stats, "survival_probability", []), dtype=float)
-        ed_ko_cf = np.asarray(
-            getattr(stats, "expected_discounted_ko_cashflow", []), dtype=float
-        )
+        The statistics are read as ``EventStatistics`` (spec D21 mapping): ``ki_probability_to_maturity`` is
+        ``ki_settlement.probability`` (matured knocked in); ``expected_discounted_maturity_cashflow`` is
+        ``maturity.discounted_cash + ki_settlement.discounted_cash``; KO rows are the observation table's KO
+        rows, KI rows the per-date KI table's. Every statistic is read through ``EventStatistics.require``: one
+        the producer lists in ``unavailable`` is recorded as NaN (an unavailable KO or KI table records no rows
+        of that kind), never as the flagged number or a stand-in. ``pv`` is the engine's price, never flagged.
+        """
+        produced, stats_engine = self._calculate_event_stats(product, env)
+        stats = _as_event_statistics(produced)
 
-        next_ko_prob = float(ko_probs[0]) if ko_probs.size else 0.0
-        next_ko_date = (
-            self._date_from_time(date, float(ko_times[0])) if ko_times.size else pd.NaT
-        )
-        ki_prob_scalar = float(getattr(stats, "ki_probability", 0.0))
+        ko_rows = _available(stats, "observations.is_ko_obs")
+        if ko_rows is None:
+            ko_times = ko_probs = survival = np.array([], dtype=float)
+            ed_ko_cf: Optional[np.ndarray] = None
+        else:
+            ko_times = stats.require("observations.times")[ko_rows]
+            ko_probs = stats.require("observations.probability")[ko_rows]
+            survival = stats.require("observations.survival")[ko_rows]
+            cash = _available(stats, "observations.discounted_cash")
+            ed_ko_cf = None if cash is None else cash[ko_rows]
+        maturity_cash = _available(stats, "maturity.discounted_cash")
+        ki_settlement_cash = _available(stats, "ki_settlement.discounted_cash")
+        ki_to_maturity = _available(stats, "ki_settlement.probability")
+
+        ko_unknown = ko_rows is None
         self.daily_event_sink.append(
             {
                 "date": date,
-                "next_ko_date": next_ko_date,
-                "next_ko_probability": next_ko_prob,
-                "total_remaining_ko_probability": float(np.nansum(ko_probs)),
-                "ki_probability_to_maturity": ki_prob_scalar,
-                "survival_probability": float(survival[-1]) if survival.size else np.nan,
-                "expected_discounted_ko_cashflow": float(np.nansum(ed_ko_cf)),
-                "expected_discounted_maturity_cashflow": float(
-                    getattr(stats, "expected_discounted_maturity_cashflow", np.nan)
+                "next_ko_date": (
+                    self._date_from_time(date, float(ko_times[0])) if ko_times.size else pd.NaT
                 ),
-                "pv": float(getattr(stats, "pv", np.nan)),
+                "next_ko_probability": (
+                    np.nan if ko_unknown else float(ko_probs[0]) if ko_probs.size else 0.0
+                ),
+                "total_remaining_ko_probability": (
+                    np.nan if ko_unknown else float(np.sum(ko_probs))
+                ),
+                "ki_probability_to_maturity": (
+                    np.nan if ki_to_maturity is None else float(ki_to_maturity)
+                ),
+                "survival_probability": float(survival[-1]) if survival.size else np.nan,
+                "expected_discounted_ko_cashflow": (
+                    np.nan if ed_ko_cf is None else float(np.sum(ed_ko_cf))
+                ),
+                "expected_discounted_maturity_cashflow": (
+                    np.nan if maturity_cash is None or ki_settlement_cash is None
+                    else float(maturity_cash + ki_settlement_cash)
+                ),
+                "pv": float(stats.pv),
                 "event_stats_engine": stats_engine,
             }
         )
@@ -758,44 +790,32 @@ class ProductReplay:
         previous_survival = 1.0
         for i, probability in enumerate(ko_probs):
             conditional = probability / previous_survival if previous_survival > 0 else np.nan
-            event_date = self._date_from_time(date, float(ko_times[i]))
             self.event_prob_sink.append(
                 {
                     "date": date,
-                    "event_date": event_date,
+                    "event_date": self._date_from_time(date, float(ko_times[i])),
                     "event_type": "KO",
                     "event_probability": float(probability),
                     "conditional_probability": float(conditional),
-                    "survival_probability": float(survival[i]) if i < survival.size else np.nan,
-                    "expected_discounted_cashflow": float(ed_ko_cf[i]) if i < ed_ko_cf.size else np.nan,
+                    "survival_probability": float(survival[i]),
+                    "expected_discounted_cashflow": np.nan if ed_ko_cf is None else float(ed_ko_cf[i]),
                     "event_stats_engine": stats_engine,
                 }
             )
-            if i < survival.size:
-                previous_survival = float(survival[i])
+            previous_survival = float(survival[i])
 
-        ki_times = np.asarray(getattr(stats, "ki_times", []), dtype=float)
-        ki_event_prob = np.asarray(
-            getattr(stats, "ki_event_probability", []), dtype=float
-        )
-        ki_survival = np.asarray(
-            getattr(stats, "ki_survival_probability", []), dtype=float
-        )
-        if ki_times.size == 0 and ki_prob_scalar > 0:
-            ki_times = np.array([product.get_maturity(env)], dtype=float)
-            ki_event_prob = np.array([ki_prob_scalar], dtype=float)
-            ki_survival = np.array([np.nan], dtype=float)
-
-        for i, probability in enumerate(ki_event_prob):
-            event_date = self._date_from_time(date, float(ki_times[i]))
+        ki_table = _available(stats, "ki_table")
+        if ki_table is None:
+            return
+        for i, probability in enumerate(ki_table.probability):
             self.event_prob_sink.append(
                 {
                     "date": date,
-                    "event_date": event_date,
+                    "event_date": self._date_from_time(date, float(ki_table.times[i])),
                     "event_type": "KI",
                     "event_probability": float(probability),
                     "conditional_probability": np.nan,
-                    "survival_probability": float(ki_survival[i]) if i < ki_survival.size else np.nan,
+                    "survival_probability": float(ki_table.survival[i]),
                     "expected_discounted_cashflow": np.nan,
                     "event_stats_engine": stats_engine,
                 }

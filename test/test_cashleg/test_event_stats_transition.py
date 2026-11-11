@@ -13,7 +13,6 @@ import dataclasses
 import numpy as np
 import pytest
 
-from quantark.asset.equity.analysis.autocallable_path_analyzer import RiskNeutralSnowballEventStats
 from quantark.asset.equity.engine._event_stats_transition import (
     LEGACY_REASON,
     _as_event_statistics,
@@ -77,14 +76,23 @@ def test_an_unknown_type_is_refused():
         _as_event_statistics({"pv": 1.0})
 
 
-def test_the_path_analyzer_record_is_refused_not_guessed():
-    """No payment times, no knock-in split, no ledger: T8 replaces the analyzer's type outright."""
-    record = RiskNeutralSnowballEventStats(
-        pv_mc=98.0, std_error=0.1, num_paths=100, ko_times=KO, ko_prob=P_KO, survive_prob=1.0 - np.cumsum(P_KO),
-        expected_discounted_ko_cf=KO_CASH, ki_probability=0.2, expected_discounted_maturity_cf=45.0,
-        reconciliation_error=0.0)
-    with pytest.raises(ValidationError, match="RiskNeutralSnowballEventStats"):
-        _as_event_statistics(record)
+def test_the_path_analyzer_result_passes_through_unchanged():
+    """T8: the path analyzer reports ``EventStatistics`` itself (its old record type is gone)."""
+    from datetime import datetime
+
+    from quantark.asset.equity.analysis.autocallable_path_analyzer import AutocallablePathAnalyzer
+    from quantark.asset.equity.param import MCParams
+    from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+    from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+    from quantark.priceenv import PricingEnvironment
+
+    env = PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(volatility=0.2),
+                             rate_curve=FlatRateCurve(rate=0.02), div_yield=ContinuousDividendYield(div_yield=0.0),
+                             valuation_date=datetime(2024, 1, 1))
+    product = create_standard_snowball(initial_price=100.0, strike=100.0, maturity=1.0, num_observations=4)
+    stats = AutocallablePathAnalyzer(mc_params=MCParams(num_paths=500, time_steps=20)).analyze_snowball_risk_neutral(
+        product, env)
+    assert _as_event_statistics(stats) is stats
 
 
 # --- snowball ---------------------------------------------------------------------------------------
