@@ -173,10 +173,210 @@ _RESIDUAL_MOVES = tuple(
                 "autocallable_backend_premium_no_ko")
 )
 
+# --- moves (T9: MC Snowball / KO-reset produce EventStatistics) ------------------------------------------
+#
+# Every check below decides the outcome from the price's own paths (``mc_same_path_reference``: a plain price()
+# with a spy on the payoff kernel, outcomes decided from the definitions in plain NumPy), never from the
+# statistics object it checks, and compares the leg against that independent number.
+
+
+def _same_path():
+    from test_asset.equity.engine_mc import mc_same_path_reference
+
+    return mc_same_path_reference
+
+
+def _leg_on_rows(leg, env, times, probability) -> float:
+    offset = float(leg.payment_offset_days) / 365.0
+    return leg.sign() * float(leg.amount) * float(sum(
+        p * env.get_discount_factor(float(t) + offset) for t, p in zip(times, probability)))
+
+
+def _first_knock_in_rows(record: dict, *, before_ko: bool = True):
+    """(row times, P per row, env) of the first knock-in on the price's own paths: before any knock-out
+    (``before_ko``) or ever (the legacy KI-ever table). Continuous: trading days of the window, mass by
+    brute-force step overlap (D18); discrete: the product's KI rows; a knock-out at valuation: no row."""
+    same_path = _same_path()
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    if BANKED["cases"][record["case"]]["family"].startswith("ko_reset"):
+        ref = same_path.ko_reset_paths(engine, product, env)
+        mask = ref["ki_first"] if before_ko else (ref["ki_index"] >= 0)
+        knocked_out_now = False
+    else:
+        ref = same_path.snowball_paths(engine, product, env)
+        mask = ref["ki_first"] if before_ko else ref["ki_ever"]
+        knocked_out_now = bool(np.all(ref["ko_time"] == 0.0))
+    n = ref["n"]
+    if ref.get("carried"):
+        return np.array([0.0]), np.array([1.0]), env
+    if before_ko and knocked_out_now:
+        return np.zeros(0), np.zeros(0), env
+    first = np.asarray(ref["ki_index"])[mask]
+    steps = np.asarray(ref["step_ends"], dtype=float)
+    if ref["continuous"]:
+        days = same_path.numeric_trading_days(float(steps[-1]), env.bus_days_in_year)
+        return days, same_path.day_overlap(steps, np.bincount(first, minlength=steps.size) / n, days), env
+    return steps, np.bincount(first, minlength=steps.size) / n, env
+
+
+def _knock_in_on_its_own_axis_before_any_ko(live: dict, banked: dict, record: dict) -> None:
+    """Cause (e). Base dropped the KI stream (a KI-ever table off the KO grid, or KO-reset, which emitted
+    none), so the AT_KI leg raised. Now the KI table is on its own axis (continuous: trading days, D18) and holds
+    first knock-ins before any knock-out: the leg equals ``sign · amount · Σ P_row · DF(t_row + offset)`` with
+    the rows decided on the price's own paths here (a knock-out at valuation leaves no row: 0)."""
+    from quantark.cashleg import EventType
+
+    assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
+    assert "value" in live, f"{record['id']}: still raises {live}"
+    times, probability, env = _first_knock_in_rows(record)
+    dist, _ = _live_distribution(record)
+    np.testing.assert_allclose(np.asarray(dist.stream_times[EventType.KI], dtype=float), times, rtol=0, atol=1e-15)
+    assert EventType.KI not in dist.flagged_streams, dist.flagged_streams
+    expected = _leg_on_rows(_leg(record), env, times, probability)
+    if times.size == 0:                                     # no knock-in row: the leg is exactly 0
+        assert float(live["value"]) == 0.0, live
+    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
+        f"{record['id']}: live {live['value']!r} != same-path KI-before-KO value {expected!r}")
+
+
+def _knock_in_after_ko_removed(live: dict, banked: dict, record: dict) -> None:
+    """Cause (a). Discrete KI on the KO dates: base kept the legacy KI-ever table on the KO grid. On the price's
+    own paths the banked value is the leg on the first knock-in EVER (a knock-in after a knock-out included), and
+    the live value the leg on the first knock-in before any knock-out."""
+    assert "value" in banked and "value" in live, (live, banked)
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert "KI" in base["streams"], f"{record['id']}: base had no KI stream"
+    leg = _leg(record)
+    times, ever, env = _first_knock_in_rows(record, before_ko=False)
+    tol = GOLDEN_REL_TOL * abs(float(banked["value"]))
+    assert close(_leg_on_rows(leg, env, times, ever), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: the banked value is not the KI-ever leg on the same paths")
+    times, before, env = _first_knock_in_rows(record)
+    expected = _leg_on_rows(leg, env, times, before)
+    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"]))
+    assert abs(float(live["value"]) - float(banked["value"])) > tol, f"{record['id']}: no KI after a KO to remove"
+
+
+def _ko_reset_maturity_on_its_own_date(live: dict, banked: dict, record: dict) -> None:
+    """Cause (d), MC KO-reset ABSOLUTE. Base read the legacy MC statistics through the one-maturity layout:
+    MATURITY_NO_KO = 1 - ΣKO - ki at the last KO record (2y), paid with the knocked-in settlement, and survival
+    1 - ΣKO. Now the maturity row is computed directly on its own determination (the first schedule's end, 1y,
+    paid at its own settlement) and the survival drops that mass there (F5). The probabilities themselves do not
+    move (same paths). Undoing the layout on the live distribution gives back the banked value."""
+    from dataclasses import replace
+
+    from quantark.cashleg import EventType
+
+    assert "value" in banked and "value" in live, (live, banked)
+    dist, env = _live_distribution(record)
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    for name, total in base["probability_totals"].items():
+        live_total = float(np.sum(np.asarray(dist.probabilities[EventType[name]], dtype=float)))
+        assert abs(live_total - total) <= 1e-12, f"{record['id']}: {name} {live_total!r} != banked {total!r}"
+    ko_times = np.asarray(dist.stream_times[EventType.KO], dtype=float)
+    np.testing.assert_array_equal(ko_times, np.asarray(base["event_times"], dtype=float))
+    survival = 1.0 - np.cumsum(np.asarray(dist.probabilities[EventType.KO], dtype=float))
+    last = float(ko_times[-1])
+    undone = replace(
+        dist, survival_times=np.r_[0.0, ko_times], survival_probability=np.r_[1.0, survival],
+        payment_times={**dist.payment_times,
+                       EventType.MATURITY_NO_KO: dist.payment_times[EventType.MATURITY_WITH_KI]},
+        determination_times={EventType.MATURITY_NO_KO: last, EventType.MATURITY_WITH_KI: last},
+    )
+    leg = _leg(record)
+    assert leg.value(dist, env, cases.UNIT) == float(live["value"])
+    tol = GOLDEN_REL_TOL * abs(float(banked["value"]))
+    assert close(leg.value(undone, env, cases.UNIT), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: undoing the one-maturity layout does not give back the banked value")
+    assert abs(float(live["value"]) - float(banked["value"])) > tol, f"{record['id']}: the move is round-off"
+
+
+def _rebased_distribution_on_the_same_paths(record: dict):
+    """The live REBASED distribution against the price's own paths (the kernel's outcome, determination and
+    settlement per path): every KO and knocked-in settlement row's probability, the never-knocked-in maturity,
+    the survival at every axis time; the KO axis is every first-schedule date and every knock-in date + offset."""
+    from quantark.cashleg import EventType
+
+    dist, env = _live_distribution(record)
+    case = _case(record["case"])
+    engine, product, _ = case.fresh()
+    ref = _same_path().ko_reset_paths(engine, product, env)
+    n = ref["n"]
+    assert dist.rebased and abs(dist.probability_residual) <= 1e-12
+    for event_type, events in ((EventType.KO, ("ko_pre", "ko_post")), (EventType.MATURITY_WITH_KI,
+                                                                        ("ki_settlement",))):
+        times = np.asarray(dist.stream_times[event_type], dtype=float)
+        pays = np.asarray(dist.payment_times[event_type], dtype=float)
+        probability = np.asarray(dist.probabilities[event_type], dtype=float)
+        in_event = np.isin(ref["event"], events)
+        covered = 0
+        for t, p in set(zip(times.tolist(), pays.tolist())):
+            rows = (times == t) & (pays == p)
+            count = np.count_nonzero(in_event & (ref["det"] == t) & (ref["settle"] == p))
+            covered += count
+            assert abs(float(probability[rows].sum()) - count / n) <= 1e-15, (event_type, t, p)
+        assert covered == np.count_nonzero(in_event), f"{event_type}: a path off the axis"
+    assert abs(float(dist.probabilities[EventType.MATURITY_NO_KO]) - np.count_nonzero(ref["v0"]) / n) <= 1e-15
+    for t, survival in zip(dist.survival_times, dist.survival_probability):
+        assert abs(survival - (1.0 - np.count_nonzero(ref["det"] <= t) / n)) <= 1e-14
+    grid = ref["grid"]
+    candidates = set(np.asarray(grid["pre_times"], dtype=float).tolist())
+    for ki_time in np.asarray(grid["ki_times"], dtype=float):
+        candidates |= set((ki_time + np.asarray(grid["post_times"], dtype=float)).tolist())
+    assert set(np.asarray(dist.stream_times[EventType.KO], dtype=float).tolist()) == candidates
+    return dist, env
+
+
+def _rebased_now_supported(live: dict, banked: dict, record: dict) -> None:
+    """Cause (g). Base refused REBASED on the event route (``NotImplementedError``: offsets). Now the statistics
+    carry the absolute termination distribution (D13): the npv is price() bitwise; a leg's value is the leg on
+    the distribution, which is checked row by row against the price's own paths; an AutocallableCashLeg booked
+    on the contract's dates refuses the candidate axis (T6 ruling: no interpolation), a different refusal."""
+    assert banked.get("raises") == "NotImplementedError", banked
+    if record["route"] == "event_npv":
+        price = RECORDS[f"{record['case']}__-__price"]["outcome"]
+        assert live == {"value": price["value"]}, (live, price)
+        return
+    dist, env = _rebased_distribution_on_the_same_paths(record)
+    leg = _leg(record)
+    if record["leg"].startswith("autocallable_"):
+        assert live.get("raises") == "ValidationError", live
+        assert "schedule" in live["message"] or "coupon stream" in live["message"], live
+        return
+    assert live.get("value") == leg.value(dist, env, cases.UNIT), live
+
+
+_T9_KI_AXIS = ("mc_snowball__snowball_cki", "mc_heston_snowball__snowball_cki", "mc_lv_snowball__snowball_cki",
+               "mc_snowball__snowball_reverse", "mc_snowball__snowball_cki_ko_at_valuation",
+               "mc_snowball__ko_reset_absolute", "mc_snowball__ko_reset_absolute_cki")
+_T9_KI_AFTER_KO = ("mc_snowball__snowball_dki", "mc_heston_snowball__snowball_dki")
+_T9_KO_RESET_MATURITY = tuple(
+    f"{case}__{leg}__event"
+    for case in ("mc_snowball__ko_reset_absolute", "mc_snowball__ko_reset_absolute_cki")
+    for leg in ("accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
+                "fixed_at_maturity_no_ko", "fixed_at_maturity_any")
+)
+_T9_REBASED = ("mc_snowball__ko_reset_rebased__-__event_npv",) + tuple(
+    f"mc_snowball__ko_reset_rebased__{leg}__event"
+    for leg in ("deterministic", "accrual_truncate_enter", "accrual_truncate_complete",
+                "accrual_truncate_at_maturity", "accrual_full_schedule", "fixed_at_ko", "fixed_at_ki",
+                "fixed_at_maturity_no_ko", "fixed_at_maturity_with_ki", "fixed_at_maturity_any",
+                "autocallable_margin_nmp_both", "autocallable_backend_premium_no_ko",
+                "autocallable_rebate_with_ki", "autocallable_backend_interest_coupon")
+)
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
     **{rid: MovedBy("d", _maturity_moves_by_the_residual) for rid in _RESIDUAL_MOVES},
+    # T9: MC Snowball / KO-reset statistics
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T9_KI_AXIS},
+    **{f"{case}__fixed_at_ki__event": MovedBy("a", _knock_in_after_ko_removed) for case in _T9_KI_AFTER_KO},
+    **{rid: MovedBy("d", _ko_reset_maturity_on_its_own_date) for rid in _T9_KO_RESET_MATURITY},
+    **{rid: MovedBy("g", _rebased_now_supported) for rid in _T9_REBASED},
 }
 
 
