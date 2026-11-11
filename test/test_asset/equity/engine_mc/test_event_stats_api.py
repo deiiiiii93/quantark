@@ -32,26 +32,26 @@ def test_snowball_mc_engine_event_stats_shapes():
     stats = engine.calculate_event_stats(product, env)
     assert stats is not None
 
-    assert stats.ko_times.shape == (4,)
-    assert stats.ko_probability.shape == (4,)
-    assert stats.survival_probability.shape == (4,)
-    assert stats.expected_discounted_ko_cashflow.shape == (4,)
-    assert stats.determination_times.shape == (5,)
-    assert stats.payment_times.shape == (5,)
-    assert stats.expected_discounted_cashflows.shape == (5,)
-    assert stats.expected_undiscounted_cashflows.shape == (5,)
+    obs = stats.observations
+    assert obs.times.shape == (4,)
+    assert obs.probability.shape == (4,)
+    assert obs.survival.shape == (4,)
+    assert obs.discounted_cash.shape == (4,)
+    # the ledger: four KO rows, the maturity and the knocked-in settlement rows
+    assert stats.ledger.determination_times.shape == (6,)
+    assert stats.ledger.payment_times.shape == (6,)
+    assert stats.ledger.discounted_cash.shape == (6,)
+    assert stats.ledger.cash_to_pay.shape == (6,)
 
-    assert 0.0 <= stats.ki_probability <= 1.0
+    assert 0.0 <= stats.knock_in.probability <= 1.0
     assert stats.pv == stats.pv  # not NaN
 
     # KO probabilities must sum to <= 1.0
-    assert stats.ko_probability.sum() <= 1.0 + 1e-12
+    assert obs.probability.sum() <= 1.0 + 1e-12
     # Survival probability is non-increasing
-    assert all(
-        stats.survival_probability[i] >= stats.survival_probability[i + 1] - 1e-12
-        for i in range(3)
-    )
+    assert all(obs.survival[i] >= obs.survival[i + 1] - 1e-12 for i in range(3))
 
-    # PV reconciliation should be close (same simulation)
+    # every outcome summed over the price's own paths: both residuals are round-off
     assert abs(stats.reconciliation_error) < 1e-8
-    assert abs(stats.pv - stats.expected_discounted_cashflows.sum()) < 1e-8
+    assert abs(stats.probability_residual) < 1e-12
+    assert abs(stats.pv - stats.ledger.discounted_cash.sum()) < 1e-8

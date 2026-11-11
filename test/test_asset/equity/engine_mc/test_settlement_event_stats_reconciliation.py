@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from dcn_fixtures import DCN_A, FLAT, flat_env, make_dcn
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -38,7 +39,26 @@ from test_asset.equity.product_other.test_structured_numerical_settlement import
 )
 
 
+class _LedgerView:
+    """An ``EventStatistics`` (MC Snowball since T9) read through this module's legacy-named attributes: its
+    ledger as the payment-aware cashflow fields, its observation table as the KO grid."""
+
+    def __init__(self, stats):
+        self.pv = stats.pv
+        self.determination_times = stats.ledger.determination_times
+        self.payment_times = stats.ledger.payment_times
+        self.expected_undiscounted_cashflows = stats.ledger.cash_to_pay
+        self.expected_discounted_cashflows = stats.ledger.discounted_cash
+        self.ko_times = stats.observations.times
+        self.ko_probability = stats.observations.probability
+
+
+def _view(stats):
+    return _LedgerView(stats) if isinstance(stats, EventStatistics) else stats
+
+
 def _assert_aligned_cashflow_ledger(stats, env, *, abs_tolerance=1.0e-8):
+    stats = _view(stats)
     determination_times = np.asarray(stats.determination_times, dtype=float)
     payment_times = np.asarray(stats.payment_times, dtype=float)
     undiscounted = np.asarray(
@@ -73,6 +93,7 @@ def _assert_aligned_cashflow_ledger(stats, env, *, abs_tolerance=1.0e-8):
 
 
 def _expected_life_from_determination_grid(stats) -> float:
+    stats = _view(stats)
     ko_probability = np.asarray(stats.ko_probability, dtype=float)
     ko_times = np.asarray(stats.ko_times, dtype=float)
     maturity_probability = max(0.0, 1.0 - float(ko_probability.sum()))
@@ -114,20 +135,21 @@ def test_autocallable_probabilities_stay_on_determination_grid(
     )
 
     _assert_aligned_cashflow_ledger(delayed, env)
+    delayed_view, immediate_view = _view(delayed), _view(immediate)
     np.testing.assert_array_equal(
-        delayed.ko_times,
-        immediate.ko_times,
+        delayed_view.ko_times,
+        immediate_view.ko_times,
     )
     np.testing.assert_array_equal(
-        delayed.ko_probability,
-        immediate.ko_probability,
+        delayed_view.ko_probability,
+        immediate_view.ko_probability,
     )
     assert _expected_life_from_determination_grid(delayed) == pytest.approx(
         _expected_life_from_determination_grid(immediate)
     )
     assert np.any(
-        np.asarray(delayed.payment_times)
-        > np.asarray(delayed.determination_times)
+        np.asarray(delayed_view.payment_times)
+        > np.asarray(delayed_view.determination_times)
     )
 
 
@@ -140,7 +162,8 @@ def test_event_distribution_keeps_determination_and_payment_times_separate():
         env,
     )
 
-    distribution = EventDistribution.from_autocallable_stats(stats)
+    distribution = EventDistribution.from_statistics(stats)
+    stats = _view(stats)
     ko_payment_times = np.asarray(
         distribution.payment_times[EventType.KO],
         dtype=float,

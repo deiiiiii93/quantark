@@ -83,17 +83,31 @@ def _mc_stats(post_ko_mode):
 def test_mc_absolute_converts_with_both_schedules():
     from quantark.util.enum import PostKOScheduleMode
     stats = _mc_stats(PostKOScheduleMode.ABSOLUTE)
-    assert stats.pre_ko_payment_times is not None and stats.post_ko_payment_times is not None
-    d = EventDistribution.from_autocallable_stats(stats)
-    assert d.stream_times[EventType.KO].size == stats.pre_ko_times.size + stats.post_ko_times.size
+    schedule = np.asarray(stats.observations.schedule)
+    assert {"pre", "post"} <= set(schedule.tolist())
+    d = EventDistribution.from_statistics(stats)
+    assert d.stream_times[EventType.KO].size == stats.observations.size
+    # both maturity outcomes on their own determination (spec Contracts, F5)
+    assert d.determination_times == {EventType.MATURITY_NO_KO: stats.maturity.time,
+                                     EventType.MATURITY_WITH_KI: stats.ki_settlement.time}
+    assert stats.maturity.time < stats.ki_settlement.time
 
 
-def test_mc_rebased_is_refused():
+def test_mc_rebased_converts_on_the_absolute_candidate_axis():
+    """REBASED: no longer refused (spec D13, T9) -- KO and MATURITY_WITH_KI array streams on the termination
+    distribution's absolute axis, survival its absolute curve."""
     from quantark.util.enum import PostKOScheduleMode
     stats = _mc_stats(PostKOScheduleMode.REBASED)
-    assert stats.post_ko_times_are_offsets
-    with pytest.raises(NotImplementedError, match="offsets"):
-        EventDistribution.from_autocallable_stats(stats)
+    assert stats.rebased and stats.post_ki_offsets is not None
+    d = EventDistribution.from_statistics(stats)
+    assert d.rebased
+    events = np.asarray(stats.termination.event)
+    np.testing.assert_array_equal(d.stream_times[EventType.KO],
+                                  stats.termination.times[np.isin(events, ("ko_pre", "ko_post"))])
+    assert isinstance(d.probabilities[EventType.MATURITY_WITH_KI], np.ndarray)
+    total = sum(float(np.sum(d.probabilities[e]))
+                for e in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI))
+    assert total == pytest.approx(1.0, abs=1e-12)
 
 
 def test_quad_v2_reports_both_maturity_outcomes():

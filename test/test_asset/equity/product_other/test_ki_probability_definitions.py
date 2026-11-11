@@ -179,9 +179,9 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
 
 
 def test_snowball_mc_quad_agree_on_both_ki_definitions():
-    """Snowball MC has its OWN calculate_event_stats (separate from Phoenix), so it
-    must populate both KI fields and agree with Snowball QUAD. Guards the gap where
-    Snowball MC returned None for the new fields."""
+    """Snowball MC reports the unified statistics since T9: P(KI before any KO) and P(KI and no KO)
+    (``knock_in.probability_no_ko == ki_settlement.probability``). The QUAD V1 legacy object still reports
+    KI ever and KI-and-no-KO (until T17): the settles-knocked-in numbers agree; KI ever bounds KI before KO."""
     from quantark.asset.equity.product.option.snowball_config import BarrierConfig
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -203,16 +203,12 @@ def test_snowball_mc_quad_agree_on_both_ki_definitions():
     q = SnowballQuadEngine(params=QuadParams(grid_points=801)).calculate_event_stats(sb, env)
     m = SnowballMCEngine(params=MCParams(num_paths=200_000, seed=7)).calculate_event_stats(sb, env)
 
-    for s in (q, m):
-        assert s.ki_ever_probability is not None
-        assert s.ki_survive_knocked_in_probability is not None
-    assert abs(float(q.ki_ever_probability) - float(m.ki_ever_probability)) < 0.02
-    assert abs(
-        float(q.ki_survive_knocked_in_probability)
-        - float(m.ki_survive_knocked_in_probability)
-    ) < 0.02
-    # Legacy per-engine meaning: MC = ki_ever, QUAD = ki_survive.
-    assert abs(float(m.ki_probability) - float(m.ki_ever_probability)) < 1e-9
+    assert q.ki_ever_probability is not None and q.ki_survive_knocked_in_probability is not None
+    assert m.knock_in.probability is not None
+    assert m.knock_in.probability_no_ko == m.ki_settlement.probability
+    assert abs(float(q.ki_survive_knocked_in_probability) - m.knock_in.probability_no_ko) < 0.02
+    assert m.knock_in.probability_no_ko <= m.knock_in.probability < float(q.ki_ever_probability) + 0.02
+    # Legacy QUAD meaning: ki_probability = ki_survive.
     assert abs(float(q.ki_probability) - float(q.ki_survive_knocked_in_probability)) < 1e-9
 
 

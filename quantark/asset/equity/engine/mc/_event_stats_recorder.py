@@ -26,6 +26,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 import numpy as np
 
 __all__ = [
+    "NON_ADDITIVE_KEYS",
     "STATS_RECORDS_KEY",
     "EventStatsRecorder",
     "EventStatsRecordingMixin",
@@ -36,6 +37,8 @@ __all__ = [
 
 #: the key a batch function's result carries its captured records under (Dask batch route)
 STATS_RECORDS_KEY = "_event_stats_records"
+#: record fields that describe the batch's layout, the same in every batch (kept from the first record)
+NON_ADDITIVE_KEYS = ("ki_row_times", "ki_breached_at_valuation")
 
 
 class EventStatsRecorder:
@@ -179,8 +182,8 @@ def grouped_sums(
     discounted: np.ndarray,
     cash: np.ndarray,
 ) -> Dict[tuple, List[float]]:
-    """``{(tag, determination, payment): [discounted sum, cash sum]}`` over the paths in ``mask`` (a ledger
-    of path-dependent cash, grouped by its determination and payment times)."""
+    """``{(tag, determination, payment): [discounted sum, cash sum, path count]}`` over the paths in ``mask``
+    (a ledger of path-dependent cash, grouped by its determination and payment times)."""
     idx = np.flatnonzero(mask)
     if idx.size == 0:
         return {}
@@ -189,21 +192,22 @@ def grouped_sums(
     inverse = np.asarray(inverse).reshape(-1)
     disc = np.bincount(inverse, weights=np.asarray(discounted, dtype=float)[idx], minlength=len(unique))
     paid = np.bincount(inverse, weights=np.asarray(cash, dtype=float)[idx], minlength=len(unique))
+    count = np.bincount(inverse, minlength=len(unique)).astype(float)
     return {
-        (tag, float(det), float(pay)): [float(d), float(c)]
-        for (det, pay), d, c in zip(unique, disc, paid)
+        (tag, float(det), float(pay)): [float(d), float(c), float(k)]
+        for (det, pay), d, c, k in zip(unique, disc, paid, count)
     }
 
 
 def aggregate_records(records: Sequence[Mapping]) -> dict:
     """Sum the additive fields of batch records (scalars and aligned arrays); keep the first record's
-    non-additive fields (row times, kind). A field missing from any record is left out."""
+    non-additive fields (row times, flags, kind). A field missing from any record is left out."""
     if not records:
         return {}
     first = records[0]
     totals: dict = {}
     for key, value in first.items():
-        if key in ("kind", "ki_row_times", "ledger"):
+        if key in ("kind", "ledger") or key in NON_ADDITIVE_KEYS:
             continue
         if not all(key in record and record[key] is not None for record in records):
             continue
@@ -218,14 +222,15 @@ def aggregate_records(records: Sequence[Mapping]) -> dict:
         totals[key] = total
     totals["n"] = int(sum(int(record["n"]) for record in records))
     totals["kind"] = tuple(record.get("kind") for record in records)
-    if "ki_row_times" in first:
-        totals["ki_row_times"] = np.asarray(first["ki_row_times"], dtype=float)
+    for key in NON_ADDITIVE_KEYS:
+        if key in first:
+            totals[key] = first[key]
     if any("ledger" in record for record in records):
         ledger: Dict[tuple, List[float]] = {}
         for record in records:
-            for key, (discounted, cash) in record.get("ledger", {}).items():
-                slot = ledger.setdefault(key, [0.0, 0.0])
-                slot[0] += float(discounted)
-                slot[1] += float(cash)
+            for key, sums in record.get("ledger", {}).items():
+                slot = ledger.setdefault(key, [0.0] * len(sums))
+                for i, value in enumerate(sums):
+                    slot[i] += float(value)
         totals["ledger"] = ledger
     return totals

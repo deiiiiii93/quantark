@@ -33,10 +33,15 @@ def test_post_ko_payment_times_match_the_pde_route(case):
     product, env = _cases()[case]
     mc = SnowballMCEngine(params=MCParams(num_paths=4000, seed=7)).calculate_event_stats(product, env)
     pde = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, env)
-    np.testing.assert_allclose(mc.post_ko_times, pde.post_ko_times, rtol=0, atol=1e-12)
-    np.testing.assert_allclose(mc.post_ko_payment_times, pde.post_ko_payment_times, rtol=0, atol=1e-12)
-    np.testing.assert_allclose(mc.pre_ko_payment_times, pde.pre_ko_payment_times, rtol=0, atol=1e-12)
-    dist = EventDistribution.from_autocallable_stats(mc)
+    # MC: EventStatistics since T9, both schedules on one observation table tagged pre / post
+    obs = mc.observations
+    tags = np.asarray(obs.schedule)
+    np.testing.assert_allclose(obs.times[tags == "post"], pde.post_ko_times, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(obs.payment_times[tags == "post"], pde.post_ko_payment_times, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(obs.payment_times[tags == "pre"], pde.pre_ko_payment_times, rtol=0, atol=1e-12)
+    if case == "dated":
+        assert obs.dates is not None        # determination dates; the time-based settlement resolver gives no date
+    dist = EventDistribution.from_statistics(mc)
     total = sum(float(np.sum(dist.probabilities[e]))
                 for e in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI))
     assert total == pytest.approx(1.0, abs=1e-9)

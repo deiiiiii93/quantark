@@ -73,12 +73,7 @@ def test_dcn_event_stats_pv_is_the_price_bitwise(name):
 def test_price_with_events_npv_is_the_price_bitwise(name):
     price = _price(name)
     route, engine, product, env = _fresh(name)
-    try:
-        result = engine.price_with_events(product, env)
-    except NotImplementedError:
-        # REBASED KO-reset: the landing-1 converter cannot place offsets on the clock (spec D13, landing 2)
-        assert "rebased" in name
-        return
+    result = engine.price_with_events(product, env)          # REBASED included (spec D13, T9)
     assert result.npv == price, f"{name}: npv {result.npv!r} != price {price!r}"
 
 
@@ -115,6 +110,19 @@ def test_adaptive_routes_stop_before_their_maximum():
 
 # --- partition and cash identities per record ---------------------------------------------------------
 
+def _ko_total(stats) -> float:
+    """Total knock-out probability: ``EventStatistics`` (KO rows; REBASED: the termination distribution's knock-outs)
+    or a legacy object (Phoenix until its producer migrates, T10)."""
+    from quantark.asset.equity.engine.event_stats import EventStatistics
+
+    if isinstance(stats, EventStatistics):
+        if stats.termination is not None:
+            events = np.asarray(stats.termination.event)
+            return float(stats.termination.probability[(events == "ko_pre") | (events == "ko_post")].sum())
+        return float(np.sum(stats.observations.probability))
+    return float(np.sum(stats.ko_probability))
+
+
 def _ko_rows(record):
     if "pre_count" in record:
         return record["pre_count"].sum() + record["post_count"].sum()
@@ -136,10 +144,7 @@ def test_outcomes_partition_every_batch(name):
         else:
             assert closed == pytest.approx(n, abs=1e-9 * n)
         terminal += record["v0_count"] + record["v1_count"]
-    ko_total = float(np.sum(stats.ko_probability))
-    if hasattr(stats, "post_ko_probability_total"):
-        ko_total = stats.pre_ko_probability_total + stats.post_ko_probability_total
-    assert ko_total + terminal / total_n == pytest.approx(1.0, abs=1e-12)
+    assert _ko_total(stats) + terminal / total_n == pytest.approx(1.0, abs=1e-12)
 
 
 def _outcome_cash(record):
@@ -169,11 +174,7 @@ def test_statistics_are_the_prices_own_path_statistics(name):
     _, engine, product, env = _fresh(name)
     stats = engine.calculate_event_stats(product, env)
     result = engine.get_last_result()
-    if hasattr(stats, "post_ko_probability_total"):
-        ko_total = stats.pre_ko_probability_total + stats.post_ko_probability_total
-    else:
-        ko_total = float(np.sum(stats.ko_probability))
-    assert ko_total == pytest.approx(result.ko_probability, abs=1e-14)
+    assert _ko_total(stats) == pytest.approx(result.ko_probability, abs=1e-14)
 
 
 # --- the Dask route records on every scheduler it can select --------------------------------------------

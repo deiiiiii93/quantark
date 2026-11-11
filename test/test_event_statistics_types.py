@@ -595,6 +595,26 @@ def test_termination_distribution_rejects(kw):
         TerminationDistribution(**base)
 
 
+def test_termination_repeats_a_time_and_event_only_with_distinct_payments():
+    """T9: an EXPIRY-paid REBASED knock-out on one date settles with the knocked-in end of the knock-in that put
+    its schedule in force, so one (time, event) may carry several payment times; a full repeat is refused."""
+    base = dict(
+        times=[0.5, 0.75, 0.75, 1.0], payment_times=[0.5, 1.0, 1.25, 1.0],
+        event=("ko_pre", "ko_post", "ko_post", "maturity"), probability=[0.25, 0.125, 0.125, 0.5],
+        discounted_cash=[0.0] * 4, cash_to_pay=[0.0] * 4, survival_times=[0.5, 0.75, 1.0], survival=[0.75, 0.5, 0.0],
+    )
+    assert TerminationDistribution(**base).size == 4
+    with pytest.raises(ValidationError, match="duplicate"):
+        TerminationDistribution(**dict(base, payment_times=[0.5, 1.0, 1.0, 1.0]))
+
+
+def test_summary_values_carry_standard_errors():
+    """T9: the computed totals are fields a standard error may name (validated after the identities)."""
+    stats = dataclasses.replace(_rebased(), standard_errors={"total_discounted_cash": 0.01, "expected_lifetime": 0.02,
+                                                             "termination.probability": [0.0] * 9})
+    assert stats.standard_errors["total_discounted_cash"] == 0.01
+
+
 @pytest.mark.parametrize("kw", [
     dict(kind=("ko_post", "ko_post", "maturity")),
     dict(probability=[0.0625, -0.1, 0.3125]),

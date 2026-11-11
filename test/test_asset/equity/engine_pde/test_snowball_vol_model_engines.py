@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from datetime import datetime
 
-from quantark.asset.equity.engine.event_stats import StatisticsRefused
+from quantark.asset.equity.engine.event_stats import EventStatistics, StatisticsRefused
 from quantark.asset.equity.engine.mc import (
     HestonSLVSnowballMCEngine,
     HestonSLVQESnowballMCEngine,
@@ -761,7 +761,15 @@ def test_snowball_vol_model_mc_engines_calculate_event_stats():
     ]
 
     for engine in engines:
-        _assert_snowball_event_stats(engine.calculate_event_stats(product, env), product)
+        stats = engine.calculate_event_stats(product, env)
+        # MC statistics are EventStatistics (spec T9); the grid engines' assertion below is the legacy one
+        assert isinstance(stats, EventStatistics) and stats.product_family == "snowball"
+        obs = stats.observations
+        assert obs.times.size == len(product.barrier_config.ko_observation_dates)
+        assert np.isfinite(stats.pv) and np.all(obs.probability >= 0.0) and np.all(obs.survival <= 1.0)
+        assert stats.knock_in.probability is not None and stats.ki_settlement.probability is not None
+        assert abs(stats.probability_residual) <= 1e-12
+        assert abs(stats.reconciliation_error) <= 1e-12 * abs(stats.pv)
 
 
 def test_snowball_vol_model_pde_engines_calculate_event_stats():

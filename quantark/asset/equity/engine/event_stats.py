@@ -864,7 +864,9 @@ class TerminationDistribution:
         values["survival_times"] = survival_times
         values["survival"] = _float_array(owner, "survival", self.survival, survival_times.size)
         _check_not_before_valuation(owner, "times", times)
-        _check_ordered_rows(owner, "times", times, values["event"])
+        # a (time, event) pair repeats only with distinct payment times: an EXPIRY-paid REBASED knock-out on
+        # one date settles with the knocked-in end of the knock-in that put its schedule in force
+        _check_ordered_rows(owner, "times", times, tuple(zip(values["event"], values["payment_times"].tolist())))
         _check_payment_not_before(owner, times, values["payment_times"])
         _check_probability(owner, "probability", values["probability"])
         _check_not_before_valuation(owner, "survival_times", survival_times)
@@ -1076,8 +1078,9 @@ class EventStatistics:
                 f"{owner}: a terminated, fully settled note has no statistics (return None)"
             )
         _set(self, "unavailable", self._frozen_unavailable())
-        _set(self, "standard_errors", self._frozen_standard_errors())
         self._compute_identities()
+        # after the identities: a summary value (``total_discounted_cash``, ...) may carry an error too
+        _set(self, "standard_errors", self._frozen_standard_errors())
 
     # ------------------------------------------------------------------ properties
 

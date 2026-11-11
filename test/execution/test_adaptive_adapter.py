@@ -320,10 +320,13 @@ class TestKernelAdaptiveDispatch:
                 ),
             )
         import numpy as np
+        # the pass-through EVENT_STATS value is the producer's EventStatistics (MC Snowball since T9)
+        assert outcome.value.pv == direct.pv
         assert np.array_equal(
-            np.asarray(outcome.value.ko_probability),
-            np.asarray(direct.ko_probability),
+            np.asarray(outcome.value.observations.probability),
+            np.asarray(direct.observations.probability),
         )
+        assert np.array_equal(np.asarray(outcome.value.ki_table.probability), np.asarray(direct.ki_table.probability))
 
 
 class TestCodeGateRegressions:

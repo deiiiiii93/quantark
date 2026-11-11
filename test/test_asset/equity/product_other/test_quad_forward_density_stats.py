@@ -418,8 +418,10 @@ def test_forward_matches_mc_event_stats():
     ).calculate_event_stats(product, e)
     # 131072 Sobol paths (500k peaked at 6-9 GB and killed a 16 GB CI runner running two workers; this is
     # 1.8 GB). Measured gaps 1.3e-3 (KO) and 1.6e-3 (KI) against the bands below.
-    assert np.max(np.abs(forward.ko_probability - mc.ko_probability)) < 4e-3
-    assert abs(forward.ki_ever_probability - mc.ki_ever_probability) < 6e-3
+    assert np.max(np.abs(forward.ko_probability - mc.observations.probability)) < 4e-3
+    # MC reports P(KI before any KO) since T9 (spec DESIGN §4.5); the V1 forward pass still reports KI ever
+    # (a knock-in after a knock-out included) until T17 moves it, so KI ever bounds the MC number from above
+    assert mc.knock_in.probability < forward.ki_ever_probability + 6e-3
 
 
 def test_ko_reset_ignores_forward_flag():

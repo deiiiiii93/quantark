@@ -50,6 +50,13 @@ PATH_VOL = 0.35     # what the paths actually do
 NUM_PATHS = 200_000
 
 
+
+def _p_ki(stats) -> float:
+    """P(knock in): ``EventStatistics.knock_in.probability`` (Snowball MC since T9: before any knock-out, which
+    with the knock-out out of reach is P(ever touch B)), or the legacy object's ``ki_probability``."""
+    knock_in = getattr(stats, "knock_in", None)
+    return float(knock_in.probability if knock_in is not None else stats.ki_probability)
+
 def _env(vol=IMPLIED_VOL):
     strikes = list(S0 * np.exp(np.linspace(-0.5, 0.5, 9)))
     maturities = list(np.linspace(0.25, 1.0, 4))
@@ -104,7 +111,7 @@ def _degenerate_heston(vol):
 def _assert_first_passage(engine, path_vol, tolerance_se=4.0):
     exact = _analytic_first_passage(path_vol)
     stats = engine.calculate_event_stats(_knock_in_only_snowball(), _env())
-    measured = float(stats.ki_probability)
+    measured = _p_ki(stats)
     z = (measured - exact) / _standard_error(exact)
     assert abs(z) < tolerance_se, (
         f"P(KI) {measured:.6f} vs analytic {exact:.6f} at vol {path_vol}: "
@@ -118,7 +125,7 @@ def test_the_constant_vol_bridge_still_matches_the_analytic_probability():
     engine = SnowballMCEngine(params=_params())
     stats = engine.calculate_event_stats(_knock_in_only_snowball(), _env(PATH_VOL))
     exact = _analytic_first_passage(PATH_VOL)
-    z = (float(stats.ki_probability) - exact) / _standard_error(exact)
+    z = (_p_ki(stats) - exact) / _standard_error(exact)
     assert abs(z) < 4.0
 
 
@@ -193,9 +200,9 @@ def _knock_in_only_phoenix():
 def _assert_phoenix_first_passage(engine, path_vol):
     exact = _analytic_first_passage(path_vol)
     stats = engine.calculate_event_stats(_knock_in_only_phoenix(), _env())
-    z = (float(stats.ki_probability) - exact) / _standard_error(exact)
+    z = (_p_ki(stats) - exact) / _standard_error(exact)
     assert abs(z) < 4.0, (
-        f"P(KI) {stats.ki_probability:.6f} vs analytic {exact:.6f}: {z:+.1f} SE"
+        f"P(KI) {_p_ki(stats):.6f} vs analytic {exact:.6f}: {z:+.1f} SE"
     )
 
 

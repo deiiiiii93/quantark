@@ -3,6 +3,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
@@ -81,7 +82,23 @@ def _engine_factories():
     }
 
 
+def _ki_view(stats):
+    """``(P(KI), KI table times, KI table probability, KI table survival)``: the MC producers report
+    ``EventStatistics`` (spec T9, P(KI before any KO)); the grid engines still their legacy objects."""
+    if isinstance(stats, EventStatistics):
+        table = stats.ki_table
+        return stats.knock_in.probability, table.times, table.probability, table.survival
+    return stats.ki_probability, stats.ki_times, stats.ki_event_probability, stats.ki_survival_probability
+
+
 def _assert_lifecycle_ki_event_stats(stats, engine="quad") -> None:
+    if isinstance(stats, EventStatistics):
+        assert stats.knock_in.probability == 1.0 and stats.knock_in.expected_time == 0.0
+        np.testing.assert_array_equal(stats.ki_table.times, [0.0])
+        np.testing.assert_array_equal(stats.ki_table.probability, [1.0])
+        np.testing.assert_array_equal(stats.ki_table.survival, [0.0])
+        assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), abs=1e-8)
+        return
     if engine in ("pde", "quad"):
         # spec 3B §5.5: ki_ever is 1; ki_probability (= ki_survive, knocked in AND reaching maturity
         # without a knock-out) is the marched no-knock-out survival, up to the march's discounting.
@@ -115,8 +132,9 @@ def test_normal_ki_products_do_not_report_forced_lifecycle_state():
 
         assert np.isfinite(price)
         assert stats is not None
-        assert 0.0 <= stats.ki_probability < 1.0
-        assert stats.ki_times.shape != (1,) or stats.ki_times[0] != pytest.approx(0.0)
+        probability, times, _, _ = _ki_view(stats)
+        assert 0.0 <= probability < 1.0
+        assert times.shape != (1,) or times[0] != pytest.approx(0.0)
 
 
 def test_no_ki_without_lifecycle_remains_v0_product():
@@ -130,8 +148,9 @@ def test_no_ki_without_lifecycle_remains_v0_product():
 
         assert np.isfinite(price)
         assert stats is not None
-        assert stats.ki_probability == pytest.approx(0.0)
-        assert stats.ki_times.size == 0
+        probability, times, _, _ = _ki_view(stats)
+        assert probability == pytest.approx(0.0)
+        assert times.size == 0
         if name == "mc":
             result = engine.get_last_result()
             assert result.v1_probability == pytest.approx(0.0)

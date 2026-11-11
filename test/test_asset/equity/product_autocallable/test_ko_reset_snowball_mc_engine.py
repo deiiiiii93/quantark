@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[4]))
 
-from quantark.asset.equity.engine.event_stats import KOResetEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.product.option import create_ko_reset_snowball
@@ -82,15 +82,20 @@ def test_ko_reset_event_stats_shape(post_ko_mode):
     )
     engine = SnowballMCEngine(params=MCParams(num_paths=1000, time_steps=252))
     stats = engine.calculate_event_stats(product, pricing_env)
-    assert isinstance(stats, KOResetEventStats)
-    assert len(stats.pre_ko_times) == len(stats.pre_ko_probability)
-    assert len(stats.post_ko_times) == len(stats.post_ko_probability)
-    assert len(stats.determination_times) == len(stats.payment_times)
-    assert np.all(stats.payment_times >= stats.determination_times)
-    assert stats.pv == pytest.approx(
-        float(stats.expected_discounted_cashflows.sum()),
-        abs=1.0e-8,
-    )
+    assert isinstance(stats, EventStatistics) and stats.product_family == "ko_reset"
+    obs = stats.observations
+    assert obs.times.size == obs.probability.size == len(obs.schedule)
+    if post_ko_mode == PostKOScheduleMode.REBASED:
+        # schedule-2 rows by offset (no survival), absolute termination on the candidate axis (spec D13)
+        assert set(obs.schedule) == {"pre"} and stats.rebased
+        assert stats.post_ki_offsets.size == stats.post_ki_offsets.probability.size
+    else:
+        assert {"pre", "post"} <= set(obs.schedule)
+    ledger = stats.ledger
+    assert len(ledger.determination_times) == len(ledger.payment_times)
+    assert np.all(ledger.payment_times >= ledger.determination_times)
+    assert stats.pv == pytest.approx(float(ledger.discounted_cash.sum()), abs=1.0e-8)
+    assert abs(stats.reconciliation_error) <= 1e-12 * abs(stats.pv)
 
 
 def _dated_ko_reset_on_business_day_clock():
