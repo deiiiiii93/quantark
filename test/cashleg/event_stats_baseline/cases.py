@@ -22,7 +22,7 @@ which other records ran first in the same process.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -51,6 +51,14 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
 from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.lifecycle import (
+    AutocallableLifecycleState,
+    DCNLifecycleState,
+    LifecycleCashflowLedger,
+    LifecycleEventType,
+    RealizedCashflow,
+    ValuationPoint,
+)
 from quantark.asset.equity.engine.quad.v2.engine import (
     KOResetSnowballQuadEngineV2,
     PhoenixQuadEngineV2,
@@ -127,7 +135,7 @@ DCN_START = datetime(2023, 1, 3)
 DCN_SIGMA, DCN_R, DCN_Q = 0.184, 0.0356, 0.1406
 
 
-def dcn_env(grid: bool = False, spot: float = 6000.0) -> PricingEnvironment:
+def dcn_env(grid: bool = False, spot: float = 6000.0, valuation: datetime = DCN_START) -> PricingEnvironment:
     if grid:
         strikes = [3000.0, 4500.0, 6000.0, 7500.0, 9000.0]
         mats = [0.25, 0.5, 1.0, 1.5, 2.0, 2.5]
@@ -137,7 +145,7 @@ def dcn_env(grid: bool = False, spot: float = 6000.0) -> PricingEnvironment:
         vol = FlatVolSurface(volatility=DCN_SIGMA)
     return PricingEnvironment(
         spot_quote=SpotQuote(spot=spot), vol_surface=vol, rate_curve=FlatRateCurve(rate=DCN_R),
-        div_yield=ContinuousDividendYield(div_yield=DCN_Q), valuation_date=DCN_START,
+        div_yield=ContinuousDividendYield(div_yield=DCN_Q), valuation_date=valuation,
         day_count_convention=DayCountConvention.ACT_365,
     )
 
@@ -145,7 +153,8 @@ def dcn_env(grid: bool = False, spot: float = 6000.0) -> PricingEnvironment:
 # --- products ----------------------------------------------------------------------------------
 
 
-def _snowball(ki: str) -> SnowballOption:
+def _snowball(ki: str, ko_dates=KO_DATES, disable_ko_after_ki: bool = False) -> SnowballOption:
+    extra = dict(disable_ko_after_ki=True) if disable_ko_after_ki else {}
     if ki == "continuous":
         ki_kw = dict(ki_barrier=75.0, ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True)
     else:
@@ -154,18 +163,33 @@ def _snowball(ki: str) -> SnowballOption:
     return SnowballOption(
         initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0, is_reverse=False,
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
-                                     ko_observation_dates=list(KO_DATES), **ki_kw),
+                                     ko_observation_dates=list(ko_dates), **ki_kw, **extra),
         payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=True),
     )
 
 
-def _phoenix(memory: bool, pay: CouponPayType) -> PhoenixOption:
+def _reverse_snowball() -> SnowballOption:
+    """Call-style (``is_reverse``): knock-out below at 97, continuous knock-in above at 125."""
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0, is_reverse=True,
+        barrier_config=BarrierConfig(ko_barrier=97.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_dates=list(KO_DATES), ki_barrier=125.0,
+                                     ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=True),
+    )
+
+
+#: a knock-out observation on the valuation instant (t = 0), decided at valuation with spot 110
+KO_DATES_AT_VALUATION = (0.0, *KO_DATES)
+
+
+def _phoenix(memory: bool, pay: CouponPayType, ko_dates=KO_DATES) -> PhoenixOption:
     return PhoenixOption(
         initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0,
         barrier_config=BarrierConfig(ko_barrier=105.0, ko_rate=0.0, ko_observation_type=ObservationType.DISCRETE,
-                                     ko_observation_dates=list(KO_DATES), ki_barrier=70.0,
+                                     ko_observation_dates=list(ko_dates), ki_barrier=70.0,
                                      ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True),
-        coupon_config=CouponBarrierConfig(coupon_barrier=[80.0] * len(KO_DATES), coupon_rate=0.02,
+        coupon_config=CouponBarrierConfig(coupon_barrier=[80.0] * len(ko_dates), coupon_rate=0.02,
                                           coupon_pay_type=pay, day_count_convention=DayCountConvention.ACT_365,
                                           memory_coupon=memory),
         payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True),
@@ -181,17 +205,21 @@ def _schedule(times, level) -> ObservationSchedule:
     return ObservationSchedule(records=[ObservationRecord(observation_time=float(t), barrier=level) for t in times])
 
 
-def _ko_reset(mode: PostKOScheduleMode) -> KnockOutResetSnowballOption:
-    """Schedule 1 quarterly to 1y (103, 15%), discrete KI at 80 on schedule 1's dates, schedule 2 (95, 3%)
-    quarterly to 2y absolute, or quarterly offsets to 1y after the knock-in (REBASED)."""
+def _ko_reset(mode: PostKOScheduleMode, ki: str = "discrete") -> KnockOutResetSnowballOption:
+    """Schedule 1 quarterly to 1y (103, 15%), KI at 80 (discrete on schedule 1's dates, or continuous),
+    schedule 2 (95, 3%) quarterly to 2y absolute, or quarterly offsets to 1y after the knock-in (REBASED)."""
     post = KO_RESET_POST_ABSOLUTE if mode is PostKOScheduleMode.ABSOLUTE else KO_RESET_POST_REBASED
     maturity = 2.0
+    if ki == "continuous":
+        ki_kw = dict(ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True)
+    else:
+        ki_kw = dict(ki_observation_type=ObservationType.DISCRETE,
+                     ki_observation_schedule=_schedule(KO_RESET_PRE, 80.0))
     return KnockOutResetSnowballOption(
         initial_price=100.0, strike=100.0, maturity=maturity, contract_multiplier=1.0,
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=_schedule(KO_RESET_PRE, 103.0), ki_barrier=80.0,
-                                     ki_observation_type=ObservationType.DISCRETE,
-                                     ki_observation_schedule=_schedule(KO_RESET_PRE, 80.0)),
+                                     **ki_kw),
         post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.03, ko_observation_type=ObservationType.DISCRETE,
                                           ko_observation_schedule=_schedule(post, 95.0)),
         accrual_config=AccrualConfig(is_annualized=True, is_annualized_ki=True, is_annualized_rebate=True),
@@ -207,9 +235,10 @@ DCN_CONTRACT = dict(
 )
 
 
-def _dcn(direction: DCNDirection = DCNDirection.BUYER) -> DCNOption:
-    """``test/dcn_fixtures.py`` DCN_A (24 monthly observations)."""
-    schedule = build_dcn_schedule(calendar=create_calendar(CalendarType.CHINA_SSE), **DCN_CONTRACT)
+def _dcn(direction: DCNDirection = DCNDirection.BUYER, valuation: datetime = DCN_START) -> DCNOption:
+    """``test/dcn_fixtures.py`` DCN_A (24 monthly observations), booked as of ``valuation``."""
+    schedule = build_dcn_schedule(calendar=create_calendar(CalendarType.CHINA_SSE),
+                                  **dict(DCN_CONTRACT, valuation_date=valuation))
     return DCNOption(
         notional=1_000_000.0, initial_price=6000.0, coupon_barrier_ratio=0.80, ko_barrier_ratio=1.00,
         ki_barrier_ratio=0.75, ki_put_strike_ratio=1.10, coupon_rate=0.12, ko_coupon_rate=0.12,
@@ -225,6 +254,46 @@ def _knocked_in(product):
     return product
 
 
+# --- aged trades with a lifecycle state (receivables, terminated notes) -------------------------
+
+_VP = ValuationPoint(date=VALUATION)
+
+
+def _autocallable_receivable_alive() -> AutocallableLifecycleState:
+    """Alive note with a coupon determined 5 days before valuation and paid 10 days after it."""
+    state = AutocallableLifecycleState(valuation_point=_VP)
+    state.ledger.register(RealizedCashflow(
+        cashflow_id="coupon-pending", event_type=LifecycleEventType.COUPON, amount=2.0,
+        determination_date=VALUATION - timedelta(days=5), payment_date=VALUATION + timedelta(days=10)))
+    return state
+
+
+def _autocallable_ko(determined_days: int, paid_days: int) -> AutocallableLifecycleState:
+    """Note knocked out ``determined_days`` before valuation, settling ``paid_days`` after (negative: already paid)."""
+    state = AutocallableLifecycleState()
+    state.mark_ko(VALUATION - timedelta(days=determined_days), cashflow=105.0,
+                  settlement_date=VALUATION + timedelta(days=paid_days), valuation_point=_VP)
+    return state
+
+
+#: DCN_A aged to the day after its 2024-06-03 coupon + knock-out row, whose cash pays 2024-06-05
+DCN_AGED = datetime(2024, 6, 4)
+DCN_SETTLED = datetime(2024, 6, 6)
+DCN_ROW, DCN_ROW_PAY = datetime(2024, 6, 3), datetime(2024, 6, 5)
+DCN_CASH = 10_000.0                     # participation 1 x 12% x 30/360 x 1e6
+
+
+def _dcn_flow(kind, determined, paid):
+    event = {"coupon": LifecycleEventType.COUPON, "ko": LifecycleEventType.KNOCK_OUT}[kind]
+    return RealizedCashflow(cashflow_id=f"dcn:{kind}:{determined:%Y-%m-%d}", event_type=event, amount=DCN_CASH,
+                            determination_date=determined, payment_date=paid)
+
+
+def _dcn_state(*flows, on=DCN_AGED, **flags) -> DCNLifecycleState:
+    return DCNLifecycleState(valuation_point=ValuationPoint(date=on), ledger=LifecycleCashflowLedger(list(flows)),
+                             **flags)
+
+
 @dataclass(frozen=True)
 class ProductSpec:
     """A product and the facts a later task needs to tell which D9 cause could move its legs."""
@@ -233,7 +302,16 @@ class ProductSpec:
     build: Callable[[], object]
     features: Dict[str, object]
     life: float                      # last payment horizon in years, for the accrual-leg schedule
+    #: the market this product is priced in, overriding the engine's default (spot through a barrier, aged date)
+    env: Optional[Callable[[], PricingEnvironment]] = None
+    #: a ``lifecycle_state`` passed to every price / event / fold call
+    lifecycle: Optional[Callable[[], object]] = None
+    #: the numeric knock-out axis the autocallable legs align to (default ``KO_DATES``)
+    ko_times: Optional[Tuple[float, ...]] = None
 
+
+DCN_FEAT = dict(ki="discrete_daily_close", memory=None, coupon_pay="INSTANT", include_principal=None,
+                direction="BUYER")
 
 PRODUCTS: Dict[str, ProductSpec] = {
     "snowball_cki": ProductSpec("snowball", lambda: _snowball("continuous"),
@@ -270,6 +348,63 @@ PRODUCTS: Dict[str, ProductSpec] = {
                                                   lambda: _knocked_in(_phoenix(True, CouponPayType.INSTANT)),
                                                   dict(ki="continuous", memory=True, coupon_pay="INSTANT",
                                                        include_principal=True, knocked_in_at_valuation=True), 1.0),
+    # --- follow-up: valuation-date, reverse, lifecycle cases ---
+    "snowball_cki_ko_at_valuation": ProductSpec(
+        "snowball", lambda: _snowball("continuous", ko_dates=KO_DATES_AT_VALUATION),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True, ko_at_valuation=True), 1.0,
+        env=lambda: flat_env(110.0), ko_times=KO_DATES_AT_VALUATION),
+    "snowball_cki_knocked_in_ko_at_valuation": ProductSpec(
+        "snowball", lambda: _knocked_in(_snowball("continuous", ko_dates=KO_DATES_AT_VALUATION)),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True, ko_at_valuation=True,
+             knocked_in_at_valuation=True), 1.0,
+        env=lambda: flat_env(110.0), ko_times=KO_DATES_AT_VALUATION),
+    "phoenix_mem_instant_ko_at_valuation": ProductSpec(
+        "phoenix", lambda: _phoenix(True, CouponPayType.INSTANT, ko_dates=KO_DATES_AT_VALUATION),
+        dict(ki="continuous", memory=True, coupon_pay="INSTANT", include_principal=True, ko_at_valuation=True), 1.0,
+        env=lambda: flat_env(110.0), ko_times=KO_DATES_AT_VALUATION),
+    "phoenix_mem_instant_knocked_in_ko_at_valuation": ProductSpec(
+        "phoenix", lambda: _knocked_in(_phoenix(True, CouponPayType.INSTANT, ko_dates=KO_DATES_AT_VALUATION)),
+        dict(ki="continuous", memory=True, coupon_pay="INSTANT", include_principal=True, ko_at_valuation=True,
+             knocked_in_at_valuation=True), 1.0,
+        env=lambda: flat_env(110.0), ko_times=KO_DATES_AT_VALUATION),
+    "snowball_reverse": ProductSpec(
+        "snowball", _reverse_snowball,
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True, reverse=True), 1.0),
+    "snowball_cki_knocked_in_no_ko_after_ki": ProductSpec(
+        "snowball", lambda: _knocked_in(_snowball("continuous", disable_ko_after_ki=True)),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True, knocked_in_at_valuation=True,
+             disable_ko_after_ki=True), 1.0),
+    "ko_reset_absolute_cki": ProductSpec(
+        "ko_reset_absolute", lambda: _ko_reset(PostKOScheduleMode.ABSOLUTE, ki="continuous"),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True, post_ko_mode="ABSOLUTE"), 2.0),
+    "snowball_cki_receivable_alive": ProductSpec(
+        "snowball", lambda: _snowball("continuous"),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True,
+             lifecycle="alive_pending_coupon_receivable"), 1.0, lifecycle=_autocallable_receivable_alive),
+    "snowball_cki_ko_unpaid": ProductSpec(
+        "snowball", lambda: _snowball("continuous"),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True,
+             lifecycle="terminated_ko_unpaid"), 1.0, lifecycle=lambda: _autocallable_ko(2, 10)),
+    "snowball_cki_ko_settled": ProductSpec(
+        "snowball", lambda: _snowball("continuous"),
+        dict(ki="continuous", memory=None, coupon_pay=None, include_principal=True,
+             lifecycle="terminated_ko_settled"), 1.0, lifecycle=lambda: _autocallable_ko(10, -3)),
+    "dcn_receivable_alive": ProductSpec(
+        "dcn", lambda: _dcn(valuation=DCN_AGED),
+        dict(DCN_FEAT, lifecycle="alive_pending_coupon_receivable"), 2.0,
+        env=lambda: dcn_env(valuation=DCN_AGED),
+        lifecycle=lambda: _dcn_state(_dcn_flow("coupon", DCN_ROW, DCN_ROW_PAY))),
+    "dcn_ko_unpaid": ProductSpec(
+        "dcn", lambda: _dcn(valuation=DCN_AGED),
+        dict(DCN_FEAT, lifecycle="terminated_ko_unpaid"), 2.0,
+        env=lambda: dcn_env(valuation=DCN_AGED),
+        lifecycle=lambda: _dcn_state(_dcn_flow("ko", DCN_ROW, DCN_ROW_PAY), knocked_out=True, ko_date=DCN_ROW)),
+    "dcn_ko_settled": ProductSpec(
+        "dcn", lambda: _dcn(valuation=DCN_SETTLED),
+        dict(DCN_FEAT, lifecycle="terminated_ko_settled"), 2.0,
+        env=lambda: dcn_env(valuation=DCN_SETTLED),
+        lifecycle=lambda: _dcn_state(_dcn_flow("ko", DCN_ROW, DCN_ROW_PAY), on=DCN_SETTLED,
+                                     knocked_out=True, ko_date=DCN_ROW)),
 }
 
 # --- engines -----------------------------------------------------------------------------------
@@ -379,6 +514,20 @@ CASES: Tuple[Tuple[str, str], ...] = (
                                                        "pde_phoenix")),
     ("mc_dcn", "dcn_seller"),
     ("pde_dcn", "dcn_seller"),
+    # follow-up: KO decided at valuation (plain and carried knock-in)
+    *((e, p) for e in ("mc_snowball", "pde_snowball", "quad_v1_snowball", "quad_v2_snowball")
+      for p in ("snowball_cki_ko_at_valuation", "snowball_cki_knocked_in_ko_at_valuation")),
+    *((e, p) for e in ("mc_phoenix", "pde_phoenix", "quad_v1_phoenix", "quad_v2_phoenix")
+      for p in ("phoenix_mem_instant_ko_at_valuation", "phoenix_mem_instant_knocked_in_ko_at_valuation")),
+    # reverse snowball; no KO after KI (knocked in); KO-reset with continuous KI
+    *((e, "snowball_reverse") for e in ("mc_snowball", "pde_snowball", "quad_v2_snowball")),
+    *((e, "snowball_cki_knocked_in_no_ko_after_ki") for e in ("mc_snowball", "pde_snowball")),
+    *((e, "ko_reset_absolute_cki") for e in ("mc_snowball", "pde_ko_reset", "quad_v2_ko_reset")),
+    # aged trades with a lifecycle state
+    *(("quad_v2_snowball", p) for p in ("snowball_cki_receivable_alive", "snowball_cki_ko_unpaid",
+                                        "snowball_cki_ko_settled")),
+    ("mc_snowball", "snowball_cki_ko_unpaid"),
+    *((e, p) for e in ("mc_dcn", "pde_dcn") for p in ("dcn_receivable_alive", "dcn_ko_unpaid", "dcn_ko_settled")),
 )
 
 
@@ -400,6 +549,7 @@ class LegSpec:
 def _ko_axis(product_name: str, product) -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
     """The parent's knock-out event axis an ``AutocallableCashLeg`` must align to, and a leg settlement
     schedule on it (the leg settles 0.01y after each observation; DCN at the knock-out payment)."""
+    spec = PRODUCTS[product_name]
     if product_name.startswith("dcn"):
         ctx = build_dcn_grid_context(product)
         obs = tuple(float(t) for t in np.asarray(ctx.times[ctx.obs_cols], dtype=float))
@@ -408,8 +558,10 @@ def _ko_axis(product_name: str, product) -> Tuple[Tuple[float, ...], Tuple[float
         obs = tuple(sorted(KO_RESET_PRE + KO_RESET_POST_ABSOLUTE))
     elif product_name == "ko_reset_rebased":
         obs = tuple(sorted(KO_RESET_PRE + KO_RESET_POST_REBASED))
+    elif spec.family == "ko_reset_absolute":
+        obs = tuple(sorted(KO_RESET_PRE + KO_RESET_POST_ABSOLUTE))
     else:
-        obs = KO_DATES
+        obs = spec.ko_times or KO_DATES
     return obs, tuple(t + 0.01 for t in obs)
 
 
@@ -530,8 +682,16 @@ class Case:
         return case_id(self.engine_name, self.product_name)
 
     def fresh(self):
-        """A fresh engine, product and environment (no state carried between computations)."""
-        return self.engine.build(), self.product_spec.build(), self.engine.env()
+        """A fresh engine, product and environment (no state carried between computations). The product's own
+        market, when it names one, replaces the engine's default."""
+        env = self.product_spec.env() if self.product_spec.env is not None else self.engine.env()
+        return self.engine.build(), self.product_spec.build(), env
+
+    def kwargs(self) -> Dict[str, object]:
+        """``{"lifecycle_state": <fresh state>}`` for an aged case, else ``{}`` (the stateless call, bitwise)."""
+        if self.product_spec.lifecycle is None:
+            return {}
+        return {"lifecycle_state": self.product_spec.lifecycle()}
 
     def legs(self) -> List[LegSpec]:
         _, product, _ = self.fresh()
@@ -550,17 +710,18 @@ class Case:
 def event_route(case: Case) -> Dict[str, object]:
     """``price``, ``event_npv`` and every leg's event-route value for one case (two solves)."""
     engine, product, env = case.fresh()
-    price = _outcome(lambda: engine.price(product, env))
+    price = _outcome(lambda: engine.price(product, env, **case.kwargs()))
     engine, product, env = case.fresh()
     try:
-        result = engine.price_with_events(product, env)
+        result = engine.price_with_events(product, env, **case.kwargs())
     except Exception as exc:  # noqa: BLE001
         raised = {"raises": type(exc).__name__, "message": str(exc)[:300]}
         return dict(price=price, event_npv=raised, legs={spec.name: dict(raised) for spec in case.legs()},
                     diagnostics=None)
     dist = result.event_distribution
     legs = {spec.name: _outcome(lambda spec=spec: spec.leg.value(dist, env, UNIT)) for spec in case.legs()}
-    return dict(price=price, event_npv={"value": float(result.npv)}, legs=legs, diagnostics=_diagnostics(dist))
+    return dict(price=price, event_npv=_outcome(lambda: result.npv), legs=legs,
+                diagnostics=None if dist is None else _diagnostics(dist))
 
 
 def _diagnostics(dist) -> Dict[str, object]:
@@ -582,7 +743,7 @@ def fold_total(case: Case, leg_name: str) -> Dict[str, object]:
     engine, product, env = case.fresh()
     spec = next(s for s in legs_for(case.product_name, product) if s.name == leg_name)
     return _outcome(lambda: folded_trade_value(engine, product, env, [spec.leg], quantity=1.0,
-                                               unit_notional=UNIT, mode=FoldMode.TOTAL).total)
+                                               unit_notional=UNIT, mode=FoldMode.TOTAL, **case.kwargs()).total)
 
 
 def fold_drilldown(case: Case, leg_names: List[str]) -> Dict[str, object]:
@@ -597,7 +758,7 @@ def fold_drilldown(case: Case, leg_names: List[str]) -> Dict[str, object]:
     legs = [s.leg for s in legs_for(case.product_name, product) if s.name in set(leg_names)]
     try:
         value = folded_trade_value(engine, product, env, legs, quantity=1.0, unit_notional=UNIT,
-                                   mode=FoldMode.DRILLDOWN)
+                                   mode=FoldMode.DRILLDOWN, **case.kwargs())
     except Exception as exc:  # noqa: BLE001
         raised = {"raises": type(exc).__name__, "message": str(exc)[:300]}
         return dict(total=raised, npv=dict(raised), per_leg={name: dict(raised) for name in leg_names})
