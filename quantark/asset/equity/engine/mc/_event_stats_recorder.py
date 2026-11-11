@@ -31,6 +31,7 @@ __all__ = [
     "EventStatsRecorder",
     "EventStatsRecordingMixin",
     "aggregate_records",
+    "control_corrected_record",
     "grouped_sums",
     "row_sums",
 ]
@@ -197,6 +198,44 @@ def grouped_sums(
         (tag, float(det), float(pay)): [float(d), float(c), float(k)]
         for (det, pay), d, c, k in zip(unique, disc, paid, count)
     }
+
+
+def control_corrected_record(native: Mapping, sampled_control: Mapping, exact_control: Mapping) -> dict:
+    """The batch record of a control-variate estimator ``native - sampled control + exact control``.
+
+    The Heston-SLV conditional-control price of one batch is ``mean(native - sampled proxy) + mean(exact
+    proxy)``: the native kernel on the SLV paths, the same kernel on the proxy paths (one path per native path),
+    and the proxy's exact conditional expectation per proxy base row (``exact_control["n"]`` rows, each standing
+    for ``native["n"] / exact_control["n"]`` native paths). Every recorded outcome sum is linear in the paths, so
+    the record of that estimator is, field by field, ``native - sampled + (native n / exact n) * exact``, with the
+    native path count: each outcome is then the control-corrected estimate of the native outcome, and the
+    outcomes add up to the price the batch returned to round-off. Layout fields come from the native record.
+
+    Raises:
+        ValueError: the records do not describe one batch (different keys, a sampled-control path count that
+            is not the native one, a native count that is not a whole multiple of the exact rows).
+    """
+    if set(native) != set(sampled_control) or set(native) != set(exact_control) or "ledger" in native:
+        raise ValueError("control-corrected records need the same additive fields in all three records")
+    n = int(native["n"])
+    if int(sampled_control["n"]) != n or int(exact_control["n"]) <= 0 or n % int(exact_control["n"]):
+        raise ValueError(
+            f"control-corrected record: native n={n}, sampled n={sampled_control['n']}, exact n={exact_control['n']}"
+        )
+    weight = float(n // int(exact_control["n"]))
+    record: dict = {"kind": "control_corrected", "n": n}
+    for key, value in native.items():
+        if key in ("kind", "n") or key in NON_ADDITIVE_KEYS:
+            continue
+        if isinstance(value, np.ndarray):
+            record[key] = (np.asarray(value, dtype=float) - np.asarray(sampled_control[key], dtype=float)
+                           + weight * np.asarray(exact_control[key], dtype=float))
+        else:
+            record[key] = float(value) - float(sampled_control[key]) + weight * float(exact_control[key])
+    for key in NON_ADDITIVE_KEYS:
+        if key in native:
+            record[key] = native[key]
+    return record
 
 
 def aggregate_records(records: Sequence[Mapping]) -> dict:

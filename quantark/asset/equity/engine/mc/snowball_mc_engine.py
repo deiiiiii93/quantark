@@ -13,7 +13,7 @@ This engine prices snowball options using Monte Carlo simulation with support fo
 
 import math
 import warnings
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
@@ -31,6 +31,7 @@ from quantark.asset.equity.engine.mc._event_stats_recorder import (
     STATS_RECORDS_KEY,
     EventStatsRecordingMixin,
     aggregate_records,
+    control_corrected_record,
     grouped_sums,
     row_sums,
 )
@@ -711,6 +712,12 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
         deterministic candidate axis (spec D13). Standard errors come from independent batch means (spec
         AC21): one batch, or deterministic QMC batches, give none, with the reason in ``unavailable``.
 
+        The Heston-SLV conditional control prices ``native - sampled proxy + exact proxy``; its statistics are
+        the same estimator outcome by outcome (each batch's native record minus the proxy paths' record plus
+        the proxy's exact conditional outcomes), so the outcomes reconcile to the price at round-off. Such an
+        estimate is unbiased but unbounded: one that breaks a probability bound (a rare outcome at a small path
+        count) raises ``PricingError`` rather than being clipped.
+
         ``streams`` is accepted for the engine contract and ignored: every number comes from the same paths,
         so nothing is pruned. At zero time to maturity ``price`` decides the claim on the spot and no path is
         priced: the statistics are ``None`` (the documented expired rule). The batch records stay on
@@ -730,7 +737,19 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
         totals = aggregate_records(records)
         if isinstance(product, KnockOutResetSnowballOption):
             return ko_reset_event_statistics(self, product, pricing_env, float(pv), totals, records)
-        return snowball_event_statistics(self, product, pricing_env, float(pv), totals, records)
+        try:
+            return snowball_event_statistics(self, product, pricing_env, float(pv), totals, records)
+        except ValidationError as exc:
+            if not any(record.get("kind") == "control_corrected" for record in records):
+                raise
+            # A control-variate estimate of one outcome (native - sampled proxy + exact proxy) is unbiased but not
+            # bounded: on a rare outcome at a small path count it can fall below zero. It is never clipped.
+            raise PricingError(
+                "Heston-SLV conditional-control statistics: a control-corrected outcome estimate (native - "
+                f"sampled proxy + exact proxy, the price's own estimator) breaks its probability bounds: {exc}. "
+                "The estimator's per-outcome noise exceeds that outcome's mass at this path count; more paths "
+                "per batch give valid statistics."
+            ) from exc
 
     @staticmethod
     def _resolve_payment_timing(
@@ -2805,8 +2824,11 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                 )
                 return payoffs * self._df(settlement_times)
 
-            discounted = native_discounted(paths)
-            if aux is None or not aux.get("heston_conditional_control", False):
+            control = aux is not None and aux.get("heston_conditional_control", False)
+            # a recorded conditional-control batch: the native record is held back and deposited corrected below
+            with (self._stats_batch_capture() if control else nullcontext()) as native_records:
+                discounted = native_discounted(paths)
+            if not control:
                 return discounted
             required = (
                 "control_paths",
@@ -2819,10 +2841,28 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                     "Heston conditional-control metadata is incomplete: "
                     + ", ".join(missing)
                 )
-            # the control's proxy paths are no batch of the price's own paths: not recorded
-            with self._without_stats_recording():
+            with self._stats_batch_capture() as control_records:
                 sampled_control = native_discounted(aux["control_paths"])
             exact_control = raw_conditional_control_payoffs(paths, aux)
+            if native_records and control_records:
+                # the price is native - sampled proxy + exact proxy: so is every recorded outcome (T10). The
+                # proxy's exact conditional outcomes on the same base rows and loadings the price integrates.
+                self._record_stats_batch(
+                    control_corrected_record(
+                        native_records[0],
+                        control_records[0],
+                        conditional_standard_snowball_event_record(
+                            product=product,
+                            pricing_env=pricing_env,
+                            base_paths=aux["control_base_paths"],
+                            log_spot_factor_loadings=aux["control_log_spot_factor_loadings"],
+                            ko_indices=ko_indices,
+                            ki_indices=ki_indices,
+                            maturity=T,
+                            discount_factors=self._df,
+                        ),
+                    )
+                )
             residual = discounted - sampled_control
             group_size = int(aux.get("conditional_group_size", 1))
             if group_size > 1:

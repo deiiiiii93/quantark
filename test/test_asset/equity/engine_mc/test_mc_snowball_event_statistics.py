@@ -49,9 +49,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 FAMILIES = ("snowball", "ko_reset")
 LIVE = [n for n, r in ROUTES.items() if r.family in FAMILIES and not r.expired]
-#: the Heston-SLV conditional control prices native - proxy + exact proxy: its outcomes are the native paths', so
-#: its reconciliation error is the control correction (reported, never absorbed; vol-model routes are T10's)
-CONTROL_VARIATE = ("slvqe_sb_conditional_control",)
 ROUND_OFF = 1e-12
 UNDEFINED_KEYS = {"knock_in.expected_time", "standard_errors", "standard_errors.knock_in.expected_time"}
 
@@ -106,7 +103,7 @@ def test_full_request_is_an_event_statistics_with_only_undefined_values_unavaila
 
 # --- AC8 -------------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", [n for n in LIVE if n not in CONTROL_VARIATE])
+@pytest.mark.parametrize("name", LIVE)      # the conditional control included: control-corrected outcomes (T10)
 def test_partition_and_reconciliation_are_round_off(name):
     _, _, _, stats = _stats(name)
     assert abs(stats.probability_residual) <= ROUND_OFF

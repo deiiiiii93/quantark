@@ -111,16 +111,11 @@ def test_adaptive_routes_stop_before_their_maximum():
 # --- partition and cash identities per record ---------------------------------------------------------
 
 def _ko_total(stats) -> float:
-    """Total knock-out probability: ``EventStatistics`` (KO rows; REBASED: the termination distribution's knock-outs)
-    or a legacy object (Phoenix until its producer migrates, T10)."""
-    from quantark.asset.equity.engine.event_stats import EventStatistics
-
-    if isinstance(stats, EventStatistics):
-        if stats.termination is not None:
-            events = np.asarray(stats.termination.event)
-            return float(stats.termination.probability[(events == "ko_pre") | (events == "ko_post")].sum())
-        return float(np.sum(stats.observations.probability))
-    return float(np.sum(stats.ko_probability))
+    """Total knock-out probability: KO rows; REBASED: the termination distribution's knock-outs."""
+    if stats.termination is not None:
+        events = np.asarray(stats.termination.event)
+        return float(stats.termination.probability[(events == "ko_pre") | (events == "ko_post")].sum())
+    return float(np.sum(stats.observations.probability))
 
 
 def _ko_rows(record):
@@ -200,6 +195,6 @@ def test_dask_records_do_not_depend_on_the_scheduler():
         with dask.config.set(scheduler=scheduler):
             _, engine, product, env = _fresh("ph_mem_instant_dask")
             stats = engine.calculate_event_stats(product, env)
-        seen.append((stats.pv, tuple(stats.ko_probability), tuple(stats.coupon_probability),
-                     tuple(stats.expected_discounted_coupon_cashflow)))
+        seen.append((stats.pv, tuple(stats.observations.probability), tuple(stats.coupons.probability),
+                     tuple(stats.coupons.discounted_cash), tuple(stats.ki_table.probability)))
     assert seen[0] == seen[1] == seen[2]

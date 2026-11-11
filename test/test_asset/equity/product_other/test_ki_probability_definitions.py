@@ -13,6 +13,11 @@ cross-engine-consistent fields:
 
 These tests pin both engines to the same definitions and pin the decomposition
 identity ki_ever - ki_survive == P(KI AND KO) >= 0.
+
+Since the unified event statistics (T9 Snowball, T10 Phoenix) the MC engines report
+``knock_in.probability`` = P(KI before any KO) and ``knock_in.probability_no_ko`` =
+P(KI AND never KO) (== the knocked-in settlement row); QUAD/PDE keep the legacy
+fields until their producers migrate.
 """
 
 from datetime import datetime
@@ -72,30 +77,31 @@ KI_SURVIVE_REF = 0.125
 
 
 def test_new_ki_fields_are_populated_by_both_engines():
+    """QUAD V1 (legacy object until T17): KI ever and KI-and-no-KO. Phoenix MC (unified statistics since T10):
+    P(KI before any KO) and P(KI and no KO) == the knocked-in settlement row."""
     q, m = _quad_stats(), _mc_stats()
-    for s in (q, m):
-        assert s.ki_ever_probability is not None
-        assert s.ki_survive_knocked_in_probability is not None
+    assert q.ki_ever_probability is not None
+    assert q.ki_survive_knocked_in_probability is not None
+    assert m.knock_in.probability is not None
+    assert m.knock_in.probability_no_ko == m.ki_settlement.probability
 
 
-def test_ki_ever_agrees_across_engines():
+def test_mc_knock_in_before_ko_is_bounded_by_ki_ever():
+    """MC counts a knock-in only before any knock-out (DESIGN §4.5): between settles-knocked-in and QUAD's KI ever."""
     q, m = _quad_stats(), _mc_stats()
-    assert abs(float(q.ki_ever_probability) - float(m.ki_ever_probability)) < 0.015, (
-        q.ki_ever_probability, m.ki_ever_probability
+    assert m.knock_in.probability_no_ko <= m.knock_in.probability
+    assert m.knock_in.probability < float(q.ki_ever_probability) + 0.015, (
+        q.ki_ever_probability, m.knock_in.probability
     )
-    assert abs(float(m.ki_ever_probability) - KI_EVER_REF) < 0.02
+    assert abs(float(q.ki_ever_probability) - KI_EVER_REF) < 0.02
 
 
 def test_ki_survive_agrees_across_engines():
     q, m = _quad_stats(), _mc_stats()
-    assert abs(
-        float(q.ki_survive_knocked_in_probability)
-        - float(m.ki_survive_knocked_in_probability)
-    ) < 0.015, (
-        q.ki_survive_knocked_in_probability,
-        m.ki_survive_knocked_in_probability,
+    assert abs(float(q.ki_survive_knocked_in_probability) - m.knock_in.probability_no_ko) < 0.015, (
+        q.ki_survive_knocked_in_probability, m.knock_in.probability_no_ko,
     )
-    assert abs(float(m.ki_survive_knocked_in_probability) - KI_SURVIVE_REF) < 0.02
+    assert abs(m.knock_in.probability_no_ko - KI_SURVIVE_REF) < 0.02
 
 
 def test_ki_survive_is_legacy_quad_value():
@@ -107,20 +113,15 @@ def test_ki_survive_is_legacy_quad_value():
     ) < 1e-9
 
 
-def test_ki_ever_is_legacy_mc_value():
-    """MC's legacy ki_probability already means 'KI ever'."""
-    m = _mc_stats()
-    assert abs(float(m.ki_ever_probability) - float(m.ki_probability)) < 1e-9
-
-
 def test_decomposition_identity_ever_ge_survive():
-    """ki_ever - ki_survive == P(KI AND KO) >= 0 for both engines; the gap is
-    the KI-then-autocalled mass (~0.05 for the reference contract)."""
-    for s in (_quad_stats(), _mc_stats()):
-        ever = float(s.ki_ever_probability)
-        survive = float(s.ki_survive_knocked_in_probability)
-        assert ever - survive > 0.02, (ever, survive)
-        assert ever >= survive - 1e-9
+    """QUAD: ki_ever - ki_survive == P(KI AND KO) >= 0 (~0.05 for the reference contract). MC: P(KI before KO) -
+    P(KI, no KO) == P(KI, then KO) >= 0, measured ~0.003: almost all of the KI-and-KO mass is a knock-in AFTER the
+    knock-out, which is no knock-in (DESIGN §4.5), so QUAD's KI ever exceeds MC's KI before KO by that mass."""
+    q, m = _quad_stats(), _mc_stats()
+    ever, survive = float(q.ki_ever_probability), float(q.ki_survive_knocked_in_probability)
+    assert ever - survive > 0.02, (ever, survive)
+    assert m.knock_in.probability >= m.knock_in.probability_no_ko
+    assert ever - m.knock_in.probability > 0.02, (ever, m.knock_in.probability)
 
 
 def _discrete_ki_phoenix(ki_barrier=90.0):
@@ -165,15 +166,17 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
         params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)
     ).calculate_event_stats(ph, env)
 
-    evers = [float(s.ki_ever_probability) for s in (q, p, m)]
-    survs = [float(s.ki_survive_knocked_in_probability) for s in (q, p, m)]
+    # QUAD / PDE: legacy objects (KI ever, KI-and-no-KO) until T12/T17; MC: P(KI before any KO), P(KI and no KO)
+    evers = [float(s.ki_ever_probability) for s in (q, p)]
+    survs = [float(s.ki_survive_knocked_in_probability) for s in (q, p)] + [m.knock_in.probability_no_ko]
     assert max(evers) - min(evers) < 0.015, evers
     assert max(survs) - min(survs) < 0.015, survs
     # The two definitions genuinely differ (this is the whole point).
     for ever, surv in zip(evers, survs):
         assert ever > surv + 0.02, (ever, surv)
-    # Legacy per-engine meanings preserved: MC legacy == ki_ever, QUAD/PDE == survive.
-    assert abs(float(m.ki_probability) - float(m.ki_ever_probability)) < 1e-9
+    # KI before any KO lies between them, well below KI ever: a knock-in after a knock-out is no knock-in
+    # (DESIGN §4.5; measured 0.104 vs KI ever ~0.14, settles knocked in 0.103)
+    assert m.knock_in.probability_no_ko <= m.knock_in.probability < min(evers) - 0.02
     assert abs(float(q.ki_probability) - float(q.ki_survive_knocked_in_probability)) < 1e-9
     assert abs(float(p.ki_probability) - float(p.ki_survive_knocked_in_probability)) < 1e-9
 
@@ -219,8 +222,8 @@ def test_event_distribution_uses_survive_definition_for_mc():
     from quantark.cashleg.event_distribution import EventDistribution, EventType
 
     m = _mc_stats()
-    dist = EventDistribution.from_autocallable_stats(m)
+    dist = EventDistribution.from_statistics(m)
     with_ki = float(dist.probabilities[EventType.MATURITY_WITH_KI])
     # Must reflect P(KI & never KO) (~0.125), NOT P(KI ever) (~0.185).
-    assert abs(with_ki - float(m.ki_survive_knocked_in_probability)) < 1e-9
+    assert abs(with_ki - m.ki_settlement.probability) < 1e-9
     assert with_ki < 0.16

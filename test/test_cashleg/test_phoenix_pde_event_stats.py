@@ -26,10 +26,10 @@ def test_phoenix_pde_ko_survival_match_mc():
     assert s_pde.determination_times.shape == (5,)
     assert s_pde.payment_times.shape == (5,)
     assert abs(s_pde.pv - s_pde.expected_discounted_cashflows.sum()) < 1e-8
-    np.testing.assert_allclose(s_pde.ko_times, s_mc.ko_times, atol=1e-9)
-    np.testing.assert_allclose(s_pde.ko_probability, s_mc.ko_probability, atol=5e-3)
+    np.testing.assert_allclose(s_pde.ko_times, s_mc.observations.times, atol=1e-9)
+    np.testing.assert_allclose(s_pde.ko_probability, s_mc.observations.probability, atol=5e-3)
     np.testing.assert_allclose(
-        s_pde.survival_probability, s_mc.survival_probability, atol=5e-3
+        s_pde.survival_probability, s_mc.observations.survival, atol=5e-3
     )
 
 
@@ -44,8 +44,8 @@ def test_phoenix_pde_coupon_prob_match_mc():
     ph = make_phoenix()
     s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
     s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
-    assert s_pde.coupon_probability.shape == s_mc.coupon_probability.shape
-    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupon_probability, atol=5e-3)
+    assert s_pde.coupon_probability.shape == s_mc.coupons.probability.shape
+    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupons.probability, atol=5e-3)
 
 
 def test_phoenix_pde_coupon_at_simultaneous_ko_matches_mc():
@@ -55,4 +55,4 @@ def test_phoenix_pde_coupon_at_simultaneous_ko_matches_mc():
     ph = make_phoenix(ko_barrier=90.0, coupon_barrier=(80.0, 80.0))
     s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
     s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
-    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupon_probability, atol=6e-3)
+    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupons.probability, atol=6e-3)

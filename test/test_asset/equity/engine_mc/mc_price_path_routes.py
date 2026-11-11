@@ -31,6 +31,7 @@ from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.mc.phoenix_vol_mc_engines import (
     HestonPhoenixMCEngine,
     HestonSLVPhoenixMCEngine,
+    HestonSLVQEPhoenixMCEngine,
     LocalVolPhoenixMCEngine,
     QEPhoenixMCEngine,
 )
@@ -119,6 +120,15 @@ def unit_leverage(s0: float = 100.0, horizon: float = 2.0) -> LeverageSurface:
                            leverage_grid=np.ones((5, strikes.size)))
 
 
+def skew_leverage(s0: float = 100.0, horizon: float = 2.0) -> LeverageSurface:
+    """A leverage that falls with spot (1.3 deep down, 0.8 high up): the SLV paths differ from the unit-leverage
+    Heston control's, so a control-variate correction is not trivially zero (T10)."""
+    strikes = np.array(list(s0 * np.exp(np.linspace(-0.8, 0.8, 11))))
+    row = np.linspace(1.3, 0.8, strikes.size)
+    return LeverageSurface(time_grid=np.linspace(0.0, horizon, 5), strike_grid=strikes,
+                           leverage_grid=np.tile(row, (5, 1)))
+
+
 # --- products ----------------------------------------------------------------------------------
 
 def snowball(ki: str = "continuous", ko_dates=KO_DATES, *, maturity: float = 1.0, reverse: bool = False,
@@ -157,7 +167,8 @@ def affine_snowball() -> SnowballOption:
 
 
 def phoenix(memory: bool = True, pay: CouponPayType = CouponPayType.INSTANT, ko_dates=KO_DATES, *,
-            maturity: float = 1.0, ki: str = "continuous", knocked_in: bool = False) -> PhoenixOption:
+            maturity: float = 1.0, ki: str = "continuous", knocked_in: bool = False,
+            arrears: float = 0.0, coupon_barriers=None) -> PhoenixOption:
     if ki == "continuous":
         ki_kw = dict(ki_barrier=70.0, ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True)
     else:
@@ -167,9 +178,10 @@ def phoenix(memory: bool = True, pay: CouponPayType = CouponPayType.INSTANT, ko_
         initial_price=100.0, strike=100.0, maturity=maturity, contract_multiplier=1.0,
         barrier_config=BarrierConfig(ko_barrier=105.0, ko_rate=0.0, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_dates=list(ko_dates), **ki_kw),
-        coupon_config=CouponBarrierConfig(coupon_barrier=[80.0] * len(ko_dates), coupon_rate=0.02,
-                                          coupon_pay_type=pay, day_count_convention=DayCountConvention.ACT_365,
-                                          memory_coupon=memory),
+        coupon_config=CouponBarrierConfig(coupon_barrier=list(coupon_barriers or [80.0] * len(ko_dates)),
+                                          coupon_rate=0.02, coupon_pay_type=pay,
+                                          day_count_convention=DayCountConvention.ACT_365,
+                                          memory_coupon=memory, initial_coupon_arrears=arrears),
         payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True),
     )
     if knocked_in:
@@ -347,6 +359,18 @@ ROUTES: Dict[str, Route] = {
                                             rqmc_frozen_leverage_conditional_control=True,
                                             rqmc_conditional_control_only=True),
         affine_snowball, lambda: grid_env(skew=False), "snowball", batches=2),
+    # T10: the vol-model Snowball routes T9's grid lacked (QE / SLV-QE plain paths with a continuous KI, the
+    # conditional control on a leverage that is not the unit one, so native and control paths differ)
+    "qe_sb_cki_pseudo": Route(lambda: QESnowballMCEngine(HESTON, params=mc()), snowball, flat_env, "snowball"),
+    "slvqe_sb_cki_pseudo": Route(
+        lambda: HestonSLVQESnowballMCEngine(HESTON, params=mc(), leverage_surface=skew_leverage()), snowball,
+        lambda: grid_env(skew=False), "snowball"),
+    "slvqe_sb_conditional_control_skew": Route(
+        lambda: HestonSLVQESnowballMCEngine(HESTON, params=rqmc_fixed(3), method=RQMC,
+                                            leverage_surface=skew_leverage(), martingale_correction=True,
+                                            substeps_per_interval=2, rqmc_heston_conditional_control=True,
+                                            rqmc_spot_strata=2),
+        affine_snowball, lambda: grid_env(skew=False), "snowball", batches=3),
     # --- KO-reset -------------------------------------------------------------------------------
     "kr_abs_pseudo": Route(_sb(), ko_reset, flat_env, "ko_reset"),
     "kr_abs_quasi": Route(_sb(QUASI), ko_reset, flat_env, "ko_reset"),
@@ -398,6 +422,23 @@ ROUTES: Dict[str, Route] = {
                         lambda: phoenix(ki="discrete"), flat_env, "phoenix", batches=2),
     "slv_ph_pseudo": Route(lambda: HestonSLVPhoenixMCEngine(HESTON, params=mc(), leverage_surface=unit_leverage()),
                            lambda: phoenix(ki="discrete"), lambda: grid_env(skew=False), "phoenix"),
+    # T10: memory arrears owed at the pricing date; the first two coupon levels sit above the knock-out level, so the
+    # arrears ride into the second row and a knock-out there on a missed coupon releases them without the current
+    # coupon; batched PSEUDO; more vol models
+    "ph_mem_arrears_instant_pseudo": Route(
+        _ph(), lambda: phoenix(arrears=0.03, coupon_barriers=[110.0, 110.0, 80.0, 80.0]), flat_env, "phoenix"),
+    "ph_mem_arrears_expiry_pseudo": Route(
+        _ph(), lambda: phoenix(pay=CouponPayType.EXPIRY, arrears=0.03, coupon_barriers=[110.0, 110.0, 80.0, 80.0]),
+        flat_env, "phoenix"),
+    "ph_nomem_dki_dask": Route(_ph(use_dask=True, num_batches=3), lambda: phoenix(False, ki="discrete"), flat_env,
+                               "phoenix", batches=3),
+    "heston_ph_antithetic": Route(lambda: HestonPhoenixMCEngine(HESTON, params=mc(use_antithetic=True)),
+                                  lambda: phoenix(ki="discrete"), flat_env, "phoenix"),
+    "lv_ph_cki_dask": Route(lambda: LocalVolPhoenixMCEngine(mc(), use_dask=True, num_batches=2), phoenix, grid_env,
+                            "phoenix", batches=2),
+    "slvqe_ph_pseudo": Route(
+        lambda: HestonSLVQEPhoenixMCEngine(HESTON, params=mc(), leverage_surface=skew_leverage()),
+        lambda: phoenix(pay=CouponPayType.EXPIRY), lambda: grid_env(skew=False), "phoenix"),
     # --- DCN ------------------------------------------------------------------------------------
     "dcn_sobol": Route(lambda: DCNMCEngine(num_paths=N, seed=7), dcn, dcn_env, "dcn"),
     "dcn_sobol_batches": Route(lambda: DCNMCEngine(num_paths=N, seed=7, num_batches=4), dcn, dcn_env, "dcn",

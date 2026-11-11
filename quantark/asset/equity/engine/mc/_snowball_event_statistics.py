@@ -81,7 +81,8 @@ def _knocked_out_now(times: np.ndarray, counts: np.ndarray, n: float) -> bool:
 
 
 class _Assembly:
-    """Shared tail: knock-in statistics, standard errors, ``unavailable`` and the result."""
+    """Shared tail: knock-in statistics, standard errors, ``unavailable`` and the result (Snowball, KO-reset and,
+    with its coupon table in ``tables["coupons"]``, Phoenix: ``_phoenix_event_statistics``)."""
 
     family: str
 
@@ -157,7 +158,8 @@ class _Assembly:
             else:
                 unavailable["standard_errors.knock_in.expected_time"] = FEW_KNOCK_IN_PATHS
         return EventStatistics(
-            product_family=self.family, pv=float(pv), observations=tables["observations"], coupons=None,
+            product_family=self.family, pv=float(pv), observations=tables["observations"],
+            coupons=tables.get("coupons"),
             maturity=tables["maturity"], ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table,
             post_ki_offsets=tables.get("post_ki_offsets"), termination=tables.get("termination"),
             receivables=ReceivablesTable.empty(), ledger=tables["ledger"],

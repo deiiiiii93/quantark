@@ -43,6 +43,12 @@ def _mc_engine():
     )
 
 
+def _mc_maturity_cash(m) -> float:
+    """MC (unified statistics, T10): the legacy "maturity" stream = both maturity outcomes' discounted
+    redemption (spec D21: maturity.discounted_cash + ki_settlement.discounted_cash), computed directly."""
+    return float(m.maturity.discounted_cash + m.ki_settlement.discounted_cash)
+
+
 def test_first_ko_probability_matches_analytic_digital():
     env = _env()
     ph = _ref_phoenix()
@@ -62,7 +68,7 @@ def test_coupon_probability_matches_mc():
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
     qc = np.asarray(q.coupon_probability, dtype=float)
-    mc = np.asarray(m.coupon_probability, dtype=float)
+    mc = np.asarray(m.coupons.probability, dtype=float)
     # Measured: aggregate +0.59%, max per-obs +2.68%. Bounds carry MC-seed margin.
     assert abs(qc.sum() - mc.sum()) / mc.sum() < 0.015, (qc.sum(), mc.sum())
     rel = np.abs(qc - mc) / np.maximum(mc, 1e-6)
@@ -77,7 +83,7 @@ def test_ko_probability_matches_mc():
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
     qk = np.asarray(q.ko_probability, dtype=float)
-    mk = np.asarray(m.ko_probability, dtype=float)
+    mk = np.asarray(m.observations.probability, dtype=float)
     # Measured: max per-obs abs diff 0.0025 (KO[0]); bound carries MC-seed margin.
     assert np.max(np.abs(qk - mk)) < 0.008, (qk, mk)
 
@@ -88,7 +94,7 @@ def test_survival_matches_mc():
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
     qsv = np.asarray(q.survival_probability, dtype=float)
-    msv = np.asarray(m.survival_probability, dtype=float)
+    msv = np.asarray(m.observations.survival, dtype=float)
     assert np.max(np.abs(qsv - msv)) < 0.01, (qsv, msv)  # measured 0.0025
 
 
@@ -109,10 +115,8 @@ def test_maturity_cashflow_matches_mc():
     )
     assert abs(total - float(q.pv)) < 1e-6 * max(1.0, abs(float(q.pv)))
     # Independent correctness check on the residual stream itself.
-    assert abs(
-        q.expected_discounted_maturity_cashflow
-        - m.expected_discounted_maturity_cashflow
-    ) < 0.08 * max(1.0, abs(m.expected_discounted_maturity_cashflow))
+    m_maturity = _mc_maturity_cash(m)
+    assert abs(q.expected_discounted_maturity_cashflow - m_maturity) < 0.08 * max(1.0, abs(m_maturity))
 
 
 def _overlap_phoenix(ko_barrier):
@@ -247,12 +251,10 @@ def test_discrete_ki_ko_stream_matches_mc(disable_ko_after_ki):
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
     ko_q = float(np.sum(q.ko_probability))
-    ko_m = float(np.sum(m.ko_probability))
+    ko_m = float(np.sum(m.observations.probability))
     assert abs(ko_q - ko_m) < 0.012, (ko_q, ko_m)
-    assert abs(
-        q.expected_discounted_maturity_cashflow
-        - m.expected_discounted_maturity_cashflow
-    ) < 0.06 * max(1.0, abs(m.expected_discounted_maturity_cashflow))
+    m_maturity = _mc_maturity_cash(m)
+    assert abs(q.expected_discounted_maturity_cashflow - m_maturity) < 0.06 * max(1.0, abs(m_maturity))
 
 
 def test_discrete_ki_cells_zero_reduces_to_hard_mask():

@@ -18,9 +18,9 @@ from typing import Dict
 
 import numpy as np
 
-from quantark.util.enum import ObservationType
+from quantark.util.enum import CouponPayType, ObservationType
 
-__all__ = ["day_overlap", "ko_reset_paths", "numeric_trading_days", "snowball_paths"]
+__all__ = ["day_overlap", "ko_reset_paths", "numeric_trading_days", "phoenix_paths", "snowball_paths"]
 
 
 def _spy(engine, name):
@@ -131,6 +131,134 @@ def ko_reset_paths(engine, product, env) -> Dict[str, np.ndarray]:
     return dict(n=payoffs.size, payoffs=payoffs, settle=settle, event=event, det=det, v0=v0, v1=v1,
                 ki_first=knocked & ~is_pre, ki_index=ki_index, ki_time=ki_time, continuous=bool(grid["ki_continuous"]),
                 step_ends=steps, is_pre=is_pre, is_post=is_post, pre_maturity=pre_maturity, grid=grid)
+
+
+def phoenix_paths(engine, product, env) -> Dict[str, np.ndarray]:
+    """Per path of a single-batch Phoenix price, every outcome decided here from the definitions.
+
+    The kernel's paths, grid and bridge seed are taken from a spy on ``_compute_payoffs``; nothing else of the
+    kernel is read. Knock-out: the first row at or through its level; knock-in: the product's KI rows (discrete) or
+    the engine's own bridge crossing step (continuous; a level breached at valuation is a knock-in at 0); a
+    knock-out wins a tie with a DISCRETE knock-in, a continuous touch inside a step precedes the observation
+    closing it (except at valuation). ``disable_ko_after_ki``: a knock-out after the knock-in is void.
+
+    Coupons by a plain per-path loop (spec AC1): memory arrears start at ``initial_coupon_arrears`` (memory only),
+    a coupon hit releases the current coupon plus the arrears, a knock-out on a missed coupon releases the
+    arrears, a miss on a live row adds the current coupon. INSTANT pays each row at its settlement; EXPIRY pays the
+    rolled-up coupons when the note ends (the knock-out's settlement, else the terminal payment).
+    """
+    calls = _spy(engine, "_compute_payoffs")
+    try:
+        engine.price(product, env)
+    finally:
+        del engine.__dict__["_compute_payoffs"]
+    if len(calls) != 1:
+        raise AssertionError(f"a single-batch route prices one kernel call, got {len(calls)}")
+    args, kwargs, _ = calls[0]
+    names = ("product", "pricing_env", "paths", "all_times", "ko_indices", "ki_indices", "r", "T", "sigma",
+             "rng_seed")
+    call = {**dict(zip(names, args)), **kwargs}
+    paths, all_times, sigma, rng_seed = call["paths"], np.asarray(call["all_times"], dtype=float), call["sigma"], \
+        call["rng_seed"]
+    ko_indices, ki_indices = np.asarray(call["ko_indices"]), np.asarray(call["ki_indices"])
+    reverse = bool(product.is_reverse)
+    n = paths.shape[0]
+    profile = product.get_ko_observation_profile(env)
+    ko_times = np.asarray(profile["observation_times"], dtype=float)
+    barriers = np.asarray(profile["barriers"], dtype=float)
+    redemption = np.asarray(profile["payoffs"], dtype=float)
+    records = product.resolve_ko_observations(env)
+    settle = np.asarray([r.settlement_time for r in records], dtype=float)
+    ko_spots = paths[:, ko_indices]
+    is_ko_raw, ko_row = _first(ko_spots <= barriers if reverse else ko_spots >= barriers)
+    ko_time = np.where(is_ko_raw, ko_times[np.maximum(ko_row, 0)], np.inf)
+
+    carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False)) and product.has_ki_barrier
+    continuous = False
+    ki_ever = np.zeros(n, bool)
+    ki_index = np.full(n, -1)
+    ki_time = np.full(n, np.inf)
+    if product.has_ki_barrier:
+        continuous = (product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+                      or product.barrier_config.ki_continuous)
+        if continuous:
+            level = float(np.asarray(product.barrier_config.ki_barrier).reshape(-1)[0])
+            ki_ever, ki_index = engine._check_ki_barriers_continuous_with_bridge(
+                paths=paths, all_times=all_times, ki_barrier=level, sigma=float(sigma), is_reverse=reverse,
+                rng_seed=int(rng_seed))
+            ki_time = np.where(ki_ever, all_times[np.maximum(ki_index, 0)], np.inf)
+            now = (paths[:, 0] >= level) if reverse else (paths[:, 0] <= level)
+            ki_time[ki_ever & now] = 0.0
+        else:
+            ki_profile = product.get_ki_observation_profile(env)
+            rows = np.asarray(ki_profile["observation_times"], dtype=float)
+            spots = paths[:, ki_indices]
+            levels = np.asarray(ki_profile["barriers"], dtype=float)
+            ki_ever, ki_index = _first(spots >= levels if reverse else spots <= levels)
+            ki_time = np.where(ki_ever, rows[np.maximum(ki_index, 0)], np.inf)
+    if carried:
+        ki_ever, ki_time = np.ones(n, bool), np.zeros(n)
+    if continuous:
+        ki_strictly_first = (ki_time < ko_time) | ((ki_time == ko_time) & (ko_time > 0.0))
+    else:
+        ki_strictly_first = ki_time < ko_time
+    if carried:
+        ki_strictly_first = np.ones(n, bool)
+    is_ko = is_ko_raw.copy()
+    if product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
+        is_ko &= ~(ki_ever & ki_strictly_first)
+    ki_first = ki_ever & (~is_ko | ki_strictly_first)
+    v0 = ~is_ko & ~ki_ever
+    v1 = ~is_ko & ki_ever
+
+    df = env.get_discount_factor
+    terminal = engine._payment_timings.terminal
+    instant = product.coupon_config.coupon_pay_type == CouponPayType.INSTANT
+    memory = bool(product.coupon_config.memory_coupon)
+    periods = product.get_coupon_period_year_fractions(env)
+    amounts = [product.get_coupon_payoff(i, year_fraction=periods[i]) for i in range(ko_times.size)]
+    rows = ko_times.size
+    coupon_hit = np.zeros((n, rows), bool)
+    coupon_paid = np.zeros((n, rows))
+    for p in range(n):
+        accrued = float(product.coupon_config.initial_coupon_arrears) if memory else 0.0
+        for i in range(rows):
+            if is_ko[p] and ko_row[p] < i:
+                break
+            hit = product.is_coupon_triggered(float(ko_spots[p, i]), i)
+            ko_here = bool(is_ko[p] and ko_row[p] == i)
+            coupon_hit[p, i] = hit
+            if hit:
+                coupon_paid[p, i] = amounts[i] + (accrued if memory else 0.0)
+                accrued = 0.0
+            elif memory and ko_here:
+                coupon_paid[p, i] = accrued
+                accrued = 0.0
+            elif memory:
+                accrued += amounts[i]
+    end_row = np.where(is_ko, ko_row, rows)                       # rows = the terminal bucket
+    end_pay = np.where(is_ko, settle[np.maximum(ko_row, 0)], float(terminal.payment_time))
+    end_df = np.array([df(float(t)) for t in end_pay])
+    if instant:
+        coupon_df = np.tile(np.array([df(float(t)) for t in settle]), (n, 1))
+    else:
+        coupon_df = np.repeat(end_df[:, None], rows, axis=1)
+    path_coupons = coupon_paid.sum(axis=1)
+    maturity_cash = np.zeros(n)
+    for p in np.flatnonzero(v0):
+        maturity_cash[p] = product.get_maturity_payoff_v0(float(paths[p, -1]), pricing_env=env)
+    for p in np.flatnonzero(v1):
+        maturity_cash[p] = product.get_maturity_payoff_v1(float(paths[p, -1]), pricing_env=env)
+    terminal_df = df(float(terminal.payment_time))
+    return dict(
+        n=n, paths=paths, ko_indices=ko_indices, is_ko=is_ko, ko_row=ko_row, ko_time=ko_time,
+        ko_redemption=np.where(is_ko, redemption[np.maximum(ko_row, 0)], 0.0),
+        ko_settle_df=np.where(is_ko, np.array([df(float(t)) for t in settle])[np.maximum(ko_row, 0)], 0.0),
+        ki_ever=ki_ever, ki_first=ki_first, ki_index=ki_index, ki_time=ki_time, continuous=continuous,
+        carried=carried, step_ends=all_times, v0=v0, v1=v1, maturity_cash=maturity_cash, terminal_df=terminal_df,
+        coupon_hit=coupon_hit, coupon_paid=coupon_paid, coupon_disc=coupon_paid * coupon_df,
+        end_row=end_row, end_df=end_df, path_coupons=path_coupons,
+    )
 
 
 def numeric_trading_days(horizon: float, bus_days_in_year: float) -> np.ndarray:

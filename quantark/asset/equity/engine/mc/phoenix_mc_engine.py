@@ -20,9 +20,9 @@ import numpy as np
 from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import (
-    PhoenixEventStats,
-    payment_aware_cashflow_fields,
+from quantark.asset.equity.engine.event_stats import EventStatistics
+from quantark.asset.equity.engine.mc._phoenix_event_statistics import (
+    phoenix_event_statistics,
 )
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
@@ -46,7 +46,11 @@ from quantark.asset.equity.engine.mc.ki_bridge import (
     continuous_ki_step_count,
     validate_ki_bridge_nodes_per_day,
 )
-from quantark.asset.equity.engine.mc.snowball_mc_engine import _FoldedPayoffMixin
+from quantark.asset.equity.engine.mc.snowball_mc_engine import (
+    _FoldedPayoffMixin,
+    _ki_level_breached,
+    _knock_out_first,
+)
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
@@ -314,17 +318,28 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
         return self._rqmc_spec(product, pricing_env, S, T, r, q, sigma)
 
     def calculate_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> Optional[PhoenixEventStats]:
-        """Per-observation event probabilities and expected discounted cashflows, on ``price()``'s paths.
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        streams: Optional[frozenset] = None,
+    ) -> Optional[EventStatistics]:
+        """Event statistics (``EventStatistics``, family ``"phoenix"``) on ``price()``'s own paths.
 
-        Runs this engine's own ``price`` under a statistics recorder (unified event statistics spec
-        AC2, D14, D23): each payoff-kernel batch of that price deposits its outcome and coupon sums,
-        so the statistics describe exactly the paths, seeds, bridge seeds and batches of the price on
-        every route (serial, Dask batches, adaptive RQMC), and ``pv`` IS the value ``price`` returned.
-        Field definitions are unchanged (coupon cash as the payoff loop pays it, maturity cash the
-        remainder of ``pv``). Zero time to maturity returns ``None`` (the documented expired rule).
-        The batch records stay on ``_last_stats_records``.
+        Runs this engine's own ``price`` under a statistics recorder (unified event statistics spec AC2, D14,
+        D23): each payoff-kernel batch of that price deposits its outcome and coupon sums, so the statistics
+        describe exactly the paths, seeds, bridge seeds and batches of the price on every route (serial, Dask
+        batches, adaptive RQMC, every ``method=``), and ``pv`` IS the value ``price`` returned. Every outcome is
+        summed directly over its own paths (the residuals are the type's own): knock-out rows hold the
+        redemption only; the coupon table holds every coupon as the payoff loop pays it (memory arrears
+        included), discounted where the price discounts it, EXPIRY coupons bucketed in the ledger at the note's
+        actual end; knock-in counts only before any knock-out (DESIGN §4.5); the continuous knock-in table spreads
+        each step's first-crossing mass over the trading days it overlaps (spec D18). Standard errors come from
+        independent batch means (spec AC21).
+
+        ``streams`` is accepted for the engine contract and ignored: every number comes from the same paths, so
+        nothing is pruned. Zero time to maturity returns ``None`` (the documented expired rule). The batch
+        records stay on ``_last_stats_records``.
         """
         if not isinstance(product, PhoenixOption):
             return None
@@ -336,128 +351,9 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
             raise PricingError(
                 f"{type(self).__name__}.price recorded no priced batch for the event statistics"
             )
-        totals = aggregate_records(recorder.records)
-        n = totals["n"]
-
-        ko_profile = product.get_ko_observation_profile(pricing_env)
-        ko_times = np.array(ko_profile["observation_times"], dtype=float)
-        ko_payoffs = np.array(ko_profile["payoffs"], dtype=float)
-        timings = self._payment_timings
-        ko_probability = np.asarray(totals["ko_count"], dtype=float) / n
-        expected_discounted_ko_cashflow = np.zeros(len(ko_times), dtype=float)
-        for i in range(len(ko_times)):
-            p_i = float(ko_probability[i])
-            if p_i > 0.0:
-                df = timings.observation_payment_dfs[i]
-                expected_discounted_ko_cashflow[i] = p_i * float(ko_payoffs[i]) * df
-
-        survival_probability = np.ones(len(ko_times), dtype=float)
-        cumulative_ko = 0.0
-        for i in range(len(ko_times)):
-            cumulative_ko += ko_probability[i]
-            survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
-
-        coupon_probabilities = np.asarray(totals["coupon_count"], dtype=float) / n
-        coupon_cashflows = np.asarray(totals["coupon_disc_cash"], dtype=float) / n
-        expected_discounted_maturity_cashflow = float(
-            pv
-            - np.sum(expected_discounted_ko_cashflow)
-            - np.sum(coupon_cashflows)
-        )
-
-        ki_event_times = np.array([], dtype=float)
-        ki_event_probability = np.array([], dtype=float)
-        ki_survival_probability = np.array([], dtype=float)
-        if product.has_ki_barrier:
-            if bool(getattr(product, "_otc_lifecycle_knocked_in", False)):
-                ki_event_times = np.array([0.0], dtype=float)
-                ki_event_probability = np.array([1.0], dtype=float)
-                ki_survival_probability = np.array([0.0], dtype=float)
-            else:
-                ki_event_times = np.asarray(totals["ki_row_times"], dtype=float)
-                if ki_event_times.size:
-                    ki_event_probability = np.asarray(totals["ki_first_count"], dtype=float) / n
-                    ki_survival_probability = np.maximum(
-                        0.0, 1.0 - np.cumsum(ki_event_probability)
-                    )
-
-        # Unambiguous, cross-engine-consistent KI definitions (investigation 2026-07-01). `ki_ever`
-        # counts any path that touches the KI barrier; `ki_survive` restricts to paths that also reach
-        # maturity without KO (the note settles knocked-in). The legacy `ki_probability` keeps MC's
-        # historical "KI ever" meaning.
-        if product.has_ki_barrier:
-            ki_ever_probability = float(totals["ki_count"] / n)
-            ki_survive_knocked_in_probability = float(totals["ki_no_ko_count"] / n)
-        else:
-            ki_ever_probability = 0.0
-            ki_survive_knocked_in_probability = 0.0
-
-        records = product.resolve_ko_observations(pricing_env)
-        terminal = timings.terminal
-        observation_payment_dates = [
-            (
-                record.settlement_date
-                if (
-                    product.coupon_config.coupon_pay_type
-                    == CouponPayType.INSTANT
-                )
-                else terminal.payment_date
-            )
-            for record in records
-        ]
-        cashflow_fields = payment_aware_cashflow_fields(
-            pricing_env,
-            determination_times=np.concatenate(
-                [
-                    np.asarray(ko_times, dtype=float),
-                    np.asarray(ko_times, dtype=float),
-                    [terminal.determination_time],
-                ]
-            ),
-            payment_times=np.concatenate(
-                [
-                    timings.observation_payment_times,
-                    timings.observation_payment_times,
-                    [terminal.payment_time],
-                ]
-            ),
-            expected_discounted_cashflows=np.concatenate(
-                [
-                    expected_discounted_ko_cashflow,
-                    coupon_cashflows,
-                    [expected_discounted_maturity_cashflow],
-                ]
-            ),
-            determination_dates=[
-                *(record.observation_date for record in records),
-                *(record.observation_date for record in records),
-                terminal.determination_date,
-            ],
-            payment_dates=[
-                *observation_payment_dates,
-                *observation_payment_dates,
-                terminal.payment_date,
-            ],
-        )
-
-        return PhoenixEventStats(
-            pv=pv,
-            ko_times=np.array(ko_times, dtype=float),
-            ko_probability=ko_probability,
-            survival_probability=survival_probability,
-            expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=ki_ever_probability,
-            expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
-            reconciliation_error=0.0,
-            ki_times=ki_event_times,
-            ki_event_probability=ki_event_probability,
-            ki_survival_probability=ki_survival_probability,
-            ki_ever_probability=ki_ever_probability,
-            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
-            coupon_probability=coupon_probabilities,
-            expected_discounted_coupon_cashflow=coupon_cashflows,
-            **cashflow_fields,
-        )
+        records = tuple(recorder.records)
+        totals = aggregate_records(records)
+        return phoenix_event_statistics(self, product, pricing_env, pv, totals, records)
 
     def _phoenix_batch_record(
         self,
@@ -476,47 +372,60 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
         coupon_count: np.ndarray,
         coupon_disc_cash: np.ndarray,
         coupon_cash: np.ndarray,
+        path_coupon: Optional[np.ndarray],
         ki_triggered: np.ndarray,
         first_ki_idx: np.ndarray,
         ki_row_times: np.ndarray,
         ki_path_times: Optional[np.ndarray],
         ki_continuous: bool,
         carried_knock_in: bool,
+        breached_at_valuation: bool,
+        principal: float,
     ) -> dict:
         """One Phoenix batch's outcome sums (read-only on the kernel's finished arrays).
 
         Knock-out rows hold the record's redemption only; every coupon -- paid on its own date, with a
-        knock-out, or rolled up to the note's end -- sits in the coupon rows as the payoff loop pays
-        it; the maturity branches hold the redemption without the rolled-up coupons. ``pv_sum`` is
-        the batch's discounted cash as the price sums it.
+        knock-out, or rolled up to the note's end -- sits in the coupon rows as the payoff loop pays it; the
+        maturity branches hold the redemption without the rolled-up coupons. EXPIRY (``path_coupon``: each
+        path's rolled-up coupons) also sums the coupons per ending event: ``coupon_end_*[i]`` for a knock-out at
+        row ``i`` (paid at its settlement), ``[n_rows]`` for the note's terminal payment. Knock-in statistics
+        count a knock-in only before any knock-out (DESIGN §4.5; a knock-out wins a tie with a discrete knock-in,
+        the shared rule ``_knock_out_first``): ``ki_first_count`` per KI row (discrete) or MC step (continuous),
+        ``ki_time_sum`` their first knock-in times (a level breached at valuation, or a carried knock-in, at 0),
+        ``ko_clean_count`` the knock-outs with no knock-in before them, ``v1_disc_loss`` the discounted
+        knocked-in downside ``principal - redemption``. ``pv_sum`` is the batch's discounted cash as the price
+        sums it.
         """
         discounted = payoffs * np.asarray(self._df(settlement_times), dtype=float) + instant_coupon_discounted
+        n_paths = len(payoffs)
         n_ko = len(ko_times)
         ko_rows = np.maximum(first_ko_idx, 0)
         ko_settle_dfs = np.asarray(self._df(np.asarray(ko_settlement_times, dtype=float)), dtype=float)
-        ko_red = np.asarray(ko_redemption, dtype=float)[ko_rows]
+        ko_red = np.asarray(ko_redemption, dtype=float)[ko_rows] if n_ko else np.zeros(n_paths)
         ko_red_disc = ko_red * ko_settle_dfs[ko_rows] if n_ko else ko_red
         terminal_df = float(self._df(float(self._payment_timings.terminal.payment_time)))
         if carried_knock_in:
             ki_before_ko = ki_triggered.copy()
+            ki_time = np.zeros(n_paths, dtype=float)
         elif ki_path_times is None:
             ki_before_ko = np.zeros_like(ki_triggered)
+            ki_time = np.zeros(n_paths, dtype=float)
         else:
             ko_path_times = np.where(is_ko, np.asarray(ko_times, dtype=float)[ko_rows], np.inf)
-            ko_first = (
-                ko_path_times < ki_path_times
-                if ki_continuous
-                else ko_path_times <= ki_path_times + 1e-12
+            ki_before_ko = ki_triggered & ~(
+                is_ko & _knock_out_first(ko_path_times, ki_path_times, ki_continuous)
             )
-            ki_before_ko = ki_triggered & ~(is_ko & ko_first)
+            ki_time = np.where(ki_before_ko, ki_path_times, 0.0)
         ki_rows = 0 if carried_knock_in else len(ki_row_times)
-        return {
+        v1_redemption = np.where(is_v1, redemption, 0.0)
+        record = {
             "kind": "native",
-            "n": int(len(payoffs)),
+            "n": int(n_paths),
             "pv_sum": float(discounted.sum()),
             "ko_count": row_sums(first_ko_idx, n_ko, is_ko),
-            "ko_redemption_disc_cash": row_sums(first_ko_idx, n_ko, is_ko, ko_red_disc),
-            "ko_redemption_cash": row_sums(first_ko_idx, n_ko, is_ko, ko_red),
+            "ko_clean_count": row_sums(first_ko_idx, n_ko, is_ko & ~ki_before_ko),
+            "ko_disc_cash": row_sums(first_ko_idx, n_ko, is_ko, ko_red_disc),
+            "ko_cash": row_sums(first_ko_idx, n_ko, is_ko, ko_red),
             "coupon_count": np.asarray(coupon_count, dtype=float),
             "coupon_disc_cash": np.asarray(coupon_disc_cash, dtype=float),
             "coupon_cash": np.asarray(coupon_cash, dtype=float),
@@ -526,12 +435,23 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
             "v1_disc_cash": float(redemption[is_v1].sum() * terminal_df),
             "v0_cash": float(redemption[is_v0].sum()),
             "v1_cash": float(redemption[is_v1].sum()),
-            "ki_count": float(ki_triggered.sum()),
+            "v1_disc_loss": float(np.where(is_v1, principal - v1_redemption, 0.0).sum() * terminal_df),
             "ki_no_ko_count": float((ki_triggered & ~is_ko).sum()),
             "ki_before_ko_count": float(ki_before_ko.sum()),
-            "ki_first_count": row_sums(first_ki_idx, ki_rows, ki_triggered),
+            "ki_time_sum": float(ki_time.sum()),
+            "ki_first_count": row_sums(first_ki_idx, ki_rows, ki_before_ko),
             "ki_row_times": np.asarray(ki_row_times, dtype=float),
+            "ki_breached_at_valuation": bool(breached_at_valuation),
         }
+        if path_coupon is not None:
+            # EXPIRY: the rolled-up coupons at the ending event (a knock-out row, else the terminal payment)
+            end = np.where(is_ko, ko_rows, n_ko)
+            end_dfs = np.where(is_ko, ko_settle_dfs[ko_rows] if n_ko else terminal_df, terminal_df)
+            record["coupon_end_disc_cash"] = np.bincount(
+                end, weights=path_coupon * end_dfs, minlength=n_ko + 1
+            )[: n_ko + 1]
+            record["coupon_end_cash"] = np.bincount(end, weights=path_coupon, minlength=n_ko + 1)[: n_ko + 1]
+        return record
 
     def _validate_inputs(
         self,
@@ -1000,10 +920,9 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
                 # A knock-out and a knock-in observed at the SAME instant: the knock-out wins, so the
                 # knock-in observed with it does not disable it. A continuously monitored knock-in is
                 # different: a touch found inside a step happened BEFORE the observation closing it.
-                ko_valid = ko_triggered & (
-                    (ko_trigger_times < ki_trigger_times)
-                    if ki_continuous
-                    else (ko_trigger_times <= ki_trigger_times + 1e-12)
+                # (The shared rule; a continuous trigger time here is a step end, never 0.)
+                ko_valid = ko_triggered & _knock_out_first(
+                    ko_trigger_times, ki_trigger_times, ki_continuous
                 )
         else:
             ko_valid = ko_triggered
@@ -1061,6 +980,8 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
             rec_coupon_disc = np.zeros(num_obs, dtype=float)
             rec_coupon_cash = np.zeros(num_obs, dtype=float)
             rec_redemption = np.zeros(num_paths, dtype=float)
+            # EXPIRY: each path's rolled-up coupons, paid at its ending event (the ledger's buckets)
+            rec_path_coupon = None if coupon_instant else np.zeros(num_paths, dtype=float)
         if collect_coupon_stats:
             ko_settlement_dfs = np.asarray(self._df(ko_settlement_times), dtype=float)
             if not coupon_instant:
@@ -1113,6 +1034,8 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
                     rec_coupon_count[obs_idx] = float(coupon_hit.sum())
                     rec_coupon_disc[obs_idx] = float(np.sum(coupon_paid * coupon_dfs))
                     rec_coupon_cash[obs_idx] = float(coupon_paid.sum())
+                    if rec_path_coupon is not None:
+                        rec_path_coupon += coupon_paid
 
             non_ko_coupon = coupon_hit & ~ko_at_obs
             if non_ko_coupon.any():
@@ -1218,10 +1141,22 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
 
         if recording:
             # event statistics of a recorded price: this batch's outcome sums (read-only)
+            breached_now = False
             if product.has_ki_barrier:
+                # continuous: the MC steps of the window (step k ends at all_times[k]); a level breached at
+                # valuation is a knock-in at time 0 (DESIGN §4.5), every path's
                 ki_row_times = np.asarray(all_times if ki_continuous else ki_times, dtype=float)
+                if ki_continuous:
+                    breached_now = bool(
+                        num_paths
+                        and _ki_level_breached(paths[:1, 0], ki_barrier_scalar, product.is_reverse)[0]
+                    )
                 ki_path_times = (
-                    np.where(ki_triggered, ki_row_times[np.maximum(first_ki_idx, 0)], np.inf)
+                    np.where(
+                        ki_triggered,
+                        0.0 if breached_now else ki_row_times[np.maximum(first_ki_idx, 0)],
+                        np.inf,
+                    )
                     if ki_row_times.size
                     else np.full(num_paths, np.inf, dtype=float)
                 )
@@ -1244,12 +1179,19 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
                     coupon_count=rec_coupon_count,
                     coupon_disc_cash=rec_coupon_disc,
                     coupon_cash=rec_coupon_cash,
+                    path_coupon=rec_path_coupon,
                     ki_triggered=ki_triggered,
                     first_ki_idx=first_ki_idx,
                     ki_row_times=ki_row_times,
                     ki_path_times=ki_path_times,
                     ki_continuous=bool(product.has_ki_barrier and ki_continuous),
                     carried_knock_in=bool(already_knocked_in and product.has_ki_barrier),
+                    breached_at_valuation=breached_now,
+                    principal=(
+                        product.initial_price * product.contract_multiplier
+                        if product.payoff_config.include_principal
+                        else 0.0
+                    ),
                 )
             )
 

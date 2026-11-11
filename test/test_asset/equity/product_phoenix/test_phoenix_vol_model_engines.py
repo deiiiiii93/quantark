@@ -291,6 +291,21 @@ def _assert_phoenix_event_stats(stats: PhoenixEventStats, product: PhoenixOption
     )
 
 
+def _assert_phoenix_event_statistics(stats, product: PhoenixOption):
+    """The MC engines report the unified ``EventStatistics`` (T10): a coupon table on the observation grid, every
+    outcome direct, both residuals at round-off."""
+    from quantark.asset.equity.engine.event_stats import EventStatistics
+
+    assert isinstance(stats, EventStatistics) and stats.product_family == "phoenix"
+    n = len(product.barrier_config.ko_observation_dates)
+    assert stats.observations.size == stats.coupons.size == n
+    assert np.all(stats.observations.probability >= 0.0) and np.all(stats.coupons.probability >= 0.0)
+    assert stats.knock_in.probability is not None
+    assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability
+    assert abs(stats.probability_residual) <= 1e-12
+    assert abs(stats.reconciliation_error) <= 1e-12 * max(1.0, abs(stats.pv))
+
+
 def test_phoenix_vol_model_mc_engines_calculate_event_stats():
     product = _phoenix(memory_coupon=False)
     env = _env()
@@ -310,7 +325,7 @@ def test_phoenix_vol_model_mc_engines_calculate_event_stats():
     ]
 
     for engine in engines:
-        _assert_phoenix_event_stats(engine.calculate_event_stats(product, env), product)
+        _assert_phoenix_event_statistics(engine.calculate_event_stats(product, env), product)
 
 
 def test_phoenix_vol_model_pde_engines_calculate_event_stats():

@@ -116,9 +116,9 @@ def test_coupon_cash_closes_the_price_on_its_own_paths(memory, pay_type):
     outcome = captured["result"][2]
 
     maturity = _maturity_cash(engine, product, env, captured["paths"], outcome)
-    coupon_cash_implied = stats.pv - float(np.sum(stats.expected_discounted_ko_cashflow)) - maturity
+    coupon_cash_implied = stats.pv - float(np.sum(stats.observations.discounted_cash)) - maturity
 
-    assert float(np.sum(stats.expected_discounted_coupon_cashflow)) == pytest.approx(
+    assert float(np.sum(stats.coupons.discounted_cash)) == pytest.approx(
         coupon_cash_implied, abs=1.0e-12 * max(1.0, abs(stats.pv))
     )
 
@@ -149,7 +149,7 @@ def test_plain_coupon_rows_discount_at_the_actual_payment(pay_type):
             # rolled up and paid when the note ends: the path's own settlement
             df = engine._df(settlement_times)
         expected = float(np.mean(np.where(hit, coupon, 0.0) * df))
-        assert stats.expected_discounted_coupon_cashflow[k] == pytest.approx(
+        assert stats.coupons.discounted_cash[k] == pytest.approx(
             expected, abs=Tolerance.ZERO
         ), f"row {k}"
 
