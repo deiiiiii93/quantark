@@ -900,6 +900,9 @@ class SnowballQuadEngine(BaseEngine):
         """Extra stacked indicator rows beyond the ``n_ko`` KO rows."""
         return 0
 
+    def _initialize_extra_quad_rows(self, v_out, v_in, n_ko: int) -> None:
+        """Terminal values of the extra rows, in place (zero unless a subclass sets them)."""
+
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
         pricing_env=None, df_fn=None,
@@ -1121,6 +1124,8 @@ class SnowballQuadEngine(BaseEngine):
         n_rows = n_ko + (self._n_extra_quad_rows(n_ko) if want_coupon else 0)
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
+        if want_coupon:
+            self._initialize_extra_quad_rows(v_out, v_in, n_ko)
 
         # The maturity KI indicator is another column of the same event stack.
         # A carried KI selects v_in at readout; it does not imply no future KO.

@@ -8,6 +8,7 @@ with coupon jumps at observation times.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
@@ -27,6 +28,119 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import Tolerance, is_close, safe_log
+
+
+@dataclass(frozen=True)
+class _CouponCashRows:
+    """Coupon-cash columns of the stacked event-statistics recursion.
+
+    The coupon a path is paid at observation ``k`` depends on its memory state there (the arrears it
+    carries) and, under EXPIRY pay, on when the note ends. Both stay linear, so two columns per row
+    carry them without a memory dimension. With ``A`` the arrears carried into a time ``t``, the
+    discounted coupon cash of row ``k`` seen from ``t`` is ``U_k + A * N_k``:
+
+    * ``U_k`` -- the row's cash on paths that carry no arrears into ``t``. At observation ``j < k``
+      a missed coupon (no knock-out) adds ``c_j`` to the arrears, so ``U_k += c_j * N_k`` there;
+    * ``N_k`` (memory only) -- the discounted unit value of the arrears released at ``k``: by a
+      coupon paid at ``k``, or by a knock-out at ``k`` whatever the coupon barrier says (the release
+      rule the price applies). A coupon paid, or a knock-out, at ``j < k`` releases the arrears
+      first, so ``N_k = 0`` there.
+
+    The discount is the price's own: INSTANT pays at the observation's settlement; EXPIRY pays when the
+    note ends, so a coupon paid without a knock-out is worth its termination-value column ``W`` (the
+    price's ``w_out`` / ``w_in``, one unit paid at the knock-out settlement or at the terminal payment)
+    and one paid with a knock-out its settlement discount.
+
+    ``carried_arrears`` are the arrears carried into the first future observation (the contract's
+    initial arrears, or the state the valuation instant leaves); ``decided_coupon`` is a coupon paid
+    by an observation decided at the valuation instant without a knock-out.
+    """
+
+    n_ko: int
+    memory: bool
+    expiry: bool
+    amounts: np.ndarray
+    delay_dfs: np.ndarray
+    terminal_delay_df: float
+    carried_arrears: float
+    decided_index: Optional[int]
+    decided_coupon: float
+
+    @property
+    def cash_row(self) -> int:
+        """First ``U`` row (after the KO and coupon-indicator rows)."""
+        return 2 * self.n_ko
+
+    @property
+    def release_row(self) -> int:
+        """First ``N`` row (memory only)."""
+        return 3 * self.n_ko
+
+    @property
+    def termination_row(self) -> int:
+        """The ``W`` row (EXPIRY only)."""
+        return (4 if self.memory else 3) * self.n_ko
+
+    @property
+    def n_extra_rows(self) -> int:
+        """Rows beyond the ``n_ko`` KO rows: indicators, ``U``, ``N`` (memory), ``W`` (EXPIRY)."""
+        return (3 if self.memory else 2) * self.n_ko + (1 if self.expiry else 0)
+
+    def initialize(self, v_out, v_in) -> None:
+        """Terminal values: no coupon cash after maturity; ``W`` is one unit paid at the terminal
+        payment, valued at maturity (the price's ``terminal_w``)."""
+        if self.expiry:
+            v_out[self.termination_row] = self.terminal_delay_df
+            v_in[self.termination_row] = self.terminal_delay_df
+
+    def write_observation(
+        self, j, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss
+    ) -> None:
+        """Fill the branch values of observation ``j`` in place (rows x grid arrays).
+
+        ``pay_*`` continue after a paid coupon, ``miss_*`` after a missed one, ``breach_*`` are the
+        knock-out values with and without the coupon. Every branch array starts as the columns before
+        the observation.
+        """
+        n = self.n_ko
+        c = float(self.amounts[j])
+        ko_df = float(self.delay_dfs[j])
+        u = self.cash_row + j
+        if self.expiry:
+            w = self.termination_row
+            paid_out, paid_in = pay_out[w].copy(), pay_in[w].copy()
+            breach_pay[w] = breach_miss[w] = ko_df
+        else:
+            paid_out = paid_in = ko_df
+        pay_out[u] = c * paid_out
+        pay_in[u] = c * paid_in
+        breach_pay[u] = c * ko_df
+        if self.memory:
+            r = self.release_row + j
+            later_u = slice(u + 1, self.cash_row + n)
+            later_r = slice(r + 1, self.release_row + n)
+            pay_out[r] = paid_out
+            pay_in[r] = paid_in
+            breach_pay[r] = breach_miss[r] = ko_df
+            pay_out[later_r] = 0.0
+            pay_in[later_r] = 0.0
+            miss_out[later_u] += c * miss_out[later_r]
+            miss_in[later_u] += c * miss_in[later_r]
+
+    def readout(self, values_at_spot: np.ndarray, termination_at_spot: Optional[float]) -> np.ndarray:
+        """Per-row discounted coupon cash from the columns read at the valuation spot."""
+        n = self.n_ko
+        cash = np.array(values_at_spot[self.cash_row:self.cash_row + n], dtype=float)
+        if self.memory:
+            cash += self.carried_arrears * np.asarray(
+                values_at_spot[self.release_row:self.release_row + n], dtype=float
+            )
+        if self.decided_index is not None:
+            discount = (
+                termination_at_spot if self.expiry else float(self.delay_dfs[self.decided_index])
+            )
+            cash[self.decided_index] += self.decided_coupon * float(discount)
+        return cash
 
 
 class PhoenixQuadEngine(SnowballQuadEngine):
@@ -812,6 +926,56 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             **cashflow_fields,
         )
 
+    def _compute_event_stats(self, product, pricing_env, *, streams=None):
+        """The Snowball stacked recursion, with this product's coupon-cash columns (``_CouponCashRows``).
+
+        The columns depend on the contract (memory, pay type, amounts, the arrears carried into the
+        first future observation), which the row hooks below are not given; they are resolved here,
+        for this call only.
+        """
+        self._validate_product(product)
+        self._coupon_cash_rows = self._resolve_coupon_cash_rows(product, pricing_env)
+        try:
+            return super()._compute_event_stats(product, pricing_env, streams=streams)
+        finally:
+            self._coupon_cash_rows = None
+
+    def _resolve_coupon_cash_rows(self, product, pricing_env) -> Optional[_CouponCashRows]:
+        """The coupon-cash column layout, or ``None`` when the recursion does not run (expired note)."""
+        maturity = product.get_maturity(pricing_env)
+        if maturity <= 0.0:
+            return None
+        ko_records = product.resolve_ko_observations(pricing_env)
+        if not ko_records:
+            return None
+        n_ko = len(ko_records)
+        fractions = product.get_coupon_period_year_fractions(pricing_env)[:n_ko]
+        amounts = np.array(
+            [product.get_coupon_payoff(i, year_fraction=fractions[i]) for i in range(n_ko)],
+            dtype=float,
+        )
+        timings = resolve_structured_payment_timings(product, pricing_env, ko_records)
+        memory = bool(product.has_memory_coupon)
+        # The valuation instant, decided as the price decides it: a coupon paid now (no knock-out
+        # here; a knock-out now never reaches the recursion) and the arrears it leaves behind.
+        decision = product.decide_observations_at_valuation(
+            float(pricing_env.spot),
+            pricing_env,
+            knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+        )
+        decided_index = None if decision.knocked_out else decision.coupon_index
+        return _CouponCashRows(
+            n_ko=n_ko,
+            memory=memory,
+            expiry=product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY,
+            amounts=amounts,
+            delay_dfs=np.asarray(timings.event_delay_dfs, dtype=float),
+            terminal_delay_df=float(timings.terminal.delay_df),
+            carried_arrears=float(decision.arrears) if memory else 0.0,
+            decided_index=decided_index,
+            decided_coupon=float(decision.coupon) if decided_index is not None else 0.0,
+        )
+
     def _event_stats_product_type(self) -> type:
         return PhoenixOption
 
@@ -860,20 +1024,27 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         index = observation_index
         barrier = self._coupon_barrier_for_obs(product, index)
         pay_out, pay_in = v_out.copy(), v_in.copy()
+        miss_out, miss_in = v_out, v_in
         breach_miss = np.zeros_like(v_out) + ko_value
         breach_pay = breach_miss.copy()
         if coupon_index is not None:
             row = n_ko + coupon_index
             pay_out[row] = pay_in[row] = 1.0
             breach_pay[row] = 1.0
+            cash_rows = getattr(self, "_coupon_cash_rows", None)
+            if cash_rows is not None:
+                miss_out, miss_in = v_out.copy(), v_in.copy()
+                cash_rows.write_observation(
+                    index, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss
+                )
         if self._use_cell_average_events():
             v_out, v_in = self._project_joint_phoenix_event(
                 grid=grid, spot=spot, is_reverse=product.is_reverse,
                 coupon_barrier=barrier,
                 ko_barrier=record.barrier if ko_record is not None else None,
                 ki_barrier=ki_record.barrier if ki_record is not None else None,
-                val_miss_out=v_out, val_pay_out=pay_out,
-                val_miss_in=v_in, val_pay_in=pay_in,
+                val_miss_out=miss_out, val_pay_out=pay_out,
+                val_miss_in=miss_in, val_pay_in=pay_in,
                 ko_value_without_coupon=breach_miss, ko_value_with_coupon=breach_pay,
                 disable_ko_after_ki=product.barrier_config.disable_ko_after_ki,
             )
@@ -882,8 +1053,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             pay_weight = self._event_weight(
                 grid, barrier, spot, width, trigger_is_down=product.is_reverse,
             )
-            v_out = pay_weight * pay_out + (1.0 - pay_weight) * v_out
-            v_in = pay_weight * pay_in + (1.0 - pay_weight) * v_in
+            v_out = pay_weight * pay_out + (1.0 - pay_weight) * miss_out
+            v_in = pay_weight * pay_in + (1.0 - pay_weight) * miss_in
             if ko_record is not None:
                 breach = pay_weight * breach_pay + (1.0 - pay_weight) * breach_miss
                 v_out = ko_weight * breach + (1.0 - ko_weight) * v_out
@@ -901,8 +1072,16 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
 
     def _n_extra_quad_rows(self, n_ko: int) -> int:
-        # One coupon-trigger indicator row per observation.
-        return n_ko
+        # One coupon-trigger indicator row per observation, then the coupon-cash columns.
+        cash_rows = getattr(self, "_coupon_cash_rows", None)
+        if cash_rows is None:
+            return n_ko
+        return cash_rows.n_extra_rows
+
+    def _initialize_extra_quad_rows(self, v_out, v_in, n_ko: int) -> None:
+        cash_rows = getattr(self, "_coupon_cash_rows", None)
+        if cash_rows is not None:
+            cash_rows.initialize(v_out, v_in)
 
     def _coupon_barrier_for_obs(self, product, obs_index: int) -> float:
         cb = product.coupon_config.coupon_barrier
@@ -926,27 +1105,40 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             )
             if df_obs > 0.0:
                 coupon_probability[i] = float(ed_coup / df_obs)
-        result = {"coupon_probability": coupon_probability}
-        # Expected discounted coupon cashflow only for non-memory coupons (the paid
-        # amount is path-dependent under memory).
-        if not product.has_memory_coupon:
-            result["expected_discounted_coupon_cashflow"] = (
-                self._coupon_cashflows_from_probability(
-                    coupon_probability, ko_records, product, pricing_env,
-                    rate, df_fn,
-                )
-            )
-        return result
+        cash_rows = self._coupon_cash_rows
+        values_at_spot = np.zeros(n_ko + cash_rows.n_extra_rows, dtype=float)
+        for row in range(cash_rows.cash_row, values_at_spot.size):
+            values_at_spot[row] = float(math_utils.interpolate(initial_surface[row], x=0.0))
+        termination_at_spot = (
+            float(values_at_spot[cash_rows.termination_row]) if cash_rows.expiry else None
+        )
+        if cash_rows.decided_index is not None:
+            # the coupon decided at the valuation instant is paid with certainty
+            coupon_probability[cash_rows.decided_index] = 1.0
+        # Each row's coupon paid as the price pays it: memory arrears (released by a coupon or by a
+        # knock-out) included, EXPIRY coupons discounted at the note's own end.
+        return {
+            "coupon_probability": coupon_probability,
+            "expected_discounted_coupon_cashflow": cash_rows.readout(
+                values_at_spot, termination_at_spot
+            ),
+        }
 
     def _coupon_cashflows_from_probability(
         self, coupon_probability, ko_records, product, pricing_env, rate,
         df_fn,
     ):
         """E[DF*amount*1{coupon}] = DF(0->settle) * amount * P(coupon) for
-        deterministic (non-memory) coupon amounts. Shared by the stacked
-        extraction and the forward readout."""
+        deterministic coupon amounts paid at deterministic dates: non-memory
+        INSTANT coupons only (the forward readout)."""
+        if (
+            product.has_memory_coupon
+            or product.coupon_config.coupon_pay_type != CouponPayType.INSTANT
+        ):
+            raise PricingError(
+                "coupon cash from probabilities needs non-memory INSTANT coupons"
+            )
         n_ko = len(ko_records)
-        ko_times = [float(rec.observation_time) for rec in ko_records]
         period_yf = product.get_coupon_period_year_fractions(pricing_env)[:n_ko]
         coupon_amounts = [
             float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
@@ -957,14 +1149,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             pricing_env,
             ko_records,
         )
-        expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
         ecc = np.zeros(n_ko, dtype=float)
         for i in range(n_ko):
-            settle = (
-                float(payment_timings.terminal.payment_time)
-                if expiry
-                else float(payment_timings.event_payment_times[i])
-            )
+            settle = float(payment_timings.event_payment_times[i])
             df_settle = (
                 float(df_fn(settle)) if df_fn is not None
                 else math.exp(-rate * settle)
@@ -999,7 +1186,14 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         self, state, ko_records, product, pricing_env, rate, df_local
     ) -> dict:
         result = {"coupon_probability": np.asarray(state, dtype=float)}
-        if not product.has_memory_coupon:
+        # The forward readout has coupon probabilities only. Coupon cash follows from them when the
+        # amount and the payment date are deterministic; a memory amount (arrears) and an EXPIRY
+        # payment (the note's own end) are path-dependent, so no coupon cash is reported for them
+        # here (the default stacked mode computes both).
+        if (
+            not product.has_memory_coupon
+            and product.coupon_config.coupon_pay_type == CouponPayType.INSTANT
+        ):
             result["expected_discounted_coupon_cashflow"] = (
                 self._coupon_cashflows_from_probability(
                     result["coupon_probability"], ko_records, product,

@@ -74,8 +74,10 @@ def test_phoenix_quad_coupon_prob_with_ki_and_disable_ko_after_ki():
 
 
 def test_phoenix_quad_expiry_coupon_cashflow_uses_real_maturity():
-    # Last KO observation (0.75) strictly before maturity (1.0); EXPIRY coupons must
-    # discount to maturity, not the last KO date. (Regression for the maturity proxy.)
+    # Last KO observation (0.75) strictly before maturity (1.0); EXPIRY coupons are paid
+    # when the note ends: at the knock-out settlement on paths that knock out, else at
+    # the real maturity, never the last KO date. (Regression for the maturity proxy; the
+    # knock-out settlement half is DESIGN §3's QUAD V1 defect, fixed with the MC's in T2/T4.)
     from quantark.util.enum import CouponPayType
 
     env = make_env(rate=0.10)
