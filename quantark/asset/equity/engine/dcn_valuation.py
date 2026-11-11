@@ -143,6 +143,10 @@ def settled_row_delta(product, pricing_env, row: DCNValuationRow) -> float:
     return float(row.direction_sign * slope)
 
 
+#: a DCN ledger flow's receivable source (spec ReceivablesTable): the run tracker's knock-out, coupon and loss flows
+_RECEIVABLE_SOURCE = {"KNOCK_OUT": "ko", "COUPON": "coupon", "MATURITY": "dcn_loss"}
+
+
 @dataclass(frozen=True)
 class DCNStateValuation:
     """A validated ``DCNLifecycleState`` reduced to what a DCN engine adds.
@@ -150,10 +154,50 @@ class DCNStateValuation:
     ``pending_pv``: the ledger's pending receivable PV (signed, via
     ``LifecycleCashflowLedger.pending_pv``). ``terminal``: knocked out or
     matured -- the price IS ``pending_pv`` and the engine does not run.
+    ``pending``: the pending flows behind ``pending_pv``, each with the payment timing it was discounted at
+    (``SettlementResolver.resolve_pending``), in the ledger's order.
     """
 
     pending_pv: float
     terminal: bool
+    pending: tuple = ()
+
+    def receivables_table(self, valuation_date):
+        """The pending flows as the statistics' receivables (spec §4.9c): cash decided at or before the valuation
+        and paid after it, ledger rows and never events.
+
+        Per row: the source (a DCN ledger carries knock-out, coupon and loss flows), the decision date and its time
+        on the DCN's own ACT/365F axis (<= 0, spec D12), the payment date and the time ``price()`` discounted it at
+        (the pending-receivable resolver's), the discounted cash ``amount x DF`` (signed, as ``pending_pv``) and the
+        cash to pay ``amount``.
+
+        Raises:
+            ValidationError: a pending flow of another kind (a DCN ledger has no other receivable).
+        """
+        from quantark.asset.equity.engine.event_stats import ReceivablesTable
+        from quantark.asset.equity.product.option.dcn_grid import DAYS_PER_YEAR
+
+        if not self.pending:
+            return ReceivablesTable.empty()
+        sources = []
+        for cashflow, _timing in self.pending:
+            source = _RECEIVABLE_SOURCE.get(getattr(cashflow.event_type, "name", None))
+            if source is None:
+                raise ValidationError(
+                    f"DCN ledger flow {cashflow.cashflow_id!r} is a {cashflow.event_type!r} receivable; a DCN ledger "
+                    "carries knock-out, coupon and loss (MATURITY) flows only"
+                )
+            sources.append(source)
+        return ReceivablesTable(
+            source=tuple(sources),
+            decision_times=[(cashflow.determination_date - valuation_date).days / DAYS_PER_YEAR
+                            for cashflow, _ in self.pending],
+            decision_dates=tuple(cashflow.determination_date for cashflow, _ in self.pending),
+            payment_times=[float(timing.payment_time) for _, timing in self.pending],
+            payment_dates=tuple(cashflow.payment_date for cashflow, _ in self.pending),
+            discounted_cash=[cashflow.amount * timing.payment_df for cashflow, timing in self.pending],
+            cash_to_pay=[cashflow.amount for cashflow, _ in self.pending],
+        )
 
 
 def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Optional[DCNStateValuation]:
@@ -201,7 +245,22 @@ def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Option
         )
     terminal = not lifecycle_state.alive
     check_dcn_ledger(product, valuation_date, lifecycle_state.ledger, alive=not terminal)
-    return DCNStateValuation(pending_pv=pending_receivable_pv(lifecycle_state, pricing_env), terminal=terminal)
+    pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
+    return DCNStateValuation(pending_pv=pending_pv, terminal=terminal,
+                             pending=_pending_flows(lifecycle_state, pricing_env))
+
+
+def _pending_flows(lifecycle_state, pricing_env) -> tuple:
+    """``(cashflow, timing)`` of every pending flow, resolved as ``LifecycleCashflowLedger.pending_pv`` resolves it."""
+    from quantark.asset.equity.settlement import SettlementResolver
+
+    point = lifecycle_state.valuation_point
+    if point is None:
+        return ()                     # ``pending_receivable_pv`` refuses a non-empty ledger without a point
+    return tuple(
+        (cashflow, SettlementResolver.resolve_pending(cashflow, pricing_env, valuation_point=point))
+        for cashflow in lifecycle_state.ledger.pending(point)
+    )
 
 
 def check_dcn_ledger(product, valuation_date, ledger, *, alive: bool) -> None:

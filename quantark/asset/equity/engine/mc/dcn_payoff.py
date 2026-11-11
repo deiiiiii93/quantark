@@ -8,7 +8,7 @@ the observation set) — no barrier continuity correction, per spec.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
@@ -33,6 +33,9 @@ class DCNPathCashflows:
     ko_obs_row: np.ndarray                 # (n_paths,) int, -1 = never KO
     knocked_in: np.ndarray                 # (n_paths,) bool
     coupon_paid: np.ndarray                # (n_paths, n_obs) bool
+    #: (n_paths,) int: the grid column of each path's first knock-in (-1 = never; 0 = carried or at the valuation
+    #: close); ``None`` unless asked for (``first_knock_in=True``, the event statistics only)
+    ki_col: Optional[np.ndarray] = field(default=None)
 
     @property
     def total_pv(self) -> np.ndarray:
@@ -45,8 +48,12 @@ def compute_dcn_cashflows(
     ctx: DCNGridContext,
     df: Callable[[float], float],
     fold: Optional["DCNFoldCash"] = None,
+    first_knock_in: bool = False,
 ) -> DCNPathCashflows:
     """Per-path DCN legs (buyer view, discounted to t=0).
+
+    ``first_knock_in`` also records each path's first knock-in grid column (``ki_col``) for the event statistics;
+    it reads the same knock-in tests and changes no leg.
 
     ``fold`` (a bound ``dcn_valuation.DCNFoldCash``, ``price_folded`` only) adds folded cash-leg cash where
     the product's own cash goes: to the knock-out coupon of a path knocking out at observation ``j``, and to
@@ -77,6 +84,10 @@ def compute_dcn_cashflows(
         # an unmonitored valuation instant (a closed day, or the post-close
         # view) tests nothing at column zero: the first test is column one
         knocked_in |= paths[:, 0] <= b_ki
+    ki_col = None
+    if first_knock_in:
+        # carried or knocked in at the valuation close: column 0 (DESIGN 4.5: a knock-in at t = 0)
+        ki_col = np.where(knocked_in, 0, -1)
     ko_obs_row = np.full(n_paths, -1, dtype=int)
     coupon_paid = np.zeros((n_paths, n_obs), dtype=bool)
     coupon_pv_by = np.zeros((n_paths, n_obs))
@@ -93,7 +104,14 @@ def compute_dcn_cashflows(
         #    KO'ing at THIS observation is still alive during this update).
         seg = paths[:, prev_col + 1:c + 1]
         if seg.shape[1] > 0:
-            knocked_in |= alive & (seg <= b_ki).any(axis=1)
+            if ki_col is None:
+                knocked_in |= alive & (seg <= b_ki).any(axis=1)
+            else:
+                hit = alive & (seg <= b_ki).any(axis=1)
+                first = hit & ~knocked_in
+                if first.any():
+                    ki_col[first] = prev_col + 1 + np.argmax(seg[first] <= b_ki, axis=1)
+                knocked_in |= hit
         s_obs = paths[:, c]
         # 2) KO priority (alive paths, KO-eligible obs)
         if ctx.obs_is_ko[j]:
@@ -146,4 +164,5 @@ def compute_dcn_cashflows(
         ko_obs_row=ko_obs_row,
         knocked_in=knocked_in,
         coupon_paid=coupon_paid,
+        ki_col=ki_col,
     )

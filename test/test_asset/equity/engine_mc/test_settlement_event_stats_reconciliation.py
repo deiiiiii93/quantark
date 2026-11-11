@@ -271,15 +271,16 @@ def test_dcn_stats_use_observation_life_and_explicit_payment_dates():
     ).price_detailed(product, env)
     stats = result.event_stats
 
+    # T11: an EventStatistics; its ledger is the payment-aware view (DESIGN 4.6), on the DCN axis (spec D12)
     _assert_aligned_cashflow_ledger(stats, env)
     assert stats.pv == result.pv
-    assert stats.expected_life_years == result.expected_life_years
-    assert stats.determination_dates is not None
-    assert stats.payment_dates is not None
+    assert stats.expected_lifetime == result.expected_life_years
+    assert stats.ledger.determination_dates is not None
+    assert stats.ledger.payment_dates is not None
     assert any(
         payment > determination
         for determination, payment in zip(
-            stats.determination_dates,
-            stats.payment_dates,
+            stats.ledger.determination_dates,
+            stats.ledger.payment_dates,
         )
     )

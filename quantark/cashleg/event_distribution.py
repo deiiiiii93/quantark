@@ -178,6 +178,16 @@ class EventDistribution:
         )
 
     @classmethod
+    def ended(cls, provenance: Optional[StatisticsProvenance] = None) -> "EventDistribution":
+        """The distribution of a note that ended before the valuation (spec §4.9c, AC17): no event is left.
+
+        Empty and flagged ``terminated``; every event-dependent reader refuses it (``ensure_live``). Built for a
+        terminated note with unpaid receivables (``from_statistics``) and for one fully settled (no statistics).
+        """
+        return cls(probabilities={}, survival_times=np.array([0.0]), survival_probability=np.array([0.0]),
+                   provenance=provenance, probability_residual=0.0, terminated=True)
+
+    @classmethod
     def from_statistics(cls, stats) -> "EventDistribution":
         """The distribution of an :class:`EventStatistics` (DESIGN §4.11; spec D13, D16).
 
@@ -198,8 +208,7 @@ class EventDistribution:
           built from (``EventStatistics.flag``), so a flagged number never reaches a leg unmarked.
         """
         if stats.terminated:
-            return cls(probabilities={}, survival_times=np.array([0.0]), survival_probability=np.array([0.0]),
-                       provenance=stats.provenance, probability_residual=0.0, terminated=True)
+            return cls.ended(provenance=stats.provenance)
         if stats.termination is not None:
             return cls._from_rebased(stats)
         obs = stats.observations

@@ -10,6 +10,11 @@ and pv is DEFINED as the sum of the signed legs (exact invariant).
 Simulation is batched (``num_batches``) so large path counts (2^20+) run at
 bounded memory; per-batch Sobol streams are shifted by batch_id exactly as in
 the snowball/phoenix engines.
+
+Event statistics (unified event statistics spec, T11): ``price_detailed``,
+``calculate_event_stats`` and ``price_with_events`` return an
+``EventStatistics`` built from the price's own batches
+(``_dcn_event_statistics``); ``price()`` records nothing.
 """
 from __future__ import annotations
 
@@ -23,10 +28,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import (
-    DCNEventStats,
-    payment_aware_cashflow_fields,
-)
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.dcn_valuation import (
     DCNStateValuation,
     bind_dcn_fold,
@@ -34,6 +36,10 @@ from quantark.asset.equity.engine.dcn_valuation import (
     refuse_terminal_fold,
     resolve_dcn_lifecycle_state,
     settle_final_observation,
+)
+from quantark.asset.equity.engine.mc._dcn_event_statistics import (
+    dcn_event_statistics,
+    terminated_dcn_statistics,
 )
 from quantark.asset.equity.engine.mc.dcn_payoff import (
     DCNPathCashflows,
@@ -85,9 +91,11 @@ class DCNMCResult:
     expected_life_years: float
     prob_survive_no_ki: float
     prob_survive_ki: float
-    event_stats: Optional[DCNEventStats] = field(repr=False, default=None)
+    #: the run's ``EventStatistics`` (``price_detailed``; ``None`` from a plain ``price`` and for a terminated,
+    #: fully settled lifecycle state); ``event_stats.pv == pv`` (the receivables are its receivables table)
+    event_stats: Optional[EventStatistics] = field(repr=False, default=None)
     # W14: PV of the lifecycle state's pending receivables (signed), included
-    # in ``pv``; the legs, s.e. and event statistics are the contingent claim's.
+    # in ``pv``; the legs and s.e. are the contingent claim's.
     pv_pending_receivables: float = 0.0
 
     def to_dict(self) -> dict:
@@ -97,17 +105,46 @@ class DCNMCResult:
             if k != "event_stats"
         }
         d["event_stats"] = (
-            self.event_stats.to_dict() if self.event_stats is not None else None
+            _json_value(self.event_stats) if self.event_stats is not None else None
         )
         return d
 
 
-def _dcn_batch_record(cf, obs_times: np.ndarray, n_obs: int) -> dict:
+def _json_value(value):
+    """A JSON-safe copy of a statistics value: dataclasses and mappings as dicts, arrays and tuples as lists,
+    dates as ISO strings."""
+    import dataclasses
+    from collections.abc import Mapping
+    from datetime import datetime
+
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _json_value(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, Mapping):
+        return {str(k): _json_value(v) for k, v in value.items()}
+    if isinstance(value, np.ndarray):
+        return [_json_value(v) for v in value.tolist()]
+    if isinstance(value, (list, tuple)):
+        return [_json_value(v) for v in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _dcn_batch_record(cf, obs_times: np.ndarray, n_obs: int, n_cols: int) -> dict:
     """One batch's event-statistics sums (BUYER-perspective, unsigned, discounted), read-only on the
-    batch's path cashflows: the batch-mean standard errors of landing 2 need them batch by batch."""
+    batch's path cashflows: the batch-mean standard errors need them batch by batch.
+
+    ``ko_clean_count``: knock-outs with no knock-in before them (the knock-in table's survival);
+    ``ki_first_count``: first knock-ins per grid column (the daily KI dates; column 0 = carried or at the
+    valuation close), from ``cf.ki_col`` (the kernel's ``first_knock_in`` run)."""
+    if cf.ki_col is None:
+        raise ValidationError("the DCN statistics record needs the kernel's first knock-in columns")
     ko_mask = cf.ko_obs_row >= 0
     rows = np.maximum(cf.ko_obs_row, 0)
     survive = ~ko_mask
+    clean = ko_mask & ~cf.knocked_in
     return {
         "kind": "native",
         "n": int(cf.ko_obs_row.size),
@@ -122,6 +159,8 @@ def _dcn_batch_record(cf, obs_times: np.ndarray, n_obs: int) -> dict:
         "survive_no_ki_count": float((survive & ~cf.knocked_in).sum()),
         "survive_ki_count": float((survive & cf.knocked_in).sum()),
         "life_sum": float(np.where(ko_mask, obs_times[rows], obs_times[-1]).sum()),
+        "ko_clean_count": np.bincount(rows[clean], minlength=n_obs).astype(float)[:n_obs],
+        "ki_first_count": np.bincount(cf.ki_col[cf.ki_col >= 0], minlength=n_cols).astype(float)[:n_cols],
     }
 
 
@@ -130,6 +169,10 @@ class _LegAccumulator:
     """Running sums over batches (BUYER-perspective, unsigned)."""
 
     n_obs: int
+    #: grid columns (``ctx.times.size``): the knock-in table's per-column counts
+    n_cols: int = 0
+    #: keep one statistics record per added batch (``price_detailed``); a plain ``price`` records nothing
+    record: bool = False
     n: int = 0
     totals: list = field(default_factory=list)  # per-path totals, for stderr
     fixed_sum: float = 0.0
@@ -153,7 +196,8 @@ class _LegAccumulator:
         self.ko_timing_count = np.zeros(self.n_obs)
 
     def add(self, cf, obs_times: np.ndarray) -> None:
-        self.batch_records.append(_dcn_batch_record(cf, obs_times, self.n_obs))
+        if self.record:
+            self.batch_records.append(_dcn_batch_record(cf, obs_times, self.n_obs, self.n_cols))
         n_b = cf.ko_obs_row.size
         self.n += n_b
         self.totals.append(cf.total_pv)
@@ -190,12 +234,17 @@ def _finalize_dcn_result(
     pricing_env,
     ctx,
     receivables: Optional[DCNStateValuation] = None,
+    engine_name: Optional[str] = None,
+    deterministic: bool = False,
 ) -> "DCNMCResult":
     """Assemble a DCNMCResult from a fully-populated accumulator.
 
     Shared verbatim by the direct path and the execution-framework batch
     reducer so the two can never drift arithmetically. ``receivables`` (a
-    lifecycle state's pending cash, W14) adds to ``pv`` only.
+    lifecycle state's pending cash, W14) adds to ``pv`` only. An accumulator
+    that recorded its batches (``acc.record``) also gets the run's
+    ``EventStatistics`` (provenance ``engine_name``; ``deterministic``: the
+    settled final row, nothing simulated).
     """
     sign = product.direction_sign
     n = acc.n
@@ -205,67 +254,16 @@ def _finalize_dcn_result(
     pv_loss = float(sign * acc.loss_sum / n)
     pv = pv_fixed + pv_ko + pv_loss
 
-    ko_probability = float(acc.ko_timing_count.sum() / n)
-    observations = product.schedule.monthly
-    pay_dates = product.payment_dates()  # C4: the dates ctx's pay times use
-    observation_times = np.asarray(
-        ctx.times[ctx.obs_cols],
-        dtype=float,
-    )
-    cashflow_fields = payment_aware_cashflow_fields(
-        pricing_env,
-        determination_times=np.concatenate(
-            [
-                observation_times,
-                observation_times,
-                [observation_times[-1]],
-            ]
-        ),
-        payment_times=np.concatenate(
-            [
-                ctx.coupon_pay_times,
-                ctx.ko_pay_times,
-                [ctx.loss_pay_time],
-            ]
-        ),
-        expected_discounted_cashflows=np.concatenate(
-            [
-                sign * acc.fixed_by_period_sum / n,
-                sign * acc.ko_by_period_sum / n,
-                [pv_loss],
-            ]
-        ),
-        determination_dates=[
-            *(row.observation_date for row in observations),
-            *(row.observation_date for row in observations),
-            observations[-1].observation_date,
-        ],
-        payment_dates=[
-            *pay_dates.coupon_payment_dates,
-            *pay_dates.ko_payment_dates,
-            pay_dates.loss_payment_date,
-        ],
-    )
-    stats = DCNEventStats(
-        ki_probability=float(acc.ki_count / n),
-        ko_probability=ko_probability,
-        ko_timing_distribution=tuple(
-            float(x) for x in acc.ko_timing_count / n
-        ),
-        coupon_probability=tuple(
-            float(x) for x in acc.coupon_paid_sum / n
-        ),
-        expected_life_years=float(acc.life_sum / n),
-        prob_survive_no_ki=float(acc.survive_no_ki_count / n),
-        prob_survive_ki=float(acc.survive_ki_count / n),
-        expected_discounted_loss_leg=pv_loss,
-        pv=pv,
-        **cashflow_fields,
-    )
     pending = 0.0
     if receivables is not None:
         pending = receivables.pending_pv
         pv = pv + pending
+    event_stats = None
+    if acc.record:
+        event_stats = dcn_event_statistics(
+            product, pricing_env, ctx, pv=pv, records=acc.batch_records, engine_name=engine_name,
+            state=receivables, deterministic=deterministic,
+        )
     return DCNMCResult(
         pv=pv,
         std_error=stderr,
@@ -282,22 +280,28 @@ def _finalize_dcn_result(
             float(sign * x) for x in acc.ko_by_period_sum / n
         ),
         pv_loss_leg=pv_loss,
-        ki_probability=stats.ki_probability,
-        ko_probability=stats.ko_probability,
-        ko_timing_distribution=stats.ko_timing_distribution,
-        coupon_probability=stats.coupon_probability,
-        expected_life_years=stats.expected_life_years,
-        prob_survive_no_ki=stats.prob_survive_no_ki,
-        prob_survive_ki=stats.prob_survive_ki,
-        event_stats=stats,
+        ki_probability=float(acc.ki_count / n),
+        ko_probability=float(acc.ko_timing_count.sum() / n),
+        ko_timing_distribution=tuple(
+            float(x) for x in acc.ko_timing_count / n
+        ),
+        coupon_probability=tuple(
+            float(x) for x in acc.coupon_paid_sum / n
+        ),
+        expected_life_years=float(acc.life_sum / n),
+        prob_survive_no_ki=float(acc.survive_no_ki_count / n),
+        prob_survive_ki=float(acc.survive_ki_count / n),
+        event_stats=event_stats,
         pv_pending_receivables=pending,
     )
 
 
-def receivables_only_result(product, seed, t0, receivables: DCNStateValuation) -> "DCNMCResult":
+def receivables_only_result(product, seed, t0, receivables: DCNStateValuation, *,
+                            engine_name: Optional[str] = None, statistics: bool = False) -> "DCNMCResult":
     """A knocked-out or matured lifecycle state (W14): the price is the
     ledger's pending receivable PV; nothing is simulated (``num_paths`` 0,
-    legs, s.e. and statistics 0, no event statistics)."""
+    legs, s.e. and statistics 0). ``statistics``: the event statistics are
+    the receivables alone, or ``None`` when nothing is left unpaid (spec AC17)."""
     n_obs = len(product.schedule.monthly)
     zeros = tuple(0.0 for _ in range(n_obs))
     return DCNMCResult(
@@ -306,18 +310,22 @@ def receivables_only_result(product, seed, t0, receivables: DCNStateValuation) -
         pv_fixed_coupons=0.0, pv_fixed_coupons_by_period=zeros, pv_ko_coupons=0.0,
         pv_ko_coupons_by_period=zeros, pv_loss_leg=0.0, ki_probability=0.0, ko_probability=0.0,
         ko_timing_distribution=zeros, coupon_probability=zeros, expected_life_years=0.0,
-        prob_survive_no_ki=0.0, prob_survive_ki=0.0, event_stats=None,
+        prob_survive_no_ki=0.0, prob_survive_ki=0.0,
+        event_stats=(terminated_dcn_statistics(product, receivables, pv=receivables.pending_pv,
+                                               engine_name=engine_name) if statistics else None),
         pv_pending_receivables=receivables.pending_pv,
     )
 
 
-def settled_dcn_result(product, pricing_env, ctx, seed, t0, receivables=None, fold=None) -> "DCNMCResult":
+def settled_dcn_result(product, pricing_env, ctx, seed, t0, receivables=None, fold=None, *,
+                       engine_name: Optional[str] = None, statistics: bool = False) -> "DCNMCResult":
     """The DCN on its final observation date (W10, ruling Q6): the settled
     final row from ``dcn_valuation`` as a one-path result, so pv, legs and
     event statistics are the row's 0/1 decisions; ``std_error`` is 0.0 and
     ``expected_life_years`` 0.0. ``fold`` (a bound ``DCNFoldCash``,
     ``price_folded`` only) adds the decided event's folded cash to its leg:
-    the knock-out leg on a knock-out, the maturity leg on a survivor (D13)."""
+    the knock-out leg on a knock-out, the maturity leg on a survivor (D13).
+    ``statistics`` (never with ``fold``): the row's event statistics."""
     row = settle_final_observation(product, pricing_env, ctx)
     ko_pv, loss_pv = row.ko_pv, row.loss_pv
     if fold is not None:
@@ -334,12 +342,13 @@ def settled_dcn_result(product, pricing_env, ctx, seed, t0, receivables=None, fo
         ko_obs_row=np.array([0 if row.knocked_out else -1], dtype=int),
         knocked_in=np.array([row.knocked_in]),
         coupon_paid=np.array([[row.coupon_paid]]),
+        ki_col=np.array([0 if row.knocked_in else -1]),
     )
-    acc = _LegAccumulator(n_obs=1)
+    acc = _LegAccumulator(n_obs=1, n_cols=int(ctx.times.size), record=statistics and fold is None)
     acc.add(cf, ctx.times[ctx.obs_cols])
     return _finalize_dcn_result(
         acc, product, seed, 0.0, t0, pricing_env=pricing_env, ctx=ctx,
-        receivables=receivables,
+        receivables=receivables, engine_name=engine_name, deterministic=True,
     )
 
 
@@ -450,39 +459,71 @@ class DCNMCEngine(BaseEngine):
 
     # -- BaseEngine-compatible entry point --
     def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
-        if lifecycle_state is None:
-            return self.price_detailed(product, pricing_env).pv
-        return self.price_detailed(
-            product, pricing_env, lifecycle_state=lifecycle_state
+        return self._price_run(
+            product, pricing_env, lifecycle_state=lifecycle_state, statistics=False
         ).pv
+
+    def calculate_event_stats(
+        self, product, pricing_env, *, streams=None, lifecycle_state=None
+    ) -> Optional[EventStatistics]:
+        """The DCN's ``EventStatistics`` from one ``price()`` run on its own paths (``pv`` is that price, D23).
+
+        ``None`` for a knocked-out or matured lifecycle state with nothing left unpaid (spec AC17). ``streams`` is
+        accepted and ignored: every number comes from the same paths, nothing is pruned (as the autocallable MC
+        engines).
+        """
+        return self._price_run(
+            product, pricing_env, lifecycle_state=lifecycle_state, statistics=True
+        ).event_stats
 
     def price_with_events(
         self, product, pricing_env, emit_distribution=True, streams=None, *, lifecycle_state=None
     ):
-        """NPV and the DCN's event distribution from one simulation (ship spec 2026-10-21 D10).
+        """NPV and the DCN's event distribution from one simulation (ship spec 2026-10-21 D10; ``npv`` is
+        ``price()``).
 
-        A run without statistics (a knocked-out or matured lifecycle state) and
-        ``emit_distribution=False`` get the maturity-only distribution.
+        The distribution is ``EventDistribution.from_statistics`` of the run's statistics; a knocked-out or
+        matured lifecycle state has no event left (``EventDistribution.ended``: an event-dependent leg refuses it,
+        spec AC17). ``emit_distribution=False`` gets the maturity-only distribution without recording statistics.
         """
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
 
-        result = self.price_detailed(product, pricing_env, lifecycle_state=lifecycle_state)
-        if emit_distribution and result.event_stats is not None:
-            dist = EventDistribution.from_dcn_stats(result.event_stats)
-        else:
+        result = self._price_run(
+            product, pricing_env, lifecycle_state=lifecycle_state, statistics=bool(emit_distribution)
+        )
+        if not emit_distribution:
             dist = EventDistribution.trivial(max(float(product.get_maturity(pricing_env)), 0.0))
+        elif result.event_stats is not None:
+            dist = EventDistribution.from_statistics(result.event_stats)
+        else:
+            # a terminated, fully settled note: no statistics (AC17) and no event
+            dist = EventDistribution.ended()
         return PricingResult(npv=result.pv, event_distribution=dist)
 
     def price_detailed(
         self, product, pricing_env, *, lifecycle_state=None
     ) -> DCNMCResult:
         """Price ``product``; a ``DCNLifecycleState`` adds its pending
-        receivables, and a knocked-out / matured one prices them alone (W14)."""
+        receivables, and a knocked-out / matured one prices them alone (W14).
+        The result carries the run's ``EventStatistics`` (``event_stats.pv ==
+        pv``)."""
+        return self._price_run(
+            product, pricing_env, lifecycle_state=lifecycle_state, statistics=True
+        )
+
+    def _price_run(
+        self, product, pricing_env, *, lifecycle_state=None, statistics: bool
+    ) -> DCNMCResult:
+        """One priced run; ``statistics`` also records the batches and builds
+        the ``EventStatistics`` (never while folding). The price arithmetic is
+        the same either way."""
         if not isinstance(product, DCNOption):
             raise PricingError(
                 f"{type(self).__name__} only supports DCNOption, "
                 f"got {type(product).__name__}"
             )
+        statistics = bool(statistics) and self._fold is None
+        name = type(self).__name__
         t0 = time.perf_counter()
         self._last_stats_records = ()
         receivables = resolve_dcn_lifecycle_state(
@@ -491,7 +532,9 @@ class DCNMCEngine(BaseEngine):
         if receivables is not None and receivables.terminal:
             if self._fold is not None:
                 refuse_terminal_fold()
-            result = receivables_only_result(product, self.seed, t0, receivables)
+            result = receivables_only_result(
+                product, self.seed, t0, receivables, engine_name=name, statistics=statistics
+            )
             self._last_result = result
             return result
         ctx = build_dcn_grid_context(product)
@@ -501,7 +544,8 @@ class DCNMCEngine(BaseEngine):
             # the final observation date (W10): the settled final row, no
             # simulation and no model preparation
             result = settled_dcn_result(
-                product, pricing_env, ctx, self.seed, t0, receivables, fold=fold
+                product, pricing_env, ctx, self.seed, t0, receivables, fold=fold,
+                engine_name=name, statistics=statistics,
             )
             self._last_result = result
             return result
@@ -520,7 +564,7 @@ class DCNMCEngine(BaseEngine):
         n_obs = ctx.obs_cols.size
         obs_times = ctx.times[ctx.obs_cols]
 
-        acc = _LegAccumulator(n_obs=n_obs)
+        acc = _LegAccumulator(n_obs=n_obs, n_cols=int(ctx.times.size), record=statistics)
         batch_size = self.num_paths // self.num_batches
         self._prepare_simulation(product, pricing_env)
 
@@ -530,7 +574,7 @@ class DCNMCEngine(BaseEngine):
                 spot0, term, dt_array, pricing_env,
                 n_paths=batch_size, batch_id=batch_id,
             )
-            return compute_dcn_cashflows(paths, product, ctx, df, fold=fold)
+            return compute_dcn_cashflows(paths, product, ctx, df, fold=fold, first_knock_in=statistics)
 
         workers = min(self.num_workers, self.num_batches)
         if workers > 1:
@@ -543,7 +587,7 @@ class DCNMCEngine(BaseEngine):
             cashflows = [run_batch(b) for b in range(self.num_batches)]
         for cf in cashflows:
             acc.add(cf, obs_times)
-        # the statistics' batch records of this price (one per batch, batch order)
+        # the statistics' batch records of this price (one per batch, batch order; none from a plain price)
         self._last_stats_records = tuple(acc.batch_records)
 
         sign = product.direction_sign
@@ -575,6 +619,7 @@ class DCNMCEngine(BaseEngine):
             pricing_env=pricing_env,
             ctx=ctx,
             receivables=receivables,
+            engine_name=name,
         )
         self._last_result = result
         return result

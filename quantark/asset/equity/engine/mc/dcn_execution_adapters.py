@@ -127,6 +127,8 @@ class DCNBatchStats:
     life_sum: float
     batch_mean: float
     totals: Optional[np.ndarray]  # per-path totals; pathwise_iid mode only
+    #: the batch's event-statistics record (``PRICE_DETAILED`` only; the direct path's ``_dcn_batch_record``)
+    record: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,9 @@ class _DCNSimContext:
     # W14: the request's validated DCNLifecycleState (pending receivables,
     # added to pv by ``_finalize_dcn_result``); None without a state.
     receivables: object | None = None
+    # a PRICE_DETAILED request: the batches record the event statistics (T11),
+    # as the direct path's ``price_detailed``; a PRICE records nothing
+    statistics: bool = False
 
 
 def _make_captured_df(rate_curve):
@@ -385,6 +390,7 @@ class _DCNBatchMixin:
             receivables=resolve_dcn_lifecycle_state(
                 product, env, request.lifecycle_state
             ),
+            statistics=request.operation is PricingOperation.PRICE_DETAILED,
         )
 
     def _attach_draw_provider(self, clone, context):
@@ -483,9 +489,11 @@ class _DCNBatchMixin:
             # blocks as soon as the simulation has consumed them
             if provider is not None:
                 provider.end_batch()
-        cf = compute_dcn_cashflows(paths, sim.product, sim.ctx, sim.df)
+        cf = compute_dcn_cashflows(paths, sim.product, sim.ctx, sim.df,
+                                   first_knock_in=sim.statistics)
         # one-batch accumulator: EXACTLY the legacy per-batch arithmetic
-        acc = _LegAccumulator(n_obs=sim.n_obs)
+        acc = _LegAccumulator(n_obs=sim.n_obs, n_cols=int(sim.ctx.times.size),
+                              record=sim.statistics)
         acc.add(cf, sim.obs_times)
         stats = DCNBatchStats(
             n=acc.n,
@@ -504,6 +512,7 @@ class _DCNBatchMixin:
             totals=(
                 cf.total_pv if sim.stderr_mode == "pathwise_iid" else None
             ),
+            record=acc.batch_records[0] if sim.statistics else None,
         )
         return BatchOutcome(
             batch_index=task.batch_index, n_paths=acc.n, payload=stats
@@ -511,7 +520,8 @@ class _DCNBatchMixin:
 
     def reduce_batches(self, outcomes, plan, state, context):
         sim = state.payload
-        acc = _LegAccumulator(n_obs=sim.n_obs)
+        acc = _LegAccumulator(n_obs=sim.n_obs, n_cols=int(sim.ctx.times.size),
+                              record=sim.statistics)
         batch_means = []
         for outcome in outcomes:
             s = outcome.payload
@@ -530,6 +540,8 @@ class _DCNBatchMixin:
             batch_means.append(s.batch_mean)
             if s.totals is not None:
                 acc.totals.append(s.totals)
+            if sim.statistics:
+                acc.batch_records.append(s.record)
         self._verify_captured_inputs(sim)
         sign = sim.product.direction_sign
         if plan.stderr_mode == "scramble_means":
@@ -549,6 +561,7 @@ class _DCNBatchMixin:
             pricing_env=sim.pricing_env,
             ctx=sim.ctx,
             receivables=sim.receivables,
+            engine_name=type(sim.engine).__name__,
         )
         economics = (
             ("pv", float(result.pv)),

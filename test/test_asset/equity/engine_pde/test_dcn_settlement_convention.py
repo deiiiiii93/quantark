@@ -261,11 +261,15 @@ def test_mc_event_stat_payment_dates_are_c4(name):
     p = with_convention(DCN_A, CONVENTIONS[name])
     result = DCNMCEngine(**MC).price_detailed(p, flat_env(**FLAT))
     dates = p.payment_dates()
-    assert result.event_stats.payment_dates == (
-        *dates.coupon_payment_dates, *dates.ko_payment_dates, dates.loss_payment_date)
+    stats = result.event_stats                     # EventStatistics (T11): coupon, KO and settlement rows
+    assert stats.coupons.payment_dates == tuple(dates.coupon_payment_dates)
+    assert stats.observations.payment_dates == tuple(dates.ko_payment_dates)
+    assert stats.ki_settlement.payment_date == stats.maturity.payment_date == dates.loss_payment_date
     v = p.schedule.valuation_date
-    np.testing.assert_array_equal(
-        result.event_stats.payment_times, [yf(v, d) for d in result.event_stats.payment_dates])
+    np.testing.assert_array_equal(stats.coupons.payment_times, [yf(v, d) for d in stats.coupons.payment_dates])
+    np.testing.assert_array_equal(stats.observations.payment_times,
+                                  [yf(v, d) for d in stats.observations.payment_dates])
+    assert stats.ki_settlement.payment_time == yf(v, dates.loss_payment_date)
 
 
 @pytest.mark.parametrize("name", sorted(CONVENTIONS))

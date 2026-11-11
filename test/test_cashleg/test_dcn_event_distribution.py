@@ -25,9 +25,11 @@ def test_price_with_events_converts_the_engines_own_statistics(contract):
     assert result.npv == detailed.pv
     ctx = build_dcn_grid_context(product)
     np.testing.assert_array_equal(dist.stream_times[EventType.KO], ctx.times[ctx.obs_cols])
-    np.testing.assert_array_equal(dist.probabilities[EventType.KO], np.asarray(stats.ko_timing_distribution))
-    assert dist.probabilities[EventType.MATURITY_WITH_KI] == stats.prob_survive_ki
-    assert dist.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(stats.prob_survive_no_ki, abs=1e-12)
+    np.testing.assert_array_equal(dist.probabilities[EventType.KO], stats.observations.probability)
+    assert dist.probabilities[EventType.MATURITY_WITH_KI] == stats.ki_settlement.probability
+    assert dist.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(stats.maturity.probability, abs=1e-12)
+    np.testing.assert_array_equal(dist.probabilities[EventType.KO], np.asarray(detailed.ko_timing_distribution))
+    assert stats.ki_settlement.probability == detailed.prob_survive_ki
     np.testing.assert_array_equal(dist.payment_times[EventType.KO], ctx.ko_pay_times)
     assert dist.payment_times_for(EventType.MATURITY_NO_KO) == ctx.loss_pay_time
     assert dist.payment_times_for(EventType.MATURITY_WITH_KI) == ctx.loss_pay_time

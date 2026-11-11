@@ -20,7 +20,7 @@ import numpy as np
 
 from quantark.util.enum import CouponPayType, ObservationType
 
-__all__ = ["day_overlap", "ko_reset_paths", "numeric_trading_days", "phoenix_paths", "snowball_paths"]
+__all__ = ["day_overlap", "dcn_paths", "ko_reset_paths", "numeric_trading_days", "phoenix_paths", "snowball_paths"]
 
 
 def _spy(engine, name):
@@ -285,3 +285,60 @@ def day_overlap(step_ends: np.ndarray, step_mass: np.ndarray, day_ends: np.ndarr
             if overlap > 0.0:
                 out[d] += m * overlap / (b - a)
     return out
+
+
+def dcn_paths(engine, product, env, *, lifecycle_state=None) -> Dict[str, np.ndarray]:
+    """Per path of a DCN price (T11): the paths ``_simulate`` produced for every batch (batch order), and every
+    outcome decided here from the contract's rules, one path at a time over its own closes:
+
+    - knock-in: the daily closes from the valuation close (when it is a schedule date) on, ``S <= KI``; a note
+      already knocked in is knocked in at column 0; monitoring stops once the note has knocked out;
+    - knock-out: the first KO-eligible monthly row with ``S >= KO`` (a knock-in on the same close is tested first);
+    - fixed coupon: a coupon-eligible row of an alive note that does not knock out there, not knocked in by that
+      close, ``S >= coupon barrier``;
+    - maturity: never knocked out; the loss leg ``-(N / S0) x participation x max(K_loss - S_T, 0)`` when
+      knocked in.
+    """
+    from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
+
+    calls = _spy(engine, "_simulate")
+    try:
+        engine.price(product, env, lifecycle_state=lifecycle_state)
+    finally:
+        del engine.__dict__["_simulate"]
+    order = sorted(range(len(calls)), key=lambda i: -1 if calls[i][1].get("batch_id") is None
+                   else int(calls[i][1]["batch_id"]))
+    paths = np.concatenate([calls[i][2] for i in order], axis=0)
+    ctx = build_dcn_grid_context(product)
+    n, n_obs = paths.shape[0], ctx.obs_cols.size
+    first_col = 0 if ctx.valuation_monitored else 1
+    carried = bool(product.knocked_in_at_valuation)
+    ko_row = np.full(n, -1)
+    ki_col = np.full(n, -1)
+    coupon_paid = np.zeros((n, n_obs), dtype=bool)
+    for p in range(n):
+        s = paths[p]
+        knocked_in = carried
+        if carried:
+            ki_col[p] = 0
+        col = first_col
+        for j in range(n_obs):
+            c = int(ctx.obs_cols[j])
+            while col <= c:
+                if not knocked_in and s[col] <= product.ki_barrier:
+                    knocked_in, ki_col[p] = True, col
+                col += 1
+            if ctx.obs_is_ko[j] and s[c] >= product.ko_barrier:
+                ko_row[p] = j
+                break
+            if ctx.obs_is_coupon[j] and not knocked_in and s[c] >= product.coupon_barrier:
+                coupon_paid[p, j] = True
+    survived = ko_row < 0
+    knocked_in = ki_col >= 0
+    s_t = paths[:, int(ctx.obs_cols[-1])]
+    loss = np.where(survived & knocked_in,
+                    -(product.notional / product.initial_price) * product.participation
+                    * np.maximum(product.k_loss - s_t, 0.0), 0.0)
+    return dict(n=n, paths=paths, ctx=ctx, first_col=first_col, carried=carried, ko_row=ko_row, ki_col=ki_col,
+                coupon_paid=coupon_paid, maturity=survived & ~knocked_in, ki_settlement=survived & knocked_in,
+                loss=loss)
