@@ -201,12 +201,14 @@ def _first_knock_in_rows(record: dict, *, before_ko: bool = True):
     same_path = _same_path()
     case = _case(record["case"])
     engine, product, env = case.fresh()
-    if BANKED["cases"][record["case"]]["family"].startswith("ko_reset"):
+    family = BANKED["cases"][record["case"]]["family"]
+    if family.startswith("ko_reset"):
         ref = same_path.ko_reset_paths(engine, product, env)
         mask = ref["ki_first"] if before_ko else (ref["ki_index"] >= 0)
         knocked_out_now = False
     else:
-        ref = same_path.snowball_paths(engine, product, env)
+        # T10: Phoenix by its own per-path reference (same first-KO / first-KI / KO-wins-a-tie decisions)
+        ref = (same_path.phoenix_paths if family == "phoenix" else same_path.snowball_paths)(engine, product, env)
         mask = ref["ki_first"] if before_ko else ref["ki_ever"]
         knocked_out_now = bool(np.all(ref["ko_time"] == 0.0))
     n = ref["n"]
@@ -370,6 +372,17 @@ _T9_REBASED = ("mc_snowball__ko_reset_rebased__-__event_npv",) + tuple(
                 "autocallable_rebate_with_ki", "autocallable_backend_interest_coupon")
 )
 
+# --- moves (T10: MC Phoenix and the vol-model Phoenix engines produce EventStatistics) -------------------------
+#
+# Every Phoenix record in the bank is a continuous-KI contract: base kept MC's KI-ever table, off the KO grid, so the
+# distribution dropped the KI stream and the AT_KI leg raised. Coupon, KO and maturity legs reproduce (the coupon
+# cash was already the price's since T2; the coupon probability, KO rows and maturity branches are the same path
+# counts). Cause (e), checked by ``_knock_in_on_its_own_axis_before_any_ko`` against ``phoenix_paths``.
+_T10_KI_AXIS = ("mc_phoenix__phoenix_mem_instant", "mc_phoenix__phoenix_nomem_instant",
+                "mc_phoenix__phoenix_mem_expiry", "mc_phoenix__phoenix_nomem_expiry",
+                "mc_phoenix__phoenix_mem_instant_ko_at_valuation", "mc_lv_phoenix__phoenix_mem_instant",
+                "mc_heston_phoenix__phoenix_mem_expiry")
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
@@ -379,6 +392,8 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("a", _knock_in_after_ko_removed) for case in _T9_KI_AFTER_KO},
     **{rid: MovedBy("d", _ko_reset_maturity_on_its_own_date) for rid in _T9_KO_RESET_MATURITY},
     **{rid: MovedBy("g", _rebased_now_supported) for rid in _T9_REBASED},
+    # T10: MC Phoenix statistics
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T10_KI_AXIS},
 }
 
 
