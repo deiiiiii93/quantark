@@ -11,7 +11,6 @@ from quantark.asset.equity.engine.mc import (
     QESnowballMCEngine,
 )
 from quantark.asset.equity.engine.base_engine import BaseEngine
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.engine.pde import (
     HestonSLVSnowballPDESolver,
     HestonSnowballPDESolver,
@@ -720,26 +719,20 @@ def test_slv_single_stratum_control_preserves_the_target_paths():
     assert np.max(np.abs(baseline_paths - target_paths)) < 2e-10
 
 
-def _assert_snowball_event_stats(stats: AutocallableEventStats, product: SnowballOption):
-    assert isinstance(stats, AutocallableEventStats)
-    assert stats.ko_times.shape == stats.ko_probability.shape
-    assert stats.ko_times.shape == stats.survival_probability.shape
-    assert stats.ko_times.shape == stats.expected_discounted_ko_cashflow.shape
-    assert stats.ko_times.size == len(product.barrier_config.ko_observation_dates)
+def _assert_snowball_event_stats(stats, product: SnowballOption):
+    """The PDE 1D statistics (local vol, and the 2D solvers' flat-vol surrogate): ``EventStatistics`` since T12."""
+    assert isinstance(stats, EventStatistics) and stats.product_family == "snowball"
+    obs = stats.observations
+    assert obs.times.shape == obs.probability.shape == obs.survival.shape == obs.discounted_cash.shape
+    assert obs.times.size == len(product.barrier_config.ko_observation_dates)
     assert np.isfinite(stats.pv)
-    assert np.all(np.isfinite(stats.ko_probability))
-    assert np.all(stats.ko_probability >= -1e-10)
-    assert np.all(stats.survival_probability <= 1.0 + 1e-10)
-    assert stats.ki_ever_probability is not None
-    assert stats.ki_survive_knocked_in_probability is not None
-
-    parts = (
-        float(np.sum(stats.expected_discounted_ko_cashflow))
-        + float(stats.expected_discounted_maturity_cashflow)
-    )
-    assert float(stats.pv) - parts == pytest.approx(
-        float(stats.reconciliation_error), abs=1e-7
-    )
+    assert np.all(np.isfinite(obs.probability))
+    assert np.all(obs.probability >= -1e-10)
+    assert np.all(obs.survival <= 1.0 + 1e-10)
+    assert stats.ki_settlement.probability is not None and stats.knock_in.expected_loss is not None
+    parts = (float(np.sum(obs.discounted_cash)) + stats.maturity.discounted_cash
+             + stats.ki_settlement.discounted_cash)
+    assert float(stats.pv) - parts == pytest.approx(float(stats.reconciliation_error), abs=1e-7)
 
 
 def test_snowball_vol_model_mc_engines_calculate_event_stats():
@@ -795,7 +788,7 @@ def test_snowball_vol_model_pde_engines_calculate_event_stats():
 
         result = engine.price_with_events(product, env)
         assert float(result.npv) == pytest.approx(price, rel=0.0, abs=1e-8)
-        assert result.event_distribution.stream_times[EventType.KO].shape == stats.ko_times.shape
+        assert result.event_distribution.stream_times[EventType.KO].shape == stats.observations.times.shape
 
 
 def test_snowball_heston_and_slv_pde_engines_run():

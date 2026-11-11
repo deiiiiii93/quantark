@@ -107,8 +107,8 @@ class SnowballAdapter(FamilyAdapter):
         return self.solver._valuation_decision(product, env)
 
     def _knocked_out_statistics(self, product, env, request, decision, pv=None):
-        from ..statistics.terminal import knocked_out_statistics
-        return knocked_out_statistics(self.solver, product, env, request, decision, pv=pv)
+        from ..statistics.terminal import knocked_out_event_statistics
+        return knocked_out_event_statistics(self.solver, product, env, request, decision, pv=pv)
 
     def _outcome(self, reason, op, value):
         if op is Operation.GREEKS:
@@ -491,7 +491,7 @@ class SnowballAdapter(FamilyAdapter):
                 solution_vec=solution_vec, x_vec=layout.spatial.x, s_vec=layout.spatial.s,
                 spot_log=np.log(spot), readout_vec=readout_vec, readout_override=readout_override,
             )
-            stats = None if prepared.statistics is None else prepared.statistics.read(
+            stats = None if prepared.statistics is None else prepared.statistics.read_statistics(
                 result.states, result.captures, price)
             return self._session_outputs(price, solution, stats)
         return price
@@ -509,7 +509,7 @@ class SnowballAdapter(FamilyAdapter):
             pv = self._price(prepared, self._columns(prepared, result))
         else:   # the facade marches no value group for a product knocked out at valuation
             pv = self.solver._get_immediate_ko_payoff(prepared.product, prepared.env)
-        return prepared.statistics.read(result.states, result.captures, pv)
+        return prepared.statistics.read_statistics(result.states, result.captures, pv)
 
     @staticmethod
     def _session_outputs(npv, solution, event_stats=None):

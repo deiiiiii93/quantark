@@ -44,7 +44,7 @@ from quantark.asset.equity.engine.pde.grid import (
     MarketSnapshot,
     project_between,
 )
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats, StatisticsProvenance
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats, EventStatistics, StatisticsProvenance
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -700,7 +700,7 @@ class SnowballPDESolver(BasePDESolver):
             stats = self.calculate_event_stats(
                 product, pricing_env, npv=float(npv), streams=streams
             )
-        dist = None if stats is None else EventDistribution.from_autocallable_stats(stats)
+        dist = None if stats is None else EventDistribution.from_statistics(stats)
         return PDESessionOutputs(
             npv=float(npv),
             solution=solution if want_grid else None,
@@ -715,11 +715,15 @@ class SnowballPDESolver(BasePDESolver):
         *,
         npv: Optional[float] = None,
         streams: Optional[frozenset] = None,
-    ) -> Optional[AutocallableEventStats]:
-        """Provide per-observation KO probabilities and expected discounted cashflows.
+    ) -> Optional[EventStatistics]:
+        """The event statistics (``EventStatistics``, unified event statistics spec §Contracts) of the
+        product: every termination outcome from its own marched column, the coupon table (Phoenix), the
+        knock-in path statistics by the valuation-date rules (the forward adjoint pass fills the rest, T13).
 
         ``npv`` / ``streams`` support the single-pass ``price_with_events`` path
-        (skip the internal value solve; prune unrequested indicator columns).
+        (skip the internal value solve; prune the knock-in path statistics and the coupon probabilities
+        to ``streams``). ``pv`` is ``price()``'s value (the caller's ``npv``, else the value marched with
+        the statistics); ``None`` once expired.
         """
         if not isinstance(product, self._event_stats_product_type()):
             return None

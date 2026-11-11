@@ -1,12 +1,19 @@
-"""The KO-reset statistics in the value mode (spec 3B §5.4; decision 6).
+"""The KO-reset statistics in the value mode (spec 3B §5.4; decision 6; unified event statistics T12).
 
-Columns per surface (``ColumnLayout(n_pre, n_post, ki=want_ki, leg=True, two_maturities=True)``): the
+Columns per surface (``ColumnLayout(n_pre, n_post, ki=False, leg=True, two_maturities=True)``): the
 pre-schedule knock-outs ``KO_pre`` (the not-knocked-in surface fires them), the post-schedule ones
-``KO_post`` (the knocked-in surface), KIS, KIE, the two maturity legs ``M_pre``, ``M_post`` and the two
-maturity units ``U_pre``, ``U_post`` (one paid at that maturity's determination). The not-knocked-in
-surface is staged exactly as the value's: zero above the pre-schedule maturity, seeded there.
+``KO_post`` (the knocked-in surface), the two maturity legs ``M_pre``, ``M_post`` and the two maturity units
+``U_pre``, ``U_post`` (one paid at that maturity's determination). The not-knocked-in surface is staged exactly
+as the value's: zero above the pre-schedule maturity, seeded there.
+
+The termination outcomes (DESIGN §4.1): a knock-out on either schedule, the maturity of the first schedule never
+knocked in (``M_pre``/``U_pre``, the maturity row) and the maturity of the second schedule knocked in and never
+knocked out (``M_post``/``U_post``, the knock-in settlement row). ABSOLUTE schedules only: the PDE refuses
+REBASED (DESIGN §4.9a).
 """
 from __future__ import annotations
+
+from dataclasses import replace
 
 import numpy as np
 
@@ -15,6 +22,7 @@ from quantark.asset.equity.engine.settlement_support import resolve_terminal_tim
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_close
 
+from . import event_statistics as es
 from .columns import ColumnLayout
 from .snowball import SnowballBreach, SnowballStatistics
 
@@ -39,6 +47,8 @@ class KOResetBreach(SnowballBreach):
 
 class KOResetStatistics(SnowballStatistics):
 
+    family = "ko_reset"
+
     @classmethod
     def create(cls, prepared, streams):
         stats = cls(prepared, streams)
@@ -50,7 +60,8 @@ class KOResetStatistics(SnowballStatistics):
         self.ko_records = solver._filter_observations_by_tau(solver._get_cached_pre_ko_records(env, product), self.tau)
         self.post_records = solver._filter_observations_by_tau(
             solver._get_cached_post_ko_records(env, product), self.tau)
-        return ColumnLayout(len(self.ko_records), len(self.post_records), ki=self.want_ki, leg=True,
+        # the knocked-in settlement unit is U_post (no KIS); the outcomes are never pruned (DESIGN §4.9b)
+        return ColumnLayout(len(self.ko_records), len(self.post_records), ki=False, leg=True,
                             two_maturities=True)
 
     def _breach(self):
@@ -65,11 +76,6 @@ class KOResetStatistics(SnowballStatistics):
                 return int(cols[k])
         raise ValidationError(f"no {surface} statistics column for the knock-out record at t={t}")
 
-    def _column_of_term(self, term, surface):
-        if term.column == "M":
-            return int(self.layout.maturity[0 if surface == "alive" else 1])
-        return super()._column_of_term(term, surface)
-
     # --- the march hooks ------------------------------------------------------------
 
     def terminal(self, states):
@@ -81,9 +87,6 @@ class KOResetStatistics(SnowballStatistics):
         solver._set_terminal_condition_v1(tmp, self.x, self.s, product, env)
         v1[:, L.maturity[1]] = tmp[:, -1]
         v1[:, L.maturity_unit[1]] = 1.0
-        if L.kis is not None:
-            v1[:, L.kis] = 1.0
-            v1[:, L.kie] = 1.0
         pre_maturity = float(product.get_pre_maturity_time(env))
         staged = bool(solver._pre_ko_observation_indices and pre_maturity < self.tau
                       and not is_close(pre_maturity, self.tau, abs_tol=Tolerance.PRECISION))
@@ -139,7 +142,60 @@ class KOResetStatistics(SnowballStatistics):
 
     # --- the readout ------------------------------------------------------------
 
+    def _maturity_timing(self, terminal):
+        """``(pre, post)`` timing dicts of the two maturities: the first schedule's end (paid after the terminal
+        delay; its dates its last record's when that record sits at it) and the product's terminal."""
+        product, env = self.product, self.env
+        delay = float(terminal.payment_time) - float(terminal.determination_time)
+        pre_maturity = float(product.get_pre_maturity_time(env))
+        last_pre = self.ko_records[-1] if self.ko_records else None
+        pre_det_date = (last_pre.observation_date
+                        if last_pre is not None and is_close(float(last_pre.observation_time), pre_maturity)
+                        else None)
+        pre_pay_date = pre_det_date if is_close(delay, 0.0) else None
+        pre = dict(time=pre_maturity, payment_time=pre_maturity + delay, date=pre_det_date,
+                   payment_date=pre_pay_date)
+        post = dict(time=float(self.tau), payment_time=float(self.tau) + delay, date=terminal.determination_date,
+                    payment_date=terminal.payment_date)
+        return pre, post
+
+    def read_statistics(self, states, captures, pv):
+        """``EventStatistics`` (ABSOLUTE): both schedules on one observation table tagged ``pre``/``post`` (the pre
+        record first at a tie), survival with the F5 drop of the first schedule's maturity mass at its own
+        determination; the maturity row is the first schedule's end never knocked in, the knock-in settlement
+        row the second schedule's end knocked in and never knocked out (DESIGN §4.2, §4.4, §4.5)."""
+        L, env, product = self.layout, self.env, self.product
+        at = self._reader(states, captures)
+        records = list(self.ko_records) + list(self.post_records)
+        n_pre, n_post = len(self.ko_records), len(self.post_records)
+        unit = np.array([at(c) for c in L.ko] + [at(c) for c in L.post_ko], dtype=float)
+        times = np.array([float(r.observation_time) for r in records], dtype=float)
+        tags = np.r_[np.zeros(n_pre), np.ones(n_post)]
+        order = np.lexsort((tags, times))
+        schedule = ["pre"] * n_pre + ["post"] * n_post
+        observations = es.observation_table(env, records, unit, schedule=schedule, order=order)
+        terminal = resolve_terminal_timing(product, env)
+        pre_timing, post_timing = self._maturity_timing(terminal)
+        maturity = es.outcome_row(env, probability=at(L.maturity_unit[0]) / float(env.get_discount_factor(
+            pre_timing["time"])), discounted=at(L.maturity[0]), **pre_timing)
+        ki_settlement = es.outcome_row(env, probability=at(L.maturity_unit[1]) / float(env.get_discount_factor(
+            post_timing["time"])), discounted=at(L.maturity[1]), **post_timing)
+        obs_times = observations.times
+        if obs_times.size and maturity.time < float(obs_times[-1]) - Tolerance.ZERO:
+            # F5: the first schedule's maturity mass leaves the survival at its own determination
+            observations = replace(observations, survival=observations.survival - np.where(
+                obs_times >= maturity.time, maturity.probability, 0.0))
+        unavailable = {}
+        knock_in, ki_table = self._knock_in(ki_settlement, unavailable)
+        lifetime = (float(np.sum(observations.probability * obs_times)) + maturity.probability * maturity.time
+                    + ki_settlement.probability * ki_settlement.time)
+        return es.assemble(family=self.family, pv=pv, observations=observations, coupons=None, maturity=maturity,
+                           ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table,
+                           expected_lifetime=lifetime, provenance=self.solver._native_provenance(),
+                           unavailable=unavailable)
+
     def read(self, states, captures, pv):
+        """The legacy dataclass (the native ADI route until it migrates, unified event statistics T14)."""
         solver, product, env, L, prepared = self.solver, self.product, self.env, self.layout, self.prepared
         grid = states["stats_v1"] if self.knocked_in_at_valuation else states["stats_v0"]
 

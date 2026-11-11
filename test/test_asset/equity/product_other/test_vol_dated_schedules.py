@@ -194,8 +194,10 @@ def test_2d_snowball_dated_twin_event_stats(route):
         out[form] = _quiet(lambda: run(engine, product, env(100.0, _on(45))))
     dated, numeric = out["dated"], out["numeric"]
     _assert_twin(dated.pv, numeric.pv, "pv")
-    for name in ("ko_times", "ko_probability", "survival_probability", "expected_discounted_ko_cashflow"):
-        np.testing.assert_allclose(np.asarray(getattr(dated, name)), np.asarray(getattr(numeric, name)),
+    # the surrogate is the PDE 1D march: EventStatistics since unified event statistics T12
+    for name in ("times", "probability", "survival", "discounted_cash"):
+        np.testing.assert_allclose(np.asarray(getattr(dated.observations, name)),
+                                   np.asarray(getattr(numeric.observations, name)),
                                    rtol=REL, atol=ABS, err_msg=name)
 
 

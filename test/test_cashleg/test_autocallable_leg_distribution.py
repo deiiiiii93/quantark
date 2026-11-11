@@ -43,8 +43,9 @@ def test_phoenix_cashflow_decomposition_reconciles(kind, memory):
     env = make_env()
     ph = make_phoenix(memory=memory)
     s = make_engine(kind, "phoenix").calculate_event_stats(ph, env)
-    if kind == "mc":
-        # MC reports the unified EventStatistics (T10): every outcome direct, the identity at round-off
+    if kind in ("mc", "pde"):
+        # MC (T10) and PDE 1D (T12) report the unified EventStatistics: every outcome direct, the identity at
+        # round-off (the PDE's value and cash columns take the same linear stages)
         assert s.coupons.probability.size == s.observations.size
         assert abs(s.reconciliation_error) <= 1e-12 * max(1.0, abs(s.pv))
         assert float(np.sum(s.coupons.discounted_cash)) > 0.0

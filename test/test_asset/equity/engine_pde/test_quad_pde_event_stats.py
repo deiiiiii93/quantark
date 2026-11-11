@@ -68,11 +68,12 @@ def test_snowball_pde_event_stats_delegates_to_quad():
     pde = SnowballPDESolver(params=PDEParams())
     stats = pde.calculate_event_stats(product, env)
     assert stats is not None
-    assert stats.ko_times.shape == (4,)
-    assert stats.determination_times.shape == (5,)
-    assert stats.payment_times.shape == (5,)
-    assert abs(stats.pv - stats.expected_discounted_cashflows.sum()) < 1e-8
+    assert stats.observations.times.shape == (4,)
+    # four knock-out rows, the maturity row and the knock-in settlement row (unified event statistics T12)
+    assert stats.ledger.determination_times.shape == (6,)
+    assert stats.ledger.payment_times.shape == (6,)
+    assert abs(stats.pv - stats.ledger.discounted_cash.sum()) < 1e-8
 
     # Basic sanity: probabilities are between 0 and 1 (tolerances allow small numerical drift).
-    assert float(stats.ko_probability.min()) >= -1e-6
-    assert float(stats.ko_probability.max()) <= 1.0 + 1e-6
+    assert float(stats.observations.probability.min()) >= -1e-6
+    assert float(stats.observations.probability.max()) <= 1.0 + 1e-6

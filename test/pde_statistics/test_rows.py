@@ -131,14 +131,18 @@ def test_knock_in_rows_are_determination_units(lag):
     for j, (lower, upper) in enumerate(rows):
         current = solver._total_tau - (p.tau - t[j])
         df_det = solver._df_between_times(e, current, p.tau)
-        lo0, lo1, up1 = lower[:w], lower[w:], upper[w:]
-        assert lo1[L.kis] == lo1[L.kie] == df_det, j          # knocked in, at the knock-in edge
-        assert lo0[L.kis] == lo0[L.kie] == df_det, j          # a certain discrete knock-in
-        assert up1[L.kis] == 0.0 and up1[L.kie] == df_det, j  # the knock-out survives the knock-in
-        # the maturity leg's rows are the value's own rows (the lag's discount included)
+        lo0, lo1, up0, up1 = lower[:w], lower[w:], upper[:w], upper[w:]
+        u0 = L.maturity_unit[0]
+        assert lo1[L.kis] == df_det and lo1[u0] == 0.0, j     # knocked in, at the knock-in edge
+        assert lo0[L.kis] == df_det and lo0[u0] == 0.0, j     # a certain discrete knock-in
+        assert up1[L.kis] == 0.0 and up1[u0] == 0.0, j        # the knock-out survives the knock-in
+        assert up0[L.kis] == 0.0, j                           # the not-knocked-in knock-out edge never knocks in
+        # the maturity leg's rows are the value's own rows (the lag's discount included), on the knocked-in
+        # outcome's column at the knock-in edge (T12: the not-knocked-in outcome's M0 carries nothing there)
         v_lo0, _ = solver._boundary_rows_v0(j, p.tau - t[j], product, e, s)
         v_lo1, _ = solver._boundary_rows_v1(j, p.tau - t[j], product, e, s)
-        assert lo0[L.maturity[0]] == v_lo0.value and lo1[L.maturity[0]] == v_lo1.value, j
+        assert lo0[L.maturity[1]] == v_lo0.value and lo1[L.maturity[1]] == v_lo1.value, j
+        assert lo0[L.maturity[0]] == 0.0 and lo1[L.maturity[0]] == 0.0, j
 
 
 def test_lag_discounts_the_maturity_leg_only():
@@ -150,8 +154,9 @@ def test_lag_discounts_the_maturity_leg_only():
     for (pl, pu), (ll, lu) in zip(plain, lagged):
         for a, b in ((pl, ll), (pu, lu)):
             for off in (0, w):
-                assert a[off + L.kis] == b[off + L.kis] and a[off + L.kie] == b[off + L.kie]
-        assert ll[L.maturity[0]] < pl[L.maturity[0]]        # the lag's extra discount on the leg
+                assert a[off + L.kis] == b[off + L.kis]
+                assert a[off + L.maturity_unit[0]] == b[off + L.maturity_unit[0]]
+        assert ll[L.maturity[1]] < pl[L.maturity[1]]        # the lag's extra discount on the leg
 
 
 def test_rows_do_not_depend_on_the_value_march():
@@ -177,7 +182,7 @@ def test_phoenix_rows():
     for j, (lower, upper) in enumerate(rows):
         lo0, lo1, up0 = lower[:w], lower[w:], upper[:w]
         cash = L.cash.ravel()
-        assert np.array_equal(lo0, lo1) and lo0[L.maturity[0]] != 0.0, j
+        assert np.array_equal(lo0, lo1) and lo0[L.maturity[1]] != 0.0, j
         assert not lo0[L.ko].any() and not lo0[L.trigger_cols].any(), j
         v_lo0, _ = solver._boundary_rows_v0(j, p.tau - t[j], product, e, p.layout.spatial.s)
         assert v_lo0.branch == "v0_lower_copy_ki" and v_lo0.copy_from_ki, j

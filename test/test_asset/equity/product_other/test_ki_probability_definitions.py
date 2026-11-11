@@ -166,10 +166,12 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
         params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)
     ).calculate_event_stats(ph, env)
 
-    # QUAD / PDE: legacy objects (KI ever, KI-and-no-KO) until T12/T17; MC: P(KI before any KO), P(KI and no KO)
-    evers = [float(s.ki_ever_probability) for s in (q, p)]
-    survs = [float(s.ki_survive_knocked_in_probability) for s in (q, p)] + [m.knock_in.probability_no_ko]
-    assert max(evers) - min(evers) < 0.015, evers
+    # QUAD: legacy object (KI ever, KI-and-no-KO) until T17; PDE 1D (T12) and MC: unified statistics — the PDE's
+    # P(KI before any KO) comes with its forward pass (T13), its settles-knocked-in row is marched now
+    assert p.knock_in.probability is None and "T13" in p.unavailable["knock_in.probability"]
+    assert p.knock_in.probability_no_ko == p.ki_settlement.probability
+    evers = [float(q.ki_ever_probability)]
+    survs = [float(q.ki_survive_knocked_in_probability), p.ki_settlement.probability, m.knock_in.probability_no_ko]
     assert max(survs) - min(survs) < 0.015, survs
     # The two definitions genuinely differ (this is the whole point).
     for ever, surv in zip(evers, survs):
@@ -178,7 +180,6 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
     # (DESIGN §4.5; measured 0.104 vs KI ever ~0.14, settles knocked in 0.103)
     assert m.knock_in.probability_no_ko <= m.knock_in.probability < min(evers) - 0.02
     assert abs(float(q.ki_probability) - float(q.ki_survive_knocked_in_probability)) < 1e-9
-    assert abs(float(p.ki_probability) - float(p.ki_survive_knocked_in_probability)) < 1e-9
 
 
 def test_snowball_mc_quad_agree_on_both_ki_definitions():

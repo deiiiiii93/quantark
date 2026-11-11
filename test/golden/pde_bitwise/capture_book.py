@@ -312,8 +312,17 @@ def _field_value(val):
 
 
 def _stats_fields(stats, prefix="stats_"):
-    """Every field of a statistics dataclass, in field order (booleans and objects included)."""
-    return {f"{prefix}{f.name}": _field_value(getattr(stats, f.name)) for f in dataclasses.fields(stats)}
+    """Every field of a statistics dataclass, in field order (booleans and objects included). A nested table
+    (``EventStatistics``' observation / coupon / outcome / knock-in / ledger tables, unified event statistics T12)
+    is flattened to ``<prefix><field>_<column>`` so every column is its own hex output; provenance stays a repr."""
+    out = {}
+    for f in dataclasses.fields(stats):
+        val = getattr(stats, f.name)
+        if dataclasses.is_dataclass(val) and not isinstance(val, type) and f.name != "provenance":
+            out.update(_stats_fields(val, prefix=f"{prefix}{f.name}_"))
+        else:
+            out[f"{prefix}{f.name}"] = _field_value(val)
+    return out
 
 
 def _dist_fields(dist):

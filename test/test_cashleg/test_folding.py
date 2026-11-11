@@ -205,14 +205,14 @@ def test_ko_reset_fold_reproduces_the_pde_route(dated):
         product, env = make_ko_reset(KO_RESET), ko_reset_env()
     stats = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, env)
     from quantark.cashleg import EventDistribution
-    dist = EventDistribution.from_autocallable_stats(stats)
+    dist = EventDistribution.from_statistics(stats)
     legs = [leg for leg in _leg_set(dist.stream_times[EventType.KO])
             if not isinstance(leg, AccrualLeg) or leg.payment_convention is PaymentConvention.AT_PERIOD_END]
     overlay = fold_cash_legs(legs, product, env, quantity=1.0, unit_notional=100.0)
     _structure_equal(dist, overlay)
-    assert [e.schedule for e in overlay.ko].count("post") == stats.post_ko_times.size
-    assert overlay.maturity_no_ki.determination_time == stats.pre_maturity_time
-    assert overlay.maturity_ki.determination_time == stats.post_maturity_time
+    assert [e.schedule for e in overlay.ko].count("post") == list(stats.observations.schedule).count("post")
+    assert overlay.maturity_no_ki.determination_time == stats.maturity.time
+    assert overlay.maturity_ki.determination_time == stats.ki_settlement.time
     expected = sum(leg.value(dist, env, 100.0) for leg in legs)
     # The KO-reset route marches BOTH maturity buckets, so they miss 1 by the PDE's discount defect: the
     # distribution absorbs that residual into MATURITY_NO_KO (spec D16) while the F5 survival keeps the
@@ -331,4 +331,8 @@ def test_dated_structure_and_value_match_the_pde_route(case):
     if EventType.KO not in dist.probabilities:
         assert overlay.is_empty and overlay.ko == ()
     expected = sum(leg.value(dist, env, 100.0) for leg in legs)
-    assert _reassemble(overlay, dist, env, 1.0) == pytest.approx(expected, rel=1e-12, abs=1e-6)
+    # T12: the PDE's knocked-in settlement probability is its own marched column, so on a note knocked in at
+    # valuation the outcomes miss 1 by the march's discount residual (MATURITY_NO_KO, 0 here, cannot absorb a
+    # negative one); an affine fold then differs by at most (v_anchor - c)·residual per leg, as on the KO-reset
+    bound = max(1e-6, abs(dist.probability_residual) * 2.0 * UNIT * len(legs))
+    assert _reassemble(overlay, dist, env, 1.0) == pytest.approx(expected, rel=1e-12, abs=bound)

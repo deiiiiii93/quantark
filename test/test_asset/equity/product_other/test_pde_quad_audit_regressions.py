@@ -394,7 +394,7 @@ class TestEventStatsThetaConsistency:
                 ))
             )
             return np.asarray(
-                solver.calculate_event_stats(snowball, env).ko_probability
+                solver.calculate_event_stats(snowball, env).observations.probability
             )
 
         prob_default = ko_prob(event_theta=1.0, event_steps=1)

@@ -17,6 +17,7 @@ solve takes.
 import dataclasses
 from datetime import datetime
 
+import numpy as np
 import pytest
 
 from quantark.asset.equity.engine.pde.grid import GridConfig
@@ -89,126 +90,47 @@ def test_pde_engine_returns_the_solver_event_stats(
         snowball_product, snowball_env
     )
     assert stats is not None, "facade swallowed the solver's event stats"
-    assert len(stats.ko_times) == len(_ko_observation_dates())
-    total_ko = float(sum(stats.ko_probability))
+    assert stats.observations.size == len(_ko_observation_dates())
+    total_ko = float(sum(stats.observations.probability))
     assert 0.0 <= total_ko <= 1.0 + 1e-9
+
+
+def _assert_identical(a, b, path):
+    """Bitwise equality through the nested ``EventStatistics`` tables (unified event statistics T12)."""
+    from collections.abc import Mapping
+
+    if dataclasses.is_dataclass(a):
+        assert type(a) is type(b), path
+        for f in dataclasses.fields(a):
+            _assert_identical(getattr(a, f.name), getattr(b, f.name), f"{path}.{f.name}")
+    elif isinstance(a, np.ndarray):
+        assert np.array_equal(a, b), path
+    elif isinstance(a, Mapping):
+        assert set(a) == set(b), path
+        for key in a:
+            _assert_identical(a[key], b[key], f"{path}[{key}]")
+    else:
+        assert a == b, path
 
 
 def test_pde_engine_event_stats_match_the_solver_directly(
     snowball_product, snowball_env, coarse_pde_params
 ):
-    """Delegation must not transform or truncate the result.
+    """Delegation must not transform or truncate the result: every field of the ``EventStatistics`` the solver
+    returns -- the observation table, both terminal outcomes, the knock-in statistics, the ledger (dated and
+    timed, discounted and undiscounted), the residuals, provenance and ``unavailable`` -- is the facade's, bit
+    for bit. A facade that mangled or dropped only one family while leaving ``pv``/KO fields intact would slip
+    past a check limited to those; not past this one."""
+    from quantark.asset.equity.engine.event_stats import EventStatistics
 
-    Compares all 19 fields ``AutocallableEventStats`` carries: the five
-    KI-breakdown fields (``ki_times``, ``ki_event_probability``,
-    ``ki_survival_probability``, ``ki_ever_probability``,
-    ``ki_survive_knocked_in_probability``) that drive the per-date KI row
-    structure the 2026-08-01 PDE event-stats re-baseline changed most (7 rows
-    -> 6 in the affected goldens), plus the six payment-aware fields the
-    settlement-date feature added (determination vs payment, dated and timed,
-    with discounted and undiscounted expected cashflows). A facade that
-    mangled or dropped only one family -- while leaving ``pv``/KO fields
-    intact -- would slip past a check limited to those; not past this one.
-    """
     facade = PDEEngine(params=coarse_pde_params).calculate_event_stats(
         snowball_product, snowball_env
     )
     direct = SnowballPDESolver(params=coarse_pde_params).calculate_event_stats(
         snowball_product, snowball_env
     )
-    assert facade is not None and direct is not None
-
-    field_names = {f.name for f in dataclasses.fields(direct)}
-    assert field_names == {
-        "pv",
-        "ko_times",
-        "ko_probability",
-        "survival_probability",
-        "expected_discounted_ko_cashflow",
-        "ki_probability",
-        "expected_discounted_maturity_cashflow",
-        "reconciliation_error",
-        "ki_times",
-        "ki_event_probability",
-        "ki_survival_probability",
-        "ki_ever_probability",
-        "ki_survive_knocked_in_probability",
-        # Payment-aware fields (settlement-date feature): determination vs
-        # payment legs, plus per-leg expected cashflows.
-        "determination_times",
-        "determination_dates",
-        "payment_times",
-        "payment_dates",
-        "expected_discounted_cashflows",
-        "expected_undiscounted_cashflows",
-        # Implementation provenance (spec 3B §5.6).
-        "provenance",
-    }, "AutocallableEventStats field set changed -- update this test's coverage"
-
-    def _match_optional_array(a, b):
-        if a is None or b is None:
-            assert a is None and b is None
-            return
-        assert list(a) == pytest.approx(list(b))
-
-    _match_optional_array(facade.determination_times, direct.determination_times)
-    _match_optional_array(facade.payment_times, direct.payment_times)
-    assert facade.determination_dates == direct.determination_dates
-    assert facade.payment_dates == direct.payment_dates
-    _match_optional_array(
-        facade.expected_discounted_cashflows, direct.expected_discounted_cashflows
-    )
-    _match_optional_array(
-        facade.expected_undiscounted_cashflows, direct.expected_undiscounted_cashflows
-    )
-
-    assert facade.pv == pytest.approx(direct.pv)
-    assert facade.ko_times == pytest.approx(direct.ko_times)
-    assert facade.ko_probability == pytest.approx(direct.ko_probability)
-    assert facade.survival_probability == pytest.approx(direct.survival_probability)
-    assert facade.expected_discounted_ko_cashflow == pytest.approx(
-        direct.expected_discounted_ko_cashflow
-    )
-    assert facade.ki_probability == pytest.approx(direct.ki_probability)
-    assert facade.expected_discounted_maturity_cashflow == pytest.approx(
-        direct.expected_discounted_maturity_cashflow
-    )
-    assert facade.reconciliation_error == pytest.approx(
-        direct.reconciliation_error, abs=1e-8
-    )
-
-    # KI breakdown fields (ki_times/ki_event_probability/ki_survival_probability
-    # are empty arrays here since this fixture uses continuous KI monitoring,
-    # which populates no per-date KI rows -- still worth comparing, since a
-    # facade that fabricated or dropped rows would show up as a shape/content
-    # mismatch here, empty or not).
-    assert facade.ki_times == pytest.approx(direct.ki_times)
-    assert facade.ki_event_probability == pytest.approx(direct.ki_event_probability)
-    assert facade.ki_survival_probability == pytest.approx(
-        direct.ki_survival_probability
-    )
-
-    # ki_ever_probability / ki_survive_knocked_in_probability are
-    # Optional[float] -- None if an engine does not compute them for a given
-    # product. Assert None-ness matches either way (a facade that silently
-    # dropped a computed value to None would be caught), and compare values
-    # when present.
-    assert (facade.ki_ever_probability is None) == (
-        direct.ki_ever_probability is None
-    ), (facade.ki_ever_probability, direct.ki_ever_probability)
-    if facade.ki_ever_probability is not None:
-        assert facade.ki_ever_probability == pytest.approx(direct.ki_ever_probability)
-
-    assert (facade.ki_survive_knocked_in_probability is None) == (
-        direct.ki_survive_knocked_in_probability is None
-    ), (
-        facade.ki_survive_knocked_in_probability,
-        direct.ki_survive_knocked_in_probability,
-    )
-    if facade.ki_survive_knocked_in_probability is not None:
-        assert facade.ki_survive_knocked_in_probability == pytest.approx(
-            direct.ki_survive_knocked_in_probability
-        )
+    assert isinstance(facade, EventStatistics) and isinstance(direct, EventStatistics)
+    _assert_identical(facade, direct, "stats")
 
 
 def test_pde_engine_calculate_event_stats_propagates_unsupported_product_type(

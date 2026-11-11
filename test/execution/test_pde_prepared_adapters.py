@@ -224,9 +224,10 @@ class TestRichOutputs:
                     operation=PricingOperation.EVENT_STATS,
                 ),
             )
+        # the producer's own object, passed through (PDE 1D: EventStatistics since T12)
         assert np.array_equal(
-            np.asarray(outcome.value.ko_probability),
-            np.asarray(direct.ko_probability),
+            np.asarray(outcome.value.observations.probability),
+            np.asarray(direct.observations.probability),
         )
 
 

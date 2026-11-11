@@ -25,10 +25,11 @@ def test_statistics_within_measured_bounds(name):
     product, env = CASES[name][0](), CASES[name][1]()
     solver = (PhoenixPDESolver if name.startswith("ph") else SnowballPDESolver)(PDEParams())
     got, ref, b = solver.calculate_event_stats(product, env), BANK[name]["values"], BOUNDS[CLASS[name]]
-    assert np.max(np.abs(got.ko_probability - ref["ko_probability"])) <= b["ko"]
-    assert abs(got.ki_ever_probability - ref["ki_ever_probability"]) <= b["ki_ever"]
-    assert abs(got.ki_survive_knocked_in_probability - ref["ki_survive_knocked_in_probability"]) <= b["ki_survive"]
-    assert np.max(np.abs(got.expected_discounted_ko_cashflow - ref["expected_discounted_ko_cashflow"])) <= CASH
+    # unified event statistics T12: the knock-in-ever column is gone (a knock-in after a knock-out is no knock-in);
+    # P(knock in before any knock-out) comes from the forward adjoint pass (T13), not from this reference
+    assert np.max(np.abs(got.observations.probability - ref["ko_probability"])) <= b["ko"]
+    assert abs(got.ki_settlement.probability - ref["ki_survive_knocked_in_probability"]) <= b["ki_survive"]
+    assert np.max(np.abs(got.observations.discounted_cash - ref["expected_discounted_ko_cashflow"])) <= CASH
     assert abs(got.pv - ref["pv"]) <= PV
     if "coupon_probability" in ref:
-        assert np.max(np.abs(got.coupon_probability - ref["coupon_probability"])) <= COUPON
+        assert np.max(np.abs(got.coupons.probability - ref["coupon_probability"])) <= COUPON

@@ -16,14 +16,20 @@ REF = json.loads((Path(__file__).parent / "ko_reset_reference.json").read_text()
 SPOTS = {"kr_cont": 100.0, "kr_cont_spot90": 90.0, "kr_cont_spot101": 101.0}
 
 
+def _rows(stats, schedule):
+    """A schedule's knock-out probabilities, in its own (time) order, from the tagged observation table."""
+    tags = np.asarray(stats.observations.schedule)
+    return stats.observations.probability[tags == schedule]
+
+
 @pytest.mark.parametrize("name", sorted(SPOTS))
 def test_against_the_converged_quad(name):
     product, e = make_ko_reset(KO_RESET), env(spot=SPOTS[name])
     s, ref = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, e), REF[name]
-    assert np.max(np.abs(s.pre_ko_probability - ref["pre_ko_probability"])) <= 5e-5
-    assert np.max(np.abs(s.post_ko_probability - ref["post_ko_probability"])) <= 5e-5
-    assert abs(s.ki_ever_probability - ref["ki_ever_probability"]) <= 5e-4
-    assert abs(s.ki_survive_knocked_in_probability - ref["ki_survive_knocked_in_probability"]) <= 5e-4
+    assert np.max(np.abs(_rows(s, "pre") - ref["pre_ko_probability"])) <= 5e-5
+    assert np.max(np.abs(_rows(s, "post") - ref["post_ko_probability"])) <= 5e-5
+    # T12: no knock-in-ever (a knock-in after a knock-out is no knock-in); P(KI before KO) is the forward pass's
+    assert abs(s.ki_settlement.probability - ref["ki_survive_knocked_in_probability"]) <= 5e-4
     assert abs(s.reconciliation_error) <= 1e-10
 
 
@@ -44,18 +50,15 @@ def test_maturity_buckets_against_v2(name):
                         lambda: KOResetSnowballQuadEngineV2().calculate_event_stats(product, e))
     assert abs(v2.pv - REF[name]["pv"]) <= V2_QUALIFIED              # F17: V2 is qualified here
     v2_alive, v2_ki = v2.expected_discounted_cashflows[-2], v2.expected_discounted_cashflows[-1]
-    assert abs(s.expected_discounted_pre_maturity_cashflow - v2_alive) <= M_PRE
-    assert abs(s.expected_discounted_post_maturity_cashflow - v2_ki) <= M_POST
-    assert s.pre_maturity_time < s.post_maturity_time
-    assert {s.pre_maturity_payment_time, s.post_maturity_payment_time} <= set(s.payment_times.tolist())
+    assert abs(s.maturity.discounted_cash - v2_alive) <= M_PRE          # the first schedule's end, not knocked in
+    assert abs(s.ki_settlement.discounted_cash - v2_ki) <= M_POST        # the second schedule's end, knocked in
+    assert s.maturity.time < s.ki_settlement.time
+    assert {s.maturity.payment_time, s.ki_settlement.payment_time} <= set(s.ledger.payment_times.tolist())
 
 
 def test_field_layout_is_complete():
     s = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make_ko_reset(KO_RESET), env())
-    for f in ("pre_ko_payment_times", "post_ko_payment_times", "expected_discounted_pre_maturity_cashflow",
-              "expected_discounted_post_maturity_cashflow", "pre_maturity_probability", "post_maturity_probability",
-              "pre_maturity_time", "post_maturity_time", "pre_maturity_payment_time", "post_maturity_payment_time"):
-        assert getattr(s, f) is not None, f
-    total = s.pre_ko_probability.sum() + s.post_ko_probability.sum() + s.pre_maturity_probability \
-        + s.post_maturity_probability
-    assert abs(total - 1.0) <= 1e-6
+    assert set(s.observations.schedule) == {"pre", "post"}
+    assert s.observations.payment_times.size == s.observations.size
+    total = s.observations.probability.sum() + s.maturity.probability + s.ki_settlement.probability
+    assert abs(total - 1.0) <= 1e-6 and abs(s.probability_residual) <= 1e-6

@@ -52,13 +52,60 @@ def test_price_matches_the_frozen_fan(name):
     assert close(live, REFERENCE[name]["price"]), (live, REFERENCE[name]["price"])
 
 
+#: frozen legacy fields with no counterpart under the unified definitions (T12): the knock-in-ever probability
+#: (a knock-in after a knock-out is no knock-in) and the legacy per-date KI arrays (the forward pass, T13)
+DROPPED = {"ki_ever_probability", "ki_times", "ki_event_probability", "ki_survival_probability"}
+
+
+def legacy_view(stats) -> dict:
+    """The frozen (legacy) field names read off ``EventStatistics`` where the definition is the same (unified event
+    statistics T12; the D21 mapping for the maturity total). The legacy ledger's single maturity row is the
+    maturity row plus the knock-in settlement row of the new ledger (same determination and payment)."""
+    obs, coupons, ledger = stats.observations, stats.coupons, stats.ledger
+    det, pay = list(ledger.determination_times[:-1]), list(ledger.payment_times[:-1])
+    disc = list(ledger.discounted_cash[:-2]) + [float(ledger.discounted_cash[-2] + ledger.discounted_cash[-1])]
+    undisc = list(ledger.cash_to_pay[:-2]) + [float(ledger.cash_to_pay[-2] + ledger.cash_to_pay[-1])]
+    assert ledger.determination_times[-1] == ledger.determination_times[-2]
+    assert ledger.payment_times[-1] == ledger.payment_times[-2]
+    dates = lambda d: None if d is None else repr(tuple(d[:-1]))   # noqa: E731
+    return stats_fields_view({
+        "pv": stats.pv, "ko_times": obs.times, "ko_probability": obs.probability,
+        "survival_probability": np.maximum(0.0, obs.survival), "expected_discounted_ko_cashflow": obs.discounted_cash,
+        "coupon_probability": coupons.probability, "expected_discounted_coupon_cashflow": coupons.discounted_cash,
+        "coupon_payment_is_path_dependent": bool(np.all(coupons.payment_is_path_dependent)),
+        "ki_probability": stats.ki_settlement.probability,
+        "ki_survive_knocked_in_probability": stats.ki_settlement.probability,
+        "expected_discounted_maturity_cashflow": stats.maturity.discounted_cash + stats.ki_settlement.discounted_cash,
+        "reconciliation_error": stats.reconciliation_error,
+        "determination_times": det, "payment_times": pay, "expected_discounted_cashflows": disc,
+        "expected_undiscounted_cashflows": undisc, "determination_dates": dates(ledger.determination_dates),
+        "payment_dates": dates(ledger.payment_dates), "provenance": stats.provenance,
+    })
+
+
+def stats_fields_view(fields: dict) -> dict:
+    from pde_routes.phoenix_memory_fan_capture import _number
+    return {k: (v if isinstance(v, str) or v is None else _number(v)) for k, v in fields.items()}
+
+
 @pytest.mark.parametrize("name", _cases(sorted(CASES)))
 def test_event_stats_match_the_frozen_fan(name):
+    """The frozen fan's statistics, field for field where the unified definitions keep them (T12): nothing moved but
+    the dropped knock-in-ever fields (the reconciliation error is round-off on both sides)."""
     product, env, solver_cls, params = _build(name)
-    live = stats_fields(solver_cls(params).calculate_event_stats(product, env))
-    want = REFERENCE[name]["stats"]
+    live = legacy_view(solver_cls(params).calculate_event_stats(product, env))
+    want = {k: v for k, v in REFERENCE[name]["stats"].items() if k not in DROPPED}
     assert live.keys() == want.keys()
-    bad = {k: (live[k], want[k]) for k in want if not close(live[k], want[k])}
+    bad = {}
+    for k in want:
+        if k == "reconciliation_error":
+            if abs(live[k]) > 1e-10 or abs(want[k]) > 1e-10:
+                bad[k] = (live[k], want[k])
+        elif k == "provenance":
+            if live[k] != want[k]:
+                bad[k] = (live[k], want[k])
+        elif not close(live[k], want[k]):
+            bad[k] = (live[k], want[k])
     assert not bad, bad
 
 
@@ -78,7 +125,7 @@ def test_a_coupon_decided_at_valuation_reconciles_whatever_it_owes(spot, coupon_
     env = _dated_env(p, _first_obs(p), spot)
     solver = PhoenixPDESolver(PDEParams(accuracy="standard"))
     stats = solver.calculate_event_stats(p, env)
-    ledger = float(np.sum(stats.expected_discounted_cashflows))
+    ledger = float(np.sum(stats.ledger.discounted_cash))
     # the value reads S(0) + earned·u at a miss (C3); the statistics must compose the same state (C3b)
     assert abs(float(stats.pv) - ledger) <= 1e-10, (stats.pv, ledger)
     assert close(float(stats.pv), float(PhoenixPDESolver(PDEParams(accuracy="standard")).price(p, env)))

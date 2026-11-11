@@ -17,16 +17,16 @@ def test_study_product_memory_coupon_cash_against_v2():
     product, env = CASES["ph_memory"][0](), CASES["ph_memory"][1]()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
     v2 = v2_event_stats("phoenix_ph_memory", lambda: PhoenixQuadEngineV2().calculate_event_stats(product, env))
-    assert np.max(np.abs(pde.expected_discounted_coupon_cashflow - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
-    assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert np.max(np.abs(pde.coupons.discounted_cash - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
+    assert abs(pde.coupons.discounted_cash.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
     assert abs(pde.reconciliation_error) <= 1e-10
 
 
 def test_trigger_probability_is_memory_free():
     mem, env = CASES["ph_memory"][0](), CASES["ph_memory"][1]()
     plain = CASES["ph_cont"][0]()
-    a = PhoenixPDESolver(PDEParams()).calculate_event_stats(mem, env).coupon_probability
-    b = PhoenixPDESolver(PDEParams()).calculate_event_stats(plain, env).coupon_probability
+    a = PhoenixPDESolver(PDEParams()).calculate_event_stats(mem, env).coupons.probability
+    b = PhoenixPDESolver(PDEParams()).calculate_event_stats(plain, env).coupons.probability
     assert np.max(np.abs(a - b)) <= 1e-12
 
 
@@ -42,10 +42,10 @@ def test_expiry_buckets_hold_the_per_earning_cash(memory):
     reported per earning date, and the coupon payment is path dependent."""
     from pde_3a.products import env
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(_expiry(memory), env())
-    assert pde.coupon_payment_is_path_dependent is True
-    n = pde.ko_times.size
-    buckets = pde.expected_discounted_cashflows[n:2 * n + 1]
-    assert abs(buckets.sum() - pde.expected_discounted_coupon_cashflow.sum()) <= 1e-10
+    assert bool(np.all(pde.coupons.payment_is_path_dependent)) is True
+    n = pde.observations.size
+    buckets = pde.ledger.discounted_cash[n:2 * n + 1]
+    assert abs(buckets.sum() - pde.coupons.discounted_cash.sum()) <= 1e-10
     assert abs(pde.reconciliation_error) <= 1e-10
 
 
@@ -78,15 +78,15 @@ def test_expiry_buckets_match_v2(memory):
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, e)
     v2 = v2_event_stats(f"phoenix_expiry_memory_{str(memory).lower()}",
                         lambda: PhoenixQuadEngineV2().calculate_event_stats(product, e))
-    n, n2 = pde.ko_times.size, v2.ko_times.size
-    mine_t, mine = pde.payment_times[n:2 * n], pde.expected_discounted_cashflows[n:2 * n]
+    n, n2 = pde.observations.size, v2.ko_times.size
+    mine_t, mine = pde.ledger.payment_times[n:2 * n], pde.ledger.discounted_cash[n:2 * n]
     theirs_t, theirs = v2.payment_times[n2:2 * n2], v2.expected_discounted_cashflows[n2:2 * n2]
-    terminal_payment = float(pde.payment_times[2 * n])
+    terminal_payment = float(pde.ledger.payment_times[2 * n])
     for t in np.unique(mine_t[~np.isclose(mine_t, terminal_payment)]):
         got = mine[np.isclose(mine_t, t)].sum()
         want = theirs[np.isclose(theirs_t, t)].sum()
         assert abs(got - want) <= TOTAL, t
-    assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert abs(pde.coupons.discounted_cash.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
 
 
 def _c105_at_start():
@@ -104,8 +104,8 @@ def test_release_rule_product_against_v2():
     product, env = _c105_at_start()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
     v2 = v2_event_stats("phoenix_release_rule", lambda: PhoenixQuadEngineV2().calculate_event_stats(product, env))
-    assert np.max(np.abs(pde.expected_discounted_coupon_cashflow - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
-    assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert np.max(np.abs(pde.coupons.discounted_cash - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
+    assert abs(pde.coupons.discounted_cash.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
     assert abs(pde.reconciliation_error) <= 1e-10
 
 
@@ -130,7 +130,7 @@ def test_carried_arrears_add_less_than_their_discounted_face():
     carried.coupon_config = dataclasses.replace(carried.coupon_config, initial_coupon_arrears=2.0)
     a = PhoenixPDESolver(PDEParams()).calculate_event_stats(base, env)
     b = PhoenixPDESolver(PDEParams()).calculate_event_stats(carried, env)
-    extra = float(b.expected_discounted_coupon_cashflow.sum() - a.expected_discounted_coupon_cashflow.sum())
-    first_pay = float(env.get_discount_factor(float(a.ko_times[0])))
+    extra = float(b.coupons.discounted_cash.sum() - a.coupons.discounted_cash.sum())
+    first_pay = float(env.get_discount_factor(float(a.observations.times[0])))
     assert 0.0 < extra < 2.0 * first_pay
     assert abs(b.reconciliation_error) <= 1e-10

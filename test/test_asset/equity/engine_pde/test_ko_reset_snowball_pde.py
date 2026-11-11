@@ -7,7 +7,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from quantark.asset.equity.engine.event_stats import KOResetEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics, KOResetEventStats
 from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,
 )
@@ -128,14 +128,15 @@ def test_ko_reset_pde_event_stats_absolute():
 
     stats = solver.calculate_event_stats(product, pricing_env)
 
-    assert isinstance(stats, KOResetEventStats)
-    assert stats.pre_ko_times.shape == stats.pre_ko_probability.shape
-    assert stats.post_ko_times.shape == stats.post_ko_probability.shape
+    assert isinstance(stats, EventStatistics) and stats.product_family == "ko_reset"
+    schedule = np.asarray(stats.observations.schedule)
+    assert set(schedule.tolist()) == {"pre", "post"}
+    assert stats.observations.times.shape == stats.observations.probability.shape
 
     pv_parts = (
-        float(np.sum(stats.expected_discounted_ko_cashflow))
-        + float(stats.expected_discounted_post_ko_cashflow)
-        + float(stats.expected_discounted_maturity_cashflow)
+        float(np.sum(stats.observations.discounted_cash))
+        + float(stats.maturity.discounted_cash)
+        + float(stats.ki_settlement.discounted_cash)
     )
     assert stats.pv == pytest.approx(pv_parts, abs=1e-8)
 

@@ -84,7 +84,7 @@ def _engine_factories():
 
 def _ki_view(stats):
     """``(P(KI), KI table times, KI table probability, KI table survival)``: the MC producers report
-    ``EventStatistics`` (spec T9, P(KI before any KO)); the grid engines still their legacy objects."""
+    ``EventStatistics`` (spec T9, P(KI before any KO)), PDE 1D since T12; QUAD still its legacy object."""
     if isinstance(stats, EventStatistics):
         table = stats.ki_table
         return stats.knock_in.probability, table.times, table.probability, table.survival
@@ -132,6 +132,12 @@ def test_normal_ki_products_do_not_report_forced_lifecycle_state():
 
         assert np.isfinite(price)
         assert stats is not None
+        if isinstance(stats, EventStatistics) and stats.knock_in.probability is None:
+            # PDE 1D (unified event statistics T12): P(KI) and its table come from the forward pass (T13); the
+            # lifecycle state is not forced either way — nothing is reported at t = 0
+            assert "T13" in stats.unavailable["knock_in.probability"] and stats.ki_table is None
+            assert 0.0 <= stats.ki_settlement.probability < 1.0
+            continue
         probability, times, _, _ = _ki_view(stats)
         assert 0.0 <= probability < 1.0
         assert times.shape != (1,) or times[0] != pytest.approx(0.0)

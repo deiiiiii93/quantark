@@ -59,7 +59,7 @@ def _ids(*keys):
 
 def _check(stats):
     assert abs(stats.reconciliation_error) <= BOUND, stats.reconciliation_error
-    ledger = float(np.sum(stats.expected_discounted_cashflows))
+    ledger = float(np.sum(stats.ledger.discounted_cash))
     assert abs(float(stats.pv) - ledger - stats.reconciliation_error) <= 1e-12
 
 
@@ -191,7 +191,7 @@ def test_dated_memory_phoenix_on_its_first_observation_date(spot, projection, pa
         p, _dated_env(p, _first_obs(p), spot))
     _check(stats)          # a miss read from state 0 would miss the arrears the value carries in state 1
     if projection is None:  # the cell-average route decides today's coupon at the spot (nodal interpolates)
-        trigger = stats.coupon_probability[0]
+        trigger = stats.coupons.probability[0]
         assert abs(trigger - 1.0) <= 1e-12 if spot == 95.0 else trigger == 0.0
-        paid = stats.expected_discounted_coupon_cashflow[0]
+        paid = stats.coupons.discounted_cash[0]
         assert paid > 0.0 if spot == 95.0 else paid == 0.0

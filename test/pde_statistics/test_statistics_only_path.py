@@ -29,8 +29,8 @@ def test_statistics_only_ko_reset_seeds_its_staged_surface():
     own = solver.calculate_event_stats(product, env())
     solver._v0_seed_idx = None
     passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))
-    assert passed.expected_discounted_pre_maturity_cashflow == own.expected_discounted_pre_maturity_cashflow
-    assert passed.pre_maturity_probability == own.pre_maturity_probability > 0.0
+    assert passed.maturity.discounted_cash == own.maturity.discounted_cash
+    assert passed.maturity.probability == own.maturity.probability > 0.0
 
 
 def test_statistics_only_snowball_builds_its_event_schedule():
@@ -51,9 +51,23 @@ def test_supplied_npv_equal_to_the_price_changes_no_field(name):
     solver, product = PRODUCTS[name]()
     own = solver.calculate_event_stats(product, env())
     passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))
-    for f in own.__dataclass_fields__:
-        a, b = getattr(own, f), getattr(passed, f)
-        if isinstance(a, np.ndarray):
-            assert np.array_equal(a, b), f
-        else:
-            assert a == b, f
+    _assert_same(own, passed, "stats")
+
+
+def _assert_same(a, b, path):
+    """Field-by-field bitwise equality through the nested tables (EventStatistics, T12)."""
+    import dataclasses
+    from collections.abc import Mapping
+
+    if dataclasses.is_dataclass(a):
+        assert type(a) is type(b), path
+        for f in dataclasses.fields(a):
+            _assert_same(getattr(a, f.name), getattr(b, f.name), f"{path}.{f.name}")
+    elif isinstance(a, np.ndarray):
+        assert np.array_equal(a, b), path
+    elif isinstance(a, Mapping):
+        assert set(a) == set(b), path
+        for k in a:
+            _assert_same(a[k], b[k], f"{path}[{k}]")
+    else:
+        assert a == b, path

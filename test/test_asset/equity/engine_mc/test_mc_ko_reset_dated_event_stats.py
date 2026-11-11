@@ -36,9 +36,14 @@ def test_post_ko_payment_times_match_the_pde_route(case):
     # MC: EventStatistics since T9, both schedules on one observation table tagged pre / post
     obs = mc.observations
     tags = np.asarray(obs.schedule)
-    np.testing.assert_allclose(obs.times[tags == "post"], pde.post_ko_times, rtol=0, atol=1e-12)
-    np.testing.assert_allclose(obs.payment_times[tags == "post"], pde.post_ko_payment_times, rtol=0, atol=1e-12)
-    np.testing.assert_allclose(obs.payment_times[tags == "pre"], pde.pre_ko_payment_times, rtol=0, atol=1e-12)
+    # PDE 1D: EventStatistics since T12, the same pre / post tagging
+    ref = pde.observations
+    ref_tags = np.asarray(ref.schedule)
+    np.testing.assert_allclose(obs.times[tags == "post"], ref.times[ref_tags == "post"], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(obs.payment_times[tags == "post"], ref.payment_times[ref_tags == "post"],
+                               rtol=0, atol=1e-12)
+    np.testing.assert_allclose(obs.payment_times[tags == "pre"], ref.payment_times[ref_tags == "pre"],
+                               rtol=0, atol=1e-12)
     if case == "dated":
         assert obs.dates is not None        # determination dates; the time-based settlement resolver gives no date
     dist = EventDistribution.from_statistics(mc)

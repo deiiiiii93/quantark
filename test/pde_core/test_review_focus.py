@@ -107,7 +107,7 @@ def test_statistics_on_a_reused_solver_ignore_an_earlier_market():
     s.price(p, _flat(vol=0.20))
     stale = s.calculate_event_stats(p, _flat(vol=0.25))
     fresh = SnowballPDESolver(PDEParams()).calculate_event_stats(p, _flat(vol=0.25))
-    assert list(stale.ko_probability) == list(fresh.ko_probability)
+    assert list(stale.observations.probability) == list(fresh.observations.probability)
 
 
 # --- Review Focus 4 (Task 10) ----------------------------------------------------

@@ -108,9 +108,11 @@ def _phoenix():
 # ~1e-4; pv is steps-per-day invariant to 0.5c/unit post-fix (was O(sqrt(dt))).
 # Re-frozen 2026-10-04 for spec 3B stage 2 (a): the statistics take the value policy (allocated rows,
 # VALUE theta, the adapter's stages); moves ki -6.0e-9, ki_ever -6.3e-9; pv unchanged.
+# Unified event statistics T12: the statistics are ``EventStatistics``; SNOWBALL_KI is the KI settlement row
+# (knocked in and not knocked out, the marched KIS column — unmoved, bitwise). The KI-ever golden is dropped: a
+# knock-in after a knock-out is no knock-in, and P(KI before KO) comes from the forward pass (T13).
 SNOWBALL_PV = 987699.4565124855  # re-frozen with the FIRST_PASSAGE default
 SNOWBALL_KI = 0.1137292604459367
-SNOWBALL_KI_EVER = 0.15063675851573247
 
 
 def test_snowball_full_stream_matches_golden():
@@ -124,10 +126,7 @@ def test_snowball_full_stream_matches_golden():
     # margin rather than by design. Probabilities are O(0.1), where the same
     # relative bound is far tighter in absolute terms than the old 1e-9.
     assert_close(float(stats.pv), SNOWBALL_PV, msg="snowball pv")
-    assert_close(float(stats.ki_probability), SNOWBALL_KI, msg="snowball ki")
-    assert_close(
-        float(stats.ki_ever_probability), SNOWBALL_KI_EVER, msg="snowball ki_ever"
-    )
+    assert_close(float(stats.ki_settlement.probability), SNOWBALL_KI, msg="snowball ki")
 
 
 def test_snowball_ki_pruning_preserves_ko_and_pv():
@@ -138,20 +137,20 @@ def test_snowball_ki_pruning_preserves_ko_and_pv():
     lean = solver.calculate_event_stats(
         product, env, streams=frozenset({EventType.KO})
     )
-    # KO/survival/pv bit-identical whether or not KI columns are computed.
+    # KO/survival/pv bit-identical whether or not the KI stream is requested.
     assert np.array_equal(
-        np.asarray(full.ko_probability), np.asarray(lean.ko_probability)
+        np.asarray(full.observations.probability), np.asarray(lean.observations.probability)
     )
     assert np.array_equal(
-        np.asarray(full.survival_probability),
-        np.asarray(lean.survival_probability),
+        np.asarray(full.observations.survival),
+        np.asarray(lean.observations.survival),
     )
     assert float(full.pv) == float(lean.pv)
-    # KI pruned => reported as 0 (no leg needs it).
-    assert float(lean.ki_probability) == 0.0
-    assert float(lean.ki_ever_probability) == 0.0
-    # ...but the full path still reports the real KI mass.
-    assert float(full.ki_probability) > 0.0
+    # T12: the KI settlement unit is never pruned (it is a maturity outcome, AC7), so it is the same number;
+    # the KI-stream fields are "not requested", not reported as 0.
+    assert lean.ki_settlement.probability == full.ki_settlement.probability > 0.0
+    assert lean.knock_in.probability is None and lean.ki_table is None
+    assert lean.unavailable["knock_in.probability"] == "not requested"
 
 
 def test_npv_passthrough_skips_internal_price():
@@ -163,9 +162,10 @@ def test_npv_passthrough_skips_internal_price():
     passed = solver.calculate_event_stats(product, env, npv=sentinel)
     assert float(passed.pv) == sentinel
     # the leg is marched (spec 3B decision 3): the supplied npv moves the residual, not the leg
-    assert passed.expected_discounted_maturity_cashflow == internal.expected_discounted_maturity_cashflow
-    assert np.array_equal(passed.expected_discounted_cashflows, internal.expected_discounted_cashflows)
-    assert abs(passed.reconciliation_error - (sentinel - float(np.sum(internal.expected_discounted_cashflows)))) < 1e-8
+    assert passed.maturity.discounted_cash == internal.maturity.discounted_cash
+    assert passed.ki_settlement.discounted_cash == internal.ki_settlement.discounted_cash
+    assert np.array_equal(passed.ledger.discounted_cash, internal.ledger.discounted_cash)
+    assert abs(passed.reconciliation_error - (sentinel - float(np.sum(internal.ledger.discounted_cash)))) < 1e-8
 
 
 def test_phoenix_coupon_pruning_preserves_ko_and_pv():
@@ -177,9 +177,11 @@ def test_phoenix_coupon_pruning_preserves_ko_and_pv():
         product, env, streams=frozenset({EventType.KO})
     )
     assert np.array_equal(
-        np.asarray(full.ko_probability), np.asarray(lean.ko_probability)
+        np.asarray(full.observations.probability), np.asarray(lean.observations.probability)
     )
     assert float(full.pv) == float(lean.pv)
-    # Coupon columns pruned => coupon_probability empty; full path has them.
-    assert np.asarray(full.coupon_probability).size > 0
-    assert np.asarray(lean.coupon_probability).size == 0
+    # Coupon trigger columns pruned => coupon probability "not requested"; the coupon cash (a ledger flow) stays.
+    assert np.asarray(full.coupons.probability).size > 0
+    assert lean.coupons.probability is None
+    assert lean.unavailable["coupons.probability"] == "not requested"
+    assert np.array_equal(full.coupons.discounted_cash, lean.coupons.discounted_cash)

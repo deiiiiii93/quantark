@@ -12,7 +12,6 @@ from quantark.asset.equity.engine.mc import (
     LocalVolPhoenixMCEngine,
     QEPhoenixMCEngine,
 )
-from quantark.asset.equity.engine.event_stats import PhoenixEventStats
 from quantark.asset.equity.engine.pde import (
     HestonPhoenixPDESolver,
     HestonSLVPhoenixPDESolver,
@@ -265,32 +264,6 @@ def test_phoenix_vol_model_mc_rqmc_engines_run():
         assert 0.0 < price < product.initial_price * 1.2
 
 
-def _assert_phoenix_event_stats(stats: PhoenixEventStats, product: PhoenixOption):
-    assert isinstance(stats, PhoenixEventStats)
-    assert stats.ko_times.shape == stats.ko_probability.shape
-    assert stats.ko_times.shape == stats.survival_probability.shape
-    assert stats.ko_times.shape == stats.expected_discounted_ko_cashflow.shape
-    assert stats.ko_times.shape == stats.coupon_probability.shape
-    assert stats.ko_times.shape == stats.expected_discounted_coupon_cashflow.shape
-    assert stats.ko_times.size == len(product.barrier_config.ko_observation_dates)
-    assert np.isfinite(stats.pv)
-    assert np.all(np.isfinite(stats.ko_probability))
-    assert np.all(np.isfinite(stats.coupon_probability))
-    assert np.all(stats.ko_probability >= -1e-10)
-    assert np.all(stats.coupon_probability >= -1e-10)
-    assert stats.ki_ever_probability is not None
-    assert stats.ki_survive_knocked_in_probability is not None
-
-    parts = (
-        float(np.sum(stats.expected_discounted_ko_cashflow))
-        + float(np.sum(stats.expected_discounted_coupon_cashflow))
-        + float(stats.expected_discounted_maturity_cashflow)
-    )
-    assert float(stats.pv) - parts == pytest.approx(
-        float(stats.reconciliation_error), abs=1e-7
-    )
-
-
 def _assert_phoenix_event_statistics(stats, product: PhoenixOption):
     """The MC engines report the unified ``EventStatistics`` (T10): a coupon table on the observation grid, every
     outcome direct, both residuals at round-off."""
@@ -304,6 +277,24 @@ def _assert_phoenix_event_statistics(stats, product: PhoenixOption):
     assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability
     assert abs(stats.probability_residual) <= 1e-12
     assert abs(stats.reconciliation_error) <= 1e-12 * max(1.0, abs(stats.pv))
+
+
+def _assert_phoenix_pde_event_statistics(stats, product: PhoenixOption):
+    """The PDE 1D march (local vol, and the 2D solvers' flat-vol surrogate) reports ``EventStatistics`` since
+    unified event statistics T12: coupon table on the observation grid, KI settlement marched, P(KI) pending the
+    forward pass (T13); the ledger reconciles to the reported pv up to ``reconciliation_error``."""
+    from quantark.asset.equity.engine.event_stats import EventStatistics
+
+    assert isinstance(stats, EventStatistics) and stats.product_family == "phoenix"
+    n = len(product.barrier_config.ko_observation_dates)
+    assert stats.observations.size == stats.coupons.size == n
+    assert np.isfinite(stats.pv)
+    assert np.all(np.isfinite(stats.observations.probability)) and np.all(np.isfinite(stats.coupons.probability))
+    assert np.all(stats.observations.probability >= -1e-10) and np.all(stats.coupons.probability >= -1e-10)
+    assert stats.knock_in.probability is None and "T13" in stats.unavailable["knock_in.probability"]
+    assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability
+    parts = float(np.sum(stats.ledger.discounted_cash))
+    assert float(stats.pv) - parts == pytest.approx(float(stats.reconciliation_error), abs=1e-7)
 
 
 def test_phoenix_vol_model_mc_engines_calculate_event_stats():
@@ -354,12 +345,12 @@ def test_phoenix_vol_model_pde_engines_calculate_event_stats():
     for engine in engines:
         price = float(engine.price(product, env))
         stats = engine.calculate_event_stats(product, env)
-        _assert_phoenix_event_stats(stats, product)
+        _assert_phoenix_pde_event_statistics(stats, product)
         assert float(stats.pv) == pytest.approx(price, rel=0.0, abs=1e-8)
 
         result = engine.price_with_events(product, env)
         assert float(result.npv) == pytest.approx(price, rel=0.0, abs=1e-8)
-        assert result.event_distribution.stream_times[EventType.KO].shape == stats.ko_times.shape
+        assert result.event_distribution.stream_times[EventType.KO].shape == stats.observations.times.shape
 
 
 def test_phoenix_heston_and_slv_pde_engines_run():

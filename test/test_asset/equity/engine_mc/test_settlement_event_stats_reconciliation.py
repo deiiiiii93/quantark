@@ -40,7 +40,7 @@ from test_asset.equity.product_other.test_structured_numerical_settlement import
 
 
 class _LedgerView:
-    """An ``EventStatistics`` (MC Snowball since T9) read through this module's legacy-named attributes: its
+    """An ``EventStatistics`` (MC Snowball since T9, PDE 1D since T12) read through this module's legacy-named attributes: its
     ledger as the payment-aware cashflow fields, its observation table as the KO grid."""
 
     def __init__(self, stats):
@@ -230,6 +230,7 @@ def test_native_structured_stats_reconcile_on_payment_grid(
     )
 
     _assert_aligned_cashflow_ledger(stats, env)
+    stats = _view(stats)   # PDE 1D: EventStatistics since T12
     assert np.any(
         np.asarray(stats.payment_times)
         > np.asarray(stats.determination_times)

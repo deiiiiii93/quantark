@@ -18,25 +18,26 @@ from pde_statistics.v2_frozen import v2_event_stats
 
 def test_both_schedules_and_both_maturities():
     stats = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make_ko_reset(KO_RESET), env())
-    d = EventDistribution.from_autocallable_stats(stats)
-    n = stats.pre_ko_times.size + stats.post_ko_times.size
+    d = EventDistribution.from_statistics(stats)
+    schedule = np.asarray(stats.observations.schedule)
+    n = int(np.sum(schedule == "pre") + np.sum(schedule == "post"))
     assert d.stream_times[EventType.KO].size == n and np.all(np.diff(d.stream_times[EventType.KO]) >= 0)
     # spec D16: the marched buckets' residual is absorbed into MATURITY_NO_KO and carried visibly
-    residual = 1.0 - (stats.pre_ko_probability.sum() + stats.post_ko_probability.sum()
-                      + stats.pre_maturity_probability + stats.post_maturity_probability)
+    residual = 1.0 - (stats.observations.probability.sum() + stats.maturity.probability
+                      + stats.ki_settlement.probability)
     assert d.probability_residual == pytest.approx(residual, abs=1e-15)
     assert d.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(
-        stats.pre_maturity_probability + d.probability_residual, abs=1e-15)
-    assert d.determination_times[EventType.MATURITY_NO_KO] == stats.pre_maturity_time
-    assert d.payment_times_for(EventType.MATURITY_NO_KO) == stats.pre_maturity_payment_time
-    assert d.payment_times_for(EventType.MATURITY_WITH_KI) == stats.post_maturity_payment_time
+        stats.maturity.probability + d.probability_residual, abs=1e-15)
+    assert d.determination_times[EventType.MATURITY_NO_KO] == stats.maturity.time
+    assert d.payment_times_for(EventType.MATURITY_NO_KO) == stats.maturity.payment_time
+    assert d.payment_times_for(EventType.MATURITY_WITH_KI) == stats.ki_settlement.payment_time
     # F5: the pre-maturity mass leaves the survival at its determination, the last node keeps today's convention
-    i_pre = int(np.searchsorted(d.stream_times[EventType.KO], stats.pre_maturity_time, side="right"))
+    i_pre = int(np.searchsorted(d.stream_times[EventType.KO], stats.maturity.time, side="right"))
     ko_cum = np.cumsum(d.probabilities[EventType.KO])
     assert d.survival_probability[i_pre] == pytest.approx(
-        1.0 - ko_cum[i_pre - 1] - stats.pre_maturity_probability, abs=1e-12)
+        1.0 - ko_cum[i_pre - 1] - stats.maturity.probability, abs=1e-12)
     assert d.survival_probability[-1] == pytest.approx(
-        1.0 - ko_cum[-1] - stats.pre_maturity_probability, abs=1e-12)
+        1.0 - ko_cum[-1] - stats.maturity.probability, abs=1e-12)
     assert d.provenance == stats.provenance
 
 
@@ -60,8 +61,11 @@ def test_legacy_quad_keeps_one_maturity_outcome_but_both_schedules():
 
 
 def test_rebased_offsets_are_refused():
+    """The transition refuses a legacy REBASED object (offsets): built from QUAD V2's legacy statistics, the PDE
+    returning ``EventStatistics`` since T12."""
     import dataclasses
-    stats = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make_ko_reset(KO_RESET), env())
+    from quantark.asset.equity.engine.quad.v2.engine import KOResetSnowballQuadEngineV2
+    stats = KOResetSnowballQuadEngineV2().calculate_event_stats(make_ko_reset(KO_RESET), env())
     with pytest.raises(NotImplementedError, match="offsets"):
         EventDistribution.from_autocallable_stats(dataclasses.replace(stats, post_ko_times_are_offsets=True))
 

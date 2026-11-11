@@ -149,7 +149,14 @@ def test_continuous_ki_monitoring_continues_after_valuation_ko(family):
     market = flat_env(date, spot=110.)
     _, _, v1, v2 = CASES[family]
     pde = {'snowball': SnowballPDESolver, 'phoenix': PhoenixPDESolver, 'ko_reset': KOResetSnowballPDESolver}[family]
-    stats = [cls().calculate_event_stats(product, market) for cls in (v1, pde, v2)]
+    stats = [cls().calculate_event_stats(product, market) for cls in (v1, v2)]
+    # PDE 1D (unified event statistics T12, DESIGN §4.5): a knock-out at valuation without a carried knock-in is
+    # no knock-in, so the PDE reports P(KI) = 0 and an empty knock-in table; the QUAD engines keep their legacy
+    # KO-independent monitor until they migrate (T16 / T17)
+    unified = pde().calculate_event_stats(product, market)
+    assert unified.knock_in.probability == 0. and unified.ki_table.size == 0
+    assert unified.ki_settlement.probability == 0. and unified.maturity.probability == 0.
+    assert float(unified.observations.probability.sum()) == 1.
     expected = stats[-1].ki_ever_probability
     assert 0 < expected < 1
     for result in stats:

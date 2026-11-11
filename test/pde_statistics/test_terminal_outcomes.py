@@ -32,7 +32,7 @@ def test_knocked_out_event_stats_is_a_terminal_outcome(cls, make, monkeypatch):
     monkeypatch.setattr(GridBinder, "bind", lambda *a, **k: calls.append(1))
     stats = solver.calculate_event_stats(product, env)
     assert not calls                                      # no layout was bound
-    assert stats.ko_probability[0] == 1.0 and not np.any(stats.ko_probability[1:])
+    assert stats.observations.probability[0] == 1.0 and not np.any(stats.observations.probability[1:])
 
 
 def test_nodal_knocked_out_is_a_terminal_outcome_too():
@@ -59,12 +59,12 @@ def test_knocked_out_phoenix_pays_its_coupon_with_the_knock_out(memory, pay):
     rec0 = product.resolve_ko_observations(env)[0]
     df = env.get_discount_factor(float(rec0.settlement_time)) if rec0.settlement_time else 1.0
     coupon = product.get_coupon_payoff(0) + (float(product.coupon_config.initial_coupon_arrears) if memory else 0.0)
-    assert stats.expected_discounted_coupon_cashflow[0] == pytest.approx(coupon * df, abs=1e-14)
-    assert not np.any(stats.expected_discounted_coupon_cashflow[1:])
-    assert stats.coupon_probability[0] == 1.0 and not np.any(stats.coupon_probability[1:])
-    assert stats.expected_discounted_maturity_cashflow == 0.0
+    assert stats.coupons.discounted_cash[0] == pytest.approx(coupon * df, abs=1e-14)
+    assert not np.any(stats.coupons.discounted_cash[1:])
+    assert stats.coupons.probability[0] == 1.0 and not np.any(stats.coupons.probability[1:])
+    assert stats.maturity.discounted_cash == 0.0 and stats.ki_settlement.discounted_cash == 0.0
     assert abs(stats.reconciliation_error) <= 1e-10
-    assert bool(stats.coupon_payment_is_path_dependent) is (pay == "expiry")
+    assert bool(np.all(stats.coupons.payment_is_path_dependent)) is (pay == "expiry")
 
 
 # --- spec 3B stage 2 (d): the family's decision first (decisions 7, 15) ----------------------------
@@ -117,12 +117,13 @@ def test_knocked_out_at_valuation_is_one_answer(kind, projection):
     product, solver, env = _knocked_out(kind, projection)
     stats = solver.calculate_event_stats(product, env)
     dist = solver.price_with_events(product, env).event_distribution
-    _same_distribution(dist, EventDistribution.from_autocallable_stats(stats))
-    assert stats.ko_probability[0] == 1.0 and stats.expected_discounted_maturity_cashflow == 0.0
+    _same_distribution(dist, EventDistribution.from_statistics(stats))
+    assert stats.observations.probability[0] == 1.0
+    assert stats.maturity.discounted_cash == 0.0 and stats.ki_settlement.discounted_cash == 0.0
     assert abs(stats.reconciliation_error) <= 1e-12
     assert solver.explain(product, env).terminal["event_stats"] == "knocked_out_at_valuation"
     if kind == "phoenix":
-        assert stats.expected_discounted_coupon_cashflow[0] > 0.0      # the coupon paid with the knock-out
+        assert stats.coupons.discounted_cash[0] > 0.0      # the coupon paid with the knock-out
 
 
 def test_carried_knock_in_with_disabled_knock_out_does_not_knock_out():
@@ -131,7 +132,7 @@ def test_carried_knock_in_with_disabled_knock_out_does_not_knock_out():
     solver = SnowballPDESolver(PDEParams())
     assert solver.explain(product, env).terminal["price"] == "marches"
     stats = solver.calculate_event_stats(product, env)
-    assert stats.ko_probability[0] == 0.0
+    assert stats.observations.probability[0] == 0.0
 
 
 def test_carried_knock_in_ko_reset_knocks_out_on_its_post_schedule():
@@ -155,9 +156,10 @@ def test_lifecycle_flag_marches_ki_survive(rate, bound):
     product = _flag(CASES["sb_cont"][0]())
     env = CASES["sb_cont"][1]() if rate is None else make_env(rate=rate)
     stats = SnowballPDESolver(PDEParams()).calculate_event_stats(product, env)
-    assert stats.ki_ever_probability == 1.0
-    assert abs(stats.ki_survive_knocked_in_probability - (1.0 - stats.ko_probability.sum())) <= bound
-    assert stats.ki_probability == stats.ki_survive_knocked_in_probability     # settles knocked in
+    assert stats.knock_in.probability == 1.0 and stats.knock_in.expected_time == 0.0     # carried (T12)
+    assert abs(stats.ki_settlement.probability - (1.0 - stats.observations.probability.sum())) <= bound
+    assert stats.maturity.probability == 0.0                                              # never not knocked in
+    assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability          # settles knocked in
 
 
 @pytest.mark.parametrize("k, memory, barrier", [
@@ -177,7 +179,6 @@ def test_a_later_observation_knock_out_pays_the_decided_coupon(k, memory, barrie
     solver = PhoenixPDESolver(PDEParams())
     assert solver.price(p, env) == pytest.approx((float(rec.payoff or 0.0) + decision.coupon) * df, abs=1e-12)
     stats = solver.calculate_event_stats(p, env)
-    assert float(np.sum(stats.expected_discounted_coupon_cashflow)) == pytest.approx(decision.coupon * df,
-                                                                                       abs=1e-12)
-    assert float(np.sum(stats.coupon_probability)) == (1.0 if decision.coupon_index is not None else 0.0)
+    assert float(np.sum(stats.coupons.discounted_cash)) == pytest.approx(decision.coupon * df, abs=1e-12)
+    assert float(np.sum(stats.coupons.probability)) == (1.0 if decision.coupon_index is not None else 0.0)
     assert abs(stats.reconciliation_error) <= 1e-10

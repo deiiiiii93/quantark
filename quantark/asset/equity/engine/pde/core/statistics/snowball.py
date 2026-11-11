@@ -1,21 +1,28 @@
-"""The two-surface statistics in the value mode (spec 3B §5.1, §5.2).
+"""The two-surface statistics in the value mode (spec 3B §5.1, §5.2; unified event statistics T12).
 
-Columns per surface: KO_0..KO_{n-1}, KIS, KIE, M (``ColumnLayout(n_ko, ki=want_ki, leg=True)``).
+Columns per surface: KO_0..KO_{n-1}, KIS, M0, M1, U0 (``ColumnLayout(n_ko, leg=True)``): the knock-out units,
+the knocked-in settlement unit, the maturity cash of the not-knocked-in and of the knocked-in outcome and the
+not-knocked-in maturity unit -- one column per termination outcome (DESIGN §4.1, §4.7), none of them pruned.
 Rows: the value's own rows, allocated (cash) and the economically right ones (probabilities).
 θ: the value groups' (``VALUE``). Events: the adapter's stages through a ``Breach``.
 
 Every cash operation the value applies is linear and is applied here column for column with the
-cash split by the column that pays it, so ``value = Σ_k payoff_k·KO_k + M`` node for node; the
+cash split by the column that pays it, so ``value = Σ_k payoff_k·KO_k + M0 + M1`` node for node; the
 readout reports that sum's residual against the pv as ``reconciliation_error``.
+
+``read_statistics`` returns ``EventStatistics`` (the PDE 1D facades). ``read`` keeps the legacy dataclass for
+the native ADI route, which migrates in its own task (unified event statistics T14).
 """
 from __future__ import annotations
 
 import numpy as np
 
+from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 from ..groups import VALUE, Backend, ColumnGroup
+from . import event_statistics as es
 from .columns import ColumnLayout
 from .group import RollingStatistics
 from .readout import assemble_autocallable
@@ -24,7 +31,7 @@ __all__ = ["SnowballStatistics", "SnowballBreach"]
 
 
 def _want(streams):
-    """(want_ki, want_coupon_report) from a stream selection (spec 3B §5.1 "streams")."""
+    """(want_ki, want_coupon_report) from a stream selection (spec 3B §5.1 "streams"): the legacy readout's."""
     if streams is None:
         return True, True
     from quantark.cashleg.event_distribution import EventType
@@ -45,11 +52,9 @@ class SnowballBreach:
             settlement_time=record.settlement_time)
 
     def ko(self, record, block, surface):
-        s, L = self.stats, self.stats.layout
+        s = self.stats
         target = np.zeros_like(block)
         target[:, s.column_of_record(record, surface)] = self.unit(record)
-        if L.kie is not None:
-            target[:, L.kie] = block[:, L.kie]          # knock-in-ever is exempt from the knock-out
         return target
 
     def seed(self, block):
@@ -57,6 +62,9 @@ class SnowballBreach:
 
 
 class SnowballStatistics(RollingStatistics):
+
+    #: ``EventStatistics.product_family``
+    family = "snowball"
 
     @classmethod
     def create(cls, prepared, streams):
@@ -71,7 +79,9 @@ class SnowballStatistics(RollingStatistics):
         self.x, self.s, self.t = sp.x, sp.s, prepared.layout.time.t
         if (len(self.x) - 2) <= 2:
             raise ValidationError("Event stats PDE currently requires banded solver path.")
-        self.want_ki, self.want_coupon = _want(streams)
+        self.want_ki, self.want_coupon = _want(streams)          # the legacy readout's (native ADI)
+        self.want_ki_path = es.want_knock_in_path(streams)
+        self.want_coupon_probability = es.want_coupon_probability(streams)
         self.ko_records = self.solver._filter_observations_by_tau(
             self.product.resolve_ko_observations(self.env), self.tau)
         self._col_by_time = {}
@@ -85,7 +95,8 @@ class SnowballStatistics(RollingStatistics):
         self.already_knocked_in = bool(getattr(self.product, "_otc_lifecycle_knocked_in", False))
 
     def _layout(self):
-        return ColumnLayout(len(self.ko_records), ki=self.want_ki, leg=True)
+        # the termination outcomes are never pruned (DESIGN §4.9b): KIS, M0, M1 and U0 on every request
+        return ColumnLayout(len(self.ko_records), ki=True, leg=True)
 
     def _breach(self):
         return SnowballBreach(self)
@@ -119,11 +130,10 @@ class SnowballStatistics(RollingStatistics):
         tmp = np.zeros((len(self.x), 1))
         solver._set_terminal_condition_v0(tmp, self.x, self.s, product, env)
         v0[:, L.maturity[0]] = tmp[:, -1]
+        v0[:, L.maturity_unit[0]] = 1.0
         solver._set_terminal_condition_v1(tmp, self.x, self.s, product, env)
-        v1[:, L.maturity[0]] = tmp[:, -1]
-        if L.kis is not None:
-            v1[:, L.kis] = 1.0
-            v1[:, L.kie] = 1.0
+        v1[:, L.maturity[1]] = tmp[:, -1]
+        v1[:, L.kis] = 1.0
         # the value adapter's terminal events, in its order (SnowballAdapter.terminal)
         is_terminal_ki = product.has_ki_barrier and (
             solver._ki_continuous or (num_t - 1) in solver._ki_observation_indices)
@@ -153,9 +163,10 @@ class SnowballStatistics(RollingStatistics):
         w = self.n_cols
         lower, upper = np.zeros(2 * w), np.zeros(2 * w)
         r_lo0, r_lo1, r_up0, r_up1 = lower[:w], lower[w:], upper[:w], upper[w:]
+        reverse = bool(product.is_reverse)
         self._fill_cash(r_lo1, lo1, "ki")
         self._fill_cash(r_up1, up1, "ki")
-        for r0, r1, edge in ((r_up0, r_up1, up0), (r_lo0, r_lo1, lo0)):
+        for r0, r1, edge, ki_edge in ((r_up0, r_up1, up0, reverse), (r_lo0, r_lo1, lo0, not reverse)):
             if edge.copy_from_ki:
                 # continuous KI: the value's alive knock-in-side row (lower; upper on a reverse product) is the
                 # knocked-in row (copied, allocation and all) -- or 0.0 on a family whose value never exposes that
@@ -163,9 +174,9 @@ class SnowballStatistics(RollingStatistics):
                 if self._alive_ki_edge_copies_ki:
                     r0[:] = r1
             else:
-                self._fill_cash(r0, edge, "alive")
+                self._fill_cash(r0, edge, "alive", ki_edge)
         if self.layout.kis is not None:
-            self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1)
+            self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1, (lo0, up0))
         self._probability_rows(j, current, (r_lo0, r_up0, r_lo1, r_up1), (lo0, up0, lo1, up1))
         return lower, upper
 
@@ -184,42 +195,55 @@ class SnowballStatistics(RollingStatistics):
                 return stash[4], stash[5]
         return getattr(solver, f"_boundary_rows_{which}")(j, tau_rem, self.product, self.env, self.s)
 
-    def _ki_rows(self, current, r_lo0, r_up0, r_lo1, r_up1):
-        """The knock-in columns' rows, in determination units ``DF(t, T)``, by edge (spec 3B §5.1).
+    def _ki_rows(self, current, r_lo0, r_up0, r_lo1, r_up1, alive_edges):
+        """The maturity outcomes' unit rows, in determination units ``DF(t, T)``, by edge (spec 3B §5.1).
 
         The knock-out edge is the upper one (the lower on a reverse product). There the knocked-in
         surface settles knocked in unless the knock-out survives the knock-in, and the
         not-knocked-in surface never knocks in; at the knock-in edge both settle knocked in (on the
         not-knocked-in surface: copied under continuous KI, a certain discrete knock-in otherwise).
+        The not-knocked-in maturity unit ``U0`` takes the rest of the not-knocked-in surface: an edge that
+        neither settles knocked in nor knocks out (the knock-in edge of a note without a barrier, a
+        knock-out edge with no knock-out record ahead) matures not knocked in.
         """
         solver, product, L = self.solver, self.product, self.layout
         df_det = solver._df_between_times(self.env, current, solver._total_tau)
         ko1, ki1 = (r_lo1, r_up1) if product.is_reverse else (r_up1, r_lo1)
         ko0, ki0 = (r_lo0, r_up0) if product.is_reverse else (r_up0, r_lo0)
+        ko_edge0 = alive_edges[0] if product.is_reverse else alive_edges[1]
         ki1[L.kis] = df_det
-        ki1[L.kie] = df_det
         ko1[L.kis] = 0.0 if solver._ko_survives_ki(product) else df_det
-        ko1[L.kie] = df_det
         reachable = df_det if product.has_ki_barrier else 0.0
         ki0[L.kis] = reachable
-        ki0[L.kie] = reachable
         ko0[L.kis] = 0.0
-        ko0[L.kie] = 0.0
+        u0 = int(L.maturity_unit[0])
+        ki1[u0] = 0.0
+        ko1[u0] = 0.0
+        ki0[u0] = 0.0 if product.has_ki_barrier else df_det
+        ko_ahead = any(term.column == "KO" and term.record_time is not None for term in ko_edge0.terms)
+        ko0[u0] = 0.0 if ko_ahead else df_det
 
     def _probability_rows(self, j, current, rows, edges):
         """Family hook (Phoenix: the trigger rows; KO-reset: the maturity units). ``rows`` are the
         statistics rows ``(lo0, up0, lo1, up1)``, filled in place; ``edges`` the value's EdgeRows."""
 
-    def _fill_cash(self, row, edge, surface):
+    def _fill_cash(self, row, edge, surface, ki_edge=False):
         """Write an EdgeRow's cash terms into ``row`` (zeros), each in the column that pays it."""
         for term in edge.terms:
             if term.column == "KO" and term.record_time is None:
                 continue                                 # no knock-out ahead: the term's unit is 0.0
-            row[self._column_of_term(term, surface)] = term.value
+            row[self._column_of_term(term, surface, ki_edge)] = term.value
 
-    def _column_of_term(self, term, surface):
+    def _maturity_column(self, surface, ki_edge):
+        """The maturity cash column of an ``M`` term: the knocked-in outcome's on the knocked-in surface and on the
+        not-knocked-in surface's knock-in edge of a note with a barrier (where the unit rows settle it knocked
+        in, ``_ki_rows``), else the not-knocked-in outcome's."""
+        knocked_in = surface == "ki" or (ki_edge and self.product.has_ki_barrier)
+        return int(self.layout.maturity[1 if knocked_in else 0])
+
+    def _column_of_term(self, term, surface, ki_edge=False):
         if term.column == "M":
-            return int(self.layout.maturity[0])
+            return self._maturity_column(surface, ki_edge)
         if term.column == "KO":
             return self.column_of_record(term.record_time, surface)
         raise ValidationError(f"row term {term.column!r} has no column in {type(self).__name__}")
@@ -257,33 +281,80 @@ class SnowballStatistics(RollingStatistics):
         sel = 1 if self.knocked_in_at_valuation else 0
         return pre[sel] if pre is not None else (states["stats_v1"] if sel else states["stats_v0"])
 
-    def read(self, states, captures, pv):
-        L, env, prepared = self.layout, self.env, self.prepared
+    def _reader(self, states, captures):
+        """``at(col)``: a column of the selected surface read at the spot by the value's own readout, so the
+        identity holds through it (a linear map of the column)."""
+        prepared, env = self.prepared, self.env
         grid = self._spot_block(states, captures)
 
         def at(col):
-            # the value's own readout, so the identity holds through it (a linear map of the column)
             return float(prepared.readout.price(grid[:, col], env.spot, prepared.layout))
 
+        return at
+
+    def read(self, states, captures, pv):
+        """The legacy dataclass (the native ADI route until it migrates, unified event statistics T14)."""
+        L = self.layout
+        at = self._reader(states, captures)
         ed_unit = np.array([at(c) for c in L.ko])
         ki = self._ki_fields(at)
-        return assemble_autocallable(self.solver, self.product, env, pv=pv, ko_records=self.ko_records,
+        return assemble_autocallable(self.solver, self.product, self.env, pv=pv, ko_records=self.ko_records,
                                      ed_unit=ed_unit, ki=ki, extra_fields={},
-                                     maturity=at(L.maturity[0]))
+                                     maturity=at(L.maturity[0]) + at(L.maturity[1]))
 
     def _ki_fields(self, at):
-        """``(ki_probability, ki_ever, ki_times, ki_event_probability, ki_survival_probability)``.
+        """The legacy readout's ``(ki_probability, ki_ever, ki_times, ki_event_probability, ki_survival_probability)``.
 
-        A lifecycle knock-in (spec 3B stage 2 (d)) is ``ki_ever`` 1 at time 0, and the marched KIS column of
-        the knocked-in surface is what settles knocked in; with the knock-in pair pruned it is reported 0,
-        as every pruned knock-in field is."""
+        A lifecycle knock-in (spec 3B stage 2 (d)) is ``ki_ever`` 1 at time 0, and the marched settlement
+        unit of the knocked-in surface is what settles knocked in; with the knock-in streams pruned it is
+        reported 0, as every pruned knock-in field is. The native ADI route replaces ``ki_ever`` with its own
+        monitor; nothing else reads it."""
+        ki_unit = self.layout.ki_unit
         if self.already_knocked_in:
             df_T = self.env.get_discount_factor(float(self.tau))
-            kis = float(at(self.layout.kis) / df_T) if (self.layout.kis is not None and df_T > 0.0) else 0.0
+            kis = float(at(ki_unit) / df_T) if (self.want_ki and df_T > 0.0) else 0.0
             return (kis, 1.0, np.array([0.0]), np.array([1.0]), np.array([0.0]))
-        if self.layout.kis is None:
+        if not self.want_ki:
             return (0.0, 0.0, np.array([]), np.array([]), np.array([]))
         df_T = self.env.get_discount_factor(float(self.tau))
-        return (float(at(self.layout.kis) / df_T) if df_T > 0.0 else 0.0,
-                float(at(self.layout.kie) / df_T) if df_T > 0.0 else 0.0,
+        return (float(at(ki_unit) / df_T) if df_T > 0.0 else 0.0, 0.0,
                 np.array([]), np.array([]), np.array([]))
+
+    # --- the EventStatistics readout (unified event statistics T12) -------------------------------
+
+    def read_statistics(self, states, captures, pv):
+        """``EventStatistics`` of the march: every outcome from its own column (DESIGN §4.7)."""
+        L, env, product = self.layout, self.env, self.product
+        at = self._reader(states, captures)
+        observations = es.observation_table(env, self.ko_records, np.array([at(c) for c in L.ko]))
+        terminal = resolve_terminal_timing(product, env)
+        maturity, ki_settlement = self._maturity_rows(at, terminal)
+        unavailable = {}
+        knock_in, ki_table = self._knock_in(ki_settlement, unavailable)
+        lifetime = float(np.sum(observations.probability * observations.times)) + (
+            maturity.probability + ki_settlement.probability) * float(terminal.determination_time)
+        return es.assemble(family=self.family, pv=pv, observations=observations, coupons=None, maturity=maturity,
+                           ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table,
+                           expected_lifetime=lifetime, provenance=self.solver._native_provenance(),
+                           unavailable=unavailable)
+
+    def _maturity_rows(self, at, terminal):
+        """The maturity (never KO, never KI) and knock-in settlement (KI, no KO) rows at the terminal timing:
+        probability from the outcome's unit (``DF(determination)``), cash from its maturity column."""
+        L, env = self.layout, self.env
+        det, pay = float(terminal.determination_time), float(terminal.payment_time)
+        df_det = float(env.get_discount_factor(det))
+        timing = dict(time=det, payment_time=pay, date=terminal.determination_date,
+                      payment_date=terminal.payment_date)
+        maturity = es.outcome_row(env, probability=at(L.maturity_unit[0]) / df_det, discounted=at(L.maturity[0]),
+                                  **timing)
+        ki_settlement = es.outcome_row(env, probability=at(L.kis) / df_det, discounted=at(L.maturity[1]), **timing)
+        return maturity, ki_settlement
+
+    def _knock_in(self, ki_settlement, unavailable):
+        """``(KnockInStatistics, ki_table)``: the valuation-date rules, else the forward pass's (T13)."""
+        rule = es.knock_in_rule(self.product, knocked_out_now=False, knocked_in_now=self.knocked_in_at_valuation)
+        loss = es.expected_loss(self.product, self.env, probability=ki_settlement.probability,
+                                discounted_cash=ki_settlement.discounted_cash, payment_time=ki_settlement.payment_time)
+        return es.knock_in_fields(rule, want=self.want_ki_path, probability_no_ko=ki_settlement.probability,
+                                  expected_loss=loss, unavailable=unavailable)

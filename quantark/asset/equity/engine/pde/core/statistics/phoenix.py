@@ -1,13 +1,17 @@
-"""The Phoenix statistics in the value mode (spec 3B §5.3, §5.1): INSTANT coupons, with memory.
+"""The Phoenix statistics in the value mode (spec 3B §5.3, §5.1; unified event statistics T12): INSTANT and
+EXPIRY coupons, with memory.
 
-Columns per surface (``ColumnLayout(n_ko, trigger=True, ki=want_ki, leg=True, coupon_cash=True,
-n_states=2)`` with memory, ``n_states=1`` without -- the value's memory fan, spec 2026-10-15 C4):
+Columns per surface (``ColumnLayout(n_ko, trigger=True, leg=True, coupon_cash=True, n_states=2, expiry=...,
+undiscounted=...)`` with memory, ``n_states=1`` without -- the value's memory fan, spec 2026-10-15 C4):
 
-* the memory-free columns ``F``: KO_k, the triggers P_k, KIS, KIE, M -- a knock-out, a knock-in and the
+* the memory-free columns ``F``: KO_k, the triggers P_k, KIS, M0, M1, U0 -- a knock-out, a knock-in and the
   maturity do not depend on the arrears owed;
 * per memory state ``m`` the slice ``S(m)`` of coupon cash ``C_k^(m)``: the coupon paid at observation
-  ``k`` on a path that is in state ``m`` now. State 0 owes ``A0`` (the arrears carried from before the
-  pricing date, at the first observation only), state 1 one unit more (``PhoenixPDESolver._state_arrears``).
+  ``k`` on a path that is in state ``m`` now (EXPIRY: also the payment buckets ``D^(j,m)`` and, with memory,
+  the coupon earned at ``k`` valued at ``k``, ``Ĉ_k^(m)``, whose readout over ``DF(t_k)`` is the coupon's
+  cash to pay -- it is paid at the note's random end, DESIGN §4.6). State 0 owes ``A0`` (the arrears carried
+  from before the pricing date, at the first observation only), state 1 one unit more
+  (``PhoenixPDESolver._state_arrears``).
 
 The value's state-``m`` surface is ``F`` + ``S(m)`` read with the knock-out payoffs: every value stage is
 linear, and each stage here applies it to ``F`` and to every slice with the cash split by the column
@@ -16,17 +20,22 @@ that pays it -- the coupon fan-in (pay: state 0 plus the coupon earned, miss: th
 the spot, the coupon on its barrier) and their joint projection on a shared date. A coupon missed at the
 valuation instant is read the same way from the pre-event block (spec 2026-10-15 C3b); ``S(1)`` is the
 unit carrier and no readout reads it raw.
+
+The coupon paid with a knock-out (current coupon and released arrears) is coupon cash, never knock-out cash
+(DESIGN §4.3, AC11): the knock-out unit pays the record's redemption only.
 """
 from __future__ import annotations
 
 import numpy as np
 
+from quantark.asset.equity.engine.event_stats import CashLedger, CouponTable
 from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.enum import CouponPayType
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
+from . import event_statistics as es
 from .columns import ColumnLayout
 from .readout import assemble_autocallable
 from .snowball import SnowballBreach, SnowballStatistics
@@ -61,6 +70,8 @@ class PhoenixBreach(SnowballBreach):
 
 class PhoenixStatistics(SnowballStatistics):
 
+    family = "phoenix"
+
     #: PhoenixAdapter.boundaries exposes the knocked-in grid to the alive knock-in-side row under continuous KI
     #: (``solver._grid_v1``), as SnowballAdapter does: the statistics copy the knocked-in row too
     _alive_ki_edge_copies_ki = True
@@ -75,9 +86,12 @@ class PhoenixStatistics(SnowballStatistics):
                 if is_close(float(own.observation_time), float(rec.observation_time)):
                     self._k_of_obs[obs_idx], self._obs_of_k[k] = k, obs_idx
                     break
-        self._S = [np.r_[L.cash[:, m], L.bucket[:, m]].astype(int) for m in range(self.n_states)]
+        self._S = [np.r_[L.cash[:, m], L.bucket[:, m], L.cash_u[:, m]].astype(int) for m in range(self.n_states)]
+        # the undiscounted coupon carrier's offset in a slice (after C_k and the buckets)
+        self._u_off = L.n_ko + L.bucket.shape[0]
         for m, cols in enumerate(self._S):     # C_k^(m) sits at position k of its slice, in every state
             assert all(int(cols[k]) == int(L.cash[k, m]) for k in range(L.n_ko))
+            assert all(int(cols[self._u_off + k]) == int(L.cash_u[k, m]) for k in range(L.cash_u.shape[0]))
         # EXPIRY's termination units T_0..T_{n-1}, U: one contiguous slice, outside F and every S(m) -- they
         # take only the knock-in copy and the termination knock-out, as W does (plan F4)
         self._TU = slice(int(L.term_unit[0]), int(L.unit) + 1) if L.expiry else None
@@ -91,8 +105,9 @@ class PhoenixStatistics(SnowballStatistics):
         product = self.product
         self.n_states = 2 if product.has_memory_coupon else 1     # the value's memory fan (spec 2026-10-15 C4)
         expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-        return ColumnLayout(len(self.ko_records), trigger=True, ki=self.want_ki, leg=True, coupon_cash=True,
-                            n_states=self.n_states, expiry=expiry)
+        return ColumnLayout(len(self.ko_records), trigger=True, ki=True, leg=True, coupon_cash=True,
+                            n_states=self.n_states, expiry=expiry,
+                            undiscounted=expiry and product.has_memory_coupon)
 
     def _breach(self):
         return PhoenixBreach(self)
@@ -125,10 +140,9 @@ class PhoenixStatistics(SnowballStatistics):
         tmp0, tmp1 = np.zeros((len(self.x), 1)), np.zeros((len(self.x), 1))
         solver._set_terminal_condition_vector([tmp0], [tmp1], self.x, self.s, product, env)
         v0[:, L.maturity[0]] = tmp0[:, -1]
-        v1[:, L.maturity[0]] = tmp1[:, -1]
-        if L.kis is not None:
-            v1[:, L.kis] = 1.0
-            v1[:, L.kie] = 1.0
+        v0[:, L.maturity_unit[0]] = 1.0
+        v1[:, L.maturity[1]] = tmp1[:, -1]
+        v1[:, L.kis] = 1.0
         terminal = num_t - 1
         obs_idx = solver._coupon_observation_indices.get(terminal)
         if obs_idx is not None:
@@ -203,7 +217,8 @@ class PhoenixStatistics(SnowballStatistics):
         INSTANT pays it now: ``C_k += earned·disc``. EXPIRY pays it at termination (spec 3B §5.3,
         decision 5): ``C_k += earned·W`` per earning date, and by payment time ``D^(j) += earned·T_j``,
         ``D^(T) += earned·U`` with ``W = Σ T_j + U`` -- except at maturity, where the value has no
-        ``W`` yet and discounts to the terminal payment (``disc``), all of it into ``D^(T)``.
+        ``W`` yet and discounts to the terminal payment (``disc``), all of it into ``D^(T)``. The
+        undiscounted carrier (memory EXPIRY) takes the coupon at its earning date: ``Ĉ_k += earned``.
         """
         n = self.layout.n_ko
         if not self.layout.expiry:
@@ -217,6 +232,8 @@ class PhoenixStatistics(SnowballStatistics):
             pay[:, k] += earned * (T.sum(axis=1) + U)
             pay[:, n:2 * n] += earned * T
             pay[:, 2 * n] += earned * U
+        if self.layout.cash_u.size:
+            pay[:, self._u_off + k] += earned
 
     def _termination_ko(self, blocks, j, current_time, rec):
         """``_apply_termination_ko`` on the T_j/U slices (views), after the knock-out stage."""
@@ -250,7 +267,7 @@ class PhoenixStatistics(SnowballStatistics):
             pay_mask, ko_mask = solver._coupon_masks(s, j, obs_idx, rec, product)
             if not ko_mask.any():
                 return                        # the termination knock-out writes the same empty mask
-        k = cb = df_pay = None                # a record without a coupon observation: KO_k and KIE only
+        k = cb = df_pay = None                # a record without a coupon observation: KO_k only
         if obs_idx is not None:
             k, cb = self._k(obs_idx), float(solver._coupon_barriers[obs_idx])
             df_pay = self._trigger_unit(j, obs_idx)
@@ -274,6 +291,8 @@ class PhoenixStatistics(SnowballStatistics):
                         target[:, L.cash[k, m]] = paid(coupon_at_ko * df, arrears * df if arrears > 0.0 else 0.0)
                         if L.expiry:          # paid with the knock-out, at its settlement: bucket k
                             target[:, L.bucket[k, m]] = target[:, L.cash[k, m]]
+                        if L.cash_u.size:     # the coupon paid at the knock-out, valued at the knock-out
+                            target[:, L.cash_u[k, m]] = paid(coupon_at_ko, arrears if arrears > 0.0 else 0.0)
             NT = self._NT
             X[:, NT] = solver._ko_update(s, rec.barrier, rev, j, X[:, NT], target[:, NT], ko_mask)
         if L.expiry and not terminal:
@@ -296,6 +315,7 @@ class PhoenixStatistics(SnowballStatistics):
         p_pos = self._pos_F[int(L.trigger_cols[k])]
         df_pay = self._trigger_unit(j, obs_idx)
         amt = float(solver._coupon_amounts[obs_idx])
+        u_off, undiscounted = self._u_off, bool(L.cash_u.size)
         for X, name in zip(blocks, ("alive", "ki")):
             ko_here = True if name == "alive" else solver._ko_survives_ki(product)
             X0 = X.copy()
@@ -320,6 +340,8 @@ class PhoenixStatistics(SnowballStatistics):
                     v[:, k] = (_c if m_pay else _a) * df       # the release rule (decision 4)
                     if L.expiry:              # bucket k: paid with the knock-out, at its settlement
                         v[:, L.n_ko + k] = v[:, k]
+                    if undiscounted:          # the coupon paid at the knock-out, valued at the knock-out
+                        v[:, u_off + k] = _c if m_pay else _a
                     return v
 
                 earned = self._earned(obs_idx, m)
@@ -328,12 +350,12 @@ class PhoenixStatistics(SnowballStatistics):
                 X[:, S[m]] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
                     lows, his, b_c_x, b_ko_x, trig_up, ko_here, s_ko_value, pay, self._missed(X0, earned)))
 
-    def _column_of_term(self, term, surface):
+    def _column_of_term(self, term, surface, ki_edge=False):
         if term.column == "U":
             return int(self.layout.unit)
         if term.column == "T":
             return int(self.layout.term_unit[self.column_of_record(term.record_time) - int(self.layout.ko[0])])
-        return super()._column_of_term(term, surface)
+        return super()._column_of_term(term, surface, ki_edge)
 
     def _probability_rows(self, j, current, rows, edges):
         """The not-knocked-in knock-out edge pays the next observation's coupon with its knock-out (F8);
@@ -370,7 +392,9 @@ class PhoenixStatistics(SnowballStatistics):
                                              at_valuation=True)[0])
         return pays, obs0
 
-    def read(self, states, captures, pv):
+    def _spot_columns(self, states, captures):
+        """The columns read at the spot: ``(at, ed_unit, cash, trigger, buckets, cash_u)``, the coupon decided
+        at valuation applied as the value applies it."""
         solver, product, env, L, prepared = self.solver, self.product, self.env, self.layout, self.prepared
         grid = self._spot_block(states, captures)
 
@@ -386,8 +410,8 @@ class PhoenixStatistics(SnowballStatistics):
             owed = self._earned(t0[1], 0)
 
         def at_state(table, i):
-            """The readout of row ``i`` of a per-state column table (``L.cash``, ``L.bucket``): state 0's, or
-            the owed state's at a valuation miss."""
+            """The readout of row ``i`` of a per-state column table (``L.cash``, ``L.bucket``, ``L.cash_u``):
+            state 0's, or the owed state's at a valuation miss."""
             if owed is None:
                 return at(table[i, 0])
             s0, s1 = grid[:, table[i, 0]], grid[:, table[i, 1]]
@@ -399,6 +423,8 @@ class PhoenixStatistics(SnowballStatistics):
         trigger = np.array([at(c) for c in L.trigger_cols], dtype=float)
         buckets = (np.array([at_state(L.bucket, j) for j in range(n_ko + 1)], dtype=float)
                    if L.expiry else None)
+        cash_u = (np.array([at_state(L.cash_u, k) for k in range(n_ko)], dtype=float)
+                  if L.cash_u.size else None)
         if t0 is not None:
             pays, obs0 = t0
             k0 = self._k(obs0)
@@ -413,10 +439,19 @@ class PhoenixStatistics(SnowballStatistics):
                     current0 = solver._total_tau - (self.tau - self.t[0])
                     disc0 = solver._coupon_discount_scalar(0, current0, product, env, obs0)
                     cash[k0] = cash[k0] + earned * disc0
+                if cash_u is not None:
+                    cash_u[k0] = cash_u[k0] + earned
                 trigger[k0] = self._trigger_unit(0, obs0)
             else:
                 cash[k0] = 0.0
                 trigger[k0] = 0.0
+                if cash_u is not None:
+                    cash_u[k0] = 0.0
+        return at, ed_unit, cash, trigger, buckets, cash_u
+
+    def _coupon_probability(self, trigger):
+        solver, product, env = self.solver, self.product, self.env
+        n_ko = self.layout.n_ko
         coupon_probability = np.zeros(n_ko, dtype=float)
         for k in range(n_ko):
             obs_idx = self._obs_of_k.get(k)
@@ -425,6 +460,13 @@ class PhoenixStatistics(SnowballStatistics):
             df0 = env.get_discount_factor(solver._coupon_payment_time(product, env, obs_idx))
             if df0 > 0.0:
                 coupon_probability[k] = float(trigger[k] / df0)
+        return coupon_probability
+
+    def read(self, states, captures, pv):
+        """The legacy dataclass (the native ADI route until it migrates, unified event statistics T14)."""
+        solver, product, env, L = self.solver, self.product, self.env, self.layout
+        at, ed_unit, cash, trigger, buckets, _ = self._spot_columns(states, captures)
+        coupon_probability = self._coupon_probability(trigger)
         recs = self.ko_records
         det = [float(r.observation_time) for r in recs]
         pay = [float(r.settlement_time if r.settlement_time is not None else r.observation_time) for r in recs]
@@ -444,4 +486,75 @@ class PhoenixStatistics(SnowballStatistics):
             extra["coupon_payment_is_path_dependent"] = True
         return assemble_autocallable(solver, product, env, pv=pv, ko_records=recs, ed_unit=ed_unit,
                                      ki=self._ki_fields(at), extra_fields=extra,
-                                     maturity=at(L.maturity[0]), coupon_rows=coupon_rows)
+                                     maturity=at(L.maturity[0]) + at(L.maturity[1]), coupon_rows=coupon_rows)
+
+    def read_statistics(self, states, captures, pv):
+        """``EventStatistics`` of the march: the knock-out redemption on the observation table, the coupon paid at
+        each row (memory arrears and the coupon paid with a knock-out included) on the coupon table."""
+        solver, product, env, L = self.solver, self.product, self.env, self.layout
+        at, ed_unit, cash, trigger, buckets, cash_u = self._spot_columns(states, captures)
+        n = L.n_ko
+        is_coupon = np.array([self._obs_of_k.get(k) is not None for k in range(n)], dtype=bool)
+        observations = es.observation_table(env, self.ko_records, ed_unit, is_coupon_obs=is_coupon)
+        terminal = resolve_terminal_timing(product, env)
+        unavailable = {}
+        coupons, path_dependent_cash = self._coupon_table(observations, terminal, cash, trigger, buckets, cash_u,
+                                                          unavailable)
+        maturity, ki_settlement = self._maturity_rows(at, terminal)
+        knock_in, ki_table = self._knock_in(ki_settlement, unavailable)
+        lifetime = float(np.sum(observations.probability * observations.times)) + (
+            maturity.probability + ki_settlement.probability) * float(terminal.determination_time)
+        return es.assemble(family=self.family, pv=pv, observations=observations, coupons=coupons,
+                           maturity=maturity, ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table,
+                           expected_lifetime=lifetime, provenance=solver._native_provenance(),
+                           unavailable=unavailable, path_dependent_cash=path_dependent_cash)
+
+    def _coupon_table(self, observations, terminal, cash, trigger, buckets, cash_u, unavailable):
+        """The coupon table and, under EXPIRY, the ledger's payment-event buckets (DESIGN §4.3, §4.6).
+
+        INSTANT: each coupon settles with its record (a coupon paid with a knock-out settles with it), so its
+        cash to pay is ``discounted / DF(settlement)``. EXPIRY: the coupon is rolled up and paid when the note
+        ends, so the row's payment is path-dependent (its payment time a placeholder, the terminal payment);
+        its cash to pay is the coupon earned at the row -- ``amount x P(coupon)`` without memory, the
+        undiscounted carrier ``Ĉ_k`` with memory -- and the ledger holds the cash at each ending event, whose
+        payment time is deterministic per bucket."""
+        solver, product, env, L = self.solver, self.product, self.env, self.layout
+        n = L.n_ko
+        probability = self._coupon_probability(trigger)
+        is_coupon = observations.is_coupon_obs
+        survival = np.concatenate([[1.0], observations.survival[:-1]]) if n else np.zeros(0)
+        coupon_probability = probability if self.want_coupon_probability else None
+        if coupon_probability is None:
+            unavailable["coupons.probability"] = es.NOT_REQUESTED
+        if not L.expiry:
+            payment = np.array([solver._coupon_payment_time(product, env, self._obs_of_k[k]) if is_coupon[k]
+                                else float(observations.payment_times[k]) for k in range(n)], dtype=float)
+            payment_dates = observations.payment_dates
+            coupons = CouponTable(probability=coupon_probability, survival=survival, payment_times=payment,
+                                  payment_dates=payment_dates, discounted_cash=cash,
+                                  cash_to_pay=es.to_pay(env, cash, payment),
+                                  payment_is_path_dependent=np.zeros(n, dtype=bool))
+            return coupons, None
+        terminal_pay = float(terminal.payment_time)
+        if cash_u is not None:
+            df_row = np.array([float(env.get_discount_factor(float(t))) for t in observations.times], dtype=float)
+            cash_to_pay = cash_u / df_row
+        else:
+            amounts = np.array([float(solver._coupon_amounts[self._obs_of_k[k]]) if is_coupon[k] else 0.0
+                                for k in range(n)], dtype=float)
+            cash_to_pay = amounts * probability
+        coupons = CouponTable(
+            probability=coupon_probability, survival=survival, payment_times=np.full(n, terminal_pay),
+            payment_dates=None if terminal.payment_date is None else (terminal.payment_date,) * n,
+            discounted_cash=cash, cash_to_pay=cash_to_pay, payment_is_path_dependent=np.full(n, True),
+        )
+        determination = np.concatenate([observations.times, [float(terminal.determination_time)]])
+        payment = np.concatenate([observations.payment_times, [terminal_pay]])
+        determination_dates = (None if observations.dates is None or terminal.determination_date is None
+                               else observations.dates + (terminal.determination_date,))
+        payment_dates = (None if observations.payment_dates is None or terminal.payment_date is None
+                         else observations.payment_dates + (terminal.payment_date,))
+        ledger = CashLedger(determination_times=determination, payment_times=payment,
+                            determination_dates=determination_dates, payment_dates=payment_dates,
+                            discounted_cash=buckets, cash_to_pay=es.to_pay(env, buckets, payment))
+        return coupons, ledger
