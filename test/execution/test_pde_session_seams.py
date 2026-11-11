@@ -17,7 +17,10 @@ def _case(name):
 
 
 def _dist_equal(a, b) -> bool:
-    if not np.array_equal(a.event_times, b.event_times):
+    if a.stream_times.keys() != b.stream_times.keys() or not all(
+            np.array_equal(t, b.stream_times[k]) for k, t in a.stream_times.items()):
+        return False
+    if not np.array_equal(a.survival_times, b.survival_times):
         return False
     if not np.array_equal(a.survival_probability, b.survival_probability):
         return False

@@ -24,7 +24,7 @@ def test_price_with_events_converts_the_engines_own_statistics(contract):
     stats, dist = detailed.event_stats, result.event_distribution
     assert result.npv == detailed.pv
     ctx = build_dcn_grid_context(product)
-    np.testing.assert_array_equal(dist.event_times, ctx.times[ctx.obs_cols])
+    np.testing.assert_array_equal(dist.stream_times[EventType.KO], ctx.times[ctx.obs_cols])
     np.testing.assert_array_equal(dist.probabilities[EventType.KO], np.asarray(stats.ko_timing_distribution))
     assert dist.probabilities[EventType.MATURITY_WITH_KI] == stats.prob_survive_ki
     assert dist.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(stats.prob_survive_no_ki, abs=1e-12)
@@ -32,7 +32,7 @@ def test_price_with_events_converts_the_engines_own_statistics(contract):
     assert dist.payment_times_for(EventType.MATURITY_NO_KO) == ctx.loss_pay_time
     assert dist.payment_times_for(EventType.MATURITY_WITH_KI) == ctx.loss_pay_time
     pay = product.payment_dates()
-    assert dist.event_dates == [m.observation_date for m in product.schedule.monthly]
+    assert dist.stream_dates[EventType.KO] == tuple(m.observation_date for m in product.schedule.monthly)
     assert dist.payment_dates[EventType.KO] == tuple(pay.ko_payment_dates)
     assert dist.payment_dates[EventType.MATURITY_WITH_KI] == pay.loss_payment_date
 
@@ -55,13 +55,13 @@ def test_fold_reproduces_the_dcn_route(direction, quantity):
     dist = _engine().price_with_events(product, env).event_distribution
     structure = _event_structure(product, env)
     basis = structure.distribution(np.zeros(len(structure.ko)), 1.0, 0.0)
-    np.testing.assert_array_equal(basis.event_times, dist.event_times)
-    assert basis.event_dates == dist.event_dates
+    np.testing.assert_array_equal(basis.stream_times[EventType.KO], dist.stream_times[EventType.KO])
+    assert basis.stream_dates[EventType.KO] == dist.stream_dates[EventType.KO]
     assert basis.payment_dates == {k: v for k, v in dist.payment_dates.items() if k in basis.payment_dates}
     for et in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):
         np.testing.assert_array_equal(np.asarray(basis.payment_times[et]), np.asarray(dist.payment_times[et]))
 
-    legs = _leg_set(dist.event_times)
+    legs = _leg_set(dist.stream_times[EventType.KO])
     overlay = fold_cash_legs(legs, product, env, quantity=quantity, unit_notional=100.0)
     assert overlay.maturity_no_ki.amount == 0.0
     # the engine applies the DCN direction to every cash it adds, so the overlay is buyer-view (D9)

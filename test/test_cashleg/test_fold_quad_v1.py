@@ -137,7 +137,7 @@ def _splits_maturity_branches(leg):
 def _legs(dist, env, *, splitting):
     """The shared leg set (every allowlisted type); ``splitting=False`` drops branch-splitting legs."""
     legs = []
-    for leg in _leg_set(dist.event_times):
+    for leg in _leg_set(dist.stream_times[EventType.KO]):
         if not splitting and _splits_maturity_branches(leg):
             continue
         try:

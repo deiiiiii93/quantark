@@ -729,9 +729,12 @@ def _diagnostics(dist) -> Dict[str, object]:
     def total(p):
         return float(np.sum(np.asarray(p, dtype=float)))
 
+    # the KO stream's axis (the shared observation grid); a KO-free distribution has the survival axis only
+    axis = dist.stream_times.get(EventType.KO, dist.survival_times)
     return dict(
-        n_event_times=int(np.asarray(dist.event_times).size),
-        event_times=[float(t) for t in np.asarray(dist.event_times, dtype=float)],
+        n_event_times=int(np.asarray(axis).size),
+        event_times=[float(t) for t in np.asarray(axis, dtype=float)],
+        stream_times={e.name: [float(t) for t in times] for e, times in dist.stream_times.items()},
         streams=sorted(e.name for e in dist.probabilities),
         probability_totals={e.name: total(p) for e, p in dist.probabilities.items()},
         path_dependent_payment_events=sorted(e.name for e in dist.path_dependent_payment_events),

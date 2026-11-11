@@ -1,19 +1,21 @@
-"""Engine-emitted timing distributions for cash-leg valuation."""
+"""Engine-emitted timing distributions for cash-leg valuation.
+
+Each event stream has its own time axis (unified event statistics, DESIGN §4.11): the KO and COUPON
+streams share the observation grid, the KI stream sits on the per-date KI table's axis, and a scalar
+(terminal) outcome keeps its own determination time. ``EventDistribution.from_statistics`` is the one
+conversion from :class:`~quantark.asset.equity.engine.event_stats.EventStatistics`.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
 import numpy as np
 
-from quantark.asset.equity.engine.event_stats import (
-    AutocallableEventStats,
-    PhoenixEventStats,
-    StatisticsProvenance,
-)
+from quantark.asset.equity.engine.event_stats import StatisticsProvenance
 from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical import Tolerance, almost_equal, is_zero
 
@@ -33,46 +35,51 @@ _TERMINATION_EVENTS = {
     EventType.MATURITY_NO_KO,
     EventType.MATURITY_WITH_KI,
 }
+#: streams that always live on an axis (array probabilities)
+_ARRAY_STREAMS = frozenset({EventType.KO, EventType.KI, EventType.COUPON})
+_KO_EVENTS = ("ko_pre", "ko_post")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EventDistribution:
-    """Probability distribution over termination and auxiliary payment events.
+    """Probability distribution over termination and auxiliary payment events, one time axis per stream.
 
-    ``event_times`` is the event grid in year fractions. For ordinary engine
-    output this is the observation grid and ``survival_probability`` has one
-    additional leading value at time 0. For the trivial vanilla fallback, the
-    grid includes 0.0 and maturity and the survival vector has the same length.
+    Attributes:
+        probabilities: per stream, an array on that stream's axis (KO, KI, COUPON; and MATURITY_WITH_KI on a
+            REBASED KO-reset) or a scalar (MATURITY_NO_KO, MATURITY_WITH_KI otherwise).
+        survival_times, survival_probability: P(alive) on its own axis, starting at the valuation (0). Without
+            an observation at 0 the first value is 1; with one, it is that observation's post-event survival.
+        stream_times: determination time of every row of each array stream (year fractions).
+        stream_dates: the same as datetimes per stream, where known.
+        payment_times, payment_dates: settlement per stream (an array on the stream's axis, or a scalar).
+        path_dependent_payment_events: streams whose payment needs the engine's cash ledger.
+        determination_times: determination time of each scalar outcome; one absent here is determined at the
+            last survival time.
+        provenance: which implementation produced the statistics and the price.
+        probability_residual: the statistics' ``probability_residual``, absorbed into MATURITY_NO_KO by
+            ``from_statistics`` (spec D16) and carried here so a reader sees it.
+        rebased: a REBASED KO-reset (spec D13): events sit on the absolute candidate axis and legs value each
+            event at its own time.
     """
 
-    event_times: np.ndarray
-    event_dates: Optional[List[datetime]]
     probabilities: Dict[EventType, Union[np.ndarray, float]]
+    survival_times: np.ndarray
     survival_probability: np.ndarray
-    payment_times: Dict[EventType, Union[np.ndarray, float]] = field(
-        default_factory=dict
-    )
-    payment_dates: Optional[
-        Dict[EventType, Union[tuple[datetime, ...], datetime]]
-    ] = None
-    mc_ko_times: Optional[np.ndarray] = None
+    stream_times: Dict[EventType, np.ndarray] = field(default_factory=dict)
+    stream_dates: Optional[Dict[EventType, tuple[datetime, ...]]] = None
+    payment_times: Dict[EventType, Union[np.ndarray, float]] = field(default_factory=dict)
+    payment_dates: Optional[Dict[EventType, Union[tuple[datetime, ...], datetime]]] = None
     # Such events retain trigger probabilities, but their settlement requires a
     # joint timing distribution or the engine's expected-cashflow ledger.
-    path_dependent_payment_events: frozenset[EventType] = field(
-        default_factory=frozenset
-    )
-    # Per-outcome determination time of a scalar (terminal) outcome; an outcome
-    # absent here is determined at the last event time (spec 3B §5.4).
+    path_dependent_payment_events: frozenset[EventType] = field(default_factory=frozenset)
     determination_times: Dict[EventType, float] = field(default_factory=dict)
     provenance: Optional[StatisticsProvenance] = None
+    probability_residual: float = 0.0
+    rebased: bool = False
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "event_times", np.asarray(self.event_times, dtype=float))
-        object.__setattr__(
-            self,
-            "survival_probability",
-            np.asarray(self.survival_probability, dtype=float),
-        )
+        object.__setattr__(self, "survival_times", np.asarray(self.survival_times, dtype=float))
+        object.__setattr__(self, "survival_probability", np.asarray(self.survival_probability, dtype=float))
         object.__setattr__(
             self,
             "probabilities",
@@ -85,6 +92,15 @@ class EventDistribution:
                 for event_type, probability in self.probabilities.items()
             },
         )
+        object.__setattr__(
+            self,
+            "stream_times",
+            {event_type: np.asarray(times, dtype=float) for event_type, times in self.stream_times.items()},
+        )
+        if self.stream_dates is not None:
+            object.__setattr__(
+                self, "stream_dates", {event_type: tuple(dates) for event_type, dates in self.stream_dates.items()}
+            )
         object.__setattr__(
             self,
             "payment_times",
@@ -115,7 +131,11 @@ class EventDistribution:
             "determination_times",
             {event_type: float(t) for event_type, t in self.determination_times.items()},
         )
+        object.__setattr__(self, "probability_residual", float(self.probability_residual))
+        object.__setattr__(self, "path_dependent_payment_events", frozenset(self.path_dependent_payment_events))
         self._validate_invariants()
+
+    # --- construction ---------------------------------------------------------------------------------
 
     @classmethod
     def trivial(cls, maturity: float) -> "EventDistribution":
@@ -123,260 +143,190 @@ class EventDistribution:
 
         maturity = float(maturity)
         return cls(
-            event_times=np.array([0.0, maturity], dtype=float),
-            event_dates=None,
             probabilities={EventType.MATURITY_NO_KO: 1.0},
+            survival_times=np.array([0.0, maturity], dtype=float),
             survival_probability=np.array([1.0, 1.0], dtype=float),
             payment_times={
                 EventType.MATURITY_NO_KO: maturity,
                 EventType.MATURITY_WITH_KI: maturity,
             },
+            determination_times={EventType.MATURITY_NO_KO: maturity, EventType.MATURITY_WITH_KI: maturity},
         )
 
     @classmethod
-    def from_autocallable_stats(
-        cls, stats: AutocallableEventStats
-    ) -> "EventDistribution":
-        """Convert the existing engine event-stats API into EventDistribution."""
-        from quantark.asset.equity.engine.event_stats import KOResetEventStats
+    def from_statistics(cls, stats) -> "EventDistribution":
+        """The distribution of an :class:`EventStatistics` (DESIGN §4.11; spec D13, D16).
 
-        if isinstance(stats, KOResetEventStats):
-            return cls._from_ko_reset(stats)
-
-        ko_times = np.asarray(stats.ko_times, dtype=float)
-        ko_probability = np.asarray(stats.ko_probability, dtype=float)
-        survival = np.concatenate(
-            [[1.0], np.asarray(stats.survival_probability, dtype=float)]
-        )
-
-        ko_total = float(np.sum(ko_probability))
-        maturity_probability = max(0.0, 1.0 - ko_total)
-        # MATURITY_WITH_KI is the mass that reaches maturity in the knocked-in
-        # state, so it must use P(KI ever AND never KO), NOT P(KI ever): a path
-        # that knocks in and later autocalls redeems at par and carries no KI
-        # loss. Prefer the unambiguous `ki_survive_knocked_in_probability`; fall
-        # back to the legacy `ki_probability` for engines that do not populate it
-        # (QUAD/PDE already report the "settles knocked-in" value there).
-        ki_settle = stats.ki_survive_knocked_in_probability
-        if ki_settle is None:
-            ki_settle = stats.ki_probability
-        maturity_with_ki = min(maturity_probability, max(0.0, float(ki_settle)))
-        maturity_no_ko = max(0.0, maturity_probability - maturity_with_ki)
-
-        probabilities: Dict[EventType, Union[np.ndarray, float]] = {
-            EventType.KO: ko_probability,
-            EventType.MATURITY_NO_KO: maturity_no_ko,
-            EventType.MATURITY_WITH_KI: maturity_with_ki,
-        }
-
-        ki_probability = np.asarray(
-            getattr(stats, "ki_event_probability", np.array([])), dtype=float
-        )
-        if ki_probability.size == ko_times.size:
-            probabilities[EventType.KI] = ki_probability
-        if isinstance(stats, PhoenixEventStats) and stats.coupon_probability.size > 0:
-            probabilities[EventType.COUPON] = np.asarray(
-                stats.coupon_probability, dtype=float
-            )
-
+        * KO: every observation row (coupon-only rows carry KO probability 0), paid at its payment time.
+        * COUPON: the coupon table's probabilities on the same grid; path-dependent payment where flagged.
+          Absent when the coupon probability is ``None`` (pruned or unavailable).
+        * KI: the per-date KI table on its own axis, paid at the KI observation (D8; a leg adds its own
+          settlement offset). An empty table is an empty stream; ``None`` (pruned/unavailable) is no stream.
+        * MATURITY_NO_KO: the maturity row's probability plus ``probability_residual`` (D16, never raised on);
+          MATURITY_WITH_KI: the KI settlement row.
+        * REBASED (D13): KO = the termination distribution's ``ko_pre`` + ``ko_post`` rows and MATURITY_WITH_KI
+          its ``ki_settlement`` rows, both array streams on the absolute candidate axis; MATURITY_NO_KO the
+          ``maturity`` row; survival the termination distribution's absolute curve.
+        * Receivables are ledger rows, not events: they are not read.
+        """
+        if stats.termination is not None:
+            return cls._from_rebased(stats)
+        obs = stats.observations
+        probabilities: Dict[EventType, Union[np.ndarray, float]] = {EventType.KO: obs.probability}
+        stream_times: Dict[EventType, np.ndarray] = {EventType.KO: obs.times}
         payment_times: Dict[EventType, Union[np.ndarray, float]] = {}
-        payment_dates = {}
-        event_dates = None
-        ledger_payment_times = np.asarray(
-            getattr(stats, "payment_times", np.array([])),
-            dtype=float,
-        )
-        n_ko = ko_times.size
-        if ledger_payment_times.size >= n_ko + 1:
-            payment_times[EventType.KO] = ledger_payment_times[:n_ko]
-            next_index = n_ko
-            if (
-                isinstance(stats, PhoenixEventStats)
-                and stats.coupon_probability.size == n_ko
-                and ledger_payment_times.size >= 2 * n_ko + 1
-            ):
-                if not stats.coupon_payment_is_path_dependent:
-                    payment_times[EventType.COUPON] = ledger_payment_times[
-                        n_ko : 2 * n_ko
-                    ]
-                next_index = 2 * n_ko
-            terminal_payment_time = float(ledger_payment_times[-1])
-            payment_times[EventType.MATURITY_NO_KO] = terminal_payment_time
-            payment_times[EventType.MATURITY_WITH_KI] = terminal_payment_time
+        stream_dates: Dict[EventType, tuple] = {}
+        payment_dates: Dict[EventType, object] = {}
+        path_dependent = set()
+        if np.any(obs.payment_is_path_dependent):
+            path_dependent.add(EventType.KO)
+        else:
+            payment_times[EventType.KO] = obs.payment_times
+            if obs.payment_dates is not None:
+                payment_dates[EventType.KO] = obs.payment_dates
+        if obs.dates is not None:
+            stream_dates[EventType.KO] = obs.dates
 
-            ledger_payment_dates = getattr(stats, "payment_dates", None)
-            ledger_determination_dates = getattr(
-                stats,
-                "determination_dates",
-                None,
-            )
-            if ledger_determination_dates is not None:
-                event_dates = list(ledger_determination_dates[:n_ko])
-            if ledger_payment_dates is not None:
-                payment_dates[EventType.KO] = tuple(
-                    ledger_payment_dates[:n_ko]
-                )
-                if (
-                    next_index == 2 * n_ko
-                    and EventType.COUPON in payment_times
-                ):
-                    payment_dates[EventType.COUPON] = tuple(
-                        ledger_payment_dates[n_ko:next_index]
-                    )
-                payment_dates[EventType.MATURITY_NO_KO] = (
-                    ledger_payment_dates[-1]
-                )
-                payment_dates[EventType.MATURITY_WITH_KI] = (
-                    ledger_payment_dates[-1]
-                )
+        coupons = stats.coupons
+        if coupons is not None and coupons.probability is not None:
+            probabilities[EventType.COUPON] = coupons.probability
+            stream_times[EventType.COUPON] = obs.times
+            if obs.dates is not None:
+                stream_dates[EventType.COUPON] = obs.dates
+            coupon_rows = obs.is_coupon_obs
+            if np.any(coupons.payment_is_path_dependent[coupon_rows]):
+                path_dependent.add(EventType.COUPON)
+            else:
+                payment_times[EventType.COUPON] = coupons.payment_times
+                if coupons.payment_dates is not None:
+                    payment_dates[EventType.COUPON] = coupons.payment_dates
 
-        dist = cls(
-            event_times=ko_times,
-            event_dates=event_dates,
+        cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates)
+        cls._add_outcome(EventType.MATURITY_NO_KO, stats.maturity, stats.maturity.probability + stats.probability_residual,
+                         probabilities, payment_times, payment_dates)
+        cls._add_outcome(EventType.MATURITY_WITH_KI, stats.ki_settlement, stats.ki_settlement.probability,
+                         probabilities, payment_times, payment_dates)
+        survival_times, survival = cls._survival_axis(obs.times, obs.survival, stats.maturity.time)
+        return cls(
             probabilities=probabilities,
+            survival_times=survival_times,
             survival_probability=survival,
+            stream_times=stream_times,
+            stream_dates=stream_dates or None,
             payment_times=payment_times,
             payment_dates=payment_dates or None,
-            path_dependent_payment_events=(
-                frozenset({EventType.COUPON})
-                if isinstance(stats, PhoenixEventStats)
-                and stats.coupon_payment_is_path_dependent
-                else frozenset()
-            ),
-            provenance=getattr(stats, "provenance", None),
+            path_dependent_payment_events=frozenset(path_dependent),
+            determination_times={EventType.MATURITY_NO_KO: stats.maturity.time,
+                                 EventType.MATURITY_WITH_KI: stats.ki_settlement.time},
+            provenance=stats.provenance,
+            probability_residual=stats.probability_residual,
         )
-        return dist.normalized()
+
+    @classmethod
+    def _from_rebased(cls, stats) -> "EventDistribution":
+        term = stats.termination
+        events = np.asarray(term.event, dtype=object)
+
+        def rows(mask):
+            idx = np.flatnonzero(mask)
+            dates = None if term.dates is None else tuple(term.dates[i] for i in idx)
+            pay_dates = None if term.payment_dates is None else tuple(term.payment_dates[i] for i in idx)
+            return idx, dates, pay_dates
+
+        probabilities: Dict[EventType, Union[np.ndarray, float]] = {}
+        stream_times: Dict[EventType, np.ndarray] = {}
+        payment_times: Dict[EventType, Union[np.ndarray, float]] = {}
+        stream_dates: Dict[EventType, tuple] = {}
+        payment_dates: Dict[EventType, object] = {}
+        for event_type, mask in ((EventType.KO, np.isin(events, _KO_EVENTS)),
+                                 (EventType.MATURITY_WITH_KI, events == "ki_settlement")):
+            idx, dates, pay_dates = rows(mask)
+            probabilities[event_type] = term.probability[idx]
+            stream_times[event_type] = term.times[idx]
+            payment_times[event_type] = term.payment_times[idx]
+            if dates is not None:
+                stream_dates[event_type] = dates
+            if pay_dates is not None:
+                payment_dates[event_type] = pay_dates
+        idx, _, pay_dates = rows(events == "maturity")
+        if idx.size == 0 or not np.all(term.times[idx] == term.times[idx[0]]):
+            raise ValidationError(
+                "a REBASED termination distribution carries one maturity determination time (zeros kept)"
+            )
+        maturity_time = float(term.times[idx[0]])
+        probabilities[EventType.MATURITY_NO_KO] = float(np.sum(term.probability[idx])) + stats.probability_residual
+        payment_times[EventType.MATURITY_NO_KO] = float(term.payment_times[idx[0]])
+        if pay_dates is not None:
+            payment_dates[EventType.MATURITY_NO_KO] = pay_dates[0]
+        cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates)
+        survival_times, survival = cls._survival_axis(term.survival_times, term.survival, maturity_time)
+        return cls(
+            probabilities=probabilities,
+            survival_times=survival_times,
+            survival_probability=survival,
+            stream_times=stream_times,
+            stream_dates=stream_dates or None,
+            payment_times=payment_times,
+            payment_dates=payment_dates or None,
+            determination_times={EventType.MATURITY_NO_KO: maturity_time},
+            provenance=stats.provenance,
+            probability_residual=stats.probability_residual,
+            rebased=True,
+        )
+
+    @staticmethod
+    def _add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates) -> None:
+        table = stats.ki_table
+        if table is None:
+            return
+        probabilities[EventType.KI] = table.probability
+        stream_times[EventType.KI] = table.times
+        payment_times[EventType.KI] = table.payment_times
+        if table.dates is not None:
+            stream_dates[EventType.KI] = table.dates
+        if table.payment_dates is not None:
+            payment_dates[EventType.KI] = table.payment_dates
+
+    @staticmethod
+    def _add_outcome(event_type, row, probability, probabilities, payment_times, payment_dates) -> None:
+        if -Tolerance.PROBABILITY <= probability < 0.0:
+            probability = 0.0                      # round-off below zero; the termination sum stays within tolerance
+        probabilities[event_type] = float(probability)
+        payment_times[event_type] = row.payment_time
+        if row.payment_date is not None:
+            payment_dates[event_type] = row.payment_date
+
+    @staticmethod
+    def _survival_axis(times, survival, terminal_time: float) -> tuple[np.ndarray, np.ndarray]:
+        """Survival from the valuation on: 1 at 0 unless an observation sits at 0 (its post-event survival)."""
+        times = np.asarray(times, dtype=float)
+        survival = np.asarray(survival, dtype=float)
+        if times.size == 0:
+            end = max(float(terminal_time), 0.0)
+            if almost_equal(end, 0.0, tol=Tolerance.PROBABILITY):
+                return np.array([0.0]), np.array([1.0])
+            return np.array([0.0, end]), np.array([1.0, 1.0])
+        if almost_equal(float(times[0]), 0.0, tol=Tolerance.PROBABILITY):
+            return times, survival
+        return np.r_[0.0, times], np.r_[1.0, survival]
+
+    # --- legacy converters (D15: routed through the transition module until T21) -----------------------
+
+    @classmethod
+    def from_autocallable_stats(cls, stats) -> "EventDistribution":
+        """A legacy autocallable statistics object, read through the transition module (spec D15)."""
+        from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
+
+        return cls.from_statistics(_as_event_statistics(stats))
 
     @classmethod
     def from_dcn_stats(cls, stats) -> "EventDistribution":
-        """A DCN's knock-out observations and its two maturity outcomes (ship spec 2026-10-21 D9).
+        """A legacy ``DCNEventStats``, read through the transition module (spec D15)."""
+        from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
 
-        KO at monthly observation j with ``ko_timing_distribution[j]``, paid at its KO payment; the
-        survivors split into knocked-in (``prob_survive_ki``) and not, both determined at the last
-        observation and paid at the loss-leg settlement. MATURITY_NO_KO is the residual, as for every
-        other autocallable. Reads the statistics' ledger, laid out ``[coupons..., KO..., loss]``.
-        """
-        ko_probability = np.asarray(stats.ko_timing_distribution, dtype=float)
-        n = ko_probability.size
-        determination = np.asarray(stats.determination_times, dtype=float)
-        payment = np.asarray(stats.payment_times, dtype=float)
-        if n == 0 or determination.size != 2 * n + 1:
-            raise ValidationError(
-                "DCNEventStats needs a [coupons..., KO..., loss] ledger aligned to its observations"
-            )
-        maturity_probability = max(0.0, 1.0 - float(np.sum(ko_probability)))
-        maturity_with_ki = min(maturity_probability, max(0.0, float(stats.prob_survive_ki)))
-        maturity_no_ko = max(0.0, maturity_probability - maturity_with_ki)
-        loss_payment = float(payment[-1])
-        payment_times: Dict[EventType, Union[np.ndarray, float]] = {
-            EventType.KO: payment[n:2 * n],
-            EventType.MATURITY_NO_KO: loss_payment,
-            EventType.MATURITY_WITH_KI: loss_payment,
-        }
-        event_dates, payment_dates = None, None
-        if stats.determination_dates is not None:
-            event_dates = list(stats.determination_dates[n:2 * n])
-        if stats.payment_dates is not None:
-            payment_dates = {
-                EventType.KO: tuple(stats.payment_dates[n:2 * n]),
-                EventType.MATURITY_NO_KO: stats.payment_dates[-1],
-                EventType.MATURITY_WITH_KI: stats.payment_dates[-1],
-            }
-        dist = cls(
-            event_times=determination[n:2 * n],
-            event_dates=event_dates,
-            probabilities={
-                EventType.KO: ko_probability,
-                EventType.MATURITY_NO_KO: maturity_no_ko,
-                EventType.MATURITY_WITH_KI: maturity_with_ki,
-            },
-            survival_probability=np.concatenate(
-                [[1.0], np.maximum(0.0, 1.0 - np.cumsum(ko_probability))]
-            ),
-            payment_times=payment_times,
-            payment_dates=payment_dates,
-        )
-        return dist.normalized()
+        return cls.from_statistics(_as_event_statistics(stats))
 
-    @classmethod
-    def _from_ko_reset(cls, stats) -> "EventDistribution":
-        """Both knock-out schedules on one time axis and, when the producer reports them, the two
-        maturity outcomes with their own determination and payment times (spec 3B §5.4, plan F5, F6)."""
-        if stats.post_ko_times_are_offsets:
-            raise NotImplementedError(
-                "a REBASED post-knock-in schedule holds offsets from the knock-in time; "
-                "a distribution needs absolute times"
-            )
-        if stats.pre_ko_payment_times is None or stats.post_ko_payment_times is None:
-            raise ValidationError(
-                f"{type(stats).__name__} from this producer carries no knock-out payment times "
-                "(pre_ko_payment_times / post_ko_payment_times)"
-            )
-        pre_t = np.asarray(stats.pre_ko_times, dtype=float)
-        post_t = np.asarray(stats.post_ko_times, dtype=float)
-        n_pre, n_post = pre_t.size, post_t.size
-        times = np.r_[pre_t, post_t]
-        tag = np.r_[np.zeros(n_pre), np.ones(n_post)]
-        order = np.lexsort((tag, times))                     # the pre record first at a tie
-        event_times = times[order]
-        ko_probability = np.r_[np.asarray(stats.pre_ko_probability, dtype=float),
-                               np.asarray(stats.post_ko_probability, dtype=float)][order]
-        ko_payment = np.r_[np.asarray(stats.pre_ko_payment_times, dtype=float),
-                           np.asarray(stats.post_ko_payment_times, dtype=float)][order]
-
-        ledger_payment = np.asarray(getattr(stats, "payment_times", np.array([])), dtype=float)
-        payment_times: Dict[EventType, Union[np.ndarray, float]] = {EventType.KO: ko_payment}
-        determination_times: Dict[EventType, float] = {}
-        buckets = stats.pre_maturity_probability is not None
-        if buckets:
-            maturity_no_ko = float(stats.pre_maturity_probability)
-            maturity_with_ki = float(stats.post_maturity_probability)
-            payment_times[EventType.MATURITY_NO_KO] = float(stats.pre_maturity_payment_time)
-            payment_times[EventType.MATURITY_WITH_KI] = float(stats.post_maturity_payment_time)
-            determination_times = {EventType.MATURITY_NO_KO: float(stats.pre_maturity_time),
-                                   EventType.MATURITY_WITH_KI: float(stats.post_maturity_time)}
-        else:
-            # one maturity outcome, split by the knocked-in share as for every other autocallable
-            maturity_probability = max(0.0, 1.0 - float(np.sum(ko_probability)))
-            ki_settle = stats.ki_survive_knocked_in_probability
-            if ki_settle is None:
-                ki_settle = stats.ki_probability
-            maturity_with_ki = min(maturity_probability, max(0.0, float(ki_settle)))
-            maturity_no_ko = max(0.0, maturity_probability - maturity_with_ki)
-            if ledger_payment.size:
-                payment_times[EventType.MATURITY_NO_KO] = float(ledger_payment[-1])
-                payment_times[EventType.MATURITY_WITH_KI] = float(ledger_payment[-1])
-
-        event_dates, payment_dates = None, {}
-        det_dates = getattr(stats, "determination_dates", None)
-        pay_dates = getattr(stats, "payment_dates", None)
-        n = n_pre + n_post
-        if det_dates is not None and len(det_dates) >= n:
-            event_dates = [det_dates[i] for i in order]
-        if pay_dates is not None and len(pay_dates) >= n + 1:
-            payment_dates[EventType.KO] = tuple(pay_dates[i] for i in order)
-            payment_dates[EventType.MATURITY_NO_KO] = pay_dates[-2] if buckets else pay_dates[-1]
-            payment_dates[EventType.MATURITY_WITH_KI] = pay_dates[-1]
-
-        # F5: the pre-maturity mass leaves the survival at its own determination when that precedes
-        # the last knock-out; otherwise the last node keeps the one-maturity convention
-        survival = 1.0 - np.cumsum(ko_probability)
-        if buckets and float(stats.pre_maturity_time) < float(event_times[-1]) - Tolerance.PROBABILITY:
-            survival = survival - np.where(event_times >= float(stats.pre_maturity_time), maturity_no_ko, 0.0)
-        survival = np.concatenate([[1.0], survival])
-
-        dist = cls(
-            event_times=event_times,
-            event_dates=event_dates,
-            probabilities={EventType.KO: ko_probability, EventType.MATURITY_NO_KO: maturity_no_ko,
-                           EventType.MATURITY_WITH_KI: maturity_with_ki},
-            survival_probability=survival,
-            payment_times=payment_times,
-            payment_dates=payment_dates or None,
-            determination_times=determination_times,
-            provenance=getattr(stats, "provenance", None),
-        )
-        return dist.normalized()
+    # --- reading ----------------------------------------------------------------------------------------
 
     def payment_times_for(
         self,
@@ -393,8 +343,12 @@ class EventDistribution:
             return self.payment_times[event_type]
         probability = self.probabilities.get(event_type)
         if isinstance(probability, np.ndarray):
-            return self.event_times
-        return float(self.event_times[-1])
+            return self.stream_times[event_type]
+        return self.determination_time(event_type)
+
+    def determination_time(self, event_type: EventType) -> float:
+        """Determination time of a scalar outcome (the last survival time unless stated)."""
+        return float(self.determination_times.get(event_type, self.survival_times[-1]))
 
     def survival_at(self, t: float) -> float:
         """Linearly interpolate survival probability at a year fraction.
@@ -405,15 +359,13 @@ class EventDistribution:
         """
 
         t = float(t)
+        time_grid, survival_grid = self.survival_times, self.survival_probability
         if is_zero(t):
-            time_grid, survival_grid = self._survival_grid()
             if almost_equal(float(time_grid[0]), 0.0, tol=Tolerance.PROBABILITY):
                 return float(survival_grid[0])
             return 1.0
         if t < 0.0:
             return 1.0
-
-        time_grid, survival_grid = self._survival_grid()
         if t <= time_grid[0]:
             return float(survival_grid[0])
         if t >= time_grid[-1]:
@@ -433,7 +385,9 @@ class EventDistribution:
             probabilities[EventType.MATURITY_NO_KO] = max(
                 0.0, float(probabilities[EventType.MATURITY_NO_KO]) - drift
             )
-        elif EventType.MATURITY_WITH_KI in probabilities:
+        elif EventType.MATURITY_WITH_KI in probabilities and not isinstance(
+            probabilities[EventType.MATURITY_WITH_KI], np.ndarray
+        ):
             probabilities[EventType.MATURITY_WITH_KI] = max(
                 0.0, float(probabilities[EventType.MATURITY_WITH_KI]) - drift
             )
@@ -441,50 +395,24 @@ class EventDistribution:
             return self
 
         return EventDistribution(
-            event_times=self.event_times,
-            event_dates=self.event_dates,
             probabilities=probabilities,
+            survival_times=self.survival_times,
             survival_probability=self.survival_probability,
+            stream_times=self.stream_times,
+            stream_dates=self.stream_dates,
             payment_times=self.payment_times,
             payment_dates=self.payment_dates,
-            mc_ko_times=self.mc_ko_times,
             path_dependent_payment_events=self.path_dependent_payment_events,
             determination_times=self.determination_times,
             provenance=self.provenance,
+            probability_residual=self.probability_residual,
+            rebased=self.rebased,
         )
 
+    # --- invariants -------------------------------------------------------------------------------------
+
     def _validate_invariants(self) -> None:
-        if self.event_times.ndim != 1:
-            raise NumericalError("EventDistribution.event_times must be 1D")
-        if self.survival_probability.ndim != 1:
-            raise NumericalError("EventDistribution.survival_probability must be 1D")
-        if len(self.event_times) == 0:
-            raise NumericalError("EventDistribution.event_times must not be empty")
-        if np.any(~np.isfinite(self.event_times)):
-            raise NumericalError("EventDistribution.event_times contains non-finite values")
-        if np.any(~np.isfinite(self.survival_probability)):
-            raise NumericalError(
-                "EventDistribution.survival_probability contains non-finite values"
-            )
-        if np.any(np.diff(self.event_times) < -Tolerance.PROBABILITY):
-            raise NumericalError("EventDistribution.event_times must be sorted")
-
-        self._validate_survival_shape()
-
-        if (
-            abs(float(self.survival_probability[0]) - 1.0)
-            > Tolerance.PROBABILITY
-        ):
-            raise NumericalError(
-                f"survival_probability[0] = {self.survival_probability[0]}, expected 1.0"
-            )
-
-        diffs = np.diff(self.survival_probability)
-        if np.any(diffs > Tolerance.PROBABILITY):
-            raise NumericalError(
-                "EventDistribution survival_probability is not monotone non-increasing"
-            )
-
+        self._validate_survival()
         for event_type, probability in self.probabilities.items():
             arr = np.asarray(probability, dtype=float)
             if np.any(~np.isfinite(arr)):
@@ -495,12 +423,80 @@ class EventDistribution:
                 raise NumericalError(
                     f"EventDistribution probability {event_type.value} is negative"
                 )
-            if isinstance(probability, np.ndarray) and probability.shape != self.event_times.shape:
+            self._validate_stream_shape(event_type, probability)
+        for event_type in self.stream_times:
+            if not isinstance(self.probabilities.get(event_type), np.ndarray):
                 raise NumericalError(
-                    f"EventDistribution probability {event_type.value} has shape "
-                    f"{probability.shape}, expected {self.event_times.shape}"
+                    f"EventDistribution stream_times[{event_type.value}] names no array stream"
                 )
+        if self.stream_dates is not None:
+            for event_type, dates in self.stream_dates.items():
+                if event_type not in self.stream_times or len(dates) != self.stream_times[event_type].size:
+                    raise NumericalError(
+                        f"EventDistribution stream_dates[{event_type.value}] is not aligned to its axis"
+                    )
+        self._validate_payment_times()
+        if not np.isfinite(self.probability_residual):
+            raise NumericalError("EventDistribution.probability_residual must be finite")
 
+        total = self._termination_probability_total()
+        if not almost_equal(total, 1.0, tol=Tolerance.PROBABILITY):
+            raise NumericalError(
+                f"EventDistribution termination probability sum = {total}, expected 1.0 "
+                f"(tolerance {Tolerance.PROBABILITY})"
+            )
+
+    def _validate_survival(self) -> None:
+        times, survival = self.survival_times, self.survival_probability
+        if times.ndim != 1 or survival.ndim != 1:
+            raise NumericalError("EventDistribution survival_times / survival_probability must be 1D")
+        if times.size == 0:
+            raise NumericalError("EventDistribution.survival_times must not be empty")
+        if survival.shape != times.shape:
+            raise NumericalError(
+                f"len(survival_probability) = {survival.size}, expected {times.size} (one per survival time)"
+            )
+        if np.any(~np.isfinite(times)) or np.any(~np.isfinite(survival)):
+            raise NumericalError("EventDistribution survival axis contains non-finite values")
+        if np.any(np.diff(times) < -Tolerance.PROBABILITY):
+            raise NumericalError("EventDistribution.survival_times must be sorted")
+        if not almost_equal(float(times[0]), 0.0, tol=Tolerance.PROBABILITY):
+            raise NumericalError(
+                f"EventDistribution.survival_times starts at {times[0]}, expected the valuation (0)"
+            )
+        if float(survival[0]) > 1.0 + Tolerance.PROBABILITY:
+            raise NumericalError(f"survival_probability[0] = {survival[0]} exceeds 1")
+        if np.any(np.diff(survival) > Tolerance.PROBABILITY):
+            raise NumericalError(
+                "EventDistribution survival_probability is not monotone non-increasing"
+            )
+
+    def _validate_stream_shape(self, event_type: EventType, probability) -> None:
+        is_array = isinstance(probability, np.ndarray)
+        if event_type in _ARRAY_STREAMS and not is_array:
+            raise NumericalError(f"EventDistribution stream {event_type.value} must be an array on its own axis")
+        if event_type is EventType.MATURITY_NO_KO and is_array:
+            raise NumericalError("EventDistribution outcome maturity_no_ko is a scalar")
+        if event_type is EventType.MATURITY_WITH_KI and is_array and not self.rebased:
+            raise NumericalError(
+                "EventDistribution outcome maturity_with_ki is a scalar except on a REBASED KO-reset (spec D13)"
+            )
+        if not is_array:
+            return
+        times = self.stream_times.get(event_type)
+        if times is None:
+            raise NumericalError(f"EventDistribution array stream {event_type.value} has no time axis")
+        if probability.ndim != 1 or times.shape != probability.shape:
+            raise NumericalError(
+                f"EventDistribution probability {event_type.value} has shape {probability.shape}, "
+                f"its axis {times.shape}"
+            )
+        if np.any(~np.isfinite(times)):
+            raise NumericalError(f"EventDistribution axis of {event_type.value} contains non-finite values")
+        if np.any(np.diff(times) < -Tolerance.PROBABILITY):
+            raise NumericalError(f"EventDistribution axis of {event_type.value} must be sorted")
+
+    def _validate_payment_times(self) -> None:
         for event_type, payment_time in self.payment_times.items():
             if event_type not in self.probabilities:
                 continue
@@ -511,14 +507,13 @@ class EventDistribution:
                 )
             probability = self.probabilities[event_type]
             if isinstance(probability, np.ndarray):
-                if times.shape != self.event_times.shape:
+                axis = self.stream_times[event_type]
+                if times.shape != axis.shape:
                     raise NumericalError(
                         f"EventDistribution payment time {event_type.value} has "
-                        f"shape {times.shape}, expected {self.event_times.shape}"
+                        f"shape {times.shape}, expected {axis.shape}"
                     )
-                if np.any(
-                    times + Tolerance.PROBABILITY < self.event_times
-                ):
+                if np.any(times + Tolerance.PROBABILITY < axis):
                     raise NumericalError(
                         f"EventDistribution payment time {event_type.value} "
                         "precedes its determination time"
@@ -528,36 +523,11 @@ class EventDistribution:
                     f"EventDistribution scalar event {event_type.value} requires "
                     "a scalar payment time"
                 )
-            elif (
-                float(times) + Tolerance.PROBABILITY
-                < float(self.determination_times.get(event_type, self.event_times[-1]))
-            ):
+            elif float(times) + Tolerance.PROBABILITY < self.determination_time(event_type):
                 raise NumericalError(
                     f"EventDistribution payment time {event_type.value} "
                     "precedes terminal determination"
                 )
-
-        total = self._termination_probability_total()
-        if not almost_equal(total, 1.0, tol=Tolerance.PROBABILITY):
-            raise NumericalError(
-                f"EventDistribution termination probability sum = {total}, expected 1.0 "
-                f"(tolerance {Tolerance.PROBABILITY})"
-            )
-
-    def _validate_survival_shape(self) -> None:
-        n_times = len(self.event_times)
-        n_survival = len(self.survival_probability)
-        starts_at_zero = almost_equal(
-            float(self.event_times[0]), 0.0, tol=Tolerance.PROBABILITY
-        )
-        expected_lengths = {n_times + 1}
-        if starts_at_zero:
-            expected_lengths.add(n_times)
-        if n_survival not in expected_lengths:
-            raise NumericalError(
-                f"len(survival_probability) = {n_survival}, expected one of "
-                f"{sorted(expected_lengths)} for {n_times} event times"
-            )
 
     def _termination_probability_total(self) -> float:
         total = 0.0
@@ -566,19 +536,6 @@ class EventDistribution:
                 continue
             total += float(np.asarray(probability, dtype=float).sum())
         return total
-
-    def _survival_grid(self) -> tuple[np.ndarray, np.ndarray]:
-        starts_at_zero = almost_equal(
-            float(self.event_times[0]), 0.0, tol=Tolerance.PROBABILITY
-        )
-        if len(self.survival_probability) == len(self.event_times):
-            return self.event_times, self.survival_probability
-        if starts_at_zero:
-            return self.event_times, self.survival_probability[1:]
-        return (
-            np.concatenate([[0.0], self.event_times]),
-            self.survival_probability,
-        )
 
 
 @dataclass(frozen=True)

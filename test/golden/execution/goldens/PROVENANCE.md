@@ -77,3 +77,18 @@ discounting exponentially outside the spatial ADI generator
 Only the price moved (5.5e-6 relative on the fixture's legacy pins: n_x=48, n_v=18, n_t=16, neumann
 v0 boundary, v_grid_power=0). Every event probability and the other seven cases are bitwise unchanged,
 which is the signature of a discounting change rather than a change to the marched survival.
+
+## 2026-11-11: unified event statistics T6 (per-stream EventDistribution axes)
+
+Spec: `.ship/2026-11-11-unified-event-stats/spec.md` D16 (`from_statistics` absorbs the statistics'
+`probability_residual` into MATURITY_NO_KO and carries it as `EventDistribution.probability_residual`).
+Not a regeneration: one leaf of `pde_phase4_goldens.json` edited by hand, after a field-level diff (spec D22)
+of every phase-4 event case showed it is the only leaf outside `golden_compare` tolerance (prices and npv
+unchanged; HestonSnowballPDESolver's price leaf is the recorded pre-existing failure and was not touched).
+
+| case | field | before | after | cause |
+|---|---|---|---|---|
+| KOResetSnowballPDESolver | MATURITY_NO_KO | 0.08031493486734011 (the marched pre-maturity bucket) | 0.08031486707983916 | the bucket plus the march's residual -6.77875009458262e-08, exactly (D16) |
+
+The payload's `event_times` key is now the KO stream's axis (`stream_times[KO]`), identical to the old single
+axis for every case here.

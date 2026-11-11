@@ -230,14 +230,18 @@ def test_knock_out_cash_alone_adds_c_times_the_knock_out_probability(family):
 @pytest.mark.parametrize("family", KO_RESETS)
 @pytest.mark.parametrize("spot_index", [0, 1, 2])
 def test_ko_reset_no_ki_cash_lands_at_the_pre_maturity_with_its_own_probability(family, spot_index):
-    """The KO-reset route reports the alive bucket explicitly (U_pre): its cash folds to round-off too."""
+    """The KO-reset route reports the alive bucket explicitly (U_pre): its cash folds to round-off too.
+
+    The distribution absorbs the marched buckets' probability residual into MATURITY_NO_KO and carries it
+    (spec D16); the solve folds the cash onto the marched bucket itself, i.e. MATURITY_NO_KO less the residual.
+    """
     factory, product, env = _case(family, SPOTS[family][spot_index])
     dist = _route(factory(), product, env).event_distribution
     c = 3.0
     folded = factory().price_folded(product, env, _hand_overlay(product, env, no_ki=c))
     npv = factory().price(product, env)
-    assert folded - npv == pytest.approx(c * _p(dist, EventType.MATURITY_NO_KO), rel=IDENTITY,
-                                         abs=IDENTITY * abs(npv))
+    marched = _p(dist, EventType.MATURITY_NO_KO) - dist.probability_residual
+    assert folded - npv == pytest.approx(c * marched, rel=IDENTITY, abs=IDENTITY * abs(npv))
 
 
 # --- AC5: parity with the PDE's own event route ------------------------------------------------

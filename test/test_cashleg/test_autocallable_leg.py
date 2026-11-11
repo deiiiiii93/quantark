@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from quantark.cashleg.base import LegDirection
+from test_cashleg._distribution_helpers import on_grid
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.autocallable_leg import (
     AutocallableCashLeg,
@@ -113,9 +114,8 @@ def make_distribution(event_times, ko_probs, mat_no_ko, mat_with_ki, coupon_prob
     }
     if coupon_probs is not None:
         probs[EventType.COUPON] = np.asarray(coupon_probs, dtype=float)
-    return EventDistribution(
-        event_times=event_times,
-        event_dates=None,
+    return on_grid(
+        times=event_times,
         probabilities=probs,
         survival_probability=survival,
     )
@@ -192,9 +192,8 @@ def test_shifted_observation_schedule_raises():
 
 def test_missing_terminal_bucket_raises():
     env = FlatEnv(0.02)
-    ed = EventDistribution(
-        event_times=np.array([0.5, 1.0]),
-        event_dates=None,
+    ed = on_grid(
+        times=np.array([0.5, 1.0]),
         probabilities={EventType.KO: np.array([0.3, 0.2]),
                        EventType.MATURITY_NO_KO: 0.5},
         survival_probability=np.array([1.0, 0.7, 0.5]),

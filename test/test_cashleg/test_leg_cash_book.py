@@ -21,6 +21,7 @@ from quantark.cashleg import (
     LegDirection,
     LegSchedule,
 )
+from test_cashleg._distribution_helpers import on_grid
 from quantark.cashleg.accrual_leg import PaymentConvention, SurvivalBasis
 from quantark.cashleg.autocallable_leg import AccrualBasis, AutocallableCashLeg, AutocallableLegType, PvFormula
 from quantark.cashleg.booking import LegCashBook, RealizedOutcome, run_time
@@ -230,7 +231,7 @@ def _realized_distribution(outcome):
     else:
         probabilities[EventType.MATURITY_WITH_KI if outcome.knocked_in else EventType.MATURITY_NO_KO] = 1.0
     probabilities[EventType.KO] = ko
-    return EventDistribution(event_times=obs, event_dates=None, probabilities=probabilities,
+    return on_grid(times=obs, probabilities=probabilities,
                              survival_probability=survival,
                              payment_times={EventType.KO: settle,
                                             EventType.MATURITY_NO_KO: MAT_SETTLE_DAY * D,

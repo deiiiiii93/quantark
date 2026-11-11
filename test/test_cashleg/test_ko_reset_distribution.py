@@ -20,13 +20,18 @@ def test_both_schedules_and_both_maturities():
     stats = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make_ko_reset(KO_RESET), env())
     d = EventDistribution.from_autocallable_stats(stats)
     n = stats.pre_ko_times.size + stats.post_ko_times.size
-    assert d.event_times.size == n and np.all(np.diff(d.event_times) >= 0)
-    assert d.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(stats.pre_maturity_probability, abs=1e-12)
+    assert d.stream_times[EventType.KO].size == n and np.all(np.diff(d.stream_times[EventType.KO]) >= 0)
+    # spec D16: the marched buckets' residual is absorbed into MATURITY_NO_KO and carried visibly
+    residual = 1.0 - (stats.pre_ko_probability.sum() + stats.post_ko_probability.sum()
+                      + stats.pre_maturity_probability + stats.post_maturity_probability)
+    assert d.probability_residual == pytest.approx(residual, abs=1e-15)
+    assert d.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(
+        stats.pre_maturity_probability + d.probability_residual, abs=1e-15)
     assert d.determination_times[EventType.MATURITY_NO_KO] == stats.pre_maturity_time
     assert d.payment_times_for(EventType.MATURITY_NO_KO) == stats.pre_maturity_payment_time
     assert d.payment_times_for(EventType.MATURITY_WITH_KI) == stats.post_maturity_payment_time
     # F5: the pre-maturity mass leaves the survival at its determination, the last node keeps today's convention
-    i_pre = int(np.searchsorted(d.event_times, stats.pre_maturity_time, side="right"))
+    i_pre = int(np.searchsorted(d.stream_times[EventType.KO], stats.pre_maturity_time, side="right"))
     ko_cum = np.cumsum(d.probabilities[EventType.KO])
     assert d.survival_probability[i_pre] == pytest.approx(
         1.0 - ko_cum[i_pre - 1] - stats.pre_maturity_probability, abs=1e-12)
@@ -48,8 +53,10 @@ def test_coincident_pre_and_post_dates_validate():
 def test_legacy_quad_keeps_one_maturity_outcome_but_both_schedules():
     stats = KOResetSnowballQuadEngine(QuadParams(grid_points=301)).calculate_event_stats(make_ko_reset(KO_RESET), env())
     d = EventDistribution.from_autocallable_stats(stats)
-    assert d.event_times.size == stats.pre_ko_times.size + stats.post_ko_times.size
-    assert d.determination_times == {}
+    assert d.stream_times[EventType.KO].size == stats.pre_ko_times.size + stats.post_ko_times.size
+    # the legacy one-maturity outcome is determined at the last knock-out record, as before
+    last = float(d.stream_times[EventType.KO][-1])
+    assert d.determination_times == {EventType.MATURITY_NO_KO: last, EventType.MATURITY_WITH_KI: last}
 
 
 def test_rebased_offsets_are_refused():
@@ -78,7 +85,7 @@ def test_mc_absolute_converts_with_both_schedules():
     stats = _mc_stats(PostKOScheduleMode.ABSOLUTE)
     assert stats.pre_ko_payment_times is not None and stats.post_ko_payment_times is not None
     d = EventDistribution.from_autocallable_stats(stats)
-    assert d.event_times.size == stats.pre_ko_times.size + stats.post_ko_times.size
+    assert d.stream_times[EventType.KO].size == stats.pre_ko_times.size + stats.post_ko_times.size
 
 
 def test_mc_rebased_is_refused():
@@ -95,7 +102,7 @@ def test_quad_v2_reports_both_maturity_outcomes():
         "ko_reset_kr_cont",
         lambda: KOResetSnowballQuadEngineV2().calculate_event_stats(make_ko_reset(KO_RESET), env()))
     d = EventDistribution.from_autocallable_stats(stats)
-    assert d.event_times.size == stats.pre_ko_times.size + stats.post_ko_times.size
+    assert d.stream_times[EventType.KO].size == stats.pre_ko_times.size + stats.post_ko_times.size
     assert d.determination_times == {EventType.MATURITY_NO_KO: stats.pre_maturity_time,
                                      EventType.MATURITY_WITH_KI: stats.post_maturity_time}
     assert d.probabilities[EventType.MATURITY_WITH_KI] == pytest.approx(stats.post_maturity_probability, abs=1e-12)

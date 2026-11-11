@@ -20,6 +20,7 @@ from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.cashleg.base import LegDirection
+from quantark.cashleg.event_distribution import EventType
 from quantark.cashleg.autocallable_leg import (
     AutocallableCashLeg,
     AutocallableLegType,
@@ -99,7 +100,7 @@ def make_engine(kind, asset="snowball"):
 def future_event_times(product, engine, env):
     """Parent's filtered future observation grid the leg must align to."""
     result = engine.price_with_events(product, env, emit_distribution=True)
-    return np.asarray(result.event_distribution.event_times, dtype=float)
+    return np.asarray(result.event_distribution.stream_times[EventType.KO], dtype=float)
 
 
 def make_margin_leg(obs, notional=1_000_000.0, rate=0.04,

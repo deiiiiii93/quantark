@@ -136,7 +136,7 @@ def test_quad_v2_batch_with_folded_legs_matches_scalar(mode):
     from test_cashleg.test_folding import _leg_set, _route_dist
 
     env, product = make_env(), make_snowball(ko_dates=(0.25, 0.5, 0.75, 1.0))
-    legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).event_times)
+    legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).stream_times[EventType.KO])
     gc = GreeksCalculator()
     envs = []
     for f in (0.9, 1.0, 1.1):

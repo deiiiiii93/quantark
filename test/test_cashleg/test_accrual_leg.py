@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from quantark.cashleg.accrual_leg import AccrualLeg, KOBehavior, PaymentConvention, SurvivalBasis
+from test_cashleg._distribution_helpers import on_grid
 from quantark.cashleg.base import LegDirection
 from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
 from quantark.cashleg.event_distribution import EventDistribution, EventType
@@ -66,9 +67,8 @@ def test_no_ko_reduces_to_deterministic_annuity():
 
 def test_pay_full_schedule_ignores_ko():
     leg = _leg(ko_behavior=KOBehavior.PAY_FULL_SCHEDULE)
-    dist_with_ko = EventDistribution(
-        event_times=np.array([0.25, 0.5, 0.75, 1.0]),
-        event_dates=None,
+    dist_with_ko = on_grid(
+        times=np.array([0.25, 0.5, 0.75, 1.0]),
         probabilities={
             EventType.KO: np.array([0.3, 0.3, 0.3, 0.0]),
             EventType.MATURITY_NO_KO: 0.1,
@@ -82,9 +82,8 @@ def test_pay_full_schedule_ignores_ko():
 
 def test_truncate_at_ko_reduces_pv_with_high_ko_probability():
     leg = _leg()
-    dist_high_ko = EventDistribution(
-        event_times=np.array([0.25, 0.5, 0.75, 1.0]),
-        event_dates=None,
+    dist_high_ko = on_grid(
+        times=np.array([0.25, 0.5, 0.75, 1.0]),
         probabilities={
             EventType.KO: np.array([0.5, 0.3, 0.1, 0.0]),
             EventType.MATURITY_NO_KO: 0.1,
@@ -107,9 +106,8 @@ def test_notional_fraction_base_uses_position_notional():
 
 
 def test_complete_period_basis_uses_end_survival():
-    dist = EventDistribution(
-        event_times=np.array([0.25, 0.5, 0.75, 1.0]),
-        event_dates=None,
+    dist = on_grid(
+        times=np.array([0.25, 0.5, 0.75, 1.0]),
         probabilities={
             EventType.KO: np.array([0.2, 0.2, 0.2, 0.0]),
             EventType.MATURITY_NO_KO: 0.4,

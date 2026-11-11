@@ -11,7 +11,7 @@ from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadE
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.riskmeasures import GreeksCalculator
-from quantark.cashleg import DeterministicLeg, FoldMode, LegClock, LegDirection
+from quantark.cashleg import DeterministicLeg, EventType, FoldMode, LegClock, LegDirection
 from quantark.execution.errors import CapabilityError
 from quantark.portfolio.equity.position import EquityPosition
 from quantark.util.calendar import CalendarType, create_calendar
@@ -38,7 +38,7 @@ def _position(product, engine, legs, quantity=1.0, mode=None, clock=LegClock.CON
 
 def _snowball_case():
     env, product = make_env(), make_snowball(ko_dates=(0.25, 0.5, 0.75, 1.0))
-    times = _route_dist(SnowballPDESolver(PDEParams()), product, env).event_times
+    times = _route_dist(SnowballPDESolver(PDEParams()), product, env).stream_times[EventType.KO]
     return product, env, _leg_set(times)
 
 
@@ -111,7 +111,7 @@ def test_rho_and_delta_rebuild_the_overlay_in_every_bumped_market():
 
 def _dated_case(env):
     product = dated_snowball(CAL, T0)
-    times = _route_dist(SnowballPDESolver(PDEParams()), product, env).event_times
+    times = _route_dist(SnowballPDESolver(PDEParams()), product, env).stream_times[EventType.KO]
     legs = [leg for leg in _leg_set(times if len(times) else [1.0])]
     return product, legs
 

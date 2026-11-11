@@ -113,7 +113,7 @@ def _reassemble(overlay, dist, env, quantity):
 
 def _structure_equal(dist, overlay):
     ko_pay = np.asarray(dist.payment_times[EventType.KO], dtype=float)
-    assert [e.determination_time for e in overlay.ko] == list(dist.event_times)
+    assert [e.determination_time for e in overlay.ko] == list(dist.stream_times[EventType.KO])
     assert [e.payment_time for e in overlay.ko] == list(ko_pay)
     assert overlay.maturity_no_ki.payment_time == dist.payment_times_for(EventType.MATURITY_NO_KO)
     assert overlay.maturity_ki.payment_time == dist.payment_times_for(EventType.MATURITY_WITH_KI)
@@ -178,7 +178,7 @@ def test_fold_reproduces_the_pde_route_leg_value(family, quantity):
     product = make_snowball(ko_dates=(0.25, 0.5, 0.75, 1.0)) if family == "snowball" else \
         make_phoenix(ko_dates=(0.25, 0.5, 0.75, 1.0), coupon_barrier=(80.0,) * 4, ki_barrier=70.0)
     dist = _route_dist(make_engine("pde", family), product, env)
-    legs = _leg_set(dist.event_times)
+    legs = _leg_set(dist.stream_times[EventType.KO])
     overlay = fold_cash_legs(legs, product, env, quantity=quantity, unit_notional=100.0)
     _structure_equal(dist, overlay)
     assert overlay.maturity_no_ki.amount == 0.0                    # the anchor carries nothing
@@ -206,7 +206,7 @@ def test_ko_reset_fold_reproduces_the_pde_route(dated):
     stats = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, env)
     from quantark.cashleg import EventDistribution
     dist = EventDistribution.from_autocallable_stats(stats)
-    legs = [leg for leg in _leg_set(dist.event_times)
+    legs = [leg for leg in _leg_set(dist.stream_times[EventType.KO])
             if not isinstance(leg, AccrualLeg) or leg.payment_convention is PaymentConvention.AT_PERIOD_END]
     overlay = fold_cash_legs(legs, product, env, quantity=1.0, unit_notional=100.0)
     _structure_equal(dist, overlay)
@@ -214,12 +214,14 @@ def test_ko_reset_fold_reproduces_the_pde_route(dated):
     assert overlay.maturity_no_ki.determination_time == stats.pre_maturity_time
     assert overlay.maturity_ki.determination_time == stats.post_maturity_time
     expected = sum(leg.value(dist, env, 100.0) for leg in legs)
-    # The KO-reset route marches BOTH maturity buckets, so its weights miss 1 by the PDE's discount
-    # defect; any affine fold then differs from it by (v_anchor - c)·(1 - ΣP) per leg, never more.
+    # The KO-reset route marches BOTH maturity buckets, so they miss 1 by the PDE's discount defect: the
+    # distribution absorbs that residual into MATURITY_NO_KO (spec D16) while the F5 survival keeps the
+    # marched bucket; any affine fold then differs from it by (v_anchor - c)·residual per leg, never more.
     total_p = sum(float(np.sum(dist.probabilities[e])) for e in
                   (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI))
-    assert abs(total_p - 1.0) < 1e-7
-    bound = abs(total_p - 1.0) * 2.0 * UNIT * len(legs) + 1e-9 * UNIT * 1e-3
+    assert abs(total_p - 1.0) < 1e-12
+    assert 0.0 < abs(dist.probability_residual) < 1e-7
+    bound = abs(dist.probability_residual) * 2.0 * UNIT * len(legs) + 1e-9 * UNIT * 1e-3
     assert abs(_reassemble(overlay, dist, env, 1.0) - expected) <= bound
     # on weights that do sum to one the decomposition is exact
     p_ko = np.asarray(dist.probabilities[EventType.KO], dtype=float)
@@ -308,8 +310,10 @@ def test_dated_structure_and_value_match_the_pde_route(case):
     structure = _event_structure(product, env)
     n = len(structure.ko)
     basis = structure.distribution(np.zeros(n), 1.0, 0.0)
-    np.testing.assert_array_equal(basis.event_times, dist.event_times)
-    assert basis.event_dates == dist.event_dates
+    if n:
+        np.testing.assert_array_equal(basis.stream_times[EventType.KO], dist.stream_times[EventType.KO])
+    np.testing.assert_array_equal(basis.survival_times, dist.survival_times)
+    assert (basis.stream_dates or {}).get(EventType.KO) == (dist.stream_dates or {}).get(EventType.KO)
     assert basis.determination_times == dist.determination_times
     for et in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):
         np.testing.assert_array_equal(np.asarray(basis.payment_times.get(et, np.nan)),
@@ -317,7 +321,7 @@ def test_dated_structure_and_value_match_the_pde_route(case):
         if dist.payment_dates is not None and et in dist.payment_dates:
             assert basis.payment_dates[et] == dist.payment_dates[et]
     legs = []
-    for leg in _leg_set(basis.event_times if n else [1.0]):
+    for leg in _leg_set(basis.stream_times[EventType.KO] if n else [1.0]):
         try:
             leg.value(dist, env, 100.0)               # legs the route itself refuses are out of scope
         except Exception:

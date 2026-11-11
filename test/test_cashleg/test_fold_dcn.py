@@ -252,7 +252,7 @@ def test_mc_parity_with_the_event_route(name, contract, direction, quantity):
     make, product, env = _case(name, contract=contract, direction=direction)
     result = _route(make(), product, env)
     dist = result.event_distribution
-    legs = _leg_set(dist.event_times)
+    legs = _leg_set(dist.stream_times[EventType.KO])
     overlay = fold_cash_legs(legs, product, env, quantity=quantity, unit_notional=100.0)
     folded = quantity * make().price_folded(product, env, overlay) + overlay.constant_pv
     expected = quantity * result.npv + sum(leg.value(dist, env, 100.0) for leg in legs)
@@ -266,7 +266,7 @@ def test_mc_parity_on_closed_row_and_final_days(d, spot, direction):
     make, product, env = _case("gbm_sobol", d=d, spot=spot, direction=direction)
     result = _route(make(), product, env)
     dist = result.event_distribution
-    legs = _leg_set(dist.event_times)
+    legs = _leg_set(dist.stream_times[EventType.KO])
     overlay = fold_cash_legs(legs, product, env, quantity=1.0, unit_notional=100.0)
     folded = make().price_folded(product, env, overlay) + overlay.constant_pv
     expected = result.npv + sum(leg.value(dist, env, 100.0) for leg in legs)
@@ -353,7 +353,7 @@ def test_pde_folded_legs_match_the_mc_event_route(name, contract, direction):
     make_pde, make_mc, grid = AC6[name]
     product, env = make_dcn(contract, direction=direction), env_on(START, grid=grid)
     dist = _route(make_mc(), product, env).event_distribution
-    legs = _leg_set(dist.event_times)
+    legs = _leg_set(dist.stream_times[EventType.KO])
     quantity = 1.0
     overlay = fold_cash_legs(legs, product, env, quantity=quantity, unit_notional=100.0)
     pde = make_pde()

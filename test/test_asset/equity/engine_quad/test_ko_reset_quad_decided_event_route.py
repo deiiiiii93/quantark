@@ -51,7 +51,7 @@ def test_the_decided_knock_out_is_certain_as_on_v2(name):
     assert _decision(product, env).knocked_out
     v1 = KOResetSnowballQuadEngine().price_with_events(product, env).event_distribution
     v2 = KOResetSnowballQuadEngineV2().price_with_events(product, env).event_distribution
-    assert np.array_equal(v1.event_times, v2.event_times)
+    assert np.array_equal(v1.stream_times[EventType.KO], v2.stream_times[EventType.KO])
     assert np.array_equal(v1.probabilities[EventType.KO], v2.probabilities[EventType.KO])
     assert float(np.sum(v1.probabilities[EventType.KO])) == 1.0
     for maturity in (EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):

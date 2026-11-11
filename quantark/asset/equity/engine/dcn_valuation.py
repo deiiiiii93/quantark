@@ -29,11 +29,13 @@ from quantark.util.numerical import is_close
 
 __all__ = [
     "DCNFoldCash",
+    "DCNFoldSlots",
     "DCNStateValuation",
     "DCNValuationRow",
     "at_final_observation",
     "bind_dcn_fold",
     "check_dcn_ledger",
+    "dcn_fold_slots",
     "folded_row_cash",
     "observe_valuation_row",
     "resolve_dcn_lifecycle_state",
@@ -245,24 +247,46 @@ class DCNFoldCash:
     ki: float
 
 
+@dataclass(frozen=True)
+class DCNFoldSlots:
+    """The DCN's event axis for folding: the shared monthly observation grid and the survivor settlement.
+
+    ``ko`` holds one ``("main", t_obs, ko_pay_time)`` record per monthly observation, the KO stream's axis of
+    the DCN statistics (DESIGN §4.2: the KO and coupon rows share one grid; a coupon-only row carries KO
+    probability 0). Both maturity branches are determined at ``determination`` (the final observation) and
+    paid at ``payment`` (the loss-leg settlement). Times are on the engine's own axis (spec D12).
+    """
+
+    ko: tuple
+    determination: float
+    payment: float
+
+
+def dcn_fold_slots(ctx: DCNGridContext) -> DCNFoldSlots:
+    """The fold structure's and the binder's one source of the DCN event axis."""
+    obs = np.asarray(ctx.times[ctx.obs_cols], dtype=float)
+    return DCNFoldSlots(
+        ko=tuple(("main", float(t), float(p)) for t, p in zip(obs, ctx.ko_pay_times)),
+        determination=float(obs[-1]),
+        payment=float(ctx.loss_pay_time),
+    )
+
+
 def bind_dcn_fold(overlay, ctx: DCNGridContext) -> DCNFoldCash:
     """``overlay`` bound one to one to the DCN's monthly rows and its two survivor branches (D5, fail closed).
 
-    Every monthly observation is a knock-out slot at ``(t_obs, ko_pay_time)`` (the event route's axis); both
-    maturity branches are determined at the final observation and paid at ``loss_pay_time``. A slot on an
-    observation that is not a knock-out observation binds and carries nothing: the event it is conditional on
-    cannot happen (a leg's own overlay does carry cash there, ``v_e - v_anchor``, which its zero probability
-    removes from the event route's leg value).
+    Every monthly observation is a knock-out slot at ``(t_obs, ko_pay_time)`` (the KO stream's axis,
+    ``dcn_fold_slots``); both maturity branches are determined at the final observation and paid at
+    ``loss_pay_time``. A slot on an observation that is not a knock-out observation binds and carries nothing:
+    the event it is conditional on cannot happen (a leg's own overlay does carry cash there,
+    ``v_e - v_anchor``, which its zero probability removes from the event route's leg value).
     """
-    obs = np.asarray(ctx.times[ctx.obs_cols], dtype=float)
-    amounts = overlay.bind_ko(
-        [("main", float(t), float(p)) for t, p in zip(obs, ctx.ko_pay_times)]
-    )
-    determination, payment = float(obs[-1]), float(ctx.loss_pay_time)
+    slots = dcn_fold_slots(ctx)
+    amounts = overlay.bind_ko(list(slots.ko))
     return DCNFoldCash(
         ko=np.where(ctx.obs_is_ko, amounts, 0.0),
-        no_ki=float(overlay.bind_terminal("no_ki", determination, payment)),
-        ki=float(overlay.bind_terminal("ki", determination, payment)),
+        no_ki=float(overlay.bind_terminal("no_ki", slots.determination, slots.payment)),
+        ki=float(overlay.bind_terminal("ki", slots.determination, slots.payment)),
     )
 
 

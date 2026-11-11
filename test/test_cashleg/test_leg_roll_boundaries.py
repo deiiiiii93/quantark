@@ -23,6 +23,7 @@ from quantark.cashleg import (
     LegDirection,
     LegSchedule,
 )
+from test_cashleg._distribution_helpers import on_grid
 from quantark.cashleg.accrual_leg import SurvivalBasis
 from quantark.cashleg.autocallable_leg import AccrualBasis, AutocallableCashLeg, AutocallableLegType
 from quantark.cashleg.booking import LegCashBook
@@ -34,14 +35,14 @@ D = 1 / 365.0
 
 
 def test_survival_at_zero_reads_an_event_kept_at_zero():
-    knocked = EventDistribution(event_times=np.array([0.0, 0.5]), event_dates=None,
+    knocked = on_grid(times=np.array([0.0, 0.5]),
                                 probabilities={EventType.KO: np.array([1.0, 0.0]), EventType.MATURITY_NO_KO: 0.0},
                                 survival_probability=np.array([1.0, 0.0, 0.0]))
     assert knocked.survival_at(0.0) == 0.0
     assert knocked.survival_at(1e-12) == 0.0
     assert knocked.survival_at(-1e-3) == 1.0
     assert EventDistribution.trivial(maturity=1.0).survival_at(0.0) == 1.0
-    no_event_at_zero = EventDistribution(event_times=np.array([0.25, 0.5]), event_dates=None,
+    no_event_at_zero = on_grid(times=np.array([0.25, 0.5]),
                                          probabilities={EventType.KO: np.array([0.3, 0.1]), EventType.MATURITY_NO_KO: 0.6},
                                          survival_probability=np.array([1.0, 0.7, 0.6]))
     assert no_event_at_zero.survival_at(0.0) == 1.0

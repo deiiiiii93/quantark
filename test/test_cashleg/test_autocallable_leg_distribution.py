@@ -29,7 +29,7 @@ def test_phoenix_price_with_events_emits_coupon_stream(kind):
         ph, env, emit_distribution=True
     ).event_distribution
     assert EventType.COUPON in dist.probabilities
-    assert np.asarray(dist.probabilities[EventType.COUPON]).size == dist.event_times.size
+    assert np.asarray(dist.probabilities[EventType.COUPON]).size == dist.stream_times[EventType.KO].size
 
 
 @pytest.mark.parametrize("memory", [False, True])

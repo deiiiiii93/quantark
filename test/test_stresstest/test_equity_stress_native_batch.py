@@ -19,7 +19,7 @@ from quantark.asset.equity.param.quad_v2_params import QuadV2Params
 from quantark.asset.equity.product import EuropeanVanillaOption
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
-from quantark.cashleg import FoldMode
+from quantark.cashleg import EventType, FoldMode
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.portfolio import EquityPosition, Portfolio
 from quantark.priceenv import PricingEnvironment
@@ -193,7 +193,7 @@ def test_folded_cash_legs_batch_matches_scalar(mode):
     from test_cashleg.test_folding import _leg_set, _route_dist
 
     env, product = make_env(), make_snowball(ko_dates=(0.25, 0.5, 0.75, 1.0))
-    legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).event_times)
+    legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).stream_times[EventType.KO])
 
     def book():
         pf = Portfolio(portfolio_name="folded", pricing_environments={"X": copy.deepcopy(env)}, creation_date=VAL, trade_value=True)

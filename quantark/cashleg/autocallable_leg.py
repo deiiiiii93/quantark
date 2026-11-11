@@ -157,7 +157,14 @@ class AutocallableCashLeg(CashLeg):
     def value(
         self, event_dist: EventDistribution, env, position_notional: float
     ) -> float:
-        """Return signed PV from the buyer's perspective (uses self.notional)."""
+        """Return signed PV from the buyer's perspective (uses self.notional).
+
+        The basis stream must sit on the leg's ``observation_schedule`` (its own axis, one entry per
+        observation). On a REBASED distribution (spec D13) the events sit on the absolute candidate axis
+        instead, and each event is valued at its own time: a knock-out with the leg's schedule entry for
+        that time, a knocked-in settlement (MATURITY_WITH_KI row) with the terminal accrual factor at the
+        note's actual settlement.
+        """
 
         af = np.asarray(self.accrual_factors, dtype=float)
         contingent = 0.0
@@ -170,40 +177,83 @@ class AutocallableCashLeg(CashLeg):
                     f"array {event_type.value} stream in the parent EventDistribution; "
                     "the parent engine emitted none (trivial/unsupported distribution)."
                 )
-            obs = np.asarray(self.observation_schedule, dtype=float)
-            ss = np.asarray(self.settlement_schedule, dtype=float)
-            ev_times = np.asarray(event_dist.event_times, dtype=float)
-            if prob.shape != obs.shape:
-                raise ValidationError(
-                    f"{event_type.value} length {prob.shape} != observation_schedule "
-                    f"length {obs.shape}; align the leg to the parent's future grid."
-                )
-            if obs.shape != ev_times.shape or not all(
-                almost_equal(float(a), float(b), tol=Tolerance.PROBABILITY)
-                for a, b in zip(obs, ev_times)
-            ):
-                raise ValidationError(
-                    "observation_schedule does not match the parent's filtered "
-                    "event_times (shifted/dropped observation); refusing to realign."
-                )
-            df_obs = np.array([env.get_discount_factor(float(t)) for t in ss])
-            contingent = float(np.sum(af * prob * df_obs))
+            if event_dist.rebased:
+                contingent = self._per_event_contingent(event_dist, event_type, env)
+            else:
+                contingent = self._scheduled_contingent(event_dist, event_type, prob, env)
 
         for e in self.terminal_events:
             prob_e = event_dist.probabilities.get(e)
-            if prob_e is None or isinstance(prob_e, np.ndarray) or not is_valid_number(float(prob_e)):
+            per_event = isinstance(prob_e, np.ndarray) and event_dist.rebased and e is EventType.MATURITY_WITH_KI
+            if prob_e is None or (isinstance(prob_e, np.ndarray) and not per_event) or (
+                not per_event and not is_valid_number(float(prob_e))
+            ):
                 raise ValidationError(
                     f"terminal event {e.value} missing or non-scalar in the parent "
                     "EventDistribution; cannot value the terminal branch."
                 )
-        p_term = sum(float(event_dist.probabilities[e]) for e in self.terminal_events)
-        df_term = env.get_discount_factor(float(self.terminal_settlement_time))
-        contingent += float(self.terminal_accrual_factor) * p_term * float(df_term)
+        df_term = float(env.get_discount_factor(float(self.terminal_settlement_time)))
+        for e in self.terminal_events:
+            prob_e = event_dist.probabilities[e]
+            if isinstance(prob_e, np.ndarray):
+                # REBASED knocked-in settlement at a path-dependent date: the branch settles with the note
+                pay = np.asarray(event_dist.payment_times_for(e), dtype=float)
+                dfs = np.array([env.get_discount_factor(float(t)) for t in pay])
+                contingent += float(self.terminal_accrual_factor) * float(np.sum(prob_e * dfs))
+            else:
+                contingent += float(self.terminal_accrual_factor) * float(prob_e) * df_term
 
         R = float(self.notional) * float(self.rate) * contingent
         if self.pv_formula is PvFormula.NORMAL:
             return self.sign() * R
         return self.sign() * (float(self.notional) - R)
+
+    def _scheduled_contingent(self, event_dist, event_type, prob, env) -> float:
+        """Σ af_i · P_i · DF(settlement_i) with the stream on the leg's own observation schedule."""
+        af = np.asarray(self.accrual_factors, dtype=float)
+        obs = np.asarray(self.observation_schedule, dtype=float)
+        ss = np.asarray(self.settlement_schedule, dtype=float)
+        ev_times = np.asarray(event_dist.stream_times[event_type], dtype=float)
+        if prob.shape != obs.shape:
+            raise ValidationError(
+                f"{event_type.value} length {prob.shape} != observation_schedule "
+                f"length {obs.shape}; align the leg to the parent's future grid."
+            )
+        if obs.shape != ev_times.shape or not all(
+            almost_equal(float(a), float(b), tol=Tolerance.PROBABILITY)
+            for a, b in zip(obs, ev_times)
+        ):
+            raise ValidationError(
+                f"observation_schedule does not match the parent's {event_type.value} "
+                "axis (shifted/dropped observation); refusing to realign."
+            )
+        df_obs = np.array([env.get_discount_factor(float(t)) for t in ss])
+        return float(np.sum(af * prob * df_obs))
+
+    def _per_event_contingent(self, event_dist, event_type, env) -> float:
+        """REBASED (spec D13): each event row valued with the leg's own schedule entry at the row's time.
+
+        An event row with zero probability contributes nothing; a row with mass at a time the leg's schedule
+        does not list is refused (fail closed: the leg has no accrual defined there).
+        """
+        obs = np.asarray(self.observation_schedule, dtype=float)
+        af = np.asarray(self.accrual_factors, dtype=float)
+        ss = np.asarray(self.settlement_schedule, dtype=float)
+        prob = np.asarray(event_dist.probabilities[event_type], dtype=float)
+        times = np.asarray(event_dist.stream_times[event_type], dtype=float)
+        total = 0.0
+        for t, p in zip(times, prob):
+            if almost_equal(float(p), 0.0, tol=0.0):
+                continue
+            match = np.flatnonzero(np.abs(obs - float(t)) <= Tolerance.PROBABILITY)
+            if match.size != 1:
+                raise ValidationError(
+                    f"AutocallableCashLeg has {'no' if match.size == 0 else 'an ambiguous'} schedule entry for "
+                    f"the REBASED {event_type.value} event at t={float(t)}; list every candidate event time once"
+                )
+            i = int(match[0])
+            total += float(af[i]) * float(p) * float(env.get_discount_factor(float(ss[i])))
+        return total
 
     def time_shift(
         self, dt: float, *, keep_landing: bool = False

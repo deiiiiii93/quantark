@@ -187,8 +187,12 @@ def _phase4_fixtures():
 
 
 def _event_distribution_payload(dist) -> dict:
+    from quantark.cashleg.event_distribution import EventType
+
+    # "event_times": the KO stream's axis (the shared observation grid); the trivial distribution has none
+    axis = dist.stream_times.get(EventType.KO, dist.survival_times)
     return {
-        "event_times": [float(t) for t in dist.event_times],
+        "event_times": [float(t) for t in axis],
         "survival_probability": [float(p) for p in dist.survival_probability],
         "probabilities": {
             event_type.name: (

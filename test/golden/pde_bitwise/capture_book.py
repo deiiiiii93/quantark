@@ -317,13 +317,16 @@ def _stats_fields(stats, prefix="stats_"):
 
 
 def _dist_fields(dist):
-    """Every field of an EventDistribution; the three pre-3B keys keep their names."""
-    out = {"dist_times": _field_value(dist.event_times),
+    """Every field of an EventDistribution; the three pre-3B keys keep their names (``dist_times`` is the KO
+    stream's axis since the per-stream axes, unified event statistics T6)."""
+    from quantark.cashleg.event_distribution import EventType
+
+    out = {"dist_times": _field_value(dist.stream_times.get(EventType.KO, dist.survival_times)),
            "dist_survival": _field_value(dist.survival_probability)}
     for et in sorted(dist.probabilities, key=str):
         out[f"dist_{et}"] = _field_value(np.atleast_1d(np.asarray(dist.probabilities[et], float)))
     for f in dataclasses.fields(dist):
-        if f.name in ("event_times", "survival_probability", "probabilities"):
+        if f.name in ("survival_probability", "probabilities"):
             continue
         val = getattr(dist, f.name)
         if isinstance(val, dict):

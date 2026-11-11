@@ -147,7 +147,7 @@ def test_folded_trade_matches_the_v2_event_route(family, quantity):
     route = engine_cls().price_with_events(product, env, emit_distribution=True)
     dist = route.event_distribution
     legs = []
-    for leg in _leg_set(dist.event_times):
+    for leg in _leg_set(dist.stream_times[EventType.KO]):
         try:
             leg.value(dist, env, 100.0)
         except Exception:          # legs the route itself refuses are out of scope

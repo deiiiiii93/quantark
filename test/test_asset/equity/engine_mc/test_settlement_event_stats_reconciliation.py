@@ -146,7 +146,7 @@ def test_event_distribution_keeps_determination_and_payment_times_separate():
         dtype=float,
     )
 
-    np.testing.assert_array_equal(distribution.event_times, stats.ko_times)
+    np.testing.assert_array_equal(distribution.stream_times[EventType.KO], stats.ko_times)
     np.testing.assert_allclose(
         ko_payment_times,
         np.asarray(stats.ko_times) + LAG,

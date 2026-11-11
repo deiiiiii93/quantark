@@ -43,16 +43,17 @@ def test_distribution_carries_provenance_and_defaults_determination():
     p = StatisticsProvenance("flat_vol_1d", "flat_vol_1d")
     d = EventDistribution.from_autocallable_stats(_stats(provenance=p))
     assert d.provenance == p
-    assert d.determination_times == {}
+    # a producer without a ledger: the outcomes are determined at the last observation, as before
+    assert d.determination_time(EventType.MATURITY_NO_KO) == d.determination_time(EventType.MATURITY_WITH_KI) == 1.0
 
 
 def test_explicit_maturity_determination_relaxes_the_terminal_check():
     # a maturity outcome determined at 0.5 and paid at 0.6, before the last event time 1.0
     d = EventDistribution(
-        event_times=np.array([0.5, 1.0]), event_dates=None,
+        stream_times={EventType.KO: np.array([0.5, 1.0])},
         probabilities={EventType.KO: np.array([0.2, 0.1]), EventType.MATURITY_NO_KO: 0.3,
                        EventType.MATURITY_WITH_KI: 0.4},
-        survival_probability=np.array([1.0, 0.8, 0.7]),
+        survival_times=np.array([0.0, 0.5, 1.0]), survival_probability=np.array([1.0, 0.8, 0.7]),
         payment_times={EventType.KO: np.array([0.5, 1.0]), EventType.MATURITY_NO_KO: 0.6,
                        EventType.MATURITY_WITH_KI: 1.0},
         determination_times={EventType.MATURITY_NO_KO: 0.5})

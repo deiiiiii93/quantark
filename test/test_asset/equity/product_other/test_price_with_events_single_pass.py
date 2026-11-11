@@ -108,7 +108,7 @@ def test_npv_matches_price_immediate_ko():
     res = solver.price_with_events(product, env)
     assert abs(res.npv - solver.price(product, env)) < 1e-8
     assert res.event_distribution.probabilities[EventType.KO][0] == 1.0
-    assert res.event_distribution.event_times[0] == 0.0
+    assert res.event_distribution.stream_times[EventType.KO][0] == 0.0
 
 
 def test_npv_matches_price_spot_above_ko_off_an_observation_date():

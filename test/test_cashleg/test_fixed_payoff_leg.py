@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from quantark.cashleg.base import LegDirection
+from test_cashleg._distribution_helpers import on_grid
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
@@ -28,9 +29,8 @@ def _env(rate=0.05):
 
 
 def test_at_ko_pv_equals_amount_times_p_ko_times_df():
-    dist = EventDistribution(
-        event_times=np.array([0.25, 0.5, 1.0]),
-        event_dates=None,
+    dist = on_grid(
+        times=np.array([0.25, 0.5, 1.0]),
         probabilities={
             EventType.KO: np.array([0.3, 0.2, 0.1]),
             EventType.MATURITY_NO_KO: 0.4,
@@ -52,9 +52,8 @@ def test_at_ko_pv_equals_amount_times_p_ko_times_df():
 
 
 def test_at_maturity_no_ko_pv():
-    dist = EventDistribution(
-        event_times=np.array([0.5, 1.0]),
-        event_dates=None,
+    dist = on_grid(
+        times=np.array([0.5, 1.0]),
         probabilities={
             EventType.KO: np.array([0.3, 0.0]),
             EventType.MATURITY_NO_KO: 0.7,
@@ -82,9 +81,8 @@ def test_missing_trigger_in_distribution_raises():
 
 
 def test_payment_offset_days_shifts_discount():
-    dist = EventDistribution(
-        event_times=np.array([1.0]),
-        event_dates=None,
+    dist = on_grid(
+        times=np.array([1.0]),
         probabilities={EventType.KO: np.array([1.0])},
         survival_probability=np.array([1.0, 0.0]),
     )

@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict
 
+import numpy as np
 import pytest
 
 from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL, close
@@ -73,10 +75,6 @@ class MovedBy:
     check: Callable[[dict, dict, dict], None]
 
 
-#: record id -> MovedBy. Empty at base: every banked record must reproduce.
-EXPECTED_MOVES: Dict[str, MovedBy] = {}
-
-
 def _bank():
     if not BANK.exists():
         return None
@@ -86,6 +84,103 @@ def _bank():
 
 BANKED = _bank()
 RECORDS = {} if BANKED is None else {r["id"]: r for r in BANKED["records"]}
+
+
+# --- moves (T6: EventDistribution on per-stream axes) ----------------------------------------------
+
+def _live_distribution(record: dict):
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    return engine.price_with_events(product, env, **case.kwargs()).event_distribution, env
+
+
+def _leg(record: dict):
+    return next(spec.leg for spec in _case(record["case"]).legs() if spec.name == record["leg"])
+
+
+def _ki_stream_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
+    """Cause (e). At base the distribution dropped the KI stream (its length differed from the KO grid), so
+    the AT_KI leg raised. Now the KI stream sits on its own axis, paid at the KI observation (D8), and the leg
+    values exactly ``amount · Σ_k P_k · DF(t_k + offset)`` on it."""
+    from quantark.cashleg import EventType
+
+    assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
+    assert "value" in live, f"{record['id']}: still raises {live}"
+    dist, env = _live_distribution(record)
+    times = np.asarray(dist.stream_times[EventType.KI], dtype=float)
+    probability = np.asarray(dist.probabilities[EventType.KI], dtype=float)
+    np.testing.assert_array_equal(np.asarray(dist.payment_times_for(EventType.KI)), times)       # D8
+    assert times.size != base["n_event_times"] or not np.array_equal(times, base["event_times"]), (
+        f"{record['id']}: the KI stream sits on the KO grid; base would not have dropped it")
+    leg = _leg(record)
+    offset = float(leg.payment_offset_days) / 365.0
+    expected = float(leg.amount) * math.fsum(
+        float(p) * env.get_discount_factor(float(t) + offset) for t, p in zip(times, probability))
+    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
+        f"{record['id']}: live {live['value']!r} != Σ P·DF on the KI axis {expected!r}")
+
+
+def _maturity_moves_by_the_residual(live: dict, banked: dict, record: dict) -> None:
+    """Cause (d). ``from_statistics`` absorbs the statistics' ``probability_residual`` into MATURITY_NO_KO
+    (spec D16); at base the converter kept the producer's direct pre-maturity probability (its normalisation
+    ignored a drift under ``Tolerance.PROBABILITY``). With the absorption undone on the live distribution the
+    leg gives back its banked value, and the move itself is more than round-off."""
+    from dataclasses import replace
+
+    from quantark.cashleg import EventType
+    from quantark.util.numerical import Tolerance
+
+    assert "value" in banked and "value" in live, (live, banked)
+    dist, env = _live_distribution(record)
+    residual = dist.probability_residual
+    assert residual != 0.0 and abs(residual) <= Tolerance.PROBABILITY, residual
+    leg = _leg(record)
+    assert leg.value(dist, env, cases.UNIT) == float(live["value"])
+    undone = replace(dist, probabilities={
+        **dist.probabilities,
+        EventType.MATURITY_NO_KO: dist.probabilities[EventType.MATURITY_NO_KO] - residual,
+    })
+    tol = GOLDEN_REL_TOL * abs(float(banked["value"]))
+    assert close(leg.value(undone, env, cases.UNIT), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: undoing the absorbed residual does not give back the banked value")
+    assert abs(float(live["value"]) - float(banked["value"])) > tol / 100.0, (
+        f"{record['id']}: the move is round-off, not the residual")
+
+
+#: T6: the KI stream that base dropped (every AT_KI event record that raised for it and now values)
+_KI_AXIS_MOVES = (
+    "mc_snowball__snowball_cki", "mc_phoenix__phoenix_mem_instant", "mc_phoenix__phoenix_nomem_instant",
+    "mc_phoenix__phoenix_mem_expiry", "mc_phoenix__phoenix_nomem_expiry", "mc_lv_snowball__snowball_cki",
+    "mc_lv_phoenix__phoenix_mem_instant", "mc_heston_snowball__snowball_cki", "mc_heston_phoenix__phoenix_mem_expiry",
+    "mc_snowball__snowball_cki_knocked_in", "quad_v1_snowball__snowball_cki_knocked_in",
+    "pde_snowball__snowball_cki_knocked_in", "adi_heston_snowball__snowball_cki_knocked_in",
+    "mc_phoenix__phoenix_mem_instant_knocked_in", "quad_v1_phoenix__phoenix_mem_instant_knocked_in",
+    "pde_phoenix__phoenix_mem_instant_knocked_in",
+    "mc_snowball__snowball_cki_ko_at_valuation", "mc_snowball__snowball_cki_knocked_in_ko_at_valuation",
+    "pde_snowball__snowball_cki_knocked_in_ko_at_valuation", "quad_v1_snowball__snowball_cki_knocked_in_ko_at_valuation",
+    "mc_phoenix__phoenix_mem_instant_ko_at_valuation", "mc_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
+    "pde_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
+    "quad_v1_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation",
+    "mc_snowball__snowball_reverse",
+    "mc_snowball__snowball_cki_knocked_in_no_ko_after_ki", "pde_snowball__snowball_cki_knocked_in_no_ko_after_ki",
+)
+#: T6: D16 absorbs the PDE KO-reset buckets' march residual (-6.9e-10 .. -2.8e-9) into MATURITY_NO_KO; every
+#: event record it moves by more than 1% of its tolerance (two of them beyond the tolerance itself)
+_RESIDUAL_MOVES = tuple(
+    f"{case}__{leg}__event"
+    for case in ("pde_ko_reset__ko_reset_absolute_cki", "pde_ko_reset__ko_reset_absolute",
+                 "pde_lv_ko_reset__ko_reset_absolute")
+    for leg in ("fixed_at_maturity_no_ko", "fixed_at_maturity_any", "autocallable_margin_nmp_both",
+                "autocallable_backend_premium_no_ko")
+)
+
+#: record id -> MovedBy; every other banked record must reproduce.
+EXPECTED_MOVES: Dict[str, MovedBy] = {
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _ki_stream_on_its_own_axis) for case in _KI_AXIS_MOVES},
+    **{rid: MovedBy("d", _maturity_moves_by_the_residual) for rid in _RESIDUAL_MOVES},
+}
 
 
 # --- live recomputation (cached per worker: one event route / one drilldown per case) -------------

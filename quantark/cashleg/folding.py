@@ -14,8 +14,10 @@ cash exactly where it adds its own payoff for the event, and one plain solve
 then prices product and legs together.
 
 The basis distributions come from the event route's own conversion code
-(``EventDistribution.from_autocallable_stats``) fed a solve-free structural
-record, so the folded structure is the event route's, not a re-derivation.
+(``EventDistribution.from_statistics``) fed a solve-free structural
+``EventStatistics`` record on the product's event axis (the shared observation
+grid; DCN: ``dcn_fold_slots``), so the folded structure is the event route's,
+not a re-derivation.
 """
 
 from __future__ import annotations
@@ -240,13 +242,92 @@ def _settlement(rec) -> float:
     return float(rec.settlement_time if rec.settlement_time is not None else rec.observation_time)
 
 
-def _autocallable_structure(product, pricing_env) -> _Structure:
-    """Snowball / Phoenix: the PDE readout's records, ledger and terminal timing."""
+#: why a fold structure's statistics carry no KI / coupon-probability streams: folding reads KO and maturity only
+_FOLD_REASON = "not requested"
+
+
+def _all_dates(dates) -> Optional[tuple]:
+    dates = tuple(dates)
+    return None if any(d is None for d in dates) else dates
+
+
+def _structure_statistics(
+    *,
+    family: str,
+    times,
+    payments,
+    p_ko,
+    survival,
+    maturity: dict,
+    ki_settlement: dict,
+    p_no_ki: float,
+    p_ki: float,
+    schedule=None,
+    dates=None,
+    payment_dates=None,
+    coupon_payments=None,
+    coupon_payment_dates=None,
+):
+    """Solve-free ``EventStatistics`` of given event weights on a product's event axis (zero cash).
+
+    The event route's distribution of these weights is ``EventDistribution.from_statistics`` of this record,
+    so a basis distribution is built by the same conversion the engines' statistics go through.
+    """
     from quantark.asset.equity.engine.event_stats import (
-        AutocallableEventStats,
-        payment_aware_cashflow_fields,
+        CouponTable,
+        EventStatistics,
+        KnockInStatistics,
+        ObservationTable,
+        OutcomeRow,
+        ReceivablesTable,
+        StatisticsProvenance,
+        build_cash_ledger,
     )
+
+    times = np.asarray(times, dtype=float)
+    n = times.size
+    zeros = np.zeros(n)
+    flags = np.zeros(n, dtype=bool)
+    survival = np.asarray(survival, dtype=float)
+    observations = ObservationTable(
+        times=times, payment_times=np.asarray(payments, dtype=float), dates=dates, payment_dates=payment_dates,
+        is_ko_obs=np.ones(n, dtype=bool), is_coupon_obs=np.full(n, family in ("phoenix", "dcn")),
+        schedule=schedule, probability=np.asarray(p_ko, dtype=float), survival=survival,
+        discounted_cash=zeros, cash_to_pay=zeros, payment_is_path_dependent=flags,
+    )
+    unavailable = {key: _FOLD_REASON for key in
+                   ("ki_table", "knock_in.probability", "knock_in.expected_time", "knock_in.expected_loss")}
+    coupons = None
+    if family in ("phoenix", "dcn"):
+        unavailable["coupons.probability"] = _FOLD_REASON
+        coupons = CouponTable(
+            probability=None, survival=np.r_[1.0, survival[:-1]] if n else zeros,
+            payment_times=np.asarray(payments if coupon_payments is None else coupon_payments, dtype=float),
+            payment_dates=payment_dates if coupon_payments is None else coupon_payment_dates,
+            discounted_cash=zeros, cash_to_pay=zeros, payment_is_path_dependent=flags,
+        )
+    maturity_row = OutcomeRow(probability=float(p_no_ki), discounted_cash=0.0, cash_to_pay=0.0, **maturity)
+    ki_row = OutcomeRow(probability=float(p_ki), discounted_cash=0.0, cash_to_pay=0.0, **ki_settlement)
+    receivables = ReceivablesTable.empty()
+    final_time = float(times[-1]) if n else maturity_row.time
+    return EventStatistics(
+        product_family=family, pv=0.0, observations=observations, coupons=coupons, maturity=maturity_row,
+        ki_settlement=ki_row,
+        knock_in=KnockInStatistics(probability=None, probability_no_ko=ki_row.probability, expected_time=None,
+                                   expected_loss=None),
+        ki_table=None, receivables=receivables,
+        ledger=build_cash_ledger(observations=observations, coupons=coupons, maturity=maturity_row,
+                                 ki_settlement=ki_row, receivables=receivables),
+        expected_lifetime=float(np.sum(observations.probability * times)) + (float(p_no_ki) + float(p_ki)) * final_time,
+        provenance=StatisticsProvenance(statistics_model="fold_structure", price_model="fold_structure"),
+        unavailable=unavailable,
+    )
+
+
+def _autocallable_structure(product, pricing_env) -> _Structure:
+    """Snowball / Phoenix: the PDE readout's records and terminal timing."""
     from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 
     tau = float(product.get_maturity(pricing_env))
     if is_non_positive(tau, tol=0.0):                   # the engines' expired outcome: trivial
@@ -256,28 +337,24 @@ def _autocallable_structure(product, pricing_env) -> _Structure:
         return _trivial_structure(product, pricing_env)
     terminal = resolve_terminal_timing(product, pricing_env)
     ko_times = np.array([float(rec.observation_time) for rec in records], dtype=float)
-    ledger = payment_aware_cashflow_fields(
-        pricing_env,
-        determination_times=[*ko_times, float(terminal.determination_time)],
-        payment_times=[*(_settlement(rec) for rec in records), float(terminal.payment_time)],
-        expected_discounted_cashflows=np.zeros(len(records) + 1),
-        determination_dates=[*(rec.observation_date for rec in records), terminal.determination_date],
-        payment_dates=[*(rec.settlement_date for rec in records), terminal.payment_date],
-    )
+    payments = np.array([_settlement(rec) for rec in records], dtype=float)
+    family = "phoenix" if isinstance(product, PhoenixOption) else "snowball"
+    timing = dict(time=float(terminal.determination_time), payment_time=float(terminal.payment_time),
+                  date=terminal.determination_date, payment_date=terminal.payment_date)
+    # dates only when every record and the terminal row carry one (the legacy ledger's all-or-nothing rule)
+    dates = _all_dates([*(rec.observation_date for rec in records), terminal.determination_date])
+    payment_dates = _all_dates([*(rec.settlement_date for rec in records), terminal.payment_date])
+    dates = None if dates is None else dates[:-1]
+    payment_dates = None if payment_dates is None else payment_dates[:-1]
 
     def distribution(p_ko, p_no_ki, p_ki):
-        stats = AutocallableEventStats(
-            pv=0.0,
-            ko_times=ko_times,
-            ko_probability=np.asarray(p_ko, dtype=float),
-            survival_probability=np.maximum(0.0, 1.0 - np.cumsum(p_ko)),
-            expected_discounted_ko_cashflow=np.zeros(len(records)),
-            ki_probability=float(p_ki),
-            expected_discounted_maturity_cashflow=0.0,
-            ki_survive_knocked_in_probability=float(p_ki),
-            **ledger,
+        p_ko = np.asarray(p_ko, dtype=float)
+        stats = _structure_statistics(
+            family=family, times=ko_times, payments=payments, p_ko=p_ko,
+            survival=np.maximum(0.0, 1.0 - np.cumsum(p_ko)), maturity=timing, ki_settlement=timing,
+            p_no_ki=p_no_ki, p_ki=p_ki, dates=dates, payment_dates=payment_dates,
         )
-        return EventDistribution.from_autocallable_stats(stats)
+        return EventDistribution.from_statistics(stats)
 
     terminal_slot = _Slot("main", float(terminal.determination_time), float(terminal.payment_time))
     return _Structure(
@@ -290,18 +367,15 @@ def _autocallable_structure(product, pricing_env) -> _Structure:
 
 def _ko_reset_structure(product, pricing_env) -> _Structure:
     """KO-reset: both schedules on one axis (pre first at a tie) and the two maturity buckets."""
-    from quantark.asset.equity.engine.event_stats import (
-        KOResetEventStats,
-        payment_aware_cashflow_fields,
-    )
     from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
     from quantark.execution.errors import CapabilityError
     from quantark.util.enum import CouponPayType, PostKOScheduleMode
 
     if product.post_ko_mode == PostKOScheduleMode.REBASED:
+        # DESIGN §4.11: out of scope until a fold binder takes the absolute termination distribution
         raise CapabilityError(
-            "a REBASED KO-reset schedule settles at knock-in-dependent times; its cash legs "
-            "cannot be folded (the event route refuses it too)"
+            "a REBASED KO-reset settles at knock-in-dependent times; its cash legs cannot be folded "
+            "(no fold binder takes the absolute termination distribution); value them on the event route"
         )
     tau = float(product.get_maturity(pricing_env))
     if is_non_positive(tau, tol=0.0):                   # the engines' expired outcome: trivial
@@ -323,48 +397,28 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
         return _trivial_structure(product, pricing_env)
     delay = float(terminal.payment_time) - float(terminal.determination_time)
     pre_maturity, post_maturity = float(product.get_pre_maturity_time(pricing_env)), tau
-    ledger = payment_aware_cashflow_fields(
-        pricing_env,
-        determination_times=[*pre_t, *post_t, pre_maturity, post_maturity],
-        payment_times=[*pre_pay, *post_pay, pre_maturity + delay, post_maturity + delay],
-        expected_discounted_cashflows=np.zeros(pre_t.size + post_t.size + 2),
-    )
     times = np.r_[pre_t, post_t]
     tag = np.r_[np.zeros(pre_t.size), np.ones(post_t.size)]
     order = np.lexsort((tag, times))                      # the event route's merged order
     pays = np.r_[pre_pay, post_pay]
-    n_pre = pre_t.size
+    merged_times, merged_pays = times[order], pays[order]
+    schedule_tags = tuple("pre" if tag[i] == 0 else "post" for i in order)
+    # F5: the pre-maturity mass leaves the survival at its own determination when that precedes the last record
+    drops_pre_maturity = pre_maturity < float(merged_times[-1]) - Tolerance.PROBABILITY
+    after_pre_maturity = merged_times >= pre_maturity
 
     def distribution(p_ko, p_no_ki, p_ki):
-        p = np.empty(order.size)
-        p[order] = np.asarray(p_ko, dtype=float)          # back to [pre..., post...]
-        p_pre, p_post = p[:n_pre], p[n_pre:]
-        stats = KOResetEventStats(
-            pv=0.0,
-            ko_times=pre_t,
-            ko_probability=p_pre,
-            survival_probability=np.maximum(0.0, 1.0 - np.cumsum(p_pre)),
-            expected_discounted_ko_cashflow=np.zeros(n_pre),
-            ki_probability=float(p_ki),
-            expected_discounted_maturity_cashflow=0.0,
-            ki_survive_knocked_in_probability=float(p_ki),
-            pre_ko_times=pre_t,
-            pre_ko_probability=p_pre,
-            post_ko_times=post_t,
-            post_ko_probability=p_post,
-            pre_ko_probability_total=float(np.sum(p_pre)),
-            post_ko_probability_total=float(np.sum(p_post)),
-            pre_ko_payment_times=pre_pay,
-            post_ko_payment_times=post_pay,
-            pre_maturity_probability=float(p_no_ki),
-            post_maturity_probability=float(p_ki),
-            pre_maturity_time=pre_maturity,
-            post_maturity_time=post_maturity,
-            pre_maturity_payment_time=pre_maturity + delay,
-            post_maturity_payment_time=post_maturity + delay,
-            **ledger,
+        p_ko = np.asarray(p_ko, dtype=float)
+        survival = 1.0 - np.cumsum(p_ko)
+        if drops_pre_maturity:
+            survival = survival - np.where(after_pre_maturity, float(p_no_ki), 0.0)
+        stats = _structure_statistics(
+            family="ko_reset", times=merged_times, payments=merged_pays, p_ko=p_ko, survival=survival,
+            schedule=schedule_tags, p_no_ki=p_no_ki, p_ki=p_ki,
+            maturity=dict(time=pre_maturity, payment_time=pre_maturity + delay),
+            ki_settlement=dict(time=post_maturity, payment_time=post_maturity + delay),
         )
-        return EventDistribution.from_autocallable_stats(stats)
+        return EventDistribution.from_statistics(stats)
 
     return _Structure(
         ko=tuple(
@@ -377,45 +431,37 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
 
 
 def _dcn_structure(product, pricing_env) -> _Structure:
-    """DCN: monthly KO observations and the loss-leg settlement, as ``DCNMCEngine``'s ledger lays them out."""
-    from quantark.asset.equity.engine.event_stats import DCNEventStats, payment_aware_cashflow_fields
+    """DCN: the shared monthly observation grid and the loss-leg settlement (``dcn_fold_slots``, spec D12 axis)."""
+    from quantark.asset.equity.engine.dcn_valuation import dcn_fold_slots
     from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 
     ctx = build_dcn_grid_context(product)
-    obs = np.asarray(ctx.times[ctx.obs_cols], dtype=float)
-    n = obs.size
-    if n == 0:
+    if np.asarray(ctx.obs_cols).size == 0:
         return _trivial_structure(product, pricing_env)
+    slots = dcn_fold_slots(ctx)
+    times = np.array([t for _, t, _ in slots.ko], dtype=float)
+    payments = np.array([p for _, _, p in slots.ko], dtype=float)
     observations = product.schedule.monthly
     pay = product.payment_dates()
-    ledger = payment_aware_cashflow_fields(
-        pricing_env,
-        determination_times=np.concatenate([obs, obs, [obs[-1]]]),
-        payment_times=np.concatenate([ctx.coupon_pay_times, ctx.ko_pay_times, [ctx.loss_pay_time]]),
-        expected_discounted_cashflows=np.zeros(2 * n + 1),
-        determination_dates=[*(m.observation_date for m in observations),
-                             *(m.observation_date for m in observations),
-                             observations[-1].observation_date],
-        payment_dates=[*pay.coupon_payment_dates, *pay.ko_payment_dates, pay.loss_payment_date],
-    )
+    timing = dict(time=slots.determination, payment_time=slots.payment,
+                  date=observations[-1].observation_date, payment_date=pay.loss_payment_date)
+    dates = _all_dates(m.observation_date for m in observations)
+    ko_dates = _all_dates(pay.ko_payment_dates)
+    coupon_dates = _all_dates(pay.coupon_payment_dates)
 
     def distribution(p_ko, p_no_ki, p_ki):
-        stats = DCNEventStats(
-            ki_probability=float(p_ki),
-            ko_probability=float(np.sum(p_ko)),
-            ko_timing_distribution=tuple(float(x) for x in p_ko),
-            coupon_probability=tuple(0.0 for _ in range(n)),
-            expected_life_years=0.0,
-            prob_survive_no_ki=float(p_no_ki),
-            prob_survive_ki=float(p_ki),
-            expected_discounted_loss_leg=0.0,
-            **ledger,
+        p_ko = np.asarray(p_ko, dtype=float)
+        stats = _structure_statistics(
+            family="dcn", times=times, payments=payments, p_ko=p_ko,
+            survival=np.maximum(0.0, 1.0 - np.cumsum(p_ko)), maturity=timing, ki_settlement=timing,
+            p_no_ki=p_no_ki, p_ki=p_ki, dates=dates, payment_dates=ko_dates,
+            coupon_payments=np.asarray(ctx.coupon_pay_times, dtype=float), coupon_payment_dates=coupon_dates,
         )
-        return EventDistribution.from_dcn_stats(stats)
+        return EventDistribution.from_statistics(stats)
 
-    maturity = _Slot("main", float(obs[-1]), float(ctx.loss_pay_time))
+    maturity = _Slot("main", slots.determination, slots.payment)
     return _Structure(
-        ko=tuple(_Slot("main", float(t), float(p)) for t, p in zip(obs, ctx.ko_pay_times)),
+        ko=tuple(_Slot(schedule, t, p) for schedule, t, p in slots.ko),
         no_ki=maturity,
         ki=maturity,
         distribution=distribution,

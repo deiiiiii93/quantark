@@ -21,6 +21,7 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.cashleg.event_distribution import EventType
 
 VAL = datetime(2026, 3, 16)
 LADDER = [80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0]
@@ -131,7 +132,7 @@ def test_folded_and_unfolded_keys_are_separate():
     from quantark.cashleg import fold_cash_legs
 
     env, product = make_env(), make_snowball(ko_dates=(0.25, 0.5, 0.75, 1.0))
-    legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).event_times)
+    legs = _leg_set(_route_dist(SnowballPDESolver(PDEParams()), product, env).stream_times[EventType.KO])
     overlay = fold_cash_legs(legs, product, env, quantity=1.0, unit_notional=1.0)
     plain_want = SnowballQuadEngineV2().price(product, env)
     folded_want = SnowballQuadEngineV2().price_folded(product, env, overlay)

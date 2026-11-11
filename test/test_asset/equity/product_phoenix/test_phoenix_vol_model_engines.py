@@ -33,6 +33,7 @@ from quantark.util.enum.engine_enums import HestonMCScheme, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.slv.leverage import LeverageSurface
+from quantark.cashleg.event_distribution import EventType
 
 
 def _env(vol=0.20, s0=100.0, r=0.03, q=0.01):
@@ -343,7 +344,7 @@ def test_phoenix_vol_model_pde_engines_calculate_event_stats():
 
         result = engine.price_with_events(product, env)
         assert float(result.npv) == pytest.approx(price, rel=0.0, abs=1e-8)
-        assert result.event_distribution.event_times.shape == stats.ko_times.shape
+        assert result.event_distribution.stream_times[EventType.KO].shape == stats.ko_times.shape
 
 
 def test_phoenix_heston_and_slv_pde_engines_run():

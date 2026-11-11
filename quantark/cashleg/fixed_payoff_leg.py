@@ -74,15 +74,12 @@ class FixedPayoffLeg(CashLeg):
         offset_yf = float(self.payment_offset_days) / 365.0
         if self.trigger is PaymentTrigger.AT_MATURITY_ANY:
             expected_df = sum(
-                float(event_dist.probabilities.get(event_type, 0.0))
-                * env.get_discount_factor(
-                    float(event_dist.payment_times_for(event_type))
-                    + offset_yf
-                )
+                _expected_df(event_dist, event_type, env, offset_yf)
                 for event_type in (
                     EventType.MATURITY_NO_KO,
                     EventType.MATURITY_WITH_KI,
                 )
+                if event_type in event_dist.probabilities
             )
             return self.sign() * float(self.amount) * expected_df
 
@@ -92,23 +89,16 @@ class FixedPayoffLeg(CashLeg):
                 f"FixedPayoffLeg trigger {self.trigger.value} requires "
                 f"{event_type.value} in EventDistribution.probabilities"
             )
+        # each stream on its own axis: a KI-triggered amount settles at the KI observation plus the offset (D8)
+        return self.sign() * float(self.amount) * _expected_df(event_dist, event_type, env, offset_yf)
 
-        probability = event_dist.probabilities[event_type]
-        if isinstance(probability, np.ndarray):
-            pay_times = (
-                np.asarray(
-                    event_dist.payment_times_for(event_type),
-                    dtype=float,
-                )
-                + offset_yf
-            )
-            dfs = np.array([env.get_discount_factor(float(t)) for t in pay_times])
-            return self.sign() * float(self.amount) * float(np.sum(probability * dfs))
 
-        pay_time = float(event_dist.payment_times_for(event_type)) + offset_yf
-        return (
-            self.sign()
-            * float(self.amount)
-            * float(probability)
-            * env.get_discount_factor(pay_time)
-        )
+def _expected_df(event_dist: EventDistribution, event_type: EventType, env, offset_yf: float) -> float:
+    """Σ P(event row) · DF(row payment + offset) over the stream's own axis (one term for a scalar outcome)."""
+    probability = event_dist.probabilities[event_type]
+    if isinstance(probability, np.ndarray):
+        pay_times = np.asarray(event_dist.payment_times_for(event_type), dtype=float) + offset_yf
+        dfs = np.array([env.get_discount_factor(float(t)) for t in pay_times])
+        return float(np.sum(probability * dfs))
+    pay_time = float(event_dist.payment_times_for(event_type)) + offset_yf
+    return float(probability) * env.get_discount_factor(pay_time)

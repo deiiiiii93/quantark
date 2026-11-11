@@ -73,7 +73,7 @@ class _WeightsEngine(BaseEngine):
 
 def _legs(product, env):
     s = _event_structure(product, env)
-    times = s.distribution(np.zeros(len(s.ko)), 1.0, 0.0).event_times
+    times = s.distribution(np.zeros(len(s.ko)), 1.0, 0.0).stream_times[EventType.KO]
     return [
         DeterministicLeg(direction=LegDirection.BUYER_PAYS, amount=5_000.0, payment_time=0.1, name="premium"),
         _accrual(),

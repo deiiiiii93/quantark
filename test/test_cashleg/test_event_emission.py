@@ -92,7 +92,7 @@ def test_phoenix_mc_price_with_events_exposes_coupon_probabilities():
     assert dist is not None
     assert EventType.KO in dist.probabilities
     assert EventType.COUPON in dist.probabilities
-    assert dist.probabilities[EventType.COUPON].shape == dist.event_times.shape
+    assert dist.probabilities[EventType.COUPON].shape == dist.stream_times[EventType.KO].shape
 
 
 def test_snowball_quad_price_with_events_uses_existing_stats_adapter():

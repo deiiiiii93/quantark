@@ -7,20 +7,21 @@ import numpy as np
 import pytest
 
 from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
+from test_cashleg._distribution_helpers import on_grid
 from quantark.util.exceptions import NumericalError
 
 
 def test_trivial_distribution_for_vanilla_product():
     dist = EventDistribution.trivial(maturity=1.0)
-    assert dist.event_times.tolist() == [0.0, 1.0]
+    assert dist.survival_times.tolist() == [0.0, 1.0]
+    assert dist.stream_times == {}
     assert dist.probabilities[EventType.MATURITY_NO_KO] == 1.0
     assert dist.survival_probability.tolist() == [1.0, 1.0]
 
 
 def test_survival_interpolation():
-    dist = EventDistribution(
-        event_times=np.array([0.25, 0.5, 0.75, 1.0]),
-        event_dates=None,
+    dist = on_grid(
+        times=np.array([0.25, 0.5, 0.75, 1.0]),
         probabilities={
             EventType.KO: np.array([0.1, 0.2, 0.1, 0.0]),
             EventType.MATURITY_NO_KO: 0.6,
@@ -34,9 +35,8 @@ def test_survival_interpolation():
 
 def test_invariant_probability_sum():
     with pytest.raises(NumericalError, match="probability"):
-        EventDistribution(
-            event_times=np.array([1.0]),
-            event_dates=None,
+        on_grid(
+        times=np.array([1.0]),
             probabilities={
                 EventType.KO: np.array([0.3]),
                 EventType.MATURITY_NO_KO: 0.2,
@@ -47,18 +47,16 @@ def test_invariant_probability_sum():
 
 def test_invariant_survival_monotone():
     with pytest.raises(NumericalError, match="monotone"):
-        EventDistribution(
-            event_times=np.array([0.5, 1.0]),
-            event_dates=None,
+        on_grid(
+        times=np.array([0.5, 1.0]),
             probabilities={EventType.MATURITY_NO_KO: 1.0},
             survival_probability=np.array([1.0, 0.5, 0.7]),
         )
 
 
 def test_coupon_and_ki_are_excluded_from_termination_sum_invariant():
-    dist = EventDistribution(
-        event_times=np.array([0.5, 1.0]),
-        event_dates=None,
+    dist = on_grid(
+        times=np.array([0.5, 1.0]),
         probabilities={
             EventType.KO: np.array([0.3, 0.0]),
             EventType.KI: np.array([0.2, 0.1]),

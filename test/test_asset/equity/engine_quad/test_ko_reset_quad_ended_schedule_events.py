@@ -75,7 +75,7 @@ def _distributions(name):
 @pytest.mark.parametrize("name", CASES)
 def test_the_distribution_is_v2s(name):
     v1, v2 = _distributions(name)
-    assert np.array_equal(v1.event_times, v2.event_times)
+    assert np.array_equal(v1.stream_times[EventType.KO], v2.stream_times[EventType.KO])
     np.testing.assert_allclose(v1.probabilities[EventType.KO], v2.probabilities[EventType.KO], rtol=0, atol=PAIR)
     for maturity in (EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):
         assert v1.probabilities[maturity] == pytest.approx(v2.probabilities[maturity], abs=PAIR), maturity.name
