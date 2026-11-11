@@ -116,6 +116,10 @@ class LegacyPriceAdapter:
             value = self._call_detailed(engine, request)
             return value, (("pv", _extract_pv(value)),)
         if op is PricingOperation.EVENT_STATS:
+            # The engine's statistics object is the value, unconverted (EventStatistics once its producer
+            # is migrated). Only ``pv`` is read: a field every statistics type carries and the event-
+            # statistics transition never flags, so no conversion (which refuses some legacy layouts)
+            # stands between a caller and a result the engine produced.
             value = self._call_event_stats(engine, request)
             return value, (("pv", _extract_pv(value)),)
         raise CapabilityError(f"operation {op} unsupported by {ADAPTER_ID}")

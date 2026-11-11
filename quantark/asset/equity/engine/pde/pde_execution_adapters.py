@@ -60,7 +60,11 @@ ADAPTER_VERSION = "1"
 
 @dataclass(frozen=True)
 class PDESessionValue:
-    """Outcome value for PRICE requests with outputs beyond {PV}."""
+    """Outcome value for PRICE requests with outputs beyond {PV}.
+
+    ``event_stats`` is the solver's statistics object as produced (no field is read here; EventStatistics once
+    the solver family is migrated) and ``event_distribution`` the solver's own distribution, both unconverted.
+    """
 
     pv: float
     event_stats: object

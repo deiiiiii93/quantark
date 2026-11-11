@@ -67,6 +67,7 @@ class QuadV2ExecutionAdapter(LegacyPriceAdapter):
         )
 
     def _call_event_stats(self, engine, request):
+        # V2's statistics object as produced (no field is read here); the base adapter reads only ``pv``
         return engine.calculate_event_stats(
             request.product,
             request.pricing_env,

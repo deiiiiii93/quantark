@@ -9,7 +9,7 @@ the product type.
 from typing import Dict, Optional, Type, Sequence
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.param.pde_removed_names import reject_removed_kwargs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -204,9 +204,14 @@ class PDEEngine(BaseEngine):
 
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> Optional[AutocallableEventStats]:
+    ) -> Optional[EventStatistics]:
         """
         Forward to the product's solver, which owns the computation.
+
+        The solver's result is returned as produced (no field is read here):
+        ``EventStatistics`` once the solver family is migrated, its legacy
+        statistics object until then. ``price_with_events`` (inherited) reads it
+        through the transition module.
 
         The base class returns None for "unsupported"; that default silently
         discarded working solver results (SnowballPDESolver et al. implement
