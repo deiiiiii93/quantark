@@ -164,6 +164,24 @@ def test_the_bank_covers_every_case_leg_and_route():
     assert set(RECORDS) == expected
 
 
+def test_rebanks_name_d9_causes_and_banked_cases():
+    """A family re-banked in place (``generate.py --rebank``) names its commit, its D9 cause and its cases."""
+    assert BANKED is not None, "baseline.json is not banked"
+    for rebank in BANKED["header"].get("rebanks", []):
+        assert rebank["cause"] in D9_CAUSES, rebank
+        assert rebank["at_sha"] and rebank["cases"], rebank
+        assert set(rebank["cases"]) <= set(BANKED["cases"]), rebank
+
+
+def test_every_mc_case_is_rebanked_on_price_paths():
+    """T3 (spec D14, AC5): the MC rows were re-banked once statistics came from price()'s own paths."""
+    assert BANKED is not None, "baseline.json is not banked"
+    mc_cases = {cid for cid, meta in BANKED["cases"].items() if "mc" in meta["engine_kind"].split("_")}
+    rebanked = {cid for rebank in BANKED["header"].get("rebanks", []) if rebank["cause"] == "f"
+                for cid in rebank["cases"]}
+    assert mc_cases and mc_cases <= rebanked
+
+
 def test_expected_moves_name_banked_records_and_d9_causes():
     for rid, move in EXPECTED_MOVES.items():
         assert rid in RECORDS, f"EXPECTED_MOVES names {rid!r}, which is not a banked record"

@@ -8,6 +8,12 @@ Every (engine, product) case in ``cases.CASES`` banks ``price``, ``event_npv``, 
 event-route value, the folded TOTAL and the folded DRILLDOWN value (expected raises recorded by
 exception class). The DRILLDOWN is one call over the legs whose TOTAL folded (the case's
 ``drilldown_set``); a leg outside it banks the outcome of a DRILLDOWN of that leg alone.
+
+A later task that moves a whole engine family on purpose re-banks only that family, in place, and
+records the commit and its D9 cause in the header's ``rebanks`` list:
+
+    env PYTHONPATH=$PWD:$PWD/test <venv>/bin/python test/cashleg/event_stats_baseline/generate.py \
+        --rebank mc --cause f --note "MC statistics on price() paths"
 """
 from __future__ import annotations
 
@@ -84,7 +90,73 @@ def bank_case(case):
     return meta, records
 
 
+def _engine_kind_matches(kind: str, families) -> bool:
+    """``kind`` (``EngineSpec.kind``, e.g. ``mc_heston``, ``dcn_mc_lv``) belongs to one of ``families``
+    (``mc`` matches every Monte Carlo kind, autocallable and DCN)."""
+    return any(family in kind.split("_") for family in families)
+
+
+def rebank(families, cause: str, note: str) -> int:
+    """Re-bank, in place, only the cases whose engine kind is in ``families``; every other record and
+    case meta is kept byte for byte. The header records the re-bank (commit, cases, D9 cause)."""
+    out = HERE / "baseline.json"
+    banked = json.loads(out.read_text())
+    head = _head()
+    positions = {r["id"]: k for k, r in enumerate(banked["records"])}
+    case_meta = dict(banked["cases"])
+    records = list(banked["records"])
+    rebanked_cases = []
+    started = time.perf_counter()
+    for case in cases.all_cases():
+        if not _engine_kind_matches(case.engine.kind, families):
+            continue
+        meta, recs = bank_case(case)
+        for rec in recs:
+            if rec["id"] not in positions:
+                print(f"ERROR: {rec['id']} is not in the bank (re-bank never adds records)", file=sys.stderr)
+                return 1
+            records[positions[rec["id"]]] = rec
+        case_meta[case.id] = meta
+        rebanked_cases.append(case.id)
+        print(f"{case.id:45s} re-banked {len(recs):3d} records", flush=True)
+    import quantark
+
+    checkout = HERE.parents[2]
+    if Path(quantark.__file__).resolve().parent != (checkout / "quantark").resolve():
+        print("ERROR: quantark is not imported from this checkout; put it first on PYTHONPATH", file=sys.stderr)
+        return 1
+    header = dict(banked["header"])
+    header.setdefault("rebanks", []).append(dict(
+        at_sha=head, on=date.today().isoformat(), machine=platform.machine(), python=platform.python_version(),
+        numpy=np.__version__, engine_families=sorted(families), cases=rebanked_cases, cause=cause, note=note,
+        seconds=round(time.perf_counter() - started, 1),
+    ))
+    _write(out, header, case_meta, records)
+    print(f"re-banked {len(rebanked_cases)} cases (cause {cause}) -> {out}")
+    return 0
+
+
+def _write(out: Path, header: dict, case_meta: dict, records: list) -> None:
+    # one record per line: a later re-bank diffs record by record
+    lines = ["{", f' "header": {json.dumps(header)},', f' "cases": {json.dumps(case_meta, indent=1)},',
+             ' "records": [']
+    lines += [f"  {json.dumps(r)}," for r in records[:-1]] + [f"  {json.dumps(records[-1])}", " ]", "}"]
+    out.write_text("\n".join(lines) + "\n")
+    json.loads(out.read_text())                         # the hand-assembled file must parse
+
+
 def main() -> int:
+    if len(sys.argv) > 1:
+        # re-bank only some engine families in place:
+        #   generate.py --rebank mc --cause f --note "MC statistics on price() paths"
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--rebank", nargs="+", required=True, help="engine families (EngineSpec.kind parts)")
+        parser.add_argument("--cause", required=True, help="the D9 cause key of the re-bank")
+        parser.add_argument("--note", required=True)
+        args = parser.parse_args()
+        return rebank(args.rebank, args.cause, args.note)
     head = _head()
     if head != cases.BASE_SHA:
         print(f"WARNING: HEAD {head} is not the base {cases.BASE_SHA}", file=sys.stderr)
@@ -116,12 +188,7 @@ def main() -> int:
         print("ERROR: quantark is not imported from this checkout; put it first on PYTHONPATH", file=sys.stderr)
         return 1
     out = HERE / "baseline.json"
-    # one record per line: a later re-bank diffs record by record
-    lines = ["{", f' "header": {json.dumps(header)},', f' "cases": {json.dumps(case_meta, indent=1)},',
-             ' "records": [']
-    lines += [f"  {json.dumps(r)}," for r in records[:-1]] + [f"  {json.dumps(records[-1])}", " ]", "}"]
-    out.write_text("\n".join(lines) + "\n")
-    json.loads(out.read_text())                         # the hand-assembled file must parse
+    _write(out, header, case_meta, records)
     n_raise = sum("raises" in r["outcome"] for r in records)
     print(f"banked {len(records)} records ({len(records) - n_raise} values, {n_raise} raises) "
           f"over {len(case_meta)} cases in {elapsed:.1f}s -> {out}")
