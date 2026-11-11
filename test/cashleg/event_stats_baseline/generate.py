@@ -31,6 +31,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import cases  # noqa: E402  (this directory's module; loaded by path in the test)
+from rebank_guard import RebankRefused, merge_rebank  # noqa: E402
 
 
 def _head() -> str:
@@ -98,27 +99,29 @@ def _engine_kind_matches(kind: str, families) -> bool:
 
 def rebank(families, cause: str, note: str) -> int:
     """Re-bank, in place, only the cases whose engine kind is in ``families``; every other record and
-    case meta is kept byte for byte. The header records the re-bank (commit, cases, D9 cause)."""
+    case meta is kept byte for byte. The header records the re-bank (commit, cases, D9 cause) and
+    every record it moved with old and new outcome; ``rebank_guard`` refuses a moved ``price`` and an
+    ``event_npv`` move outside the npv causes, writing nothing."""
     out = HERE / "baseline.json"
     banked = json.loads(out.read_text())
     head = _head()
-    positions = {r["id"]: k for k, r in enumerate(banked["records"])}
     case_meta = dict(banked["cases"])
-    records = list(banked["records"])
+    fresh = []
     rebanked_cases = []
     started = time.perf_counter()
     for case in cases.all_cases():
         if not _engine_kind_matches(case.engine.kind, families):
             continue
         meta, recs = bank_case(case)
-        for rec in recs:
-            if rec["id"] not in positions:
-                print(f"ERROR: {rec['id']} is not in the bank (re-bank never adds records)", file=sys.stderr)
-                return 1
-            records[positions[rec["id"]]] = rec
+        fresh.extend(recs)
         case_meta[case.id] = meta
         rebanked_cases.append(case.id)
         print(f"{case.id:45s} re-banked {len(recs):3d} records", flush=True)
+    try:
+        records, moved = merge_rebank(banked["records"], fresh, cause)
+    except RebankRefused as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     import quantark
 
     checkout = HERE.parents[2]
@@ -129,10 +132,10 @@ def rebank(families, cause: str, note: str) -> int:
     header.setdefault("rebanks", []).append(dict(
         at_sha=head, on=date.today().isoformat(), machine=platform.machine(), python=platform.python_version(),
         numpy=np.__version__, engine_families=sorted(families), cases=rebanked_cases, cause=cause, note=note,
-        seconds=round(time.perf_counter() - started, 1),
+        moved=moved, seconds=round(time.perf_counter() - started, 1),
     ))
     _write(out, header, case_meta, records)
-    print(f"re-banked {len(rebanked_cases)} cases (cause {cause}) -> {out}")
+    print(f"re-banked {len(rebanked_cases)} cases (cause {cause}), {len(moved)} records moved -> {out}")
     return 0
 
 

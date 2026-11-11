@@ -33,20 +33,21 @@ BANK_DIR = HERE / "event_stats_baseline"
 BANK = BANK_DIR / "baseline.json"
 
 
-def _load_cases():
-    """``event_stats_baseline/cases.py`` under a unique name (``cases`` is taken by other test dirs, and
-    a ``cashleg`` package on ``sys.path`` would shadow the legacy ``cashleg`` import alias)."""
-    name = "_cashleg_event_stats_baseline_cases"
+def _load(stem: str):
+    """``event_stats_baseline/<stem>.py`` under a unique name (``cases`` is taken by other test dirs,
+    and a ``cashleg`` package on ``sys.path`` would shadow the legacy ``cashleg`` import alias)."""
+    name = f"_cashleg_event_stats_baseline_{stem}"
     if name in sys.modules:
         return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, BANK_DIR / "cases.py")
+    spec = importlib.util.spec_from_file_location(name, BANK_DIR / f"{stem}.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-cases = _load_cases()
+cases = _load("cases")
+rebank_guard = _load("rebank_guard")
 
 #: spec D9's causes a banked value may move for (landing 2 asserts each move against its cause)
 D9_CAUSES: Dict[str, str] = {
@@ -57,6 +58,9 @@ D9_CAUSES: Dict[str, str] = {
     "e": "KI stream on its own axis (AT_KI legs pay on KI dates, or stop raising)",
     "f": "MC statistics on price() paths (T3, D14)",
     "g": "REBASED now supported",
+    "h": "engine or state newly producing native statistics (DCN PDE, terminated DCN/V2 states, "
+         "QUAD V1 Phoenix KO-at-valuation coupon stream)",
+    "i": "npv := price() where the marched stats pv differed by round-off (Heston ADI ~2 ULP)",
 }
 
 
@@ -171,6 +175,58 @@ def test_rebanks_name_d9_causes_and_banked_cases():
         assert rebank["cause"] in D9_CAUSES, rebank
         assert rebank["at_sha"] and rebank["cases"], rebank
         assert set(rebank["cases"]) <= set(BANKED["cases"]), rebank
+
+
+def test_rebanks_list_every_record_they_moved():
+    """Each re-bank lists the records it moved with old and new outcome, so a move absorbed in place
+    stays visible: never a ``price`` record, ``event_npv`` only under the npv causes, and the chain of
+    moves ends at the banked outcome."""
+    assert BANKED is not None, "baseline.json is not banked"
+    latest = {}
+    for rebank in BANKED["header"].get("rebanks", []):
+        assert "moved" in rebank, f"re-bank at {rebank['at_sha']} does not list its moved records"
+        for move in rebank["moved"]:
+            rid = move["id"]
+            assert rid in RECORDS, move
+            assert RECORDS[rid]["case"] in rebank["cases"], move
+            assert move["route"] != "price", f"{rid}: a re-bank absorbed a price() move"
+            if move["route"] == "event_npv":
+                assert rebank["cause"] in rebank_guard.NPV_MOVE_CAUSES, move
+            assert move["old"] != move["new"], move
+            if rid in latest:
+                assert move["old"] == latest[rid], f"{rid}: move chain broken"
+            latest[rid] = move["new"]
+    for rid, outcome in latest.items():
+        assert RECORDS[rid]["outcome"] == outcome, f"{rid}: banked outcome is not the last re-banked one"
+
+
+def _rec(rid, route, value):
+    return dict(id=rid, route=route, outcome=dict(value=value))
+
+
+def test_rebank_guard_lists_moves_and_keeps_unmoved_records_unlisted():
+    banked = [_rec("a", "price", 1.0), _rec("b", "event_npv", 2.0), _rec("c", "event", 3.0)]
+    fresh = [_rec("a", "price", 1.0), _rec("b", "event_npv", 2.5), _rec("c", "event", 3.0)]
+    merged, moved = rebank_guard.merge_rebank(banked, fresh, cause="f")
+    assert [r["outcome"]["value"] for r in merged] == [1.0, 2.5, 3.0]
+    assert moved == [dict(id="b", route="event_npv", old=dict(value=2.0), new=dict(value=2.5))]
+
+
+def test_rebank_guard_refuses_a_moved_price():
+    banked = [_rec("a", "price", 1.0)]
+    with pytest.raises(rebank_guard.RebankRefused, match="price"):
+        rebank_guard.merge_rebank(banked, [_rec("a", "price", 1.0 + 1e-15)], cause="f")
+
+
+def test_rebank_guard_refuses_an_npv_move_outside_the_npv_causes():
+    banked = [_rec("b", "event_npv", 2.0)]
+    with pytest.raises(rebank_guard.RebankRefused, match="event_npv"):
+        rebank_guard.merge_rebank(banked, [_rec("b", "event_npv", 2.1)], cause="c")
+
+
+def test_rebank_guard_refuses_a_record_not_in_the_bank():
+    with pytest.raises(rebank_guard.RebankRefused, match="not in the bank"):
+        rebank_guard.merge_rebank([_rec("a", "price", 1.0)], [_rec("z", "event", 1.0)], cause="f")
 
 
 def test_every_mc_case_is_rebanked_on_price_paths():
