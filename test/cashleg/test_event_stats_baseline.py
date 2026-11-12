@@ -578,17 +578,18 @@ def _ki_schedule_cut(product, k, env):
 
 
 def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
-    """Cause (e), PDE 1D (T13). Base carried no KI stream (the legacy PDE table was empty and the converter dropped
-    it), so the AT_KI leg raised. Now the forward adjoint pass fills the KI table. Pinned without the statistics
-    object it checks:
+    """Cause (e), PDE 1D (T13) and native Heston / SLV ADI (T14). Base carried no KI stream (the legacy PDE / ADI table
+    was empty and the converter dropped it), so the AT_KI leg raised. Now the forward adjoint pass fills the KI table
+    (the PDE 1D pass; the ADI pass, ``pde/vol_model_adjoint.py``). Pinned without the statistics object it checks:
 
     * the axis is the product's own: its KI observations up to the knock-in horizon (discrete), or one numeric
       trading day ``k / bus_days_in_year`` per row up to the horizon (continuous, AC13);
     * the total is P(KI before any KO), checked against an independent backward number: the knocked-in settlement
       of the note's ``disable_ko_after_ki`` twin (its knocked-in surface never knocks out, so every first knock-in
       before a knock-out settles knocked in; same not-knocked-in march, a same-instant tie to the knock-out), within
-      the march's discount residual (T12 RESIDUAL_BOUND 1e-8). A KI-ever table (a knock-in after a knock-out
-      counted) or the note's own settlement (no knock-out after a knock-in) fails it;
+      the march's discount residual (T12 RESIDUAL_BOUND 1e-8; the ADI discounts exactly: round-off). A KI-ever table
+      (a knock-in after a knock-out counted -- the ADI's removed KO-independent monitor) or the note's own settlement
+      (no knock-out after a knock-in) fails it;
     * discrete KI, row by row: the first k rows' sum against the KI settlement of the twin cut to its first k KI
       observations, within 1e-8 (a row moved to another date fails it, even on a KI schedule that is the KO grid;
       CP4: possible since the statistics settle the knock-in-side edge knocked in only where the price's row does);
@@ -601,7 +602,7 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
     from quantark.util.enum import ObservationType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
-    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv"), record["engine_kind"]
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "pde_adi", "pde_adi_slv"), record["engine_kind"]
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     assert "value" in live, f"{record['id']}: still raises {live}"
@@ -659,6 +660,11 @@ _T13_KI_AXIS = ("pde_snowball__snowball_cki", "pde_snowball__snowball_dki", "pde
                 "pde_lv_snowball__snowball_cki", "pde_lv_phoenix__phoenix_mem_instant",
                 "pde_lv_ko_reset__ko_reset_absolute")
 
+#: T14: the native ADI forward adjoint pass (Heston / SLV; the carried-KI ADI record moved with T6's _KI_AXIS_MOVES)
+_T14_KI_AXIS = ("adi_heston_snowball__snowball_cki", "adi_heston_snowball__snowball_dki",
+                "adi_heston_phoenix__phoenix_mem_instant", "adi_heston_phoenix__phoenix_nomem_expiry",
+                "adi_heston_ko_reset__ko_reset_absolute", "adi_slv_snowball__snowball_cki")
+
 _T12_KO_AT_VALUATION = ("pde_snowball__snowball_cki_ko_at_valuation", "pde_phoenix__phoenix_mem_instant_ko_at_valuation")
 _T12_KNOCKED_IN_SETTLEMENT = tuple(
     f"{case}__{leg}__event"
@@ -689,6 +695,8 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{rid: MovedBy("d", _knocked_in_settlement_marched_directly) for rid in _T12_KNOCKED_IN_SETTLEMENT},
     # T13: the PDE 1D forward adjoint pass
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T13_KI_AXIS},
+    # T14: the native ADI forward adjoint pass
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T14_KI_AXIS},
 }
 
 
