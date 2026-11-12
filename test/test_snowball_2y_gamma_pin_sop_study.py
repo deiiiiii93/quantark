@@ -1916,8 +1916,9 @@ def _day(day, spot, price, delta, *, gamma=0.0, alive=True, cash=0.0, knocked_in
                 extra=extra or {})
 
 
-def _world(days, *, coupon=0.1, book="ki75"):
-    """``(states, boards, chains)`` for the world days: ``states`` in the shape of ``NoteStates.to_json``."""
+def _world(days, *, coupon=0.1, book="ki75", n_records=None):
+    """``(states, boards, chains)`` for the world days: ``states`` in the shape of ``NoteStates.to_json``; only the first
+    ``n_records`` days get a record (the pricing pass stops at the note's end, the chain goes on)."""
     from gpin.board import DayBoard, ImBar, OptionQuote
     from s2ts.chain import DayChain, ImQuote, MoPillar
 
@@ -1932,7 +1933,8 @@ def _world(days, *, coupon=0.1, book="ki75"):
         if w["alive"]:
             rec["states"]["true"] = _ladder_state(w["price"], w["delta"], w["gamma"], w["spot"])
         rec.update(w["extra"])
-        records.append(rec)
+        if n_records is None or i < n_records:
+            records.append(rec)
         listed, bars = [], {}
         for code, b in w["im"].items():
             bars[code] = ImBar(b.get("open"), b["close"], b["close"], b.get("vwap"), b.get("volume", 0))
@@ -2134,3 +2136,142 @@ def test_the_run_carries_its_identity_and_serialises():
     assert payload["technique"] == "base" and payload["mode"] == "close" and payload["desk_notional"] == 1e8
     assert payload["inception"] == WORLD_START.isoformat() and len(payload["rows"]) == 3
     assert "holder" not in json.dumps(payload)
+
+
+# ---- the three clocks (D7) ----
+
+def _world_twap():
+    """Four days; IM vwap / volume given except on day 2, which did not trade (vwap None, volume 0)."""
+    d = _weekdays(4)
+
+    def im(close, vwap, volume, open_=None):
+        return {"IM2403": dict(close=close, vwap=vwap, volume=volume, open=open_)}
+
+    return _world([
+        _day(d[0], 5000.0, 100000.0, 1000.0, im=im(5000.0, 4990.0, 1000)),
+        _day(d[1], 5100.0, 95000.0, 1200.0, im=im(5100.0, 5080.0, 1000)),
+        _day(d[2], 5000.0, 105000.0, 1000.0, im=im(5000.0, None, 0)),
+        _day(d[3], 5000.0, 105000.0, 1000.0, im=im(5000.0, 5000.0, 1000)),
+    ])
+
+
+def test_twap_fills_im_at_the_vwap_and_at_the_close_when_nothing_traded():
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_twap()
+    run = _run(states, Base(), boards, chains, "twap")
+    r0, r1, r2, r3 = run.rows
+    # day 0: 5 lots bought at the VWAP 4990, marked at the close 5000: fill_pnl = 5 x (5000 - 4990) x 200
+    assert r0["fill_pnl"] == pytest.approx(5 * 10.0 * 200.0) and r0["im_vm"] == pytest.approx(10000.0)
+    assert r0["cost"] == pytest.approx(IM_COST * 5 * 4990.0 * 200.0)
+    # day 1: 5 lots held earn 5 x 100 x 200; one lot bought at 5080: fill_pnl = 1 x (5100 - 5080) x 200
+    assert r1["fill_pnl"] == pytest.approx(1 * 20.0 * 200.0)
+    assert r1["im_vm"] == pytest.approx(5 * 100.0 * 200.0 + 4000.0)
+    assert r1["cost"] == pytest.approx(IM_COST * 1 * 5080.0 * 200.0)
+    # day 2: zero volume, so the VWAP is not used: the lot sold fills at the close
+    assert r2["fill_pnl"] == 0.0 and r2["cost"] == pytest.approx(IM_COST * 1 * 5000.0 * 200.0)
+    assert r2["im_vm"] == pytest.approx(6 * -100.0 * 200.0)
+    # day 3: the data end, flat at the day's mark (the close), not at the VWAP
+    assert r3["fill_pnl"] == 0.0 and r3["im_lots"] == 0.0 and "data_end" in r3["flags"]
+    _check_identity(run)
+
+
+def test_clocks_give_the_same_end_of_day_positions_on_non_fixing_days():
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_twap()
+    lots = {m: [r["im_lots"] for r in _run(states, Base(), boards, chains, m).rows] for m in ("close", "twap", "next_open")}
+    assert lots["close"] == lots["twap"] == lots["next_open"] == pytest.approx([5.0, 6.0, 5.0, 0.0])
+    # the fills differ: only the twap row has a fill part
+    assert [r["fill_pnl"] for r in _run(states, Base(), boards, chains, "close").rows] == [0.0] * 4
+    assert _run(states, Base(), boards, chains, "twap").rows[0]["fill_pnl"] != 0.0
+
+
+def _ko_world(n_extra=1, last_open=4930.0):
+    """d0, d1 alive (the KO observation is d2), the KO fires on d2 (dead record, cash 700000); ``n_extra`` chain days
+    follow it (no record). IM close 5000 / 5100 / 4900 / 4950, the day after the KO opens at ``last_open``."""
+    d = _weekdays(3 + n_extra)
+    days = [
+        _day(d[0], 5000.0, 100000.0, 1000.0, next_ko=d[2], im={"IM2403": dict(close=5000.0)}),
+        _day(d[1], 5100.0, 95000.0, 1200.0, next_ko=d[2], im={"IM2403": dict(close=5100.0)}),
+        _day(d[2], 4900.0, 0.0, 0.0, alive=False, cash=700000.0, end_reason="ko", im={"IM2403": dict(close=4900.0)}),
+    ]
+    for k in range(n_extra):
+        days.append(_day(d[3 + k], 4950.0, 0.0, 0.0, alive=False,
+                         im={"IM2403": dict(close=4950.0, open=last_open if k == 0 else 4950.0)}))
+    return _world(days, n_records=3)
+
+
+def test_next_open_carries_the_hedge_through_the_ko_and_flattens_at_the_next_open():
+    from gpin.techniques import Base
+
+    states, boards, chains = _ko_world()
+    run = _run(states, Base(), boards, chains, "next_open")
+    assert len(run.rows) == 4                                                   # a T+1 row after the fired KO
+    r1, r2, r3 = run.rows[1:]
+    lots1 = 1200.0 * 5100.0 / (200.0 * 5100.0)
+    assert r1["im_lots"] == pytest.approx(lots1)
+    # the KO day: no IM trade at the fixing close, the hedge is carried and earns the close-to-close move
+    assert r2["im_lots"] == pytest.approx(lots1) and r2["cost"] == 0.0 and "fixing_deferred" in r2["flags"]
+    assert r2["im_vm"] == pytest.approx(lots1 * (4900.0 - 5100.0) * 200.0)
+    assert r2["hedge_ratio"] == pytest.approx(lots1 * 200.0 * 4900.0 / NOTIONAL_)
+    assert r2["note_cash"] == -700000.0 and r2["seller_pv"] == 0.0
+    # T+1: the held lots earn (open - close) x 200, the flat target fills at the open
+    assert r3["im_vm"] == pytest.approx(lots1 * (4930.0 - 4900.0) * 200.0) and r3["im_lots"] == 0.0
+    assert r3["cost"] == pytest.approx(IM_COST * lots1 * 4930.0 * 200.0)
+    assert r3["note_pnl"] == 0.0 and r3["note_cash"] == 0.0 and r3["seller_pv"] == 0.0
+    assert "deferred_fill" in r3["flags"] and "last_day_fixing" not in r3["flags"]
+    _check_identity(run)
+    # under the close clock the same world is flat on the KO day, three rows
+    assert len(_run(states, Base(), boards, chains, "close").rows) == 3
+
+
+def test_next_open_a_knock_in_day_is_a_fixing_day_and_the_pending_trade_fills_at_the_open():
+    from gpin.techniques import Base
+
+    d = _weekdays(5)
+
+    def im(close, open_=None):
+        return {"IM2403": dict(close=close, open=open_)}
+
+    states, boards, chains = _world([
+        _day(d[0], 5000.0, 100000.0, 1000.0, im=im(5000.0)),
+        _day(d[1], 5000.0, 100000.0, 1000.0, im=im(5000.0)),
+        _day(d[2], 5000.0, 90000.0, 1500.0, knocked_in=True, im=im(5000.0)),         # the knock-in day
+        _day(d[3], 5000.0, 90000.0, 1200.0, knocked_in=True, im=im(5100.0, open_=5040.0)),
+        _day(d[4], 5000.0, 90000.0, 1200.0, knocked_in=True, im=im(5100.0)),
+    ])
+    run = _run(states, Base(), boards, chains, "next_open")
+    r2, r3 = run.rows[2], run.rows[3]
+    assert r2["im_lots"] == pytest.approx(5.0) and "fixing_deferred" in r2["flags"] and r2["cost"] == 0.0
+    pend = 1500.0 * 5000.0 / (200.0 * 5000.0)                                       # 7.5 lots, sized at the day-2 close
+    own = 1200.0 * 5000.0 / (200.0 * 5100.0)                                        # day 3's own target at its close
+    # 5 lots held earn 5 x 100 x 200; 2.5 more bought at the open 5040 earn 2.5 x (5100 - 5040) x 200; the own trade
+    # at the close has no fill part
+    assert r3["fill_pnl"] == pytest.approx(2.5 * 60.0 * 200.0)
+    assert r3["im_vm"] == pytest.approx(5 * 100.0 * 200.0 + 2.5 * 60.0 * 200.0)
+    assert r3["cost"] == pytest.approx(IM_COST * 2.5 * 5040.0 * 200.0 + IM_COST * abs(own - pend) * 5100.0 * 200.0)
+    assert r3["im_lots"] == pytest.approx(own) and "deferred_fill" in r3["flags"]
+    _check_identity(run)
+
+
+def test_a_fixing_on_the_last_data_day_fills_at_that_close_and_is_flagged():
+    from gpin.techniques import Base
+
+    # the KO fires on the last chain day: no next open exists
+    states, boards, chains = _ko_world(n_extra=0)
+    run = _run(states, Base(), boards, chains, "next_open")
+    r2 = run.rows[-1]
+    assert len(run.rows) == 3 and r2["im_lots"] == 0.0 and "last_day_fixing" in r2["flags"]
+    assert r2["im_vm"] == pytest.approx(1200.0 * 5100.0 / (200.0 * 5100.0) * (4900.0 - 5100.0) * 200.0)
+    assert r2["cost"] == pytest.approx(IM_COST * 6.0 * 4900.0 * 200.0)             # 6 lots sold at the fixing close
+    _check_identity(run)
+    # an alive note whose observation is the last data day is flattened at that close, flagged both ways
+    d = _weekdays(3)
+    states, boards, chains = _world([
+        _day(d[0], 5000.0, 100000.0, 1000.0, next_ko=d[2], im={"IM2403": dict(close=5000.0)}),
+        _day(d[1], 5000.0, 100000.0, 1000.0, next_ko=d[2], im={"IM2403": dict(close=5000.0)}),
+        _day(d[2], 5000.0, 100000.0, 1000.0, next_ko=d[2] + timedelta(days=90), im={"IM2403": dict(close=5000.0)}),
+    ])
+    last = _run(states, Base(), boards, chains, "next_open").rows[-1]
+    assert "last_day_fixing" in last["flags"] and "data_end" in last["flags"] and last["im_lots"] == 0.0

@@ -102,18 +102,71 @@ def _im_close(code: str, dc: DayChain, board: DayBoard) -> float:
     return float(bar.close)
 
 
+def _im_fill(code: str, kind: str, dc: DayChain, board: DayBoard, close: float) -> float:
+    """Fill price of an IM trade: ``close``; ``vwap`` (the day VWAP, the close when nothing traded); ``open``."""
+    if kind == "close":
+        return close
+    bar = board.im.get(code)
+    if bar is None:
+        raise StudyDataError(f"{dc.day}: no IM bar for {code} on the board")
+    if kind == "vwap":
+        return close if (not bar.volume or bar.vwap is None) else float(bar.vwap)
+    if bar.open is None:
+        raise StudyDataError(f"{dc.day}: no open for {code}: the next-open fill cannot be made")
+    return float(bar.open)
+
+
+def _im_trade(pos: _Positions, new_im: Mapping[str, float], kind: str, dc: DayChain, board: DayBoard,
+              rate: float) -> Tuple[float, float]:
+    """Trade the IM book to ``new_im`` at the ``kind`` fill; returns ``(cost, fill part of the day's P&L)``."""
+    cost = gain = 0.0
+    for code in sorted(set(pos.im) | set(new_im)):
+        dq = new_im.get(code, 0.0) - pos.im.get(code, 0.0)
+        if is_zero(dq):
+            continue
+        close = _im_close(code, dc, board)
+        fill = _im_fill(code, kind, dc, board, close)
+        cost += rate * abs(dq) * fill * IM_MULT
+        gain += dq * (close - fill) * IM_MULT
+    pos.im = {c: v for c, v in new_im.items() if not is_zero(v)}
+    return cost, gain
+
+
+def _im_target(target: Target, spot: float, far_code: str, far_close: float, clip: bool,
+               bounds: Tuple[float, float]) -> Tuple[Dict[str, float], bool]:
+    """IM lots for a target sized at ``spot`` / ``far_close``, with the D9 clip on ``h = im_delta x spot / NOTIONAL``."""
+    im_delta = float(target.note_delta)
+    clipped = False
+    if clip:
+        h = im_delta * spot / NOTIONAL
+        h_clipped = min(max(h, bounds[0]), bounds[1])
+        if not is_close(h, h_clipped):
+            clipped, im_delta = True, h_clipped * NOTIONAL / spot
+    lots = im_delta * spot / (IM_MULT * far_close)
+    return ({} if is_zero(lots) else {far_code: lots}), clipped
+
+
+@dataclass(frozen=True)
+class _Pending:
+    """A fixing-day decision waiting for the next open (``next_open``): the target and what it was sized with."""
+
+    target: Target
+    spot: float
+    far_code: str
+    far_close: float
+    clip: bool
+
+
 def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBoard], chains: Sequence[DayChain], *,
                   mode: str, mo_cost_pt: float, desk_notional: float, until: Optional[date] = None) -> Run:
     """Replay ``technique`` on the recorded ``states`` of one note (module docstring). ``boards`` by day, ``chains``
     in date order covering at least the note's life (and the days after it until the book is flat)."""
     if mode not in CLOCKS:
         raise ValidationError(f"mode must be one of {CLOCKS}, got {mode!r}")
-    if mode != "close":
-        raise ValidationError("the twap and next_open clocks are not built yet")
     prereg = load_prereg()
     trade = prereg["tradability"]
     im_cost_rate = float(trade["im_cost_rate"])
-    clip_lo, clip_hi = (float(x) for x in prereg["im_clip"])
+    bounds = (float(prereg["im_clip"][0]), float(prereg["im_clip"][1]))
     data = _states_dict(states)
     records: List[Dict[str, Any]] = list(data["days"])
     if not records:
@@ -127,13 +180,14 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
     for k, rec in enumerate(records):
         if start + k >= len(chains) or chain_days[start + k].isoformat() != rec["date"]:
             raise StudyDataError(f"record {rec['date']} is not the chain's day {start + k}")
-    ki_pct = float(data.get("ki_pct", 0.75))
-    note = NoteInfo(str(data.get("book", "ki75")), inception, float(data["coupon"]), ki_pct, KO_PCT,
-                    float(records[0]["spot"]))
+    note = NoteInfo(str(data.get("book", "ki75")), inception, float(data["coupon"]), float(data.get("ki_pct", 0.75)),
+                    KO_PCT, float(records[0]["spot"]))
     run = Run(note.book, inception, note.coupon, technique.id, technique.family, dict(technique.params), mode,
               float(mo_cost_pt), im_cost_rate, float(desk_notional), until)
+    im_kind = "vwap" if mode == "twap" else "close"
 
     pos = _Positions()
+    pending: Optional[_Pending] = None
     cash = 0.0
     prev_pv = 0.0
     prev_day: Optional[date] = None
@@ -150,12 +204,15 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
         next_idx = start + i + 1
         has_next = next_idx < len(chains) and (until is None or chains[next_idx].day <= until)
         final = (alive and i == len(records) - 1) or not has_next
+        is_fixing = rec is not None and i > 0 and (
+            records[i - 1]["next_ko"] == rec["date"] or (rec["knocked_in"] and not records[i - 1]["knocked_in"]))
         flags: List[str] = []
+        cost = fill_pnl = 0.0
+        clipped = False
 
-        # 1. mark the positions held from the previous close
+        # 1. mark the IM positions held from the previous close
         im_vm = 0.0
-        held_before = pos.held_im()
-        for code, lots in held_before.items():
+        for code, lots in pos.held_im().items():
             im_vm += lots * (_im_close(code, dc, board) - pos.im_mark[code]) * IM_MULT
         # 2. the note's day
         if alive:
@@ -171,9 +228,20 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
         note_cash = 0.0 if rec is None else -float(rec["engine_note_cash"])
         note_pnl = seller_pv - prev_pv + note_cash
 
-        # 3. the technique's target
+        # 3. a fixing-day decision of the previous close fills at today's open (next_open)
+        if pending is not None:
+            new_im, clipped_a = _im_target(pending.target, pending.spot, pending.far_code, pending.far_close,
+                                           pending.clip, bounds)
+            c, g = _im_trade(pos, new_im, "open", dc, board, im_cost_rate)
+            cost, fill_pnl, im_vm = cost + c, fill_pnl + g, im_vm + g
+            clipped = clipped or clipped_a
+            flags.append("deferred_fill")
+            pending = None
+
+        # 4. the technique's target for today's close
+        held_now = pos.held_im()
         if alive and not final:
-            ctx = DayContext.build(day, i, dc.spot, dc.mo.vol, frozen[i], board, note, held_before, {}, prev_ctx)
+            ctx = DayContext.build(day, i, dc.spot, dc.mo.vol, frozen[i], board, note, held_now, {}, prev_ctx)
             target = technique.target(ctx)
             if not isinstance(target, Target):
                 raise ValidationError(f"{technique.id}: target() must return a Target, got {type(target).__name__}")
@@ -182,37 +250,26 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
             prev_ctx = ctx
         else:
             target = Target(0.0, {})
-
-        # 4. the IM target (D9 clip) and the IM trade
-        im_delta = float(target.note_delta)
-        clipped = False
-        if technique.clip and not final and alive:
-            h = im_delta * dc.spot / NOTIONAL
-            h_clipped = min(max(h, clip_lo), clip_hi)
-            if not is_close(h, h_clipped):
-                clipped, im_delta = True, h_clipped * NOTIONAL / dc.spot
         far = dc.im[-1]
-        lots_new = im_delta * dc.spot / (IM_MULT * far.close)
-        new_im: Dict[str, float] = {} if is_zero(lots_new) else {far.code: lots_new}
-        cost = 0.0
-        fill_pnl = 0.0
-        for code in sorted(set(held_before) | set(new_im)):
-            dq = new_im.get(code, 0.0) - held_before.get(code, 0.0)
-            if is_zero(dq):
-                continue
-            close = _im_close(code, dc, board)
-            cost += im_cost_rate * abs(dq) * close * IM_MULT
-            gain = dq * (close - close) * IM_MULT
-            im_vm += gain
-            fill_pnl += gain
-        if held_before and set(held_before) != set(new_im) and new_im:
-            flags.append("roll")
-        pos.im = dict(new_im)
-        pos.im_mark = {code: _im_close(code, dc, board) for code in new_im}
+        fixing_clock = mode == "next_open" and is_fixing
+        if fixing_clock and not final:
+            pending = _Pending(target, dc.spot, far.code, float(far.close), technique.clip and alive)
+            flags.append("fixing_deferred")
+        else:
+            if fixing_clock:
+                flags.append("last_day_fixing")
+            new_im, clipped_b = _im_target(target, dc.spot, far.code, float(far.close),
+                                           technique.clip and alive and not final, bounds)
+            if held_now and new_im and set(held_now) != set(new_im):
+                flags.append("roll")
+            c, g = _im_trade(pos, new_im, "close" if final else im_kind, dc, board, im_cost_rate)
+            cost, fill_pnl, im_vm = cost + c, fill_pnl + g, im_vm + g
+            clipped = clipped or clipped_b
         if final and alive:
             flags.append("data_end")
-        im_lots = sum(new_im.values())
-        hedge_ratio = sum(lots * pos.im_mark[code] for code, lots in new_im.items()) * IM_MULT / NOTIONAL
+        pos.im_mark = {code: _im_close(code, dc, board) for code in pos.held_im()}
+        im_lots = sum(pos.held_im().values())
+        hedge_ratio = sum(lots * pos.im_mark[code] for code, lots in pos.held_im().items()) * IM_MULT / NOTIONAL
 
         # 5. accounting
         accrual = 0.0 if prev_day is None else cash * RATE * (day - prev_day).days / ACT
@@ -226,6 +283,6 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
             "unfilled": {}, "flags": flags,
         })
         prev_pv, prev_day = seller_pv, day
-        if final or (i >= len(records) - 1 and not pos.held_im()):
+        if final or (i >= len(records) - 1 and not pos.held_im() and pending is None):
             break
     return run
