@@ -1,20 +1,21 @@
 """Stage 3: the pricing pass. Per note of the sample, per live day, a spot ladder of QUAD V2 price / delta / gamma for
 every hedge model whose window the day is in (``gpin.pricing``).
 
-A note is a (book, inception): a book is a KI level (``ki75`` the product, ``ki85``, ``ki90``), identified by
-``"<book>:<inception>"``. Reads ``results/events.json`` (the note list per book, ``02_events.py``) and
-``OUTPUT_DIR/chain.pkl`` (``01_data.py``). Coupons: one per note, solved to PV = 0 under hold-forward for the book's
-KI level (``gpin.pricing.solve_book_coupon``) and cached in ``OUTPUT_DIR/coupons.json`` with a stamp of what they
-depend on (re-solved when it differs). One atomic JSON per note, ``<book>__<inception>.json``, in
+A note is a (book, inception), identified by ``"<book>:<inception>"``: ``ki75`` the 2Y product (the headline and
+pin sets) and ``seas6`` the seasoned book (every weekly booking). Reads ``results/events.json`` (the note list per
+book, ``02_events.py``) and ``OUTPUT_DIR/chain.pkl`` (``01_data.py``). Coupons: one per note, the ``ki75`` coupon
+(PV = 0 under hold-forward for the 2Y note struck that day; a ``seas6`` note is booked with its booking day's)
+(``gpin.pricing.solve_book_coupon``), cached in ``OUTPUT_DIR/coupons.json`` with the full pricing fingerprint as the
+stamp (re-solved when it differs) and written after each solved coupon. One atomic JSON per note, ``<book>__<inception>.json``, in
 ``OUTPUT_DIR/states/``, resumable: a file is reused only when its stamped fingerprint matches, its stored coupon is
 the current one and it was not written with ``max_days`` or ``price_days`` (see ``gpin.pricing.read_current``). A
 failed note leaves ``<book>__<inception>.error.json`` and the exit status is 2; every other note completes. Runs on
 a spawn pool started from this file, with the group-RSS guard and a lock file so two runs cannot share the directory.
 
 Run (from a script file, never stdin; long runs under ``nohup caffeinate -i -m -s``):
-    python example/case_studies/snowball_2y_gamma_pin_sop/03_pricing.py --plan [--workers 4] [--books ki90]
+    python example/case_studies/snowball_2y_gamma_pin_sop/03_pricing.py --plan [--workers 4] [--books seas6]
     python example/case_studies/snowball_2y_gamma_pin_sop/03_pricing.py --quick
-    python example/case_studies/snowball_2y_gamma_pin_sop/03_pricing.py [--workers 4] [--books ki75,ki90] [--notes ki75:2024-02-29]
+    python example/case_studies/snowball_2y_gamma_pin_sop/03_pricing.py [--workers 4] [--books ki75,seas6] [--notes ki75:2024-02-29]
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ EVENTS_PATH = RESULTS_DIR / "events.json"
 COUPONS_PATH = OUTPUT_DIR / "coupons.json"
 QUICK_DIR = OUTPUT_DIR / "states_quick"
 QUICK_DAYS = 30
-#: Calendar days that hold ``QUICK_DAYS`` trading days (a quick ki90 note is picked by an approach inside them).
+#: Calendar days that hold ``QUICK_DAYS`` trading days (a quick seas6 note is picked by an approach inside them).
 QUICK_CALENDAR_DAYS = 42
 QUICK_PROBE = date(2024, 2, 29)
 #: Measured seconds per ladder solve (V2 QUAD, spec Decisions block: 0.41-0.49 s); an assumption of ``--plan``.
@@ -110,7 +111,7 @@ def plan(chains, scans_by_book: Dict[str, Dict[date, Any]], notes: Sequence[str]
                 continue
             n += 1
             rec = scans_by_book[book][inc]
-            counts = expected_solves(chains, rec, calendar, max_days=max_days, ki_pct=BOOKS[book])
+            counts = expected_solves(chains, rec, calendar, book=book, max_days=max_days)
             for k in keys:
                 totals[k] += counts[k]
             live_days += by_day[rec.end_date] - by_day[inc]
@@ -127,7 +128,9 @@ def print_plan(summary: Dict[str, Any], log: Callable[[str], None] = print) -> N
     for book, z in summary["books"].items():
         if not z["notes"]:
             continue
-        log(f"book {book} (KI {BOOKS[book]:.0%}): notes {z['notes']}; live note-days (closes after inception) "
+        spec = BOOKS[book]
+        log(f"book {book} (KI {spec.ki_pct:.0%}, {spec.elapsed_months} months elapsed, {spec.maturity_months} to run): "
+            f"notes {z['notes']}; live note-days (closes after inception) "
             f"{z['live_note_days']}; priced note-days {z['priced_days']}; KO-window days {z['ko_window_days']}, "
             f"KI-window days {z['ki_window_days']}; solves {z['solves']}; {z['hours']:.2f} h wall")
         for n_solves, nid, c in z["heaviest"]:
@@ -158,7 +161,7 @@ def init_worker(chain_path: str) -> None:
     anchors = anchor_series(chains, load_prereg()["data"]["anchor_window"])
     _WORKER["chains"] = chains
     _WORKER["anchors"] = anchors
-    _WORKER["scans"] = {b: {s.inception: s for s in scan(chains, anchors, ki_pct=level)} for b, level in BOOKS.items()}
+    _WORKER["scans"] = {b: {s.inception: s for s in scan(chains, anchors, b)} for b in BOOKS}
 
 
 def worker_job(note: str, coupon: float, fingerprint: str, out_dir: str, max_days: Optional[int]) -> Dict[str, Any]:
@@ -167,7 +170,7 @@ def worker_job(note: str, coupon: float, fingerprint: str, out_dir: str, max_day
         init_worker(str(CHAIN_PATH))
     book, inc = parse_note_id(note)
     return price_one(inc, coupon, _WORKER["chains"], _WORKER["anchors"], _WORKER["scans"][book][inc], Path(out_dir),
-                     fingerprint, ki_pct=BOOKS[book], max_days=max_days)
+                     fingerprint, book=book, max_days=max_days)
 
 
 def _file_stem(note: str) -> str:
@@ -263,18 +266,18 @@ def run_notes(notes: Sequence[str], coupons: Dict[str, float], out_dir: Path, fi
 
 def quick_notes(sample: Dict[str, Any]) -> List[str]:
     """The ``--quick`` notes: the first ``ki75`` headline note, the ``ki75`` pin note struck 2024-02-29 (the probe)
-    when it is in the sample, else the first ``ki75`` pin note, and the earliest ``ki90`` pin note with a KI approach
-    that starts within ``QUICK_DAYS`` trading days of its inception (so its 30 days exercise the KI window)."""
-    k75, k90 = sample["books"]["ki75"], sample["books"]["ki90"]
+    when it is in the sample, else the first ``ki75`` pin note, and the earliest ``seas6`` booking with a KI approach
+    that starts within ``QUICK_CALENDAR_DAYS`` calendar days (``QUICK_DAYS`` trading days) of its booking (so its 30
+    days exercise the KI window)."""
+    k75, seas = sample["books"]["ki75"], sample["books"]["seas6"]
     pins = [date.fromisoformat(p["inception"]) for p in k75["pin"]]
     picks = [note_id("ki75", date.fromisoformat(k75["headline"][0])),
              note_id("ki75", QUICK_PROBE if QUICK_PROBE in pins else pins[0])]
-    pin90 = {p["inception"] for p in k90["pin"]}
-    early = sorted((r["inception"], r["start"]) for r in k90["ki_approaches"] if r["inception"] in pin90
-                   and (date.fromisoformat(r["start"]) - date.fromisoformat(r["inception"])).days <= QUICK_CALENDAR_DAYS)
+    early = sorted(r["inception"] for r in seas["ki_approaches"]
+                   if (date.fromisoformat(r["start"]) - date.fromisoformat(r["inception"])).days <= QUICK_CALENDAR_DAYS)
     if not early:
-        raise StudyDataError("no ki90 pin note has a KI approach in its first 30 trading days")
-    picks.append(note_id("ki90", date.fromisoformat(early[0][0])))
+        raise StudyDataError("no seas6 booking has a KI approach in its first 30 trading days")
+    picks.append(note_id("seas6", date.fromisoformat(early[0])))
     return picks
 
 
@@ -283,9 +286,9 @@ def main() -> int:
     ap.add_argument("--plan", action="store_true",
                     help="notes, priced note-days, window days, solves and hours per book and in total; no pricing")
     ap.add_argument("--quick", action="store_true",
-                    help="two ki75 notes and a ki90 pin note, 30 days each, into states_quick/")
+                    help="two ki75 notes and a seas6 booking that enters its KI window early, 30 days each, into states_quick/")
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--books", default="", help="comma-separated books to price (default: all of ki75,ki85,ki90)")
+    ap.add_argument("--books", default="", help="comma-separated books to price (default: all of ki75,seas6)")
     ap.add_argument("--notes", default="", help="comma-separated note ids '<book>:<inception>' of the sample (default: all)")
     args = ap.parse_args()
 
@@ -304,7 +307,7 @@ def main() -> int:
     print(f"chain {chains[0].day} .. {chains[-1].day}; {len(notes)} notes ({per_book})")
 
     if args.plan:
-        scans_by_book = {b: {s.inception: s for s in scan(chains, anchors, ki_pct=level)} for b, level in BOOKS.items()}
+        scans_by_book = {b: {s.inception: s for s in scan(chains, anchors, b)} for b in BOOKS}
         print_plan(plan(chains, scans_by_book, notes, args.workers))
         return 0
 
@@ -321,7 +324,7 @@ def main() -> int:
     by_day = {dc.day: dc for dc in chains}
     engine = v2_engine()
     coupons = book_coupons(notes, COUPONS_PATH, coupon_stamp(),
-                           lambda book, inc: solve_book_coupon(by_day[inc], engine, BOOKS[book]))
+                           lambda book, inc: solve_book_coupon(by_day[inc], engine, book))
     for nid in notes:
         print(f"  coupon {nid}: {coupons[nid]:.6f}")
     try:

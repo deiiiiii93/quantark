@@ -399,11 +399,13 @@ def scan_one(path, start: date = START, book: str = "ki75"):
     return next(s for s in scans if s.inception == start)
 
 
-def life_outcome(path, inception: date = START):
+def life_outcome(path, inception: date = START, book: str = "ki75"):
     """(ko_date, ki_date, end_reason, end_date) from the library's own tracker, no pricing."""
-    from s2ts.note import NoteLife, build_note, build_terms, make_env
+    from gpin.events import book_terms
+    from gpin.models import book_note
+    from s2ts.note import NoteLife, make_env
 
-    life = NoteLife(build_note(0.2, path[0].spot, build_terms(inception)), inception)
+    life = NoteLife(book_note(0.2, path[0].spot, book_terms(book, inception), book=book), inception)
     ko = ki = None
     reason, end = "truncated", path[-1].day
     for bar in path:
@@ -727,6 +729,22 @@ def test_scan_agrees_with_the_library_lifecycle_on_real_notes(real_chains, real_
     for s in picks:
         path = [Bar(d, by_day[d].spot) for d in sorted(by_day) if d >= s.inception]
         assert (s.ko_date, s.ki_date, s.end_reason, s.end_date) == life_outcome(path, s.inception)[:4], s.inception
+
+
+def test_seas6_scan_agrees_with_the_library_lifecycle_on_real_bookings(real_chains, book_scans):
+    """Price-free cross-check of the seasoned book's scan against ``NoteLife`` on the shortest real booking of each
+    outcome: KO after a knock-in, KO only, a knocked-in maturity, a maturity without a knock-in and a truncated
+    knock-in (the pricing pass makes the same comparison for every priced note)."""
+    by_day = {dc.day: dc for dc in real_chains}
+    scans = book_scans["seas6"]
+    picks = []
+    for reason, knocked in (("ko", True), ("ko", False), ("maturity", True), ("maturity", False), ("truncated", True)):
+        pool = [s for s in scans if s.end_reason == reason and (s.ki_date is not None) is knocked]
+        assert pool, (reason, knocked)
+        picks.append(min(pool, key=lambda s: ((s.end_date - s.inception).days, s.inception)))
+    for s in picks:
+        path = [Bar(d, by_day[d].spot) for d in sorted(by_day) if d >= s.inception]
+        assert (s.ko_date, s.ki_date, s.end_reason, s.end_date) == life_outcome(path, s.inception, "seas6")[:4], s.inception
 
 
 # ---- results/events.json ----
@@ -1489,6 +1507,54 @@ def test_ki_gap_probe_uses_the_lifecycle_state_the_engine_reads(probe_stage, eng
     import inspect
 
     assert "_otc_lifecycle_knocked_in" not in inspect.getsource(probe_stage)
+
+
+def _gap_bp_at_three_percent_above_ki(true_ladder, kin_ladder, spot, ki_level) -> float:
+    """``true`` minus ``kin`` engine price (bp of notional) read on the ladder at 3% above the KI barrier."""
+    from s2ts import NOTIONAL
+
+    spots = spot * (1.0 + np.asarray(gpin.LADDER))
+    target = 1.03 * ki_level
+    assert spots[0] <= target <= spots[-1]
+    return 1.0e4 * float(np.interp(target, spots, true_ladder["engine_price"])
+                         - np.interp(target, spots, kin_ladder["engine_price"])) / NOTIONAL
+
+
+def test_the_ki_pin_is_a_property_of_a_short_remaining_life(real_chains, real_anchors, book_scans, engine):
+    """AC4b on real notes. A seas6 booking (6 months left) with the spot 3% above its KI barrier has a ``true`` minus
+    ``kin`` engine price above 100 bp of notional (the pin exists); a real ki75 note in the first month of its life
+    (23 months left) on its first KI-window day, 3% above the barrier, has under 30 bp."""
+    from gpin.events import book_levels, book_terms
+    from gpin.models import MODELS
+    from gpin.pricing import model_ladder, price_note, solve_book_coupon
+
+    rec = next(s for s in book_scans["seas6"] if s.inception >= date(2024, 3, 1))
+    dc0 = next(c for c in real_chains if c.day == rec.inception)
+    coupon = solve_book_coupon(dc0, engine, "seas6")
+    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, rec.inception, coupon, rec.inception, book="seas6")
+    terms = book_terms("seas6", rec.inception)
+    spots = dc.spot * (1.0 + np.asarray(gpin.LADDER))
+    ladders = {m: model_ladder(engine, life, MODELS[m], terms, dc.spot, coupon, rec.inception, rec.inception, env, spots,
+                               None, book="seas6") for m in ("true", "kin")}
+    _, _, ki = book_levels("seas6", dc.spot)
+    seasoned_gap = _gap_bp_at_three_percent_above_ki(ladders["true"], ladders["kin"], dc.spot, ki)
+    assert seasoned_gap > 100.0, seasoned_gap
+
+    young = min(((a.start - s.inception).days, s.inception, a.start) for s in book_scans["ki75"] if s.anchored
+                for a in s.ki_approaches)
+    age, inception, day = young
+    assert age <= 31                                              # the first month of its life
+    note = next(s for s in book_scans["ki75"] if s.inception == inception)
+    days = [c.day for c in real_chains]
+    states = price_note(inception, PROBE_COUPON, real_chains, real_anchors, note, book="ki75", engine=engine,
+                        price_days={day}, max_days=days.index(day) - days.index(inception))
+    rec_day = states.days[-1]
+    assert rec_day["date"] == day.isoformat() and {"true", "kin"} <= set(rec_day["states"])
+    spot0 = next(c.spot for c in real_chains if c.day == inception)
+    young_gap = _gap_bp_at_three_percent_above_ki(rec_day["states"]["true"], rec_day["states"]["kin"], rec_day["spot"],
+                                                  0.75 * spot0)
+    assert young_gap < 30.0, young_gap
+    assert young_gap < seasoned_gap / 3.0
 
 
 # ---- 03_pricing.py: the sample, the plan, the pool's failure / lock / resume behaviour ----
