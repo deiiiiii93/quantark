@@ -42,7 +42,7 @@ KI_NEAR: float = float(_PREREG["sample"]["ki_near"])
 KI_BAND: float = float(_PREREG["windows"]["ki_band"])
 KO_NOTES_PER_WEEK: int = int(_PREREG["sample"]["ko_notes_per_week"])
 KI_NOTES_PER_MONTH: int = int(_PREREG["sample"]["ki_notes_per_month"])
-LIFTED_KI_NOTES_PER_MONTH: int = int(_PREREG["sample"]["lifted_ki_notes_per_month"])
+LIFTED_KI_NOTES_PER_WEEK: int = int(_PREREG["sample"]["lifted_ki_notes_per_week"])
 #: The books of the study: a book is a KI level (pre-registration ``books``); ``ki75`` is the product.
 BOOKS: Dict[str, float] = {k: float(v) for k, v in _PREREG["books"].items()}
 PRODUCT_BOOK = "ki75"
@@ -234,8 +234,10 @@ def select(scans: Sequence[NoteScan], book: str = PRODUCT_BOOK) -> Sample:
 
     Headline: the first chain day of each quarter, kept when anchored. ``ki75`` KO pin set: per ISO week of the
     observation, the ``KO_NOTES_PER_WEEK`` pin events with the smallest prior gap (ties: earlier inception). KI pin
-    set: per calendar month of the approach date, ``KI_NOTES_PER_MONTH`` notes (``LIFTED_KI_NOTES_PER_MONTH`` for a
-    lifted book) at evenly spaced positions of the inception-sorted list of notes with an approach that month.
+    set: per calendar month of the approach date, ``KI_NOTES_PER_MONTH`` notes at evenly spaced positions of the
+    inception-sorted list of notes with an approach that month; a lifted book samples per ISO week of the approach
+    date instead (the bootstrap's cluster), ``LIFTED_KI_NOTES_PER_WEEK`` notes at evenly spaced positions of the
+    inception-sorted notes with an approach dated in that week, all of them when fewer.
     Events: every KI approach of every selected note, and for ``ki75`` every KO pin event; a lifted book has no
     KO pin set and records no KO pin events.
     """
@@ -245,7 +247,7 @@ def select(scans: Sequence[NoteScan], book: str = PRODUCT_BOOK) -> Sample:
         if not is_close(s.ki_pct, BOOKS[book]):
             raise StudyDataError(f"scan of {s.inception} is for KI {s.ki_pct}, not book {book} ({BOOKS[book]})")
     product = book == PRODUCT_BOOK
-    ki_cap = KI_NOTES_PER_MONTH if product else LIFTED_KI_NOTES_PER_MONTH
+    ki_cap = KI_NOTES_PER_MONTH if product else LIFTED_KI_NOTES_PER_WEEK
     ordered = sorted(scans, key=lambda s: s.inception)
     first_of_quarter: Dict[Tuple[int, int], NoteScan] = {}
     for s in ordered:
@@ -266,7 +268,7 @@ def select(scans: Sequence[NoteScan], book: str = PRODUCT_BOOK) -> Sample:
 
     by_month: Dict[str, List[date]] = {}
     for s in anchored:
-        for month in sorted({f"{a.end:%Y-%m}" for a in s.ki_approaches}):
+        for month in sorted({f"{a.end:%Y-%m}" if product else week_key(a.end) for a in s.ki_approaches}):
             by_month.setdefault(month, []).append(s.inception)
     for month, notes in by_month.items():
         for pos in _spaced_positions(len(notes), ki_cap):

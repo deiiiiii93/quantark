@@ -19,7 +19,7 @@
         "engine": "SnowballQuadEngineV2 defaults, flat vol = the day's far-MO ATM vol"
     },
     "sample": {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12,
-               "lifted_ki_notes_per_month": 6},
+               "lifted_ki_notes_per_week": 3},
     "windows": {
         "ko_days": 10,
         "ko_band": 0.10,
@@ -116,7 +116,7 @@
     },
     "amendments": [
         {"date": "2026-11-12", "before_any_ledger_run": true,
-         "text": "added the lifted-KI books ki85 and ki90 and moved the KI verdict to ki90 (was: descriptive only on ki75); narrowed the KI window from 10% to 5% above the barrier; added H8"}
+         "text": "added the lifted-KI books ki85 and ki90 and moved the KI verdict to ki90 (was: descriptive only on ki75); narrowed the KI window from 10% to 5% above the barrier; added H8; lifted books sample 3 notes per ISO week of approach date"}
     ],
     "deviation_protocol": "a defect found after test numbers have been seen is fixed, training selection and the test are re-run, and the README lists the headline numbers before and after; grid and thresholds are never changed after unblinding",
     "hypotheses": [

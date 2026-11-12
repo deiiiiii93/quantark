@@ -313,8 +313,9 @@ Corrections to sections 1-8 after the pre-registration commit:
   window. With the 5% window the scan on the anchored inceptions (`results/events.json`,
   `books.<book>.restricted`) gives: 75%: 106 training approaches in 4 weeks and 74 test
   approaches in 5 weeks; 85%: 309 in 21 weeks and 138 in 9; 90%: 404 in 31 weeks and 196
-  in 13. The sampled notes (headline plus pin set) carry 123 training and 50 test
-  approaches in 28 and 10 weeks at 90%.
+  in 13. The lifted books are sampled 3 notes per ISO week of approach date (not 6 per month, which
+  left the 90% test slice at exactly the 10-week minimum), so no week of the universe is dropped: the
+  sampled 90% notes carry 121 training and 41 test approaches in 31 and 13 weeks.
 
 Results per hypothesis are added here when the backtest has run.
 

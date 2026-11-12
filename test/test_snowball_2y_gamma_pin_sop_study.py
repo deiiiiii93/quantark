@@ -58,7 +58,7 @@ def test_prereg_numbers_match_the_spec():
     assert p["data"] == {"start": "2023-05-04", "end": "2026-11-06", "anchor_window": 63}
     assert p["books"] == {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90}
     assert p["sample"] == {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12,
-                           "lifted_ki_notes_per_month": 6}
+                           "lifted_ki_notes_per_week": 3}
     assert p["windows"] == {"ko_days": 10, "ko_band": 0.10, "ki_band": 0.05, "trigger_z": 2.0,
                             "days_per_year": 244, "overlay_ko_days": 5, "overlay_ki_min_days_left": 3}
     assert p["clocks"] == {"primary": "close", "others": ["twap", "next_open"]}
@@ -773,6 +773,18 @@ def test_events_json_matches_a_fresh_scan_and_lists_every_event_per_book(book_sc
     assert "holder" not in EVENTS_JSON.read_text(encoding="utf-8").lower()
 
 
+def test_lifted_books_cover_every_week_of_their_restricted_test_universe():
+    """The per-week cap cannot drop a week: every ISO week with an approach in the restricted universe has a
+    selected note's approach in it, in each slice."""
+    on_disk = json.loads(EVENTS_JSON.read_text(encoding="utf-8"))
+    for book in ("ki85", "ki90"):
+        blk = on_disk["books"][book]
+        for sl in ("train", "test"):
+            assert blk["sample_sizes"][sl]["ki_weeks"] == blk["restricted"][sl]["ki_weeks"], (book, sl)
+    assert on_disk["books"]["ki90"]["sample_sizes"]["test"]["ki_weeks"] >= 13
+    assert all(r.split()[1].count("-W") == 1 for p in on_disk["books"]["ki90"]["pin"] for r in p["why"])
+
+
 def test_ki75_sample_is_unchanged_by_the_books(real_scans, book_scans):
     """Adding books does not touch the product's scan or sample: it is the same call, the same records."""
     from gpin.events import select
@@ -1457,20 +1469,28 @@ def test_coupon_cache_is_stamped_and_re_solved_when_the_stamp_differs(tmp_path):
     assert len(calls) == 5
 
 
-def test_coupon_stamp_covers_data_s2ts_engine_and_books_but_not_gpin(tmp_path):
+def test_coupon_stamp_covers_data_s2ts_engine_books_and_the_solver_file(tmp_path):
     import shutil
 
     from gpin import pricing
 
     s2 = tmp_path / "s2ts"
     shutil.copytree(S2TS_DIR / "s2ts", s2, ignore=shutil.ignore_patterns("__pycache__"))
-    base = pricing.coupon_stamp(s2ts_dir=s2, data_digest="d")
-    assert base == pricing.coupon_stamp(s2ts_dir=s2, data_digest="d")
-    assert pricing.coupon_stamp(s2ts_dir=s2, data_digest="e") != base
+    pkg = tmp_path / "gpin"
+    shutil.copytree(STUDY_DIR / "gpin", pkg, ignore=shutil.ignore_patterns("__pycache__"))
+    kw = dict(s2ts_dir=s2, pkg_dir=pkg, data_digest="d")
+    base = pricing.coupon_stamp(**kw)
+    assert base == pricing.coupon_stamp(**kw)
+    assert pricing.coupon_stamp(**{**kw, "data_digest": "e"}) != base
     (s2 / "note.py").write_text((s2 / "note.py").read_text() + "\n# edit\n")
-    assert pricing.coupon_stamp(s2ts_dir=s2, data_digest="d") != base
-    parts = pricing.coupon_stamp_parts(s2ts_dir=s2, data_digest="d")
-    assert set(parts) == {"data", "s2ts", "engine", "books"}
+    edited = pricing.coupon_stamp(**kw)
+    assert edited != base
+    (pkg / "events.py").write_text((pkg / "events.py").read_text() + "\n# edit\n")
+    assert pricing.coupon_stamp(**kw) == edited                       # only the solver's file counts
+    (pkg / "pricing.py").write_text((pkg / "pricing.py").read_text() + "\n# edit\n")   # an edit of the solver
+    assert pricing.coupon_stamp(**kw) != edited
+    parts = pricing.coupon_stamp_parts(**kw)
+    assert set(parts) == {"data", "s2ts", "engine", "books", "solver"}
     assert parts["books"] == {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90}
 
 
@@ -1698,15 +1718,20 @@ def test_scan_ki_level_is_a_parameter_a_90_book_knocks_in_where_the_75_does_not(
     assert (a.start, a.end, a.knocked_in) == (days[5], days[6], False)
 
 
-def test_select_lifted_books_take_six_notes_a_month_and_no_ko_pin_set():
+def test_select_lifted_books_take_three_notes_a_week_and_no_ko_pin_set():
     from gpin.events import select
 
     incs = [date(2024, 1, 2) + timedelta(days=i) for i in range(30)]
     t = date(2025, 3, 5)
-    scans = [fake_scan(i, ki=[(date(2024, 2, 1), date(2024, 2, 9), False)], ko=[(t, 0.001, True)], ki_pct=0.90)
-             for i in incs]
+    wk6 = (date(2024, 2, 5), date(2024, 2, 9))          # ISO 2024-W06
+    wk7 = (date(2024, 2, 12), date(2024, 2, 14))        # ISO 2024-W07
+    scans = [fake_scan(i, ki=[(*wk6, False)], ko=[(t, 0.001, True)], ki_pct=0.90) for i in incs]
+    scans += [fake_scan(date(2023, 6, 2) + timedelta(days=i), ki=[(*wk7, False)], ki_pct=0.90) for i in range(2)]
     sample = select(scans, book="ki90")
-    assert list(sample.pin) == [incs[p] for p in (0, 6, 12, 17, 23, 29)]       # 6 evenly spaced of 30
+    week6 = [i for i in sample.pin if i >= date(2024, 1, 2)]
+    assert week6 == [incs[p] for p in (0, 15, 29)]                       # 3 evenly spaced of 30 in the week
+    assert sum(1 for i in sample.pin if date(2023, 6, 2) <= i <= date(2023, 6, 3)) == 2   # fewer than 3: all of them
+    assert sample.reasons[incs[15]] == ("ki 2024-W06 position 16 of 30",)
     assert all(r.startswith("ki ") for why in sample.reasons.values() for r in why)
     assert all(type(e).__name__ == "KiApproach" for e in sample.events)       # no KO pin events for a lifted book
     assert {e.inception for e in sample.events} == set(sample.pin) | set(sample.headline)
