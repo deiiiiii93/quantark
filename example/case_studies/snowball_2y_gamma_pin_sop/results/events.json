@@ -3851,50 +3851,213 @@
         }
       }
     },
-    "ki85": {
+    "seas6": {
       "headline": [
+        "2023-08-02",
+        "2023-08-07",
+        "2023-08-14",
+        "2023-08-21",
+        "2023-08-28",
+        "2023-09-04",
+        "2023-09-11",
+        "2023-09-18",
+        "2023-09-25",
         "2023-10-09",
+        "2023-10-16",
+        "2023-10-23",
+        "2023-10-30",
+        "2023-11-06",
+        "2023-11-13",
+        "2023-11-20",
+        "2023-11-27",
+        "2023-12-04",
+        "2023-12-11",
+        "2023-12-18",
+        "2023-12-25",
         "2024-01-02",
+        "2024-01-08",
+        "2024-01-15",
+        "2024-01-22",
+        "2024-01-29",
+        "2024-02-05",
+        "2024-02-19",
+        "2024-02-26",
+        "2024-03-04",
+        "2024-03-11",
+        "2024-03-18",
+        "2024-03-25",
         "2024-04-01",
+        "2024-04-08",
+        "2024-04-15",
+        "2024-04-22",
+        "2024-04-29",
+        "2024-05-06",
+        "2024-05-13",
+        "2024-05-20",
+        "2024-05-27",
+        "2024-06-03",
+        "2024-06-11",
+        "2024-06-17",
+        "2024-06-24",
         "2024-07-01",
+        "2024-07-08",
+        "2024-07-15",
+        "2024-07-22",
+        "2024-07-29",
+        "2024-08-05",
+        "2024-08-12",
+        "2024-08-19",
+        "2024-08-26",
+        "2024-09-02",
+        "2024-09-09",
+        "2024-09-18",
+        "2024-09-23",
+        "2024-09-30",
         "2024-10-08",
-        "2025-01-02",
-        "2025-04-01",
-        "2025-07-01",
+        "2024-10-14",
+        "2024-10-21",
+        "2024-10-28",
+        "2024-11-04",
+        "2024-11-11",
+        "2024-11-18",
+        "2024-11-25",
+        "2024-12-02",
+        "2024-12-09",
+        "2024-12-16",
+        "2024-12-23",
+        "2024-12-30",
+        "2025-01-06",
+        "2025-01-13",
+        "2025-01-20",
+        "2025-01-27",
+        "2025-02-05",
+        "2025-02-10",
+        "2025-02-17",
+        "2025-02-24",
+        "2025-03-03",
+        "2025-03-10",
+        "2025-03-17",
+        "2025-03-24",
+        "2025-03-31",
+        "2025-04-07",
+        "2025-04-14",
+        "2025-04-21",
+        "2025-04-28",
+        "2025-05-06",
+        "2025-05-12",
+        "2025-05-19",
+        "2025-05-26",
+        "2025-06-03",
+        "2025-06-09",
+        "2025-06-16",
+        "2025-06-23",
+        "2025-06-30",
+        "2025-07-07",
+        "2025-07-14",
+        "2025-07-21",
+        "2025-07-28",
+        "2025-08-04",
+        "2025-08-11",
+        "2025-08-18",
+        "2025-08-25",
+        "2025-09-01",
+        "2025-09-08",
+        "2025-09-15",
+        "2025-09-22",
+        "2025-09-29",
         "2025-10-09",
+        "2025-10-13",
+        "2025-10-20",
+        "2025-10-27",
+        "2025-11-03",
+        "2025-11-10",
+        "2025-11-17",
+        "2025-11-24",
+        "2025-12-01",
+        "2025-12-08",
+        "2025-12-15",
+        "2025-12-22",
+        "2025-12-29",
         "2026-01-05",
-        "2026-04-01",
-        "2026-07-01",
-        "2026-10-08"
+        "2026-01-12",
+        "2026-01-19",
+        "2026-01-26",
+        "2026-02-02",
+        "2026-02-09",
+        "2026-02-24",
+        "2026-03-02",
+        "2026-03-09",
+        "2026-03-16",
+        "2026-03-23",
+        "2026-03-30",
+        "2026-04-07",
+        "2026-04-13",
+        "2026-04-20",
+        "2026-04-27",
+        "2026-05-06",
+        "2026-05-11",
+        "2026-05-18",
+        "2026-05-25",
+        "2026-06-01",
+        "2026-06-08",
+        "2026-06-15",
+        "2026-06-22",
+        "2026-06-29",
+        "2026-07-06",
+        "2026-07-13",
+        "2026-07-20",
+        "2026-07-27",
+        "2026-08-03",
+        "2026-08-10",
+        "2026-08-17",
+        "2026-08-24",
+        "2026-08-31",
+        "2026-09-07",
+        "2026-09-14",
+        "2026-09-21",
+        "2026-09-28",
+        "2026-10-08",
+        "2026-10-12",
+        "2026-10-19",
+        "2026-10-26",
+        "2026-11-02"
       ],
       "ki_approaches": [
         {
-          "date": "2023-10-25",
-          "inception": "2023-08-02",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-10-20",
-          "week": "2023-W43"
-        },
-        {
-          "date": "2023-12-27",
-          "inception": "2023-08-02",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-12-22",
-          "week": "2023-W52"
-        },
-        {
-          "date": "2024-01-10",
+          "date": "2023-08-21",
           "inception": "2023-08-02",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-04",
-          "week": "2024-W02"
+          "start": "2023-08-11",
+          "week": "2023-W34"
         },
         {
-          "date": "2023-10-26",
-          "inception": "2023-08-04",
+          "date": "2023-08-21",
+          "inception": "2023-08-07",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2023-08-11",
+          "week": "2023-W34"
+        },
+        {
+          "date": "2023-08-25",
+          "inception": "2023-08-14",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2023-08-18",
+          "week": "2023-W34"
+        },
+        {
+          "date": "2023-10-23",
+          "inception": "2023-08-21",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2023-10-18",
+          "week": "2023-W43"
+        },
+        {
+          "date": "2023-10-25",
+          "inception": "2023-08-28",
           "knocked_in": false,
           "slice": "train",
           "start": "2023-10-20",
@@ -3902,31 +4065,7 @@
         },
         {
           "date": "2023-12-28",
-          "inception": "2023-08-04",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-12-20",
-          "week": "2023-W52"
-        },
-        {
-          "date": "2024-01-08",
-          "inception": "2023-08-04",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-03",
-          "week": "2024-W02"
-        },
-        {
-          "date": "2023-10-25",
-          "inception": "2023-08-07",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-10-20",
-          "week": "2023-W43"
-        },
-        {
-          "date": "2023-12-27",
-          "inception": "2023-08-07",
+          "inception": "2023-08-28",
           "knocked_in": false,
           "slice": "train",
           "start": "2023-12-20",
@@ -3934,2028 +4073,31 @@
         },
         {
           "date": "2024-01-10",
-          "inception": "2023-08-07",
+          "inception": "2023-08-28",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-01-04",
           "week": "2024-W02"
         },
         {
-          "date": "2023-10-24",
-          "inception": "2023-08-08",
+          "date": "2023-10-11",
+          "inception": "2023-09-04",
           "knocked_in": false,
           "slice": "train",
-          "start": "2023-10-20",
-          "week": "2023-W43"
-        },
-        {
-          "date": "2023-12-27",
-          "inception": "2023-08-08",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-12-22",
-          "week": "2023-W52"
-        },
-        {
-          "date": "2024-01-17",
-          "inception": "2023-08-08",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-05",
-          "week": "2024-W03"
-        },
-        {
-          "date": "2024-01-19",
-          "inception": "2023-08-14",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-08",
-          "week": "2024-W03"
-        },
-        {
-          "date": "2024-01-22",
-          "inception": "2023-08-16",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-17",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-22",
-          "inception": "2023-10-09",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-17",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-24",
-          "inception": "2023-10-19",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-01-22",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-31",
-          "inception": "2023-10-19",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-29",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-01-22",
-          "inception": "2023-11-03",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-19",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-19",
-          "inception": "2023-11-20",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-12",
-          "week": "2024-W03"
-        },
-        {
-          "date": "2024-01-31",
-          "inception": "2023-12-27",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-30",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-01-24",
-          "inception": "2024-01-02",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-01-22",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-31",
-          "inception": "2024-01-02",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-29",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-01-24",
-          "inception": "2024-01-04",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-01-22",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-31",
-          "inception": "2024-01-04",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-29",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-02-02",
-          "inception": "2024-01-17",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-31",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-02-05",
-          "inception": "2024-01-18",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-31",
-          "week": "2024-W06"
-        },
-        {
-          "date": "2024-02-05",
-          "inception": "2024-01-24",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-02-02",
-          "week": "2024-W06"
-        },
-        {
-          "date": "2024-02-05",
-          "inception": "2024-01-30",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-02-05",
-          "week": "2024-W06"
-        },
-        {
-          "date": "2024-07-10",
-          "inception": "2024-03-01",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-04",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-03-01",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-20",
-          "inception": "2024-03-01",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-02",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-07-10",
-          "inception": "2024-03-11",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-03",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-24",
-          "inception": "2024-03-11",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-12",
-          "week": "2024-W30"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-03-15",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-03-15",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-04",
-          "inception": "2024-03-18",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W27"
-        },
-        {
-          "date": "2024-07-04",
-          "inception": "2024-03-21",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W27"
-        },
-        {
-          "date": "2024-08-27",
-          "inception": "2024-03-27",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-12",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-04-01",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-04-01",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-24",
-          "inception": "2024-04-03",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-02",
-          "week": "2024-W30"
-        },
-        {
-          "date": "2024-07-10",
-          "inception": "2024-04-08",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-04",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-04-08",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-20",
-          "inception": "2024-04-08",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-02",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-04-12",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-22",
-          "inception": "2024-04-12",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-05",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-09-23",
-          "inception": "2024-04-16",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-09-06",
-          "week": "2024-W39"
-        },
-        {
-          "date": "2024-08-22",
-          "inception": "2024-04-17",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-09",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-09-13",
-          "inception": "2024-04-22",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-16",
-          "week": "2024-W37"
-        },
-        {
-          "date": "2024-07-04",
-          "inception": "2024-05-09",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W27"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-05-10",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-05-10",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-24",
-          "inception": "2024-05-16",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-03",
-          "week": "2024-W30"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-05-22",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-05-22",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-10",
-          "inception": "2024-05-27",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-04",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-05-27",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-20",
-          "inception": "2024-05-27",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-02",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-06-04",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-22",
-          "inception": "2024-06-04",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-08",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-09-13",
-          "inception": "2024-06-11",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W37"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-06-13",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-18",
-          "inception": "2024-06-13",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W38"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-06-14",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-18",
-          "inception": "2024-06-14",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W38"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-06-17",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-18",
-          "inception": "2024-06-17",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W38"
-        },
-        {
-          "date": "2024-09-13",
-          "inception": "2024-06-18",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-16",
-          "week": "2024-W37"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-06-19",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-23",
-          "inception": "2024-06-19",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W39"
-        },
-        {
-          "date": "2024-09-23",
-          "inception": "2024-06-21",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-09-06",
-          "week": "2024-W39"
-        },
-        {
-          "date": "2024-10-11",
-          "inception": "2024-10-08",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-10-11",
-          "week": "2024-W41"
-        },
-        {
-          "date": "2025-01-13",
-          "inception": "2024-11-07",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2025-01-03",
-          "week": "2025-W03"
-        },
-        {
-          "date": "2025-01-10",
-          "inception": "2024-11-11",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-01-02",
-          "week": "2025-W02"
-        },
-        {
-          "date": "2025-01-13",
-          "inception": "2024-11-13",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2025-01-03",
-          "week": "2025-W03"
-        },
-        {
-          "date": "2025-04-07",
-          "inception": "2024-11-13",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-04-07",
-          "week": "2025-W15"
-        },
-        {
-          "date": "2025-01-13",
-          "inception": "2024-12-06",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2025-01-10",
-          "week": "2025-W03"
-        },
-        {
-          "date": "2025-01-13",
-          "inception": "2024-12-13",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2025-01-10",
-          "week": "2025-W03"
-        },
-        {
-          "date": "2025-04-07",
-          "inception": "2025-03-07",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-04-07",
-          "week": "2025-W15"
-        },
-        {
-          "date": "2025-04-08",
-          "inception": "2025-03-27",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2025-04-07",
-          "week": "2025-W15"
-        },
-        {
-          "date": "2026-03-23",
-          "inception": "2026-01-23",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-03-23",
-          "week": "2026-W13"
-        },
-        {
-          "date": "2026-03-24",
-          "inception": "2026-02-27",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-03-23",
-          "week": "2026-W13"
-        },
-        {
-          "date": "2026-03-23",
-          "inception": "2026-03-02",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-03-23",
-          "week": "2026-W13"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-03-10",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-04-13",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-20",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-24",
-          "inception": "2026-04-13",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-24",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-08-03",
-          "inception": "2026-04-13",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-28",
-          "week": "2026-W32"
-        },
-        {
-          "date": "2026-10-15",
-          "inception": "2026-04-13",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-08",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-07-30",
-          "inception": "2026-04-14",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W31"
-        },
-        {
-          "date": "2026-07-17",
-          "inception": "2026-04-22",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W29"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-04-30",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-17",
-          "inception": "2026-05-27",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W29"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-06-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-24",
-          "inception": "2026-06-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-22",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-08-03",
-          "inception": "2026-06-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-28",
-          "week": "2026-W32"
-        },
-        {
-          "date": "2026-10-15",
-          "inception": "2026-06-08",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-08",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-07-30",
-          "inception": "2026-06-11",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W31"
-        },
-        {
-          "date": "2026-07-17",
-          "inception": "2026-07-01",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-15",
-          "week": "2026-W29"
-        },
-        {
-          "date": "2026-07-17",
-          "inception": "2026-07-06",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W29"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-07-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-08-03",
-          "inception": "2026-07-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-22",
-          "week": "2026-W32"
-        },
-        {
-          "date": "2026-10-15",
-          "inception": "2026-07-08",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-08",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-07-10",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-10-22",
-          "inception": "2026-07-13",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-14",
-          "week": "2026-W43"
-        },
-        {
-          "date": "2026-07-30",
-          "inception": "2026-07-14",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-30",
-          "week": "2026-W31"
-        },
-        {
-          "date": "2026-10-15",
-          "inception": "2026-07-14",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-12",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-10-27",
-          "inception": "2026-07-16",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-15",
-          "week": "2026-W44"
-        },
-        {
-          "date": "2026-11-03",
-          "inception": "2026-07-17",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-29",
-          "week": "2026-W45"
-        },
-        {
-          "date": "2026-11-03",
-          "inception": "2026-07-27",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-29",
-          "week": "2026-W45"
-        },
-        {
-          "date": "2026-10-15",
-          "inception": "2026-08-18",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-12",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-10-22",
-          "inception": "2026-08-25",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-22",
-          "week": "2026-W43"
-        },
-        {
-          "date": "2026-10-29",
-          "inception": "2026-08-25",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-26",
-          "week": "2026-W44"
-        },
-        {
-          "date": "2026-10-27",
-          "inception": "2026-08-28",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-15",
-          "week": "2026-W44"
-        },
-        {
-          "date": "2026-10-22",
-          "inception": "2026-09-23",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-14",
-          "week": "2026-W43"
-        },
-        {
-          "date": "2026-10-30",
-          "inception": "2026-09-30",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-29",
-          "week": "2026-W44"
-        },
-        {
-          "date": "2026-11-03",
-          "inception": "2026-10-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-30",
-          "week": "2026-W45"
-        },
-        {
-          "date": "2026-11-03",
-          "inception": "2026-10-09",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-29",
-          "week": "2026-W45"
-        }
-      ],
-      "ki_pct": 0.85,
-      "notes": {
-        "2023-08-02": {
-          "end_date": "2025-08-04",
-          "end_reason": "ko",
-          "ki_date": "2024-01-10",
-          "ko_date": "2025-08-04",
-          "ko_observations": 22
-        },
-        "2023-08-04": {
-          "end_date": "2025-08-04",
-          "end_reason": "ko",
-          "ki_date": "2024-01-08",
-          "ko_date": "2025-08-04",
-          "ko_observations": 22
-        },
-        "2023-08-07": {
-          "end_date": "2025-03-07",
-          "end_reason": "ko",
-          "ki_date": "2024-01-10",
-          "ko_date": "2025-03-07",
-          "ko_observations": 17
-        },
-        "2023-08-08": {
-          "end_date": "2025-03-10",
-          "end_reason": "ko",
-          "ki_date": "2024-01-17",
-          "ko_date": "2025-03-10",
-          "ko_observations": 17
-        },
-        "2023-08-14": {
-          "end_date": "2025-03-14",
-          "end_reason": "ko",
-          "ki_date": "2024-01-19",
-          "ko_date": "2025-03-14",
-          "ko_observations": 17
-        },
-        "2023-08-16": {
-          "end_date": "2024-12-16",
-          "end_reason": "ko",
-          "ki_date": "2024-01-22",
-          "ko_date": "2024-12-16",
-          "ko_observations": 14
-        },
-        "2023-10-09": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2024-01-22",
-          "ko_date": "2024-11-11",
-          "ko_observations": 11
-        },
-        "2023-10-19": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-01-31",
-          "ko_date": "2024-10-21",
-          "ko_observations": 10
-        },
-        "2023-11-03": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-22",
-          "ko_date": "2024-10-08",
-          "ko_observations": 9
-        },
-        "2023-11-20": {
-          "end_date": "2024-12-20",
-          "end_reason": "ko",
-          "ki_date": "2024-01-19",
-          "ko_date": "2024-12-20",
-          "ko_observations": 11
-        },
-        "2023-12-27": {
-          "end_date": "2024-10-28",
-          "end_reason": "ko",
-          "ki_date": "2024-01-31",
-          "ko_date": "2024-10-28",
-          "ko_observations": 8
-        },
-        "2024-01-02": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-31",
-          "ko_date": "2024-10-08",
-          "ko_observations": 7
-        },
-        "2024-01-04": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-31",
-          "ko_date": "2024-10-08",
-          "ko_observations": 7
-        },
-        "2024-01-17": {
-          "end_date": "2024-05-17",
-          "end_reason": "ko",
-          "ki_date": "2024-02-02",
-          "ko_date": "2024-05-17",
-          "ko_observations": 2
-        },
-        "2024-01-18": {
-          "end_date": "2024-05-20",
-          "end_reason": "ko",
-          "ki_date": "2024-02-05",
-          "ko_date": "2024-05-20",
-          "ko_observations": 2
-        },
-        "2024-01-24": {
-          "end_date": "2024-04-24",
-          "end_reason": "ko",
-          "ki_date": "2024-02-05",
-          "ko_date": "2024-04-24",
-          "ko_observations": 1
-        },
-        "2024-01-30": {
-          "end_date": "2024-04-30",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-04-30",
-          "ko_observations": 1
-        },
-        "2024-03-01": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-08-20",
-          "ko_date": "2024-10-08",
-          "ko_observations": 5
-        },
-        "2024-03-11": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2024-07-24",
-          "ko_date": "2024-11-11",
-          "ko_observations": 6
-        },
-        "2024-03-15": {
-          "end_date": "2024-11-15",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-11-15",
-          "ko_observations": 6
-        },
-        "2024-03-18": {
-          "end_date": "2024-10-18",
-          "end_reason": "ko",
-          "ki_date": "2024-07-04",
-          "ko_date": "2024-10-18",
-          "ko_observations": 5
-        },
-        "2024-03-21": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-07-04",
-          "ko_date": "2024-10-21",
-          "ko_observations": 5
-        },
-        "2024-03-27": {
-          "end_date": "2024-10-28",
-          "end_reason": "ko",
-          "ki_date": "2024-08-27",
-          "ko_date": "2024-10-28",
-          "ko_observations": 5
-        },
-        "2024-04-01": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-10-08",
-          "ko_observations": 4
-        },
-        "2024-04-03": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-07-24",
-          "ko_date": "2024-10-08",
-          "ko_observations": 4
-        },
-        "2024-04-08": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-08-20",
-          "ko_date": "2024-10-08",
-          "ko_observations": 4
-        },
-        "2024-04-12": {
-          "end_date": "2024-10-14",
-          "end_reason": "ko",
-          "ki_date": "2024-08-22",
-          "ko_date": "2024-10-14",
-          "ko_observations": 4
-        },
-        "2024-04-16": {
-          "end_date": "2024-10-16",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-16",
-          "ko_observations": 4
-        },
-        "2024-04-17": {
-          "end_date": "2024-10-17",
-          "end_reason": "ko",
-          "ki_date": "2024-08-22",
-          "ko_date": "2024-10-17",
-          "ko_observations": 4
-        },
-        "2024-04-22": {
-          "end_date": "2024-10-22",
-          "end_reason": "ko",
-          "ki_date": "2024-09-13",
-          "ko_date": "2024-10-22",
-          "ko_observations": 4
-        },
-        "2024-05-09": {
-          "end_date": "2024-10-09",
-          "end_reason": "ko",
-          "ki_date": "2024-07-04",
-          "ko_date": "2024-10-09",
-          "ko_observations": 3
-        },
-        "2024-05-10": {
-          "end_date": "2024-10-10",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-10-10",
-          "ko_observations": 3
-        },
-        "2024-05-16": {
-          "end_date": "2024-10-16",
-          "end_reason": "ko",
-          "ki_date": "2024-07-24",
-          "ko_date": "2024-10-16",
-          "ko_observations": 3
-        },
-        "2024-05-22": {
-          "end_date": "2024-10-22",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-10-22",
-          "ko_observations": 3
-        },
-        "2024-05-27": {
-          "end_date": "2024-10-28",
-          "end_reason": "ko",
-          "ki_date": "2024-08-20",
-          "ko_date": "2024-10-28",
-          "ko_observations": 3
-        },
-        "2024-06-04": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-08-22",
-          "ko_date": "2024-10-08",
-          "ko_observations": 2
-        },
-        "2024-06-11": {
-          "end_date": "2024-10-11",
-          "end_reason": "ko",
-          "ki_date": "2024-09-13",
-          "ko_date": "2024-10-11",
-          "ko_observations": 2
-        },
-        "2024-06-13": {
-          "end_date": "2024-10-14",
-          "end_reason": "ko",
-          "ki_date": "2024-09-18",
-          "ko_date": "2024-10-14",
-          "ko_observations": 2
-        },
-        "2024-06-14": {
-          "end_date": "2024-10-14",
-          "end_reason": "ko",
-          "ki_date": "2024-09-18",
-          "ko_date": "2024-10-14",
-          "ko_observations": 2
-        },
-        "2024-06-17": {
-          "end_date": "2024-10-17",
-          "end_reason": "ko",
-          "ki_date": "2024-09-18",
-          "ko_date": "2024-10-17",
-          "ko_observations": 2
-        },
-        "2024-06-18": {
-          "end_date": "2024-10-18",
-          "end_reason": "ko",
-          "ki_date": "2024-09-13",
-          "ko_date": "2024-10-18",
-          "ko_observations": 2
-        },
-        "2024-06-19": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-21",
-          "ko_observations": 2
-        },
-        "2024-06-21": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-21",
-          "ko_observations": 2
-        },
-        "2024-07-01": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-08",
-          "ko_observations": 1
-        },
-        "2024-10-08": {
-          "end_date": "2025-02-10",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-02-10",
-          "ko_observations": 2
-        },
-        "2024-11-07": {
-          "end_date": "2025-03-07",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-03-07",
-          "ko_observations": 2
-        },
-        "2024-11-11": {
-          "end_date": "2025-08-11",
-          "end_reason": "ko",
-          "ki_date": "2025-01-10",
-          "ko_date": "2025-08-11",
-          "ko_observations": 7
-        },
-        "2024-11-13": {
-          "end_date": "2025-08-13",
-          "end_reason": "ko",
-          "ki_date": "2025-04-07",
-          "ko_date": "2025-08-13",
-          "ko_observations": 7
-        },
-        "2024-12-06": {
-          "end_date": "2025-03-06",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-03-06",
-          "ko_observations": 1
-        },
-        "2024-12-13": {
-          "end_date": "2025-03-13",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-03-13",
-          "ko_observations": 1
-        },
-        "2025-01-02": {
-          "end_date": "2025-04-02",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-04-02",
-          "ko_observations": 1
-        },
-        "2025-03-07": {
-          "end_date": "2025-08-07",
-          "end_reason": "ko",
-          "ki_date": "2025-04-07",
-          "ko_date": "2025-08-07",
-          "ko_observations": 3
-        },
-        "2025-03-27": {
-          "end_date": "2025-07-28",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-07-28",
-          "ko_observations": 2
-        },
-        "2025-04-01": {
-          "end_date": "2025-07-01",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-07-01",
-          "ko_observations": 1
-        },
-        "2025-07-01": {
-          "end_date": "2025-10-09",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-10-09",
-          "ko_observations": 1
-        },
-        "2025-10-09": {
-          "end_date": "2026-01-09",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-01-09",
-          "ko_observations": 1
-        },
-        "2026-01-05": {
-          "end_date": "2026-05-06",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-05-06",
-          "ko_observations": 2
-        },
-        "2026-01-23": {
-          "end_date": "2026-05-25",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-05-25",
-          "ko_observations": 2
-        },
-        "2026-02-27": {
-          "end_date": "2026-06-29",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-06-29",
-          "ko_observations": 2
-        },
-        "2026-03-02": {
-          "end_date": "2026-07-02",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-07-02",
-          "ko_observations": 2
-        },
-        "2026-03-10": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-20",
-          "ko_date": null,
-          "ko_observations": 5
-        },
-        "2026-04-01": {
-          "end_date": "2026-07-01",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-07-01",
-          "ko_observations": 1
-        },
-        "2026-04-13": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-15",
-          "ko_date": null,
-          "ko_observations": 4
-        },
-        "2026-04-14": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-30",
-          "ko_date": null,
-          "ko_observations": 4
-        },
-        "2026-04-22": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-17",
-          "ko_date": null,
-          "ko_observations": 4
-        },
-        "2026-04-30": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-20",
-          "ko_date": null,
-          "ko_observations": 4
-        },
-        "2026-05-27": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-17",
-          "ko_date": null,
-          "ko_observations": 3
-        },
-        "2026-06-08": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-15",
-          "ko_date": null,
-          "ko_observations": 2
-        },
-        "2026-06-11": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-30",
-          "ko_date": null,
-          "ko_observations": 2
-        },
-        "2026-07-01": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-17",
-          "ko_date": null,
-          "ko_observations": 2
-        },
-        "2026-07-06": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-17",
-          "ko_date": null,
-          "ko_observations": 2
-        },
-        "2026-07-08": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-15",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-10": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-20",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-13": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-22",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-14": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-15",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-16": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-27",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-17": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": null,
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-27": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": null,
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-08-18": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-15",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-08-25": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-29",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-08-28": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-27",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-09-23": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-22",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-09-30": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-30",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-10-08": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": null,
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-10-09": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": null,
-          "ko_date": null,
-          "ko_observations": 0
-        }
-      },
-      "pin": [
-        {
-          "inception": "2023-08-02",
-          "why": [
-            "ki 2023-W43 position 1 of 5",
-            "ki 2023-W52 position 1 of 5",
-            "ki 2024-W02 position 1 of 4"
-          ]
-        },
-        {
-          "inception": "2023-08-04",
-          "why": [
-            "ki 2023-W43 position 3 of 5",
-            "ki 2023-W52 position 3 of 5",
-            "ki 2024-W02 position 3 of 4"
-          ]
-        },
-        {
-          "inception": "2023-08-07",
-          "why": [
-            "ki 2024-W02 position 4 of 4"
-          ]
-        },
-        {
-          "inception": "2023-08-08",
-          "why": [
-            "ki 2023-W43 position 5 of 5",
-            "ki 2023-W52 position 5 of 5",
-            "ki 2024-W03 position 1 of 8"
-          ]
-        },
-        {
-          "inception": "2023-08-14",
-          "why": [
-            "ki 2024-W03 position 5 of 8"
-          ]
-        },
-        {
-          "inception": "2023-08-16",
-          "why": [
-            "ki 2024-W04 position 1 of 81"
-          ]
-        },
-        {
-          "inception": "2023-10-19",
-          "why": [
-            "ki 2024-W05 position 1 of 27"
-          ]
-        },
-        {
-          "inception": "2023-11-03",
-          "why": [
-            "ki 2024-W04 position 41 of 81"
-          ]
-        },
-        {
-          "inception": "2023-11-20",
-          "why": [
-            "ki 2024-W03 position 8 of 8"
-          ]
-        },
-        {
-          "inception": "2023-12-27",
-          "why": [
-            "ki 2024-W05 position 14 of 27"
-          ]
-        },
-        {
-          "inception": "2024-01-04",
-          "why": [
-            "ki 2024-W04 position 81 of 81"
-          ]
-        },
-        {
-          "inception": "2024-01-17",
-          "why": [
-            "ki 2024-W05 position 27 of 27"
-          ]
-        },
-        {
-          "inception": "2024-01-18",
-          "why": [
-            "ki 2024-W06 position 1 of 9"
-          ]
-        },
-        {
-          "inception": "2024-01-24",
-          "why": [
-            "ki 2024-W06 position 5 of 9"
-          ]
-        },
-        {
-          "inception": "2024-01-30",
-          "why": [
-            "ki 2024-W06 position 9 of 9"
-          ]
-        },
-        {
-          "inception": "2024-03-01",
-          "why": [
-            "ki 2024-W28 position 1 of 29",
-            "ki 2024-W31 position 1 of 24",
-            "ki 2024-W34 position 1 of 28"
-          ]
-        },
-        {
-          "inception": "2024-03-11",
-          "why": [
-            "ki 2024-W30 position 1 of 11"
-          ]
-        },
-        {
-          "inception": "2024-03-15",
-          "why": [
-            "ki 2024-W26 position 1 of 7"
-          ]
-        },
-        {
-          "inception": "2024-03-18",
-          "why": [
-            "ki 2024-W27 position 1 of 7"
-          ]
-        },
-        {
-          "inception": "2024-03-21",
-          "why": [
-            "ki 2024-W27 position 4 of 7"
-          ]
-        },
-        {
-          "inception": "2024-03-27",
-          "why": [
-            "ki 2024-W35 position 1 of 8"
-          ]
-        },
-        {
-          "inception": "2024-04-03",
-          "why": [
-            "ki 2024-W30 position 6 of 11"
-          ]
-        },
-        {
-          "inception": "2024-04-08",
-          "why": [
-            "ki 2024-W28 position 15 of 29"
-          ]
-        },
-        {
-          "inception": "2024-04-12",
-          "why": [
-            "ki 2024-W31 position 13 of 24"
-          ]
-        },
-        {
-          "inception": "2024-04-16",
-          "why": [
-            "ki 2024-W39 position 1 of 6"
-          ]
-        },
-        {
-          "inception": "2024-04-17",
-          "why": [
-            "ki 2024-W34 position 15 of 28"
-          ]
-        },
-        {
-          "inception": "2024-04-22",
-          "why": [
-            "ki 2024-W37 position 1 of 6"
-          ]
-        },
-        {
-          "inception": "2024-05-09",
-          "why": [
-            "ki 2024-W27 position 7 of 7"
-          ]
-        },
-        {
-          "inception": "2024-05-10",
-          "why": [
-            "ki 2024-W26 position 4 of 7"
-          ]
-        },
-        {
-          "inception": "2024-05-16",
-          "why": [
-            "ki 2024-W30 position 11 of 11"
-          ]
-        },
-        {
-          "inception": "2024-05-22",
-          "why": [
-            "ki 2024-W26 position 7 of 7"
-          ]
-        },
-        {
-          "inception": "2024-05-27",
-          "why": [
-            "ki 2024-W28 position 29 of 29"
-          ]
-        },
-        {
-          "inception": "2024-06-04",
-          "why": [
-            "ki 2024-W31 position 24 of 24",
-            "ki 2024-W34 position 28 of 28"
-          ]
-        },
-        {
-          "inception": "2024-06-11",
-          "why": [
-            "ki 2024-W37 position 4 of 6"
-          ]
-        },
-        {
-          "inception": "2024-06-13",
-          "why": [
-            "ki 2024-W35 position 5 of 8",
-            "ki 2024-W38 position 1 of 3"
-          ]
-        },
-        {
-          "inception": "2024-06-14",
-          "why": [
-            "ki 2024-W38 position 2 of 3"
-          ]
-        },
-        {
-          "inception": "2024-06-17",
-          "why": [
-            "ki 2024-W38 position 3 of 3"
-          ]
-        },
-        {
-          "inception": "2024-06-18",
-          "why": [
-            "ki 2024-W37 position 6 of 6"
-          ]
-        },
-        {
-          "inception": "2024-06-19",
-          "why": [
-            "ki 2024-W35 position 8 of 8",
-            "ki 2024-W39 position 4 of 6"
-          ]
-        },
-        {
-          "inception": "2024-06-21",
-          "why": [
-            "ki 2024-W39 position 6 of 6"
-          ]
-        },
-        {
-          "inception": "2024-10-08",
-          "why": [
-            "ki 2024-W41 position 1 of 1"
-          ]
-        },
-        {
-          "inception": "2024-11-07",
-          "why": [
-            "ki 2025-W03 position 1 of 9"
-          ]
-        },
-        {
-          "inception": "2024-11-11",
-          "why": [
-            "ki 2025-W02 position 1 of 1"
-          ]
-        },
-        {
-          "inception": "2024-11-13",
-          "why": [
-            "ki 2025-W15 position 1 of 30"
-          ]
-        },
-        {
-          "inception": "2024-12-06",
-          "why": [
-            "ki 2025-W03 position 5 of 9"
-          ]
-        },
-        {
-          "inception": "2024-12-13",
-          "why": [
-            "ki 2025-W03 position 9 of 9"
-          ]
-        },
-        {
-          "inception": "2025-03-07",
-          "why": [
-            "ki 2025-W15 position 16 of 30"
-          ]
-        },
-        {
-          "inception": "2025-03-27",
-          "why": [
-            "ki 2025-W15 position 30 of 30"
-          ]
-        },
-        {
-          "inception": "2026-01-23",
-          "why": [
-            "ki 2026-W13 position 1 of 4"
-          ]
-        },
-        {
-          "inception": "2026-02-27",
-          "why": [
-            "ki 2026-W13 position 3 of 4"
-          ]
-        },
-        {
-          "inception": "2026-03-02",
-          "why": [
-            "ki 2026-W13 position 4 of 4"
-          ]
-        },
-        {
-          "inception": "2026-03-10",
-          "why": [
-            "ki 2026-W30 position 1 of 29"
-          ]
-        },
-        {
-          "inception": "2026-04-13",
-          "why": [
-            "ki 2026-W32 position 1 of 4",
-            "ki 2026-W42 position 1 of 7"
-          ]
-        },
-        {
-          "inception": "2026-04-14",
-          "why": [
-            "ki 2026-W31 position 1 of 3"
-          ]
-        },
-        {
-          "inception": "2026-04-22",
-          "why": [
-            "ki 2026-W29 position 1 of 33"
-          ]
-        },
-        {
-          "inception": "2026-04-30",
-          "why": [
-            "ki 2026-W30 position 15 of 29"
-          ]
-        },
-        {
-          "inception": "2026-05-27",
-          "why": [
-            "ki 2026-W29 position 17 of 33"
-          ]
-        },
-        {
-          "inception": "2026-06-08",
-          "why": [
-            "ki 2026-W32 position 3 of 4"
-          ]
-        },
-        {
-          "inception": "2026-06-11",
-          "why": [
-            "ki 2026-W31 position 2 of 3"
-          ]
-        },
-        {
-          "inception": "2026-07-06",
-          "why": [
-            "ki 2026-W29 position 33 of 33"
-          ]
-        },
-        {
-          "inception": "2026-07-08",
-          "why": [
-            "ki 2026-W32 position 4 of 4",
-            "ki 2026-W42 position 4 of 7"
-          ]
-        },
-        {
-          "inception": "2026-07-10",
-          "why": [
-            "ki 2026-W30 position 29 of 29"
-          ]
-        },
-        {
-          "inception": "2026-07-13",
-          "why": [
-            "ki 2026-W43 position 1 of 12"
-          ]
-        },
-        {
-          "inception": "2026-07-14",
-          "why": [
-            "ki 2026-W31 position 3 of 3"
-          ]
-        },
-        {
-          "inception": "2026-07-16",
-          "why": [
-            "ki 2026-W44 position 1 of 37"
-          ]
-        },
-        {
-          "inception": "2026-07-17",
-          "why": [
-            "ki 2026-W45 position 1 of 7"
-          ]
-        },
-        {
-          "inception": "2026-07-27",
-          "why": [
-            "ki 2026-W45 position 4 of 7"
-          ]
-        },
-        {
-          "inception": "2026-08-18",
-          "why": [
-            "ki 2026-W42 position 7 of 7"
-          ]
-        },
-        {
-          "inception": "2026-08-25",
-          "why": [
-            "ki 2026-W43 position 7 of 12"
-          ]
-        },
-        {
-          "inception": "2026-08-28",
-          "why": [
-            "ki 2026-W44 position 19 of 37"
-          ]
-        },
-        {
-          "inception": "2026-09-23",
-          "why": [
-            "ki 2026-W43 position 12 of 12"
-          ]
-        },
-        {
-          "inception": "2026-09-30",
-          "why": [
-            "ki 2026-W44 position 37 of 37"
-          ]
-        },
-        {
-          "inception": "2026-10-09",
-          "why": [
-            "ki 2026-W45 position 7 of 7"
-          ]
-        }
-      ],
-      "restricted": {
-        "inceptions": 790,
-        "ki_approaches": 447,
-        "ki_weeks": 30,
-        "notes_knocked_in": 306,
-        "test": {
-          "ki_approaches": 138,
-          "ki_knocked_in": 110,
-          "ki_weeks": 9
-        },
-        "train": {
-          "ki_approaches": 309,
-          "ki_knocked_in": 196,
-          "ki_weeks": 21
-        }
-      },
-      "sample_sizes": {
-        "headline_notes": 13,
-        "pin_notes": 73,
-        "priced_notes": 85,
-        "test": {
-          "ki_approaches": 37,
-          "ki_knocked_in": 20,
-          "ki_weeks": 9
-        },
-        "train": {
-          "ki_approaches": 80,
-          "ki_knocked_in": 42,
-          "ki_weeks": 21
-        }
-      }
-    },
-    "ki90": {
-      "headline": [
-        "2023-10-09",
-        "2024-01-02",
-        "2024-04-01",
-        "2024-07-01",
-        "2024-10-08",
-        "2025-01-02",
-        "2025-04-01",
-        "2025-07-01",
-        "2025-10-09",
-        "2026-01-05",
-        "2026-04-01",
-        "2026-07-01",
-        "2026-10-08"
-      ],
-      "ki_approaches": [
-        {
-          "date": "2023-08-29",
-          "inception": "2023-08-02",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-08-18",
-          "week": "2023-W35"
-        },
-        {
-          "date": "2023-10-19",
-          "inception": "2023-08-02",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2023-09-13",
-          "week": "2023-W42"
-        },
-        {
-          "date": "2023-08-25",
-          "inception": "2023-08-04",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2023-08-18",
-          "week": "2023-W34"
-        },
-        {
-          "date": "2023-08-29",
-          "inception": "2023-08-08",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-08-21",
-          "week": "2023-W35"
+          "start": "2023-09-19",
+          "week": "2023-W41"
         },
         {
           "date": "2023-10-20",
-          "inception": "2023-08-08",
+          "inception": "2023-09-04",
           "knocked_in": true,
           "slice": "train",
-          "start": "2023-09-13",
+          "start": "2023-10-13",
           "week": "2023-W42"
         },
         {
-          "date": "2023-08-28",
-          "inception": "2023-08-09",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-08-23",
-          "week": "2023-W35"
-        },
-        {
           "date": "2023-09-27",
-          "inception": "2023-08-09",
+          "inception": "2023-09-11",
           "knocked_in": false,
           "slice": "train",
           "start": "2023-09-19",
@@ -5963,31 +4105,7 @@
         },
         {
           "date": "2023-10-20",
-          "inception": "2023-08-09",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2023-10-16",
-          "week": "2023-W42"
-        },
-        {
-          "date": "2023-08-28",
-          "inception": "2023-08-10",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-08-23",
-          "week": "2023-W35"
-        },
-        {
-          "date": "2023-09-27",
-          "inception": "2023-08-10",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-09-19",
-          "week": "2023-W39"
-        },
-        {
-          "date": "2023-10-20",
-          "inception": "2023-08-10",
+          "inception": "2023-09-11",
           "knocked_in": true,
           "slice": "train",
           "start": "2023-10-16",
@@ -5995,15 +4113,15 @@
         },
         {
           "date": "2023-10-23",
-          "inception": "2023-08-11",
+          "inception": "2023-09-18",
           "knocked_in": true,
           "slice": "train",
           "start": "2023-10-18",
           "week": "2023-W43"
         },
         {
-          "date": "2023-10-27",
-          "inception": "2023-08-15",
+          "date": "2023-10-26",
+          "inception": "2023-09-25",
           "knocked_in": false,
           "slice": "train",
           "start": "2023-10-18",
@@ -6011,159 +4129,103 @@
         },
         {
           "date": "2024-01-08",
-          "inception": "2023-08-15",
+          "inception": "2023-09-25",
           "knocked_in": true,
           "slice": "train",
           "start": "2023-12-18",
           "week": "2024-W02"
         },
         {
-          "date": "2023-10-26",
-          "inception": "2023-08-16",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-10-19",
-          "week": "2023-W43"
-        },
-        {
-          "date": "2023-12-28",
-          "inception": "2023-08-16",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-12-20",
-          "week": "2023-W52"
-        },
-        {
-          "date": "2024-01-08",
-          "inception": "2023-08-16",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-03",
-          "week": "2024-W02"
-        },
-        {
-          "date": "2023-10-24",
-          "inception": "2023-08-31",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-10-23",
-          "week": "2023-W43"
-        },
-        {
-          "date": "2023-12-27",
-          "inception": "2023-08-31",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-12-22",
-          "week": "2023-W52"
-        },
-        {
-          "date": "2024-01-17",
-          "inception": "2023-08-31",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-05",
-          "week": "2024-W03"
-        },
-        {
-          "date": "2023-10-24",
-          "inception": "2023-09-01",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-10-23",
-          "week": "2023-W43"
-        },
-        {
-          "date": "2024-01-17",
+          "date": "2023-10-23",
           "inception": "2023-10-09",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-05",
-          "week": "2024-W03"
-        },
-        {
-          "date": "2023-10-24",
-          "inception": "2023-10-12",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-10-23",
+          "start": "2023-10-18",
           "week": "2023-W43"
         },
         {
-          "date": "2023-12-27",
-          "inception": "2023-10-12",
+          "date": "2023-10-26",
+          "inception": "2023-10-16",
           "knocked_in": false,
           "slice": "train",
-          "start": "2023-12-22",
-          "week": "2023-W52"
+          "start": "2023-10-18",
+          "week": "2023-W43"
         },
         {
-          "date": "2024-01-17",
-          "inception": "2023-10-12",
+          "date": "2024-01-08",
+          "inception": "2023-10-16",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-05",
-          "week": "2024-W03"
+          "start": "2023-12-18",
+          "week": "2024-W02"
         },
         {
           "date": "2024-01-22",
-          "inception": "2023-10-19",
+          "inception": "2023-10-23",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-01-17",
           "week": "2024-W04"
         },
         {
-          "date": "2024-01-19",
-          "inception": "2023-10-27",
+          "date": "2024-01-08",
+          "inception": "2023-10-30",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-12",
-          "week": "2024-W03"
-        },
-        {
-          "date": "2023-12-28",
-          "inception": "2023-11-13",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2023-12-20",
-          "week": "2023-W52"
-        },
-        {
-          "date": "2024-01-10",
-          "inception": "2023-11-13",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-04",
+          "start": "2023-12-18",
           "week": "2024-W02"
         },
         {
-          "date": "2023-12-27",
-          "inception": "2023-12-01",
-          "knocked_in": false,
+          "date": "2023-12-26",
+          "inception": "2023-11-06",
+          "knocked_in": true,
           "slice": "train",
-          "start": "2023-12-22",
+          "start": "2023-12-15",
           "week": "2023-W52"
         },
         {
-          "date": "2024-01-10",
-          "inception": "2023-12-01",
+          "date": "2023-12-22",
+          "inception": "2023-11-13",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-04",
-          "week": "2024-W02"
+          "start": "2023-12-13",
+          "week": "2023-W51"
         },
         {
-          "date": "2023-12-27",
+          "date": "2023-12-20",
+          "inception": "2023-11-20",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2023-11-29",
+          "week": "2023-W51"
+        },
+        {
+          "date": "2023-12-26",
+          "inception": "2023-11-27",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2023-12-14",
+          "week": "2023-W52"
+        },
+        {
+          "date": "2023-12-26",
           "inception": "2023-12-04",
-          "knocked_in": false,
+          "knocked_in": true,
           "slice": "train",
-          "start": "2023-12-22",
+          "start": "2023-12-14",
+          "week": "2023-W52"
+        },
+        {
+          "date": "2023-12-26",
+          "inception": "2023-12-11",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2023-12-15",
           "week": "2023-W52"
         },
         {
           "date": "2024-01-17",
-          "inception": "2023-12-04",
+          "inception": "2023-12-18",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-01-05",
@@ -6171,103 +4233,199 @@
         },
         {
           "date": "2024-01-19",
-          "inception": "2023-12-15",
+          "inception": "2023-12-25",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-01-08",
           "week": "2024-W03"
         },
         {
-          "date": "2024-01-22",
-          "inception": "2023-12-27",
+          "date": "2024-01-17",
+          "inception": "2024-01-02",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-18",
-          "week": "2024-W04"
+          "start": "2024-01-05",
+          "week": "2024-W03"
         },
         {
           "date": "2024-01-22",
-          "inception": "2024-01-02",
+          "inception": "2024-01-08",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-01-17",
           "week": "2024-W04"
         },
         {
-          "date": "2024-01-24",
-          "inception": "2024-01-08",
-          "knocked_in": false,
+          "date": "2024-01-22",
+          "inception": "2024-01-15",
+          "knocked_in": true,
           "slice": "train",
-          "start": "2024-01-22",
+          "start": "2024-01-17",
           "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-30",
-          "inception": "2024-01-08",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-29",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-01-24",
-          "inception": "2024-01-16",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-01-22",
-          "week": "2024-W04"
-        },
-        {
-          "date": "2024-01-30",
-          "inception": "2024-01-16",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-29",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-01-31",
-          "inception": "2024-01-18",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-01-30",
-          "week": "2024-W05"
-        },
-        {
-          "date": "2024-02-05",
-          "inception": "2024-01-22",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-02-02",
-          "week": "2024-W06"
         },
         {
           "date": "2024-02-02",
-          "inception": "2024-01-29",
+          "inception": "2024-01-22",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-01-31",
           "week": "2024-W05"
         },
         {
-          "date": "2024-02-05",
-          "inception": "2024-01-30",
+          "date": "2024-01-31",
+          "inception": "2024-01-29",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-02-02",
-          "week": "2024-W06"
+          "start": "2024-01-30",
+          "week": "2024-W05"
         },
         {
-          "date": "2024-02-05",
-          "inception": "2024-02-01",
+          "date": "2024-07-08",
+          "inception": "2024-02-19",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-07-02",
+          "week": "2024-W28"
+        },
+        {
+          "date": "2024-06-24",
+          "inception": "2024-02-26",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-06-20",
+          "week": "2024-W26"
+        },
+        {
+          "date": "2024-04-16",
+          "inception": "2024-03-04",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-04-15",
+          "week": "2024-W16"
+        },
+        {
+          "date": "2024-04-16",
+          "inception": "2024-03-11",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-04-12",
+          "week": "2024-W16"
+        },
+        {
+          "date": "2024-03-27",
+          "inception": "2024-03-18",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-03-25",
+          "week": "2024-W13"
+        },
+        {
+          "date": "2024-04-16",
+          "inception": "2024-03-25",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-04-12",
+          "week": "2024-W16"
+        },
+        {
+          "date": "2024-04-16",
+          "inception": "2024-04-01",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-04-10",
+          "week": "2024-W16"
+        },
+        {
+          "date": "2024-04-23",
+          "inception": "2024-04-08",
           "knocked_in": false,
           "slice": "train",
-          "start": "2024-02-05",
-          "week": "2024-W06"
+          "start": "2024-04-15",
+          "week": "2024-W17"
+        },
+        {
+          "date": "2024-06-24",
+          "inception": "2024-04-08",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-06-05",
+          "week": "2024-W26"
+        },
+        {
+          "date": "2024-04-16",
+          "inception": "2024-04-15",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-04-16",
+          "week": "2024-W16"
+        },
+        {
+          "date": "2024-06-24",
+          "inception": "2024-04-15",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-06-19",
+          "week": "2024-W26"
+        },
+        {
+          "date": "2024-06-24",
+          "inception": "2024-04-22",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-06-20",
+          "week": "2024-W26"
+        },
+        {
+          "date": "2024-06-06",
+          "inception": "2024-04-29",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-05-23",
+          "week": "2024-W23"
+        },
+        {
+          "date": "2024-06-06",
+          "inception": "2024-05-06",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-05-23",
+          "week": "2024-W23"
+        },
+        {
+          "date": "2024-06-06",
+          "inception": "2024-05-13",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-05-23",
+          "week": "2024-W23"
+        },
+        {
+          "date": "2024-06-06",
+          "inception": "2024-05-20",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-05-23",
+          "week": "2024-W23"
+        },
+        {
+          "date": "2024-06-24",
+          "inception": "2024-05-27",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-06-05",
+          "week": "2024-W26"
+        },
+        {
+          "date": "2024-06-24",
+          "inception": "2024-06-03",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-06-19",
+          "week": "2024-W26"
         },
         {
           "date": "2024-06-25",
-          "inception": "2024-03-01",
+          "inception": "2024-06-11",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-06-20",
@@ -6275,119 +4433,15 @@
         },
         {
           "date": "2024-07-04",
-          "inception": "2024-03-05",
+          "inception": "2024-06-17",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-06-20",
           "week": "2024-W27"
         },
         {
-          "date": "2024-04-16",
-          "inception": "2024-03-11",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-04-16",
-          "week": "2024-W16"
-        },
-        {
-          "date": "2024-06-24",
-          "inception": "2024-03-11",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-19",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-04-23",
-          "inception": "2024-03-19",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-04-15",
-          "week": "2024-W17"
-        },
-        {
-          "date": "2024-06-24",
-          "inception": "2024-03-19",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-05",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-04-16",
-          "inception": "2024-03-20",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-04-12",
-          "week": "2024-W16"
-        },
-        {
-          "date": "2024-04-23",
-          "inception": "2024-03-22",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-04-15",
-          "week": "2024-W17"
-        },
-        {
-          "date": "2024-06-24",
-          "inception": "2024-03-22",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-05",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-03-27",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
           "date": "2024-07-08",
-          "inception": "2024-03-27",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-04-16",
-          "inception": "2024-04-01",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-04-16",
-          "week": "2024-W16"
-        },
-        {
-          "date": "2024-06-24",
-          "inception": "2024-04-01",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-05",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-04-16",
-          "inception": "2024-04-09",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-04-16",
-          "week": "2024-W16"
-        },
-        {
-          "date": "2024-06-24",
-          "inception": "2024-04-09",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-19",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-04-16",
+          "inception": "2024-06-24",
           "knocked_in": false,
           "slice": "train",
           "start": "2024-07-08",
@@ -6395,231 +4449,47 @@
         },
         {
           "date": "2024-07-30",
-          "inception": "2024-04-16",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-21",
-          "inception": "2024-04-16",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-05",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-04-19",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-04-19",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-04-23",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-02",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-04",
-          "inception": "2024-04-24",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W27"
-        },
-        {
-          "date": "2024-06-20",
-          "inception": "2024-05-07",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-03",
-          "week": "2024-W25"
-        },
-        {
-          "date": "2024-06-20",
-          "inception": "2024-05-09",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-03",
-          "week": "2024-W25"
-        },
-        {
-          "date": "2024-07-04",
-          "inception": "2024-06-04",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W27"
-        },
-        {
-          "date": "2024-06-25",
-          "inception": "2024-06-05",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-06-24",
-          "week": "2024-W26"
-        },
-        {
-          "date": "2024-07-08",
-          "inception": "2024-06-05",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-06-27",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-10",
-          "inception": "2024-06-07",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-03",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-24",
-          "inception": "2024-06-07",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-15",
-          "week": "2024-W30"
-        },
-        {
-          "date": "2024-07-24",
-          "inception": "2024-06-14",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-03",
-          "week": "2024-W30"
-        },
-        {
-          "date": "2024-07-10",
-          "inception": "2024-06-19",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-03",
-          "week": "2024-W28"
-        },
-        {
-          "date": "2024-07-24",
-          "inception": "2024-06-19",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-07-15",
-          "week": "2024-W30"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-06-20",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-21",
-          "inception": "2024-06-20",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-05",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-07-30",
-          "inception": "2024-06-21",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-07-23",
-          "week": "2024-W31"
-        },
-        {
-          "date": "2024-08-21",
-          "inception": "2024-06-21",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-05",
-          "week": "2024-W34"
-        },
-        {
-          "date": "2024-08-29",
           "inception": "2024-06-24",
           "knocked_in": false,
           "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
+          "start": "2024-07-23",
+          "week": "2024-W31"
         },
         {
-          "date": "2024-09-23",
+          "date": "2024-08-21",
           "inception": "2024-06-24",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W39"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-06-28",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-18",
-          "inception": "2024-06-28",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W38"
+          "start": "2024-08-05",
+          "week": "2024-W34"
         },
         {
-          "date": "2024-09-13",
+          "date": "2024-07-10",
+          "inception": "2024-07-01",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-07-04",
+          "week": "2024-W28"
+        },
+        {
+          "date": "2024-07-30",
+          "inception": "2024-07-01",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-07-15",
+          "week": "2024-W31"
+        },
+        {
+          "date": "2024-08-20",
           "inception": "2024-07-01",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-08-16",
-          "week": "2024-W37"
-        },
-        {
-          "date": "2024-09-13",
-          "inception": "2024-07-02",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W37"
+          "start": "2024-08-02",
+          "week": "2024-W34"
         },
         {
           "date": "2024-08-29",
-          "inception": "2024-07-11",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-18",
-          "inception": "2024-07-11",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W38"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-07-12",
+          "inception": "2024-07-08",
           "knocked_in": false,
           "slice": "train",
           "start": "2024-08-20",
@@ -6627,7 +4497,55 @@
         },
         {
           "date": "2024-09-23",
-          "inception": "2024-07-12",
+          "inception": "2024-07-08",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-09-02",
+          "week": "2024-W39"
+        },
+        {
+          "date": "2024-07-30",
+          "inception": "2024-07-15",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-07-23",
+          "week": "2024-W31"
+        },
+        {
+          "date": "2024-08-22",
+          "inception": "2024-07-15",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-08-09",
+          "week": "2024-W34"
+        },
+        {
+          "date": "2024-07-30",
+          "inception": "2024-07-22",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-07-23",
+          "week": "2024-W31"
+        },
+        {
+          "date": "2024-08-22",
+          "inception": "2024-07-22",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-08-09",
+          "week": "2024-W34"
+        },
+        {
+          "date": "2024-08-29",
+          "inception": "2024-07-29",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-08-20",
+          "week": "2024-W35"
+        },
+        {
+          "date": "2024-09-23",
+          "inception": "2024-07-29",
           "knocked_in": false,
           "slice": "train",
           "start": "2024-09-02",
@@ -6635,15 +4553,31 @@
         },
         {
           "date": "2024-08-29",
-          "inception": "2024-07-15",
+          "inception": "2024-08-05",
           "knocked_in": false,
           "slice": "train",
-          "start": "2024-08-21",
+          "start": "2024-08-20",
           "week": "2024-W35"
         },
         {
           "date": "2024-09-23",
-          "inception": "2024-07-15",
+          "inception": "2024-08-05",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-09-02",
+          "week": "2024-W39"
+        },
+        {
+          "date": "2024-08-29",
+          "inception": "2024-08-12",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-08-20",
+          "week": "2024-W35"
+        },
+        {
+          "date": "2024-09-23",
+          "inception": "2024-08-12",
           "knocked_in": false,
           "slice": "train",
           "start": "2024-09-06",
@@ -6651,46 +4585,30 @@
         },
         {
           "date": "2024-08-29",
-          "inception": "2024-07-31",
+          "inception": "2024-08-19",
           "knocked_in": false,
           "slice": "train",
-          "start": "2024-08-20",
-          "week": "2024-W35"
-        },
-        {
-          "date": "2024-09-18",
-          "inception": "2024-07-31",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W38"
-        },
-        {
-          "date": "2024-08-29",
-          "inception": "2024-08-01",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-08-20",
+          "start": "2024-08-21",
           "week": "2024-W35"
         },
         {
           "date": "2024-09-23",
-          "inception": "2024-08-01",
+          "inception": "2024-08-19",
           "knocked_in": false,
           "slice": "train",
-          "start": "2024-09-02",
-          "week": "2024-W39"
-        },
-        {
-          "date": "2024-09-23",
-          "inception": "2024-08-06",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-09-09",
+          "start": "2024-09-06",
           "week": "2024-W39"
         },
         {
           "date": "2024-10-11",
+          "inception": "2024-09-30",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2024-10-11",
+          "week": "2024-W41"
+        },
+        {
+          "date": "2024-10-09",
           "inception": "2024-10-08",
           "knocked_in": true,
           "slice": "train",
@@ -6699,151 +4617,111 @@
         },
         {
           "date": "2025-01-13",
-          "inception": "2024-10-28",
+          "inception": "2024-10-21",
           "knocked_in": false,
           "slice": "train",
           "start": "2025-01-03",
           "week": "2025-W03"
         },
         {
+          "date": "2025-04-09",
+          "inception": "2024-10-21",
+          "knocked_in": false,
+          "slice": "train",
+          "start": "2025-04-07",
+          "week": "2025-W15"
+        },
+        {
           "date": "2025-01-03",
-          "inception": "2024-11-05",
+          "inception": "2024-10-28",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-12-31",
+          "week": "2025-W01"
+        },
+        {
+          "date": "2025-01-03",
+          "inception": "2024-11-04",
           "knocked_in": true,
           "slice": "train",
           "start": "2025-01-02",
           "week": "2025-W01"
         },
         {
-          "date": "2024-11-19",
+          "date": "2024-11-15",
           "inception": "2024-11-11",
-          "knocked_in": false,
+          "knocked_in": true,
           "slice": "train",
-          "start": "2024-11-15",
-          "week": "2024-W47"
+          "start": "2024-11-14",
+          "week": "2024-W46"
         },
         {
-          "date": "2024-11-29",
-          "inception": "2024-11-11",
-          "knocked_in": false,
+          "date": "2025-01-10",
+          "inception": "2024-11-18",
+          "knocked_in": true,
           "slice": "train",
-          "start": "2024-11-22",
-          "week": "2024-W48"
+          "start": "2025-01-02",
+          "week": "2025-W02"
+        },
+        {
+          "date": "2025-01-03",
+          "inception": "2024-11-25",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-01-02",
+          "week": "2025-W01"
         },
         {
           "date": "2025-01-02",
-          "inception": "2024-11-11",
+          "inception": "2024-12-02",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-12-23",
           "week": "2025-W01"
         },
         {
-          "date": "2024-11-19",
-          "inception": "2024-11-12",
-          "knocked_in": false,
+          "date": "2025-01-02",
+          "inception": "2024-12-09",
+          "knocked_in": true,
           "slice": "train",
-          "start": "2024-11-15",
-          "week": "2024-W47"
-        },
-        {
-          "date": "2024-11-28",
-          "inception": "2024-11-12",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-11-22",
-          "week": "2024-W48"
+          "start": "2024-12-23",
+          "week": "2025-W01"
         },
         {
           "date": "2025-01-02",
-          "inception": "2024-11-12",
+          "inception": "2024-12-16",
           "knocked_in": true,
           "slice": "train",
-          "start": "2024-12-31",
+          "start": "2024-12-30",
           "week": "2025-W01"
-        },
-        {
-          "date": "2024-11-18",
-          "inception": "2024-11-13",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-11-18",
-          "week": "2024-W47"
-        },
-        {
-          "date": "2024-11-26",
-          "inception": "2024-11-13",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2024-11-22",
-          "week": "2024-W48"
-        },
-        {
-          "date": "2025-01-02",
-          "inception": "2024-11-13",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2024-12-31",
-          "week": "2025-W01"
-        },
-        {
-          "date": "2025-01-13",
-          "inception": "2024-11-25",
-          "knocked_in": false,
-          "slice": "train",
-          "start": "2025-01-03",
-          "week": "2025-W03"
-        },
-        {
-          "date": "2025-01-10",
-          "inception": "2024-11-29",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-01-02",
-          "week": "2025-W02"
         },
         {
           "date": "2025-01-03",
-          "inception": "2024-12-02",
+          "inception": "2024-12-23",
           "knocked_in": true,
           "slice": "train",
           "start": "2024-12-31",
           "week": "2025-W01"
         },
         {
-          "date": "2025-01-10",
-          "inception": "2024-12-19",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-01-02",
-          "week": "2025-W02"
-        },
-        {
           "date": "2025-01-03",
-          "inception": "2024-12-20",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-01-02",
-          "week": "2025-W01"
-        },
-        {
-          "date": "2025-01-10",
-          "inception": "2024-12-27",
-          "knocked_in": true,
-          "slice": "train",
-          "start": "2025-01-02",
-          "week": "2025-W02"
-        },
-        {
-          "date": "2025-01-13",
           "inception": "2024-12-30",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2024-12-31",
+          "week": "2025-W01"
+        },
+        {
+          "date": "2025-04-09",
+          "inception": "2025-01-20",
           "knocked_in": false,
           "slice": "train",
-          "start": "2025-01-02",
-          "week": "2025-W03"
+          "start": "2025-04-07",
+          "week": "2025-W15"
         },
         {
-          "date": "2025-04-08",
-          "inception": "2025-01-24",
+          "date": "2025-04-09",
+          "inception": "2025-01-27",
           "knocked_in": false,
           "slice": "train",
           "start": "2025-04-07",
@@ -6851,7 +4729,7 @@
         },
         {
           "date": "2025-04-07",
-          "inception": "2025-03-06",
+          "inception": "2025-02-05",
           "knocked_in": true,
           "slice": "train",
           "start": "2025-04-07",
@@ -6859,7 +4737,7 @@
         },
         {
           "date": "2025-04-07",
-          "inception": "2025-04-01",
+          "inception": "2025-02-10",
           "knocked_in": true,
           "slice": "train",
           "start": "2025-04-07",
@@ -6867,183 +4745,527 @@
         },
         {
           "date": "2025-04-07",
-          "inception": "2025-04-03",
+          "inception": "2025-02-17",
           "knocked_in": true,
           "slice": "train",
           "start": "2025-04-07",
           "week": "2025-W15"
         },
         {
-          "date": "2025-11-24",
-          "inception": "2025-10-09",
+          "date": "2025-04-07",
+          "inception": "2025-02-24",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-03-25",
+          "week": "2025-W15"
+        },
+        {
+          "date": "2025-04-07",
+          "inception": "2025-03-03",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-04-07",
+          "week": "2025-W15"
+        },
+        {
+          "date": "2025-04-07",
+          "inception": "2025-03-10",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-03-24",
+          "week": "2025-W15"
+        },
+        {
+          "date": "2025-04-07",
+          "inception": "2025-03-17",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-03-21",
+          "week": "2025-W15"
+        },
+        {
+          "date": "2025-04-07",
+          "inception": "2025-03-24",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-04-03",
+          "week": "2025-W15"
+        },
+        {
+          "date": "2025-04-07",
+          "inception": "2025-03-31",
+          "knocked_in": true,
+          "slice": "train",
+          "start": "2025-04-07",
+          "week": "2025-W15"
+        },
+        {
+          "date": "2025-09-10",
+          "inception": "2025-08-25",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-09-02",
+          "week": "2025-W37"
+        },
+        {
+          "date": "2025-10-20",
+          "inception": "2025-08-25",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-10-17",
+          "week": "2025-W43"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-08-25",
           "knocked_in": false,
           "slice": "test",
           "start": "2025-11-21",
           "week": "2025-W48"
         },
         {
+          "date": "2025-12-19",
+          "inception": "2025-08-25",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-15",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-09-10",
+          "inception": "2025-09-01",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-09-02",
+          "week": "2025-W37"
+        },
+        {
+          "date": "2025-10-23",
+          "inception": "2025-09-01",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-10-17",
+          "week": "2025-W43"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-09-01",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-20",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-09-01",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-15",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-11-27",
+          "inception": "2025-09-15",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-21",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-10-23",
+          "inception": "2025-09-22",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-10-17",
+          "week": "2025-W43"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-09-22",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-20",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-09-22",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-15",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-10-23",
+          "inception": "2025-09-29",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-10-17",
+          "week": "2025-W43"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-09-29",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-20",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-09-29",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-15",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-10-28",
+          "inception": "2025-10-09",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-10-14",
+          "week": "2025-W44"
+        },
+        {
+          "date": "2025-11-21",
+          "inception": "2025-10-09",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2025-11-18",
+          "week": "2025-W47"
+        },
+        {
+          "date": "2025-10-23",
+          "inception": "2025-10-13",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-10-17",
+          "week": "2025-W43"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-10-13",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-20",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-10-13",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-11",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-10-27",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-20",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-10-27",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-15",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-12-05",
+          "inception": "2025-11-03",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-19",
+          "week": "2025-W49"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-11-03",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-11",
+          "week": "2025-W51"
+        },
+        {
+          "date": "2025-11-21",
+          "inception": "2025-11-10",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2025-11-19",
+          "week": "2025-W47"
+        },
+        {
+          "date": "2025-11-28",
+          "inception": "2025-11-17",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-11-20",
+          "week": "2025-W48"
+        },
+        {
+          "date": "2025-12-19",
+          "inception": "2025-11-17",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2025-12-11",
+          "week": "2025-W51"
+        },
+        {
           "date": "2026-03-24",
-          "inception": "2026-01-09",
+          "inception": "2026-01-05",
           "knocked_in": false,
           "slice": "test",
           "start": "2026-03-23",
           "week": "2026-W13"
         },
         {
-          "date": "2026-03-27",
-          "inception": "2026-01-13",
+          "date": "2026-02-02",
+          "inception": "2026-01-12",
           "knocked_in": false,
           "slice": "test",
-          "start": "2026-03-23",
-          "week": "2026-W13"
+          "start": "2026-02-02",
+          "week": "2026-W06"
         },
         {
-          "date": "2026-04-07",
-          "inception": "2026-01-13",
-          "knocked_in": false,
+          "date": "2026-03-20",
+          "inception": "2026-01-12",
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-04-02",
-          "week": "2026-W15"
+          "start": "2026-03-17",
+          "week": "2026-W12"
         },
         {
           "date": "2026-03-23",
-          "inception": "2026-02-10",
+          "inception": "2026-01-19",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-03-17",
+          "week": "2026-W13"
+        },
+        {
+          "date": "2026-02-02",
+          "inception": "2026-01-26",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-02-02",
+          "week": "2026-W06"
+        },
+        {
+          "date": "2026-02-06",
+          "inception": "2026-01-26",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-02-04",
+          "week": "2026-W06"
+        },
+        {
+          "date": "2026-03-20",
+          "inception": "2026-01-26",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-03-17",
+          "week": "2026-W12"
+        },
+        {
+          "date": "2026-03-23",
+          "inception": "2026-02-02",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-03-20",
           "week": "2026-W13"
         },
         {
-          "date": "2026-03-24",
-          "inception": "2026-03-03",
-          "knocked_in": false,
+          "date": "2026-03-23",
+          "inception": "2026-02-09",
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-03-23",
+          "start": "2026-03-19",
           "week": "2026-W13"
         },
         {
-          "date": "2026-04-07",
-          "inception": "2026-03-03",
-          "knocked_in": false,
+          "date": "2026-03-23",
+          "inception": "2026-02-24",
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-04-02",
-          "week": "2026-W15"
+          "start": "2026-03-17",
+          "week": "2026-W13"
         },
         {
-          "date": "2026-03-27",
+          "date": "2026-03-09",
+          "inception": "2026-03-02",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-03-03",
+          "week": "2026-W11"
+        },
+        {
+          "date": "2026-03-19",
+          "inception": "2026-03-02",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-03-13",
+          "week": "2026-W12"
+        },
+        {
+          "date": "2026-03-23",
+          "inception": "2026-03-09",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-03-19",
+          "week": "2026-W13"
+        },
+        {
+          "date": "2026-03-23",
           "inception": "2026-03-16",
-          "knocked_in": false,
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-03-23",
+          "start": "2026-03-19",
           "week": "2026-W13"
         },
         {
-          "date": "2026-04-07",
-          "inception": "2026-03-16",
-          "knocked_in": false,
+          "date": "2026-07-30",
+          "inception": "2026-03-23",
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-04-02",
-          "week": "2026-W15"
+          "start": "2026-07-17",
+          "week": "2026-W31"
         },
         {
-          "date": "2026-03-24",
-          "inception": "2026-03-18",
-          "knocked_in": false,
+          "date": "2026-07-17",
+          "inception": "2026-03-30",
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-03-23",
-          "week": "2026-W13"
+          "start": "2026-07-17",
+          "week": "2026-W29"
+        },
+        {
+          "date": "2026-07-20",
+          "inception": "2026-04-07",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-07-17",
+          "week": "2026-W30"
         },
         {
           "date": "2026-07-17",
           "inception": "2026-04-13",
           "knocked_in": true,
           "slice": "test",
-          "start": "2026-07-17",
+          "start": "2026-07-15",
           "week": "2026-W29"
         },
         {
-          "date": "2026-06-08",
-          "inception": "2026-05-08",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-06-08",
-          "week": "2026-W24"
-        },
-        {
           "date": "2026-07-13",
-          "inception": "2026-05-08",
+          "inception": "2026-04-20",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-07-10",
           "week": "2026-W29"
         },
         {
-          "date": "2026-06-08",
-          "inception": "2026-05-14",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-06-08",
-          "week": "2026-W24"
-        },
-        {
-          "date": "2026-07-08",
-          "inception": "2026-05-14",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-08",
-          "week": "2026-W28"
-        },
-        {
           "date": "2026-07-13",
-          "inception": "2026-05-14",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-10",
-          "week": "2026-W29"
-        },
-        {
-          "date": "2026-06-08",
-          "inception": "2026-05-25",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-06-08",
-          "week": "2026-W24"
-        },
-        {
-          "date": "2026-07-13",
-          "inception": "2026-05-25",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-07",
-          "week": "2026-W29"
-        },
-        {
-          "date": "2026-07-16",
-          "inception": "2026-05-28",
+          "inception": "2026-04-27",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-07-13",
           "week": "2026-W29"
         },
         {
-          "date": "2026-07-08",
-          "inception": "2026-06-18",
+          "date": "2026-06-12",
+          "inception": "2026-05-06",
           "knocked_in": false,
           "slice": "test",
-          "start": "2026-07-08",
-          "week": "2026-W28"
+          "start": "2026-06-05",
+          "week": "2026-W24"
         },
         {
           "date": "2026-07-13",
-          "inception": "2026-06-18",
+          "inception": "2026-05-06",
           "knocked_in": true,
           "slice": "test",
-          "start": "2026-07-10",
+          "start": "2026-07-07",
+          "week": "2026-W29"
+        },
+        {
+          "date": "2026-05-22",
+          "inception": "2026-05-11",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-05-21",
+          "week": "2026-W21"
+        },
+        {
+          "date": "2026-06-08",
+          "inception": "2026-05-11",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-05-26",
+          "week": "2026-W24"
+        },
+        {
+          "date": "2026-06-08",
+          "inception": "2026-05-18",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-05-29",
+          "week": "2026-W24"
+        },
+        {
+          "date": "2026-06-08",
+          "inception": "2026-05-25",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-05-29",
+          "week": "2026-W24"
+        },
+        {
+          "date": "2026-07-13",
+          "inception": "2026-06-01",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-07-13",
+          "week": "2026-W29"
+        },
+        {
+          "date": "2026-07-17",
+          "inception": "2026-06-08",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-07-13",
           "week": "2026-W29"
         },
         {
           "date": "2026-07-13",
-          "inception": "2026-07-01",
+          "inception": "2026-06-15",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-07-07",
+          "week": "2026-W29"
+        },
+        {
+          "date": "2026-07-08",
+          "inception": "2026-06-22",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-07-02",
+          "week": "2026-W28"
+        },
+        {
+          "date": "2026-07-13",
+          "inception": "2026-06-29",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-07-07",
+          "week": "2026-W29"
+        },
+        {
+          "date": "2026-07-13",
+          "inception": "2026-07-06",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-07-07",
@@ -7051,103 +5273,31 @@
         },
         {
           "date": "2026-07-17",
-          "inception": "2026-07-10",
+          "inception": "2026-07-13",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-07-16",
           "week": "2026-W29"
         },
         {
-          "date": "2026-07-20",
-          "inception": "2026-07-13",
+          "date": "2026-10-27",
+          "inception": "2026-07-20",
           "knocked_in": true,
           "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-07-15",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-20",
-          "inception": "2026-07-16",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-17",
-          "week": "2026-W30"
-        },
-        {
-          "date": "2026-07-24",
-          "inception": "2026-07-16",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-07-22",
-          "week": "2026-W30"
+          "start": "2026-10-15",
+          "week": "2026-W44"
         },
         {
           "date": "2026-08-03",
-          "inception": "2026-07-16",
+          "inception": "2026-07-27",
           "knocked_in": false,
           "slice": "test",
-          "start": "2026-07-28",
+          "start": "2026-07-30",
           "week": "2026-W32"
         },
         {
           "date": "2026-10-15",
-          "inception": "2026-07-16",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-08",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-10-27",
-          "inception": "2026-07-17",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-22",
-          "week": "2026-W44"
-        },
-        {
-          "date": "2026-10-30",
-          "inception": "2026-08-03",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-26",
-          "week": "2026-W44"
-        },
-        {
-          "date": "2026-10-08",
-          "inception": "2026-08-17",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-09-28",
-          "week": "2026-W41"
-        },
-        {
-          "date": "2026-10-08",
-          "inception": "2026-08-18",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-09-28",
-          "week": "2026-W41"
-        },
-        {
-          "date": "2026-10-14",
-          "inception": "2026-09-01",
-          "knocked_in": true,
-          "slice": "test",
-          "start": "2026-10-08",
-          "week": "2026-W42"
-        },
-        {
-          "date": "2026-10-15",
-          "inception": "2026-09-24",
+          "inception": "2026-07-27",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-10-12",
@@ -7155,819 +5305,1305 @@
         },
         {
           "date": "2026-10-22",
-          "inception": "2026-09-29",
+          "inception": "2026-08-03",
           "knocked_in": true,
           "slice": "test",
           "start": "2026-10-14",
           "week": "2026-W43"
         },
         {
-          "date": "2026-10-29",
+          "date": "2026-09-17",
+          "inception": "2026-08-10",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-09-10",
+          "week": "2026-W38"
+        },
+        {
+          "date": "2026-10-08",
+          "inception": "2026-08-10",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-09-24",
+          "week": "2026-W41"
+        },
+        {
+          "date": "2026-09-11",
+          "inception": "2026-08-17",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-08-19",
+          "week": "2026-W37"
+        },
+        {
+          "date": "2026-10-14",
+          "inception": "2026-08-24",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-09-28",
+          "week": "2026-W42"
+        },
+        {
+          "date": "2026-09-17",
+          "inception": "2026-08-31",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-09-10",
+          "week": "2026-W38"
+        },
+        {
+          "date": "2026-10-08",
+          "inception": "2026-08-31",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-09-24",
+          "week": "2026-W41"
+        },
+        {
+          "date": "2026-10-08",
+          "inception": "2026-09-07",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-09-28",
+          "week": "2026-W41"
+        },
+        {
+          "date": "2026-10-14",
+          "inception": "2026-09-14",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-09-28",
+          "week": "2026-W42"
+        },
+        {
+          "date": "2026-10-08",
+          "inception": "2026-09-21",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-09-24",
+          "week": "2026-W41"
+        },
+        {
+          "date": "2026-10-15",
+          "inception": "2026-09-28",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-10-08",
+          "week": "2026-W42"
+        },
+        {
+          "date": "2026-10-22",
           "inception": "2026-10-08",
           "knocked_in": true,
           "slice": "test",
-          "start": "2026-10-22",
+          "start": "2026-10-14",
+          "week": "2026-W43"
+        },
+        {
+          "date": "2026-10-27",
+          "inception": "2026-10-12",
+          "knocked_in": true,
+          "slice": "test",
+          "start": "2026-10-15",
+          "week": "2026-W44"
+        },
+        {
+          "date": "2026-10-27",
+          "inception": "2026-10-19",
+          "knocked_in": false,
+          "slice": "test",
+          "start": "2026-10-27",
           "week": "2026-W44"
         },
         {
           "date": "2026-10-30",
-          "inception": "2026-10-16",
-          "knocked_in": false,
+          "inception": "2026-10-19",
+          "knocked_in": true,
           "slice": "test",
-          "start": "2026-10-30",
+          "start": "2026-10-29",
           "week": "2026-W44"
         },
         {
-          "date": "2026-11-03",
-          "inception": "2026-10-19",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-30",
-          "week": "2026-W45"
-        },
-        {
-          "date": "2026-11-03",
-          "inception": "2026-10-21",
-          "knocked_in": false,
+          "date": "2026-10-30",
+          "inception": "2026-10-26",
+          "knocked_in": true,
           "slice": "test",
           "start": "2026-10-29",
-          "week": "2026-W45"
-        },
-        {
-          "date": "2026-11-03",
-          "inception": "2026-10-23",
-          "knocked_in": false,
-          "slice": "test",
-          "start": "2026-10-30",
-          "week": "2026-W45"
+          "week": "2026-W44"
         }
       ],
-      "ki_pct": 0.9,
+      "ki_pct": 0.75,
       "notes": {
         "2023-08-02": {
-          "end_date": "2025-08-04",
-          "end_reason": "ko",
-          "ki_date": "2023-10-19",
-          "ko_date": "2025-08-04",
-          "ko_observations": 22
-        },
-        "2023-08-04": {
-          "end_date": "2025-08-04",
-          "end_reason": "ko",
-          "ki_date": "2023-08-25",
-          "ko_date": "2025-08-04",
-          "ko_observations": 22
-        },
-        "2023-08-08": {
-          "end_date": "2025-03-10",
-          "end_reason": "ko",
-          "ki_date": "2023-10-20",
-          "ko_date": "2025-03-10",
-          "ko_observations": 17
-        },
-        "2023-08-09": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2023-10-20",
-          "ko_date": "2024-11-11",
-          "ko_observations": 13
-        },
-        "2023-08-10": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2023-10-20",
-          "ko_date": "2024-11-11",
-          "ko_observations": 13
-        },
-        "2023-08-11": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2023-10-23",
-          "ko_date": "2024-11-11",
-          "ko_observations": 13
-        },
-        "2023-08-15": {
-          "end_date": "2024-12-16",
-          "end_reason": "ko",
-          "ki_date": "2024-01-08",
-          "ko_date": "2024-12-16",
-          "ko_observations": 14
-        },
-        "2023-08-16": {
-          "end_date": "2024-12-16",
-          "end_reason": "ko",
-          "ki_date": "2024-01-08",
-          "ko_date": "2024-12-16",
-          "ko_observations": 14
-        },
-        "2023-08-31": {
-          "end_date": "2024-10-31",
-          "end_reason": "ko",
-          "ki_date": "2024-01-17",
-          "ko_date": "2024-10-31",
-          "ko_observations": 12
-        },
-        "2023-09-01": {
-          "end_date": "2023-12-01",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2023-12-01",
-          "ko_observations": 1
-        },
-        "2023-10-09": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2024-01-17",
-          "ko_date": "2024-11-11",
-          "ko_observations": 11
-        },
-        "2023-10-12": {
-          "end_date": "2024-11-12",
-          "end_reason": "ko",
-          "ki_date": "2024-01-17",
-          "ko_date": "2024-11-12",
-          "ko_observations": 11
-        },
-        "2023-10-19": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-01-22",
-          "ko_date": "2024-10-21",
-          "ko_observations": 10
-        },
-        "2023-10-27": {
-          "end_date": "2024-10-28",
-          "end_reason": "ko",
-          "ki_date": "2024-01-19",
-          "ko_date": "2024-10-28",
-          "ko_observations": 10
-        },
-        "2023-11-13": {
-          "end_date": "2024-11-13",
-          "end_reason": "ko",
-          "ki_date": "2024-01-10",
-          "ko_date": "2024-11-13",
-          "ko_observations": 10
-        },
-        "2023-12-01": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-10",
-          "ko_date": "2024-10-08",
-          "ko_observations": 8
-        },
-        "2023-12-04": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-17",
-          "ko_date": "2024-10-08",
-          "ko_observations": 8
-        },
-        "2023-12-15": {
-          "end_date": "2024-11-15",
-          "end_reason": "ko",
-          "ki_date": "2024-01-19",
-          "ko_date": "2024-11-15",
-          "ko_observations": 9
-        },
-        "2023-12-27": {
-          "end_date": "2024-10-28",
-          "end_reason": "ko",
-          "ki_date": "2024-01-22",
-          "ko_date": "2024-10-28",
-          "ko_observations": 8
-        },
-        "2024-01-02": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-22",
-          "ko_date": "2024-10-08",
-          "ko_observations": 7
-        },
-        "2024-01-08": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-01-30",
-          "ko_date": "2024-10-08",
-          "ko_observations": 7
-        },
-        "2024-01-16": {
-          "end_date": "2024-11-18",
-          "end_reason": "ko",
-          "ki_date": "2024-01-30",
-          "ko_date": "2024-11-18",
-          "ko_observations": 8
-        },
-        "2024-01-18": {
-          "end_date": "2024-05-20",
-          "end_reason": "ko",
-          "ki_date": "2024-01-31",
-          "ko_date": "2024-05-20",
-          "ko_observations": 2
-        },
-        "2024-01-22": {
-          "end_date": "2024-04-22",
-          "end_reason": "ko",
-          "ki_date": "2024-02-05",
-          "ko_date": "2024-04-22",
-          "ko_observations": 1
-        },
-        "2024-01-29": {
-          "end_date": "2024-04-29",
-          "end_reason": "ko",
-          "ki_date": "2024-02-02",
-          "ko_date": "2024-04-29",
-          "ko_observations": 1
-        },
-        "2024-01-30": {
-          "end_date": "2024-04-30",
-          "end_reason": "ko",
-          "ki_date": "2024-02-05",
-          "ko_date": "2024-04-30",
-          "ko_observations": 1
-        },
-        "2024-02-01": {
-          "end_date": "2024-05-06",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-05-06",
-          "ko_observations": 1
-        },
-        "2024-03-01": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-06-25",
-          "ko_date": "2024-10-08",
-          "ko_observations": 5
-        },
-        "2024-03-05": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-07-04",
-          "ko_date": "2024-10-08",
-          "ko_observations": 5
-        },
-        "2024-03-11": {
-          "end_date": "2024-11-11",
-          "end_reason": "ko",
-          "ki_date": "2024-06-24",
-          "ko_date": "2024-11-11",
+          "end_date": "2024-02-02",
+          "end_reason": "maturity",
+          "ki_date": "2023-08-21",
+          "ko_date": null,
           "ko_observations": 6
         },
-        "2024-03-19": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-06-24",
-          "ko_date": "2024-10-21",
-          "ko_observations": 5
+        "2023-08-07": {
+          "end_date": "2024-02-07",
+          "end_reason": "maturity",
+          "ki_date": "2023-08-21",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-03-20": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-04-16",
-          "ko_date": "2024-10-21",
-          "ko_observations": 5
+        "2023-08-14": {
+          "end_date": "2024-02-19",
+          "end_reason": "maturity",
+          "ki_date": "2023-08-25",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-03-22": {
-          "end_date": "2024-10-22",
-          "end_reason": "ko",
-          "ki_date": "2024-06-24",
-          "ko_date": "2024-10-22",
-          "ko_observations": 5
+        "2023-08-21": {
+          "end_date": "2024-02-21",
+          "end_reason": "maturity",
+          "ki_date": "2023-10-23",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-03-27": {
-          "end_date": "2024-10-28",
+        "2023-08-28": {
+          "end_date": "2024-02-28",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-10",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-09-04": {
+          "end_date": "2024-03-04",
+          "end_reason": "maturity",
+          "ki_date": "2023-10-20",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-09-11": {
+          "end_date": "2024-03-11",
+          "end_reason": "maturity",
+          "ki_date": "2023-10-20",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-09-18": {
+          "end_date": "2024-03-18",
+          "end_reason": "maturity",
+          "ki_date": "2023-10-23",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-09-25": {
+          "end_date": "2024-03-25",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-08",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-10-09": {
+          "end_date": "2024-04-09",
+          "end_reason": "maturity",
+          "ki_date": "2023-10-23",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-10-16": {
+          "end_date": "2024-04-16",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-08",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-10-23": {
+          "end_date": "2024-04-23",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-22",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-10-30": {
+          "end_date": "2024-04-30",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-08",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-11-06": {
+          "end_date": "2024-05-06",
+          "end_reason": "maturity",
+          "ki_date": "2023-12-26",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-11-13": {
+          "end_date": "2024-05-13",
+          "end_reason": "maturity",
+          "ki_date": "2023-12-22",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-11-20": {
+          "end_date": "2024-05-20",
+          "end_reason": "maturity",
+          "ki_date": "2023-12-20",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-11-27": {
+          "end_date": "2024-05-27",
+          "end_reason": "maturity",
+          "ki_date": "2023-12-26",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-12-04": {
+          "end_date": "2024-06-04",
+          "end_reason": "maturity",
+          "ki_date": "2023-12-26",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-12-11": {
+          "end_date": "2024-06-11",
+          "end_reason": "maturity",
+          "ki_date": "2023-12-26",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-12-18": {
+          "end_date": "2024-06-18",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-17",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2023-12-25": {
+          "end_date": "2024-06-25",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-19",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-01-02": {
+          "end_date": "2024-07-02",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-17",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-01-08": {
+          "end_date": "2024-07-08",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-22",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-01-15": {
+          "end_date": "2024-07-15",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-22",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-01-22": {
+          "end_date": "2024-07-22",
+          "end_reason": "maturity",
+          "ki_date": "2024-02-02",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-01-29": {
+          "end_date": "2024-07-29",
+          "end_reason": "maturity",
+          "ki_date": "2024-01-31",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-02-05": {
+          "end_date": "2024-03-05",
           "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-03-05",
+          "ko_observations": 1
+        },
+        "2024-02-19": {
+          "end_date": "2024-08-19",
+          "end_reason": "maturity",
           "ki_date": "2024-07-08",
-          "ko_date": "2024-10-28",
-          "ko_observations": 5
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-02-26": {
+          "end_date": "2024-08-26",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-24",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-03-04": {
+          "end_date": "2024-09-04",
+          "end_reason": "maturity",
+          "ki_date": "2024-04-16",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-03-11": {
+          "end_date": "2024-09-11",
+          "end_reason": "maturity",
+          "ki_date": "2024-04-16",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-03-18": {
+          "end_date": "2024-09-18",
+          "end_reason": "maturity",
+          "ki_date": "2024-03-27",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-03-25": {
+          "end_date": "2024-09-25",
+          "end_reason": "maturity",
+          "ki_date": "2024-04-16",
+          "ko_date": null,
+          "ko_observations": 6
         },
         "2024-04-01": {
           "end_date": "2024-10-08",
-          "end_reason": "ko",
+          "end_reason": "maturity",
+          "ki_date": "2024-04-16",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-04-08": {
+          "end_date": "2024-10-08",
+          "end_reason": "maturity",
           "ki_date": "2024-06-24",
-          "ko_date": "2024-10-08",
-          "ko_observations": 4
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-04-09": {
-          "end_date": "2024-10-09",
-          "end_reason": "ko",
+        "2024-04-15": {
+          "end_date": "2024-10-15",
+          "end_reason": "maturity",
           "ki_date": "2024-06-24",
-          "ko_date": "2024-10-09",
-          "ko_observations": 4
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-04-16": {
-          "end_date": "2024-10-16",
-          "end_reason": "ko",
-          "ki_date": "2024-08-21",
-          "ko_date": "2024-10-16",
-          "ko_observations": 4
+        "2024-04-22": {
+          "end_date": "2024-10-22",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-24",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-04-19": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-10-21",
-          "ko_observations": 4
+        "2024-04-29": {
+          "end_date": "2024-10-29",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-06",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-04-23": {
-          "end_date": "2024-10-23",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-10-23",
-          "ko_observations": 4
+        "2024-05-06": {
+          "end_date": "2024-11-06",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-06",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2024-04-24": {
-          "end_date": "2024-10-24",
+        "2024-05-13": {
+          "end_date": "2024-11-13",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-06",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-05-20": {
+          "end_date": "2024-11-20",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-06",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-05-27": {
+          "end_date": "2024-11-27",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-24",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-06-03": {
+          "end_date": "2024-12-03",
+          "end_reason": "maturity",
+          "ki_date": "2024-06-24",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-06-11": {
+          "end_date": "2024-11-11",
           "end_reason": "ko",
+          "ki_date": "2024-06-25",
+          "ko_date": "2024-11-11",
+          "ko_observations": 5
+        },
+        "2024-06-17": {
+          "end_date": "2024-12-17",
+          "end_reason": "maturity",
           "ki_date": "2024-07-04",
-          "ko_date": "2024-10-24",
-          "ko_observations": 4
-        },
-        "2024-05-07": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-06-20",
-          "ko_date": "2024-10-08",
-          "ko_observations": 3
-        },
-        "2024-05-09": {
-          "end_date": "2024-10-09",
-          "end_reason": "ko",
-          "ki_date": "2024-06-20",
-          "ko_date": "2024-10-09",
-          "ko_observations": 3
-        },
-        "2024-06-04": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-07-04",
-          "ko_date": "2024-10-08",
-          "ko_observations": 2
-        },
-        "2024-06-05": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-07-08",
-          "ko_date": "2024-10-08",
-          "ko_observations": 2
-        },
-        "2024-06-07": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-07-24",
-          "ko_date": "2024-10-08",
-          "ko_observations": 2
-        },
-        "2024-06-14": {
-          "end_date": "2024-10-14",
-          "end_reason": "ko",
-          "ki_date": "2024-07-24",
-          "ko_date": "2024-10-14",
-          "ko_observations": 2
-        },
-        "2024-06-19": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-07-24",
-          "ko_date": "2024-10-21",
-          "ko_observations": 2
-        },
-        "2024-06-20": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-08-21",
-          "ko_date": "2024-10-21",
-          "ko_observations": 2
-        },
-        "2024-06-21": {
-          "end_date": "2024-10-21",
-          "end_reason": "ko",
-          "ki_date": "2024-08-21",
-          "ko_date": "2024-10-21",
-          "ko_observations": 2
+          "ko_date": null,
+          "ko_observations": 6
         },
         "2024-06-24": {
-          "end_date": "2024-10-24",
+          "end_date": "2024-12-24",
           "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-24",
-          "ko_observations": 2
-        },
-        "2024-06-28": {
-          "end_date": "2024-09-30",
-          "end_reason": "ko",
-          "ki_date": "2024-09-18",
-          "ko_date": "2024-09-30",
-          "ko_observations": 1
+          "ki_date": "2024-08-21",
+          "ko_date": "2024-12-24",
+          "ko_observations": 6
         },
         "2024-07-01": {
           "end_date": "2024-10-08",
           "end_reason": "ko",
-          "ki_date": "2024-09-13",
+          "ki_date": "2024-08-20",
           "ko_date": "2024-10-08",
-          "ko_observations": 1
-        },
-        "2024-07-02": {
-          "end_date": "2024-10-08",
-          "end_reason": "ko",
-          "ki_date": "2024-09-13",
-          "ko_date": "2024-10-08",
-          "ko_observations": 1
-        },
-        "2024-07-11": {
-          "end_date": "2024-10-11",
-          "end_reason": "ko",
-          "ki_date": "2024-09-18",
-          "ko_date": "2024-10-11",
-          "ko_observations": 1
-        },
-        "2024-07-12": {
-          "end_date": "2024-10-14",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-14",
-          "ko_observations": 1
-        },
-        "2024-07-15": {
-          "end_date": "2024-10-15",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-10-15",
-          "ko_observations": 1
-        },
-        "2024-07-31": {
-          "end_date": "2024-10-31",
-          "end_reason": "ko",
-          "ki_date": "2024-09-18",
-          "ko_date": "2024-10-31",
-          "ko_observations": 1
-        },
-        "2024-08-01": {
-          "end_date": "2024-11-01",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-11-01",
-          "ko_observations": 1
-        },
-        "2024-08-06": {
-          "end_date": "2024-11-06",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2024-11-06",
-          "ko_observations": 1
-        },
-        "2024-10-08": {
-          "end_date": "2025-02-10",
-          "end_reason": "ko",
-          "ki_date": "2024-10-11",
-          "ko_date": "2025-02-10",
-          "ko_observations": 2
-        },
-        "2024-10-28": {
-          "end_date": "2025-02-28",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-02-28",
-          "ko_observations": 2
-        },
-        "2024-11-05": {
-          "end_date": "2025-03-05",
-          "end_reason": "ko",
-          "ki_date": "2025-01-03",
-          "ko_date": "2025-03-05",
-          "ko_observations": 2
-        },
-        "2024-11-11": {
-          "end_date": "2025-08-11",
-          "end_reason": "ko",
-          "ki_date": "2025-01-02",
-          "ko_date": "2025-08-11",
-          "ko_observations": 7
-        },
-        "2024-11-12": {
-          "end_date": "2025-03-12",
-          "end_reason": "ko",
-          "ki_date": "2025-01-02",
-          "ko_date": "2025-03-12",
-          "ko_observations": 2
-        },
-        "2024-11-13": {
-          "end_date": "2025-08-13",
-          "end_reason": "ko",
-          "ki_date": "2025-01-02",
-          "ko_date": "2025-08-13",
-          "ko_observations": 7
-        },
-        "2024-11-25": {
-          "end_date": "2025-02-25",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-02-25",
-          "ko_observations": 1
-        },
-        "2024-11-29": {
-          "end_date": "2025-02-28",
-          "end_reason": "ko",
-          "ki_date": "2025-01-10",
-          "ko_date": "2025-02-28",
-          "ko_observations": 1
-        },
-        "2024-12-02": {
-          "end_date": "2025-08-04",
-          "end_reason": "ko",
-          "ki_date": "2025-01-03",
-          "ko_date": "2025-08-04",
-          "ko_observations": 6
-        },
-        "2024-12-19": {
-          "end_date": "2025-03-19",
-          "end_reason": "ko",
-          "ki_date": "2025-01-10",
-          "ko_date": "2025-03-19",
-          "ko_observations": 1
-        },
-        "2024-12-20": {
-          "end_date": "2025-03-20",
-          "end_reason": "ko",
-          "ki_date": "2025-01-03",
-          "ko_date": "2025-03-20",
-          "ko_observations": 1
-        },
-        "2024-12-27": {
-          "end_date": "2025-03-27",
-          "end_reason": "ko",
-          "ki_date": "2025-01-10",
-          "ko_date": "2025-03-27",
-          "ko_observations": 1
-        },
-        "2024-12-30": {
-          "end_date": "2025-03-31",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-03-31",
-          "ko_observations": 1
-        },
-        "2025-01-02": {
-          "end_date": "2025-04-02",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-04-02",
-          "ko_observations": 1
-        },
-        "2025-01-24": {
-          "end_date": "2025-05-26",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2025-05-26",
-          "ko_observations": 2
-        },
-        "2025-03-06": {
-          "end_date": "2025-08-06",
-          "end_reason": "ko",
-          "ki_date": "2025-04-07",
-          "ko_date": "2025-08-06",
           "ko_observations": 3
         },
-        "2025-04-01": {
-          "end_date": "2025-07-01",
+        "2024-07-08": {
+          "end_date": "2024-10-08",
           "end_reason": "ko",
-          "ki_date": "2025-04-07",
-          "ko_date": "2025-07-01",
+          "ki_date": null,
+          "ko_date": "2024-10-08",
+          "ko_observations": 3
+        },
+        "2024-07-15": {
+          "end_date": "2024-11-15",
+          "end_reason": "ko",
+          "ki_date": "2024-08-22",
+          "ko_date": "2024-11-15",
+          "ko_observations": 4
+        },
+        "2024-07-22": {
+          "end_date": "2024-11-22",
+          "end_reason": "ko",
+          "ki_date": "2024-08-22",
+          "ko_date": "2024-11-22",
+          "ko_observations": 4
+        },
+        "2024-07-29": {
+          "end_date": "2024-10-29",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-29",
+          "ko_observations": 3
+        },
+        "2024-08-05": {
+          "end_date": "2024-10-08",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-08",
+          "ko_observations": 2
+        },
+        "2024-08-12": {
+          "end_date": "2024-11-12",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-11-12",
+          "ko_observations": 3
+        },
+        "2024-08-19": {
+          "end_date": "2024-10-21",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-21",
+          "ko_observations": 2
+        },
+        "2024-08-26": {
+          "end_date": "2024-10-28",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-28",
+          "ko_observations": 2
+        },
+        "2024-09-02": {
+          "end_date": "2024-10-08",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-08",
           "ko_observations": 1
         },
-        "2025-04-03": {
-          "end_date": "2025-07-03",
+        "2024-09-09": {
+          "end_date": "2024-10-09",
           "end_reason": "ko",
-          "ki_date": "2025-04-07",
-          "ko_date": "2025-07-03",
+          "ki_date": null,
+          "ko_date": "2024-10-09",
           "ko_observations": 1
         },
-        "2025-07-01": {
+        "2024-09-18": {
+          "end_date": "2024-10-18",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-18",
+          "ko_observations": 1
+        },
+        "2024-09-23": {
+          "end_date": "2024-10-23",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2024-10-23",
+          "ko_observations": 1
+        },
+        "2024-09-30": {
+          "end_date": "2025-03-31",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-10-08": {
+          "end_date": "2025-04-08",
+          "end_reason": "maturity",
+          "ki_date": "2024-10-09",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-10-14": {
+          "end_date": "2025-04-14",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-10-21": {
+          "end_date": "2025-04-21",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-10-28": {
+          "end_date": "2025-04-28",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-03",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-11-04": {
+          "end_date": "2025-05-06",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-03",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-11-11": {
+          "end_date": "2025-05-12",
+          "end_reason": "maturity",
+          "ki_date": "2024-11-15",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-11-18": {
+          "end_date": "2025-05-19",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-10",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-11-25": {
+          "end_date": "2025-05-26",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-03",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-12-02": {
+          "end_date": "2025-06-03",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-02",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-12-09": {
+          "end_date": "2025-06-09",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-02",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-12-16": {
+          "end_date": "2025-06-16",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-02",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-12-23": {
+          "end_date": "2025-06-23",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-03",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2024-12-30": {
+          "end_date": "2025-06-30",
+          "end_reason": "maturity",
+          "ki_date": "2025-01-03",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-01-06": {
+          "end_date": "2025-07-07",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-01-13": {
+          "end_date": "2025-07-14",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-01-20": {
+          "end_date": "2025-07-21",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-01-27": {
+          "end_date": "2025-07-28",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-02-05": {
+          "end_date": "2025-08-05",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-02-10": {
+          "end_date": "2025-08-11",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-02-17": {
+          "end_date": "2025-08-18",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-02-24": {
+          "end_date": "2025-08-25",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-03-03": {
+          "end_date": "2025-09-03",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-03-10": {
+          "end_date": "2025-09-10",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-03-17": {
+          "end_date": "2025-09-17",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-03-24": {
+          "end_date": "2025-09-24",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-03-31": {
+          "end_date": "2025-09-30",
+          "end_reason": "maturity",
+          "ki_date": "2025-04-07",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-04-07": {
+          "end_date": "2025-08-07",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2025-08-07",
+          "ko_observations": 4
+        },
+        "2025-04-14": {
+          "end_date": "2025-09-15",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2025-09-15",
+          "ko_observations": 5
+        },
+        "2025-04-21": {
+          "end_date": "2025-09-22",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2025-09-22",
+          "ko_observations": 5
+        },
+        "2025-04-28": {
+          "end_date": "2025-08-28",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2025-08-28",
+          "ko_observations": 4
+        },
+        "2025-05-06": {
           "end_date": "2025-10-09",
           "end_reason": "ko",
           "ki_date": null,
           "ko_date": "2025-10-09",
-          "ko_observations": 1
+          "ko_observations": 5
+        },
+        "2025-05-12": {
+          "end_date": "2025-11-12",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-05-19": {
+          "end_date": "2025-11-19",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-05-26": {
+          "end_date": "2025-11-26",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-06-03": {
+          "end_date": "2025-10-09",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2025-10-09",
+          "ko_observations": 4
+        },
+        "2025-06-09": {
+          "end_date": "2025-12-09",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-06-16": {
+          "end_date": "2025-12-16",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-06-23": {
+          "end_date": "2025-12-23",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-06-30": {
+          "end_date": "2025-12-30",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-07-07": {
+          "end_date": "2026-01-07",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2026-01-07",
+          "ko_observations": 6
+        },
+        "2025-07-14": {
+          "end_date": "2026-01-14",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2026-01-14",
+          "ko_observations": 6
+        },
+        "2025-07-21": {
+          "end_date": "2026-01-21",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2026-01-21",
+          "ko_observations": 6
+        },
+        "2025-07-28": {
+          "end_date": "2026-01-28",
+          "end_reason": "ko",
+          "ki_date": null,
+          "ko_date": "2026-01-28",
+          "ko_observations": 6
+        },
+        "2025-08-04": {
+          "end_date": "2026-02-04",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-08-11": {
+          "end_date": "2026-02-11",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-08-18": {
+          "end_date": "2026-02-24",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-08-25": {
+          "end_date": "2026-02-25",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-09-01": {
+          "end_date": "2026-03-02",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-09-08": {
+          "end_date": "2026-03-09",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-09-15": {
+          "end_date": "2026-03-16",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-09-22": {
+          "end_date": "2026-03-23",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-09-29": {
+          "end_date": "2026-03-30",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
         },
         "2025-10-09": {
-          "end_date": "2026-01-09",
-          "end_reason": "ko",
+          "end_date": "2026-04-09",
+          "end_reason": "maturity",
+          "ki_date": "2025-11-21",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-10-13": {
+          "end_date": "2026-04-13",
+          "end_reason": "maturity",
           "ki_date": null,
-          "ko_date": "2026-01-09",
-          "ko_observations": 1
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-10-20": {
+          "end_date": "2026-04-20",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-10-27": {
+          "end_date": "2026-04-27",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-11-03": {
+          "end_date": "2026-05-06",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-11-10": {
+          "end_date": "2026-05-11",
+          "end_reason": "maturity",
+          "ki_date": "2025-11-21",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-11-17": {
+          "end_date": "2026-05-18",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-11-24": {
+          "end_date": "2026-05-25",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-12-01": {
+          "end_date": "2026-06-01",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-12-08": {
+          "end_date": "2026-06-08",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-12-15": {
+          "end_date": "2026-06-15",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-12-22": {
+          "end_date": "2026-06-22",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2025-12-29": {
+          "end_date": "2026-06-29",
+          "end_reason": "maturity",
+          "ki_date": null,
+          "ko_date": null,
+          "ko_observations": 6
         },
         "2026-01-05": {
-          "end_date": "2026-05-06",
-          "end_reason": "ko",
+          "end_date": "2026-07-06",
+          "end_reason": "maturity",
           "ki_date": null,
-          "ko_date": "2026-05-06",
-          "ko_observations": 2
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2026-01-09": {
-          "end_date": "2026-05-11",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-05-11",
-          "ko_observations": 2
+        "2026-01-12": {
+          "end_date": "2026-07-13",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-20",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2026-01-13": {
-          "end_date": "2026-05-13",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-05-13",
-          "ko_observations": 2
-        },
-        "2026-02-10": {
-          "end_date": "2026-05-11",
-          "end_reason": "ko",
+        "2026-01-19": {
+          "end_date": "2026-07-20",
+          "end_reason": "maturity",
           "ki_date": "2026-03-23",
-          "ko_date": "2026-05-11",
-          "ko_observations": 1
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2026-03-03": {
-          "end_date": "2026-06-03",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-06-03",
-          "ko_observations": 1
+        "2026-01-26": {
+          "end_date": "2026-07-27",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-20",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-02-02": {
+          "end_date": "2026-08-03",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-23",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-02-09": {
+          "end_date": "2026-08-10",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-23",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-02-24": {
+          "end_date": "2026-08-24",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-23",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-03-02": {
+          "end_date": "2026-09-02",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-19",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-03-09": {
+          "end_date": "2026-09-09",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-23",
+          "ko_date": null,
+          "ko_observations": 6
         },
         "2026-03-16": {
-          "end_date": "2026-06-16",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-06-16",
-          "ko_observations": 1
+          "end_date": "2026-09-16",
+          "end_reason": "maturity",
+          "ki_date": "2026-03-23",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2026-03-18": {
-          "end_date": "2026-06-18",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-06-18",
-          "ko_observations": 1
+        "2026-03-23": {
+          "end_date": "2026-09-23",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-30",
+          "ko_date": null,
+          "ko_observations": 6
         },
-        "2026-04-01": {
-          "end_date": "2026-07-01",
-          "end_reason": "ko",
-          "ki_date": null,
-          "ko_date": "2026-07-01",
-          "ko_observations": 1
+        "2026-03-30": {
+          "end_date": "2026-09-30",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-17",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-04-07": {
+          "end_date": "2026-10-08",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-20",
+          "ko_date": null,
+          "ko_observations": 6
         },
         "2026-04-13": {
+          "end_date": "2026-10-13",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-17",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-04-20": {
+          "end_date": "2026-10-20",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-13",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-04-27": {
+          "end_date": "2026-10-27",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-13",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-05-06": {
+          "end_date": "2026-11-06",
+          "end_reason": "maturity",
+          "ki_date": "2026-07-13",
+          "ko_date": null,
+          "ko_observations": 6
+        },
+        "2026-05-11": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-06-08",
+          "ko_date": null,
+          "ko_observations": 5
+        },
+        "2026-05-18": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-06-08",
+          "ko_date": null,
+          "ko_observations": 5
+        },
+        "2026-05-25": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-06-08",
+          "ko_date": null,
+          "ko_observations": 5
+        },
+        "2026-06-01": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-07-13",
+          "ko_date": null,
+          "ko_observations": 5
+        },
+        "2026-06-08": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-07-17",
           "ko_date": null,
           "ko_observations": 4
         },
-        "2026-05-08": {
+        "2026-06-15": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-07-13",
           "ko_date": null,
-          "ko_observations": 3
+          "ko_observations": 4
         },
-        "2026-05-14": {
+        "2026-06-22": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-07-08",
+          "ko_date": null,
+          "ko_observations": 4
+        },
+        "2026-06-29": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-07-13",
           "ko_date": null,
-          "ko_observations": 3
+          "ko_observations": 4
         },
-        "2026-05-25": {
+        "2026-07-06": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-07-13",
           "ko_date": null,
-          "ko_observations": 3
-        },
-        "2026-05-28": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-16",
-          "ko_date": null,
-          "ko_observations": 3
-        },
-        "2026-06-18": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-13",
-          "ko_date": null,
-          "ko_observations": 2
-        },
-        "2026-07-01": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-13",
-          "ko_date": null,
-          "ko_observations": 2
-        },
-        "2026-07-10": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-17",
-          "ko_date": null,
-          "ko_observations": 1
+          "ko_observations": 4
         },
         "2026-07-13": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
-          "ki_date": "2026-07-20",
+          "ki_date": "2026-07-17",
           "ko_date": null,
-          "ko_observations": 1
+          "ko_observations": 3
         },
-        "2026-07-15": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-07-20",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-16": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-15",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-07-17": {
+        "2026-07-20": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-10-27",
           "ko_date": null,
-          "ko_observations": 1
+          "ko_observations": 3
         },
-        "2026-08-03": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-30",
-          "ko_date": null,
-          "ko_observations": 1
-        },
-        "2026-08-17": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-08",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-08-18": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-08",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-09-01": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": "2026-10-14",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-09-24": {
+        "2026-07-27": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-10-15",
           "ko_date": null,
-          "ko_observations": 0
+          "ko_observations": 3
         },
-        "2026-09-29": {
+        "2026-08-03": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-22",
+          "ko_date": null,
+          "ko_observations": 3
+        },
+        "2026-08-10": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-08",
+          "ko_date": null,
+          "ko_observations": 2
+        },
+        "2026-08-17": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-09-11",
+          "ko_date": null,
+          "ko_observations": 2
+        },
+        "2026-08-24": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-14",
+          "ko_date": null,
+          "ko_observations": 2
+        },
+        "2026-08-31": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-08",
+          "ko_date": null,
+          "ko_observations": 2
+        },
+        "2026-09-07": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-08",
+          "ko_date": null,
+          "ko_observations": 1
+        },
+        "2026-09-14": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-14",
+          "ko_date": null,
+          "ko_observations": 1
+        },
+        "2026-09-21": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-08",
+          "ko_date": null,
+          "ko_observations": 1
+        },
+        "2026-09-28": {
+          "end_date": "2026-11-06",
+          "end_reason": "truncated",
+          "ki_date": "2026-10-15",
+          "ko_date": null,
+          "ko_observations": 1
+        },
+        "2026-10-08": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": "2026-10-22",
           "ko_date": null,
           "ko_observations": 0
         },
-        "2026-10-08": {
+        "2026-10-12": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
-          "ki_date": "2026-10-29",
-          "ko_date": null,
-          "ko_observations": 0
-        },
-        "2026-10-16": {
-          "end_date": "2026-11-06",
-          "end_reason": "truncated",
-          "ki_date": null,
+          "ki_date": "2026-10-27",
           "ko_date": null,
           "ko_observations": 0
         },
         "2026-10-19": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
-          "ki_date": null,
+          "ki_date": "2026-10-30",
           "ko_date": null,
           "ko_observations": 0
         },
-        "2026-10-21": {
+        "2026-10-26": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
-          "ki_date": null,
+          "ki_date": "2026-10-30",
           "ko_date": null,
           "ko_observations": 0
         },
-        "2026-10-23": {
+        "2026-11-02": {
           "end_date": "2026-11-06",
           "end_reason": "truncated",
           "ki_date": null,
@@ -7975,653 +6611,36 @@
           "ko_observations": 0
         }
       },
-      "pin": [
-        {
-          "inception": "2023-08-02",
-          "why": [
-            "ki 2023-W35 position 1 of 6",
-            "ki 2023-W42 position 1 of 6"
-          ]
-        },
-        {
-          "inception": "2023-08-04",
-          "why": [
-            "ki 2023-W34 position 1 of 1"
-          ]
-        },
-        {
-          "inception": "2023-08-08",
-          "why": [
-            "ki 2023-W35 position 4 of 6",
-            "ki 2023-W42 position 4 of 6"
-          ]
-        },
-        {
-          "inception": "2023-08-09",
-          "why": [
-            "ki 2023-W39 position 1 of 2"
-          ]
-        },
-        {
-          "inception": "2023-08-10",
-          "why": [
-            "ki 2023-W35 position 6 of 6",
-            "ki 2023-W39 position 2 of 2",
-            "ki 2023-W42 position 6 of 6"
-          ]
-        },
-        {
-          "inception": "2023-08-11",
-          "why": [
-            "ki 2023-W43 position 1 of 21"
-          ]
-        },
-        {
-          "inception": "2023-08-15",
-          "why": [
-            "ki 2024-W02 position 1 of 21"
-          ]
-        },
-        {
-          "inception": "2023-08-16",
-          "why": [
-            "ki 2023-W52 position 1 of 28"
-          ]
-        },
-        {
-          "inception": "2023-08-31",
-          "why": [
-            "ki 2024-W03 position 1 of 46"
-          ]
-        },
-        {
-          "inception": "2023-09-01",
-          "why": [
-            "ki 2023-W43 position 11 of 21"
-          ]
-        },
-        {
-          "inception": "2023-10-12",
-          "why": [
-            "ki 2023-W43 position 21 of 21"
-          ]
-        },
-        {
-          "inception": "2023-10-19",
-          "why": [
-            "ki 2024-W04 position 1 of 28"
-          ]
-        },
-        {
-          "inception": "2023-10-27",
-          "why": [
-            "ki 2024-W03 position 24 of 46"
-          ]
-        },
-        {
-          "inception": "2023-11-13",
-          "why": [
-            "ki 2023-W52 position 15 of 28",
-            "ki 2024-W02 position 11 of 21"
-          ]
-        },
-        {
-          "inception": "2023-12-01",
-          "why": [
-            "ki 2024-W02 position 21 of 21"
-          ]
-        },
-        {
-          "inception": "2023-12-04",
-          "why": [
-            "ki 2023-W52 position 28 of 28"
-          ]
-        },
-        {
-          "inception": "2023-12-15",
-          "why": [
-            "ki 2024-W03 position 46 of 46"
-          ]
-        },
-        {
-          "inception": "2023-12-27",
-          "why": [
-            "ki 2024-W04 position 15 of 28"
-          ]
-        },
-        {
-          "inception": "2024-01-08",
-          "why": [
-            "ki 2024-W05 position 1 of 11"
-          ]
-        },
-        {
-          "inception": "2024-01-16",
-          "why": [
-            "ki 2024-W04 position 28 of 28"
-          ]
-        },
-        {
-          "inception": "2024-01-18",
-          "why": [
-            "ki 2024-W05 position 6 of 11"
-          ]
-        },
-        {
-          "inception": "2024-01-22",
-          "why": [
-            "ki 2024-W06 position 1 of 5"
-          ]
-        },
-        {
-          "inception": "2024-01-29",
-          "why": [
-            "ki 2024-W05 position 11 of 11"
-          ]
-        },
-        {
-          "inception": "2024-01-30",
-          "why": [
-            "ki 2024-W06 position 3 of 5"
-          ]
-        },
-        {
-          "inception": "2024-02-01",
-          "why": [
-            "ki 2024-W06 position 5 of 5"
-          ]
-        },
-        {
-          "inception": "2024-03-01",
-          "why": [
-            "ki 2024-W26 position 1 of 37"
-          ]
-        },
-        {
-          "inception": "2024-03-05",
-          "why": [
-            "ki 2024-W27 position 1 of 16"
-          ]
-        },
-        {
-          "inception": "2024-03-11",
-          "why": [
-            "ki 2024-W16 position 1 of 13"
-          ]
-        },
-        {
-          "inception": "2024-03-19",
-          "why": [
-            "ki 2024-W17 position 1 of 2"
-          ]
-        },
-        {
-          "inception": "2024-03-20",
-          "why": [
-            "ki 2024-W16 position 7 of 13"
-          ]
-        },
-        {
-          "inception": "2024-03-22",
-          "why": [
-            "ki 2024-W17 position 2 of 2"
-          ]
-        },
-        {
-          "inception": "2024-03-27",
-          "why": [
-            "ki 2024-W28 position 1 of 15"
-          ]
-        },
-        {
-          "inception": "2024-04-09",
-          "why": [
-            "ki 2024-W16 position 13 of 13"
-          ]
-        },
-        {
-          "inception": "2024-04-16",
-          "why": [
-            "ki 2024-W31 position 1 of 4",
-            "ki 2024-W34 position 1 of 4"
-          ]
-        },
-        {
-          "inception": "2024-04-19",
-          "why": [
-            "ki 2024-W26 position 19 of 37"
-          ]
-        },
-        {
-          "inception": "2024-04-23",
-          "why": [
-            "ki 2024-W28 position 8 of 15"
-          ]
-        },
-        {
-          "inception": "2024-04-24",
-          "why": [
-            "ki 2024-W27 position 9 of 16"
-          ]
-        },
-        {
-          "inception": "2024-05-07",
-          "why": [
-            "ki 2024-W25 position 1 of 2"
-          ]
-        },
-        {
-          "inception": "2024-05-09",
-          "why": [
-            "ki 2024-W25 position 2 of 2"
-          ]
-        },
-        {
-          "inception": "2024-06-04",
-          "why": [
-            "ki 2024-W27 position 16 of 16"
-          ]
-        },
-        {
-          "inception": "2024-06-05",
-          "why": [
-            "ki 2024-W26 position 37 of 37"
-          ]
-        },
-        {
-          "inception": "2024-06-07",
-          "why": [
-            "ki 2024-W30 position 1 of 6"
-          ]
-        },
-        {
-          "inception": "2024-06-14",
-          "why": [
-            "ki 2024-W30 position 4 of 6"
-          ]
-        },
-        {
-          "inception": "2024-06-19",
-          "why": [
-            "ki 2024-W28 position 15 of 15",
-            "ki 2024-W30 position 6 of 6"
-          ]
-        },
-        {
-          "inception": "2024-06-20",
-          "why": [
-            "ki 2024-W31 position 3 of 4",
-            "ki 2024-W34 position 3 of 4"
-          ]
-        },
-        {
-          "inception": "2024-06-21",
-          "why": [
-            "ki 2024-W31 position 4 of 4",
-            "ki 2024-W34 position 4 of 4"
-          ]
-        },
-        {
-          "inception": "2024-06-24",
-          "why": [
-            "ki 2024-W35 position 1 of 15",
-            "ki 2024-W39 position 1 of 18"
-          ]
-        },
-        {
-          "inception": "2024-06-28",
-          "why": [
-            "ki 2024-W38 position 1 of 3"
-          ]
-        },
-        {
-          "inception": "2024-07-01",
-          "why": [
-            "ki 2024-W37 position 1 of 2"
-          ]
-        },
-        {
-          "inception": "2024-07-02",
-          "why": [
-            "ki 2024-W37 position 2 of 2"
-          ]
-        },
-        {
-          "inception": "2024-07-11",
-          "why": [
-            "ki 2024-W38 position 2 of 3"
-          ]
-        },
-        {
-          "inception": "2024-07-12",
-          "why": [
-            "ki 2024-W35 position 8 of 15"
-          ]
-        },
-        {
-          "inception": "2024-07-15",
-          "why": [
-            "ki 2024-W39 position 10 of 18"
-          ]
-        },
-        {
-          "inception": "2024-07-31",
-          "why": [
-            "ki 2024-W38 position 3 of 3"
-          ]
-        },
-        {
-          "inception": "2024-08-01",
-          "why": [
-            "ki 2024-W35 position 15 of 15"
-          ]
-        },
-        {
-          "inception": "2024-08-06",
-          "why": [
-            "ki 2024-W39 position 18 of 18"
-          ]
-        },
-        {
-          "inception": "2024-10-08",
-          "why": [
-            "ki 2024-W41 position 1 of 1"
-          ]
-        },
-        {
-          "inception": "2024-10-28",
-          "why": [
-            "ki 2025-W03 position 1 of 16"
-          ]
-        },
-        {
-          "inception": "2024-11-05",
-          "why": [
-            "ki 2025-W01 position 1 of 21"
-          ]
-        },
-        {
-          "inception": "2024-11-11",
-          "why": [
-            "ki 2024-W47 position 1 of 3",
-            "ki 2024-W48 position 1 of 3"
-          ]
-        },
-        {
-          "inception": "2024-11-12",
-          "why": [
-            "ki 2024-W47 position 2 of 3",
-            "ki 2024-W48 position 2 of 3"
-          ]
-        },
-        {
-          "inception": "2024-11-13",
-          "why": [
-            "ki 2024-W47 position 3 of 3",
-            "ki 2024-W48 position 3 of 3"
-          ]
-        },
-        {
-          "inception": "2024-11-25",
-          "why": [
-            "ki 2025-W03 position 9 of 16"
-          ]
-        },
-        {
-          "inception": "2024-11-29",
-          "why": [
-            "ki 2025-W02 position 1 of 6"
-          ]
-        },
-        {
-          "inception": "2024-12-02",
-          "why": [
-            "ki 2025-W01 position 11 of 21"
-          ]
-        },
-        {
-          "inception": "2024-12-19",
-          "why": [
-            "ki 2025-W02 position 4 of 6"
-          ]
-        },
-        {
-          "inception": "2024-12-20",
-          "why": [
-            "ki 2025-W01 position 21 of 21"
-          ]
-        },
-        {
-          "inception": "2024-12-27",
-          "why": [
-            "ki 2025-W02 position 6 of 6"
-          ]
-        },
-        {
-          "inception": "2024-12-30",
-          "why": [
-            "ki 2025-W03 position 16 of 16"
-          ]
-        },
-        {
-          "inception": "2025-01-24",
-          "why": [
-            "ki 2025-W15 position 1 of 42"
-          ]
-        },
-        {
-          "inception": "2025-03-06",
-          "why": [
-            "ki 2025-W15 position 22 of 42"
-          ]
-        },
-        {
-          "inception": "2025-04-03",
-          "why": [
-            "ki 2025-W15 position 42 of 42"
-          ]
-        },
-        {
-          "inception": "2025-10-09",
-          "why": [
-            "ki 2025-W48 position 1 of 1"
-          ]
-        },
-        {
-          "inception": "2026-01-09",
-          "why": [
-            "ki 2026-W13 position 1 of 42"
-          ]
-        },
-        {
-          "inception": "2026-01-13",
-          "why": [
-            "ki 2026-W15 position 1 of 10"
-          ]
-        },
-        {
-          "inception": "2026-02-10",
-          "why": [
-            "ki 2026-W13 position 22 of 42"
-          ]
-        },
-        {
-          "inception": "2026-03-03",
-          "why": [
-            "ki 2026-W15 position 6 of 10"
-          ]
-        },
-        {
-          "inception": "2026-03-16",
-          "why": [
-            "ki 2026-W15 position 10 of 10"
-          ]
-        },
-        {
-          "inception": "2026-03-18",
-          "why": [
-            "ki 2026-W13 position 42 of 42"
-          ]
-        },
-        {
-          "inception": "2026-04-13",
-          "why": [
-            "ki 2026-W29 position 1 of 61"
-          ]
-        },
-        {
-          "inception": "2026-05-08",
-          "why": [
-            "ki 2026-W24 position 1 of 9"
-          ]
-        },
-        {
-          "inception": "2026-05-14",
-          "why": [
-            "ki 2026-W24 position 5 of 9",
-            "ki 2026-W28 position 1 of 2"
-          ]
-        },
-        {
-          "inception": "2026-05-25",
-          "why": [
-            "ki 2026-W24 position 9 of 9"
-          ]
-        },
-        {
-          "inception": "2026-05-28",
-          "why": [
-            "ki 2026-W29 position 31 of 61"
-          ]
-        },
-        {
-          "inception": "2026-06-18",
-          "why": [
-            "ki 2026-W28 position 2 of 2"
-          ]
-        },
-        {
-          "inception": "2026-07-10",
-          "why": [
-            "ki 2026-W29 position 61 of 61"
-          ]
-        },
-        {
-          "inception": "2026-07-13",
-          "why": [
-            "ki 2026-W30 position 1 of 4"
-          ]
-        },
-        {
-          "inception": "2026-07-15",
-          "why": [
-            "ki 2026-W30 position 3 of 4"
-          ]
-        },
-        {
-          "inception": "2026-07-16",
-          "why": [
-            "ki 2026-W30 position 4 of 4",
-            "ki 2026-W32 position 1 of 1",
-            "ki 2026-W42 position 1 of 36"
-          ]
-        },
-        {
-          "inception": "2026-07-17",
-          "why": [
-            "ki 2026-W44 position 1 of 22"
-          ]
-        },
-        {
-          "inception": "2026-08-03",
-          "why": [
-            "ki 2026-W44 position 12 of 22"
-          ]
-        },
-        {
-          "inception": "2026-08-17",
-          "why": [
-            "ki 2026-W41 position 1 of 2"
-          ]
-        },
-        {
-          "inception": "2026-08-18",
-          "why": [
-            "ki 2026-W41 position 2 of 2"
-          ]
-        },
-        {
-          "inception": "2026-09-01",
-          "why": [
-            "ki 2026-W42 position 19 of 36"
-          ]
-        },
-        {
-          "inception": "2026-09-24",
-          "why": [
-            "ki 2026-W42 position 36 of 36"
-          ]
-        },
-        {
-          "inception": "2026-09-29",
-          "why": [
-            "ki 2026-W43 position 1 of 1"
-          ]
-        },
-        {
-          "inception": "2026-10-16",
-          "why": [
-            "ki 2026-W44 position 22 of 22"
-          ]
-        },
-        {
-          "inception": "2026-10-19",
-          "why": [
-            "ki 2026-W45 position 1 of 4"
-          ]
-        },
-        {
-          "inception": "2026-10-21",
-          "why": [
-            "ki 2026-W45 position 3 of 4"
-          ]
-        },
-        {
-          "inception": "2026-10-23",
-          "why": [
-            "ki 2026-W45 position 4 of 4"
-          ]
-        }
-      ],
+      "pin": [],
       "restricted": {
-        "inceptions": 790,
-        "ki_approaches": 600,
-        "ki_weeks": 44,
-        "notes_knocked_in": 413,
+        "inceptions": 168,
+        "ki_approaches": 176,
+        "ki_weeks": 52,
+        "notes_knocked_in": 111,
         "test": {
-          "ki_approaches": 196,
-          "ki_knocked_in": 149,
-          "ki_weeks": 13
+          "ki_approaches": 79,
+          "ki_knocked_in": 43,
+          "ki_weeks": 24
         },
         "train": {
-          "ki_approaches": 404,
-          "ki_knocked_in": 264,
-          "ki_weeks": 31
+          "ki_approaches": 97,
+          "ki_knocked_in": 68,
+          "ki_weeks": 28
         }
       },
       "sample_sizes": {
-        "headline_notes": 13,
-        "pin_notes": 100,
-        "priced_notes": 110,
+        "headline_notes": 168,
+        "pin_notes": 0,
+        "priced_notes": 168,
         "test": {
-          "ki_approaches": 41,
-          "ki_knocked_in": 20,
-          "ki_weeks": 13
+          "ki_approaches": 79,
+          "ki_knocked_in": 43,
+          "ki_weeks": 24
         },
         "train": {
-          "ki_approaches": 121,
-          "ki_knocked_in": 65,
-          "ki_weeks": 31
+          "ki_approaches": 97,
+          "ki_knocked_in": 68,
+          "ki_weeks": 28
         }
       }
     }
@@ -8631,7 +6650,7 @@
     "first": "2023-05-04",
     "last": "2026-11-06"
   },
-  "preregistration_hash": "8c23693c1c246c8b8a6846460ec0983462e7a3f3cc0ab36f0788e0696ee4bb16",
+  "preregistration_hash": "76da5b2188ef2d947e7c5251ea7b7bdfdc7da10afdff0d5e2852f38fa2f770f7",
   "restricted": {
     "inceptions": 790,
     "ki_approaches": 180,

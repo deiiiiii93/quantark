@@ -392,10 +392,10 @@ def make_path(end: date, overrides: dict = None, base: float = 90.0, start: date
     return [Bar(d, S0_SYN if d == start else overrides.get(d, base)) for d in trading_days(start, end)]
 
 
-def scan_one(path, start: date = START):
+def scan_one(path, start: date = START, book: str = "ki75"):
     from gpin.events import scan
 
-    scans = scan(path, {start: 0.0})
+    scans = scan(path, {start: 0.0}, book)
     return next(s for s in scans if s.inception == start)
 
 
@@ -524,16 +524,16 @@ def test_scan_one_record_per_trading_day_with_anchored_flag():
 
     days = trading_days(START, START + timedelta(days=40))
     path = [Bar(d, S0_SYN) for d in days]
-    scans = scan(path, {days[2]: 0.0, days[5]: 0.0})
+    scans = scan(path, {days[2]: 0.0, days[5]: 0.0}, "ki75")
     assert [s.inception for s in scans] == days
     assert [s.inception for s in scans if s.anchored] == [days[2], days[5]]
     assert all(s.end_reason == "truncated" and s.ko_observations == 0 for s in scans)
     assert scans[-1].end_date == days[-1] and scans[-1].ko_events == ()
     gap = path[:3] + path[4:]
     with pytest.raises(StudyDataError):
-        scan(gap, {})  # a missing trading day fails closed
+        scan(gap, {}, "ki75")  # a missing trading day fails closed
     with pytest.raises(StudyDataError):
-        scan([Bar(date(2024, 1, 6), 100.0)], {})  # a Saturday is not a trading day
+        scan([Bar(date(2024, 1, 6), 100.0)], {}, "ki75")  # a Saturday is not a trading day
 
 
 def test_scan_reads_its_thresholds_from_the_preregistration():
@@ -556,14 +556,14 @@ def test_slice_of_and_week_key():
     assert week_key(date(2024, 1, 1)) == "2024-W01" and week_key(date(2023, 1, 1)) == "2022-W52"
 
 
-def fake_scan(inc, *, anchored=True, ko=(), ki=(), n_ko=0, ki_date=None, ki_pct=0.75):
+def fake_scan(inc, *, anchored=True, ko=(), ki=(), n_ko=0, ki_date=None, book="ki75"):
     from gpin.events import KiApproach, KoEvent, NoteScan
 
     return NoteScan(
         inception=inc, anchored=anchored, ko_date=None, ki_date=ki_date, end_reason="truncated",
         end_date=date(2026, 11, 6), ko_observations=n_ko,
         ko_events=tuple(KoEvent(inc, d, g, f) for d, g, f in ko),
-        ki_approaches=tuple(KiApproach(inc, s, e, k) for s, e, k in ki), ki_pct=ki_pct)
+        ki_approaches=tuple(KiApproach(inc, s, e, k) for s, e, k in ki), book=book)
 
 
 def test_select_ko_two_smallest_gaps_per_iso_week_ties_to_earlier_inception():
@@ -578,7 +578,7 @@ def test_select_ko_two_smallest_gaps_per_iso_week_ties_to_earlier_inception():
         fake_scan(date(2024, 1, 2), anchored=False, ko=[(t, 0.001, True)]),   # unanchored: never selected
         fake_scan(date(2024, 2, 1), ko=[(date(2025, 3, 12), 0.015, False)]),  # next week, alone
     ]
-    sample = select(scans)
+    sample = select(scans, "ki75")
     assert sample.pin == (date(2024, 1, 3), date(2024, 1, 5), date(2024, 2, 1))
     assert sample.reasons[date(2024, 1, 5)] == ("ko 2025-W10 rank 1",)
     assert sample.reasons[date(2024, 1, 3)] == ("ko 2025-W10 rank 2",)
@@ -593,7 +593,7 @@ def test_select_ki_twelve_evenly_spaced_notes_per_month():
     scans += [fake_scan(date(2023, 6, 1), ki=[(date(2024, 3, 4), date(2024, 3, 5), True)], ki_date=date(2024, 3, 5))]
     scans += [fake_scan(date(2023, 6, 2) + timedelta(days=i), ki=[(date(2024, 4, 2), date(2024, 4, 3), False)])
               for i in range(5)]
-    sample = select(scans)
+    sample = select(scans, "ki75")
     positions = [0, 3, 5, 8, 11, 13, 16, 18, 21, 24, 26, 29]
     feb = [i for i in sample.pin if i >= date(2024, 1, 2)]
     assert feb == [incs[p] for p in positions]
@@ -616,7 +616,7 @@ def test_select_is_deterministic_headline_is_first_anchored_day_of_a_quarter_and
         fake_scan(date(2024, 4, 2), ko=[(date(2024, 7, 3), 0.02, False)]),
         fake_scan(date(2024, 7, 1)),
     ]
-    sample = select(scans)
+    sample = select(scans, "ki75")
     assert sample.headline == (date(2024, 4, 1), date(2024, 7, 1))
     # events: every KO pin event and every KI approach of every selected note (headline or pin), nothing else
     got = {(type(e).__name__, e.inception) for e in sample.events}
@@ -624,8 +624,8 @@ def test_select_is_deterministic_headline_is_first_anchored_day_of_a_quarter_and
     assert len([e for e in sample.events if type(e).__name__ == "KoEvent"]) == 3  # two of 04-01 (the week cap does not thin events), one of 04-02
     shuffled = list(scans)
     random.Random(1).shuffle(shuffled)
-    assert select(shuffled) == sample
-    assert select(scans) == sample
+    assert select(shuffled, "ki75") == sample
+    assert select(scans, "ki75") == sample
     union = set(sample.headline) | set(sample.pin)
     assert {e.inception for e in sample.events} <= union
 
@@ -645,7 +645,7 @@ def real_scans(real_chains, real_anchors):
     from gpin.events import scan
 
     t0 = time.perf_counter()
-    scans = scan(real_chains, real_anchors)
+    scans = scan(real_chains, real_anchors, "ki75")
     assert time.perf_counter() - t0 < 60.0  # the pricing-free scan is a few seconds
     return scans
 
@@ -684,14 +684,14 @@ def test_headline_is_the_tail_stability_studys_inception_set(real_chains, real_a
     from gpin.events import select
     from s2ts.note import inception_dates
 
-    assert list(select(real_scans).headline) == inception_dates(real_chains, real_anchors)
+    assert list(select(real_scans, "ki75").headline) == inception_dates(real_chains, real_anchors)
 
 
 def test_select_on_real_data_obeys_the_caps_and_is_deterministic(real_scans):
     from gpin.events import KO_NOTES_PER_WEEK, KI_NOTES_PER_MONTH, KoEvent, select, week_key
 
-    sample = select(real_scans)
-    again = select(list(reversed(real_scans)))
+    sample = select(real_scans, "ki75")
+    again = select(list(reversed(real_scans)), "ki75")
     assert again == sample
     anchored = {s.inception for s in real_scans if s.anchored}
     assert set(sample.headline) <= anchored and set(sample.pin) <= anchored
@@ -747,24 +747,24 @@ def _load_stage(name: str):
 def book_scans(real_chains, real_anchors, real_scans):
     from gpin.events import BOOKS, scan
 
-    return {b: (real_scans if b == "ki75" else scan(real_chains, real_anchors, ki_pct=lv)) for b, lv in BOOKS.items()}
+    return {b: (real_scans if b == "ki75" else scan(real_chains, real_anchors, b)) for b in BOOKS}
 
 
 def test_events_json_matches_a_fresh_scan_and_lists_every_event_per_book(book_scans):
     from gpin.events import BOOKS, select
 
     stage = _load_stage("02_events.py")
-    samples = {b: select(book_scans[b], book=b) for b in BOOKS}
+    samples = {b: select(book_scans[b], b) for b in BOOKS}
     fresh = json.loads(json.dumps(stage.build_payload(book_scans, samples), sort_keys=True))
     on_disk = json.loads(EVENTS_JSON.read_text(encoding="utf-8"))
     assert on_disk == fresh                                   # the committed file is the current scan
     assert on_disk["preregistration_hash"] == prereg_hash()
     assert on_disk["split_date"] == "2025-07-01"
     assert on_disk["unrestricted"]["ko_pin_fired"] == 145 and on_disk["unrestricted"]["notes_knocked_in"] == 209
-    assert set(on_disk["books"]) == set(BOOKS)
+    assert set(on_disk["books"]) == set(BOOKS) == {"ki75", "seas6"}
     for b, block in on_disk["books"].items():
         sample = samples[b]
-        assert block["ki_pct"] == BOOKS[b]
+        assert block["ki_pct"] == BOOKS[b].ki_pct
         ko_rows = block.get("ko_events", [])
         assert len(ko_rows) + len(block["ki_approaches"]) == len(sample.events)
         for row in ko_rows + block["ki_approaches"]:
@@ -777,36 +777,45 @@ def test_events_json_matches_a_fresh_scan_and_lists_every_event_per_book(book_sc
         assert sizes["train"]["ki_approaches"] + sizes["test"]["ki_approaches"] == len(block["ki_approaches"])
         r = block["restricted"]
         assert r["train"]["ki_approaches"] + r["test"]["ki_approaches"] == r["ki_approaches"]
-    assert "ko_events" in on_disk["books"]["ki75"] and "ko_events" not in on_disk["books"]["ki85"]
-    assert "ko_events" not in on_disk["books"]["ki90"]
-    assert not any("ko " in w for p in on_disk["books"]["ki90"]["pin"] for w in p["why"])
-    # AC4b: the decidable KI test slice
-    k90 = on_disk["books"]["ki90"]["restricted"]["test"]
-    assert k90["ki_approaches"] >= 20 and k90["ki_weeks"] >= 10
+    assert "ko_events" in on_disk["books"]["ki75"] and "ko_events" not in on_disk["books"]["seas6"]
+    assert on_disk["books"]["seas6"]["pin"] == []
     assert "holder" not in EVENTS_JSON.read_text(encoding="utf-8").lower()
 
 
-def test_lifted_books_cover_every_week_of_their_restricted_test_universe():
-    """The per-week cap cannot drop a week: every ISO week with an approach in the restricted universe has a
-    selected note's approach in it, in each slice."""
+def test_seas6_samples_every_booking_and_its_test_slice_is_decidable():
+    """AC4b: one booking per ISO week, every one priced and listed as headline (none picked for a pin), and on real
+    data the test slice holds at least 20 approaches in at least 10 distinct weeks."""
     on_disk = json.loads(EVENTS_JSON.read_text(encoding="utf-8"))
-    for book in ("ki85", "ki90"):
-        blk = on_disk["books"][book]
-        for sl in ("train", "test"):
-            assert blk["sample_sizes"][sl]["ki_weeks"] == blk["restricted"][sl]["ki_weeks"], (book, sl)
-    assert on_disk["books"]["ki90"]["sample_sizes"]["test"]["ki_weeks"] >= 13
-    assert all(r.split()[1].count("-W") == 1 for p in on_disk["books"]["ki90"]["pin"] for r in p["why"])
+    blk = on_disk["books"]["seas6"]
+    z = blk["sample_sizes"]
+    assert z["headline_notes"] == z["priced_notes"] == len(blk["notes"]) == blk["restricted"]["inceptions"] == 168
+    assert z["pin_notes"] == 0
+    for sl in ("train", "test"):
+        assert z[sl]["ki_approaches"] == blk["restricted"][sl]["ki_approaches"]       # nothing is dropped by selection
+        assert z[sl]["ki_weeks"] == blk["restricted"][sl]["ki_weeks"]
+    assert z["test"]["ki_approaches"] >= 20 and z["test"]["ki_weeks"] >= 10
+    assert z["train"]["ki_approaches"] >= 20 and z["train"]["ki_weeks"] >= 10
+    weeks = [date.fromisoformat(d).isocalendar()[:2] for d in blk["notes"]]
+    assert len(set(weeks)) == len(weeks) == 168                                         # one booking per ISO week
 
 
 def test_ki75_sample_is_unchanged_by_the_books(real_scans, book_scans):
-    """Adding books does not touch the product's scan or sample: it is the same call, the same records."""
-    from gpin.events import select
+    """Adding the seasoned book does not touch the product's scan or sample: pinned to the counts of the committed
+    events.json of the lifted-books task (13 headline notes, 125 KO pin reasons, 42 KI reasons, 150 KO events, 80 KI
+    approaches over 142 pin notes), and the ki75 records are the library-pinned ones (``real_scans``)."""
+    from gpin.events import KoEvent, select
 
     assert book_scans["ki75"] is real_scans
-    assert select(real_scans) == select(real_scans, book="ki75")
-    for b in ("ki85", "ki90"):
-        assert [(s.inception, s.ko_date, s.ko_events, s.ko_observations) for s in book_scans[b]] == \
-            [(s.inception, s.ko_date, s.ko_events, s.ko_observations) for s in real_scans]   # KO side is book-free
+    sample = select(real_scans, "ki75")
+    reasons = [r for why in sample.reasons.values() for r in why]
+    assert len(sample.headline) == 13 and len(sample.pin) == 142
+    assert sum(r.startswith("ko ") for r in reasons) == 125 and sum(r.startswith("ki ") for r in reasons) == 42
+    assert sum(isinstance(e, KoEvent) for e in sample.events) == 150
+    assert sum(not isinstance(e, KoEvent) for e in sample.events) == 80
+    assert all(s.book == "ki75" for s in real_scans)
+    on_disk = json.loads(EVENTS_JSON.read_text(encoding="utf-8"))["books"]["ki75"]
+    assert (len(on_disk["headline"]), len(on_disk["ko_events"]), len(on_disk["ki_approaches"]), len(on_disk["notes"])) == \
+        (13, 150, 80, 153)
 
 
 # ---------------------------------------------------------------------------
@@ -1704,55 +1713,132 @@ def test_a_short_im_or_mo_row_fails_closed_and_other_families_are_ignored():
 
 
 def test_books_come_from_the_preregistration_and_note_ids_roundtrip():
-    from gpin.events import BOOKS, note_id, parse_note_id
+    import dataclasses
 
-    assert BOOKS == load_prereg()["books"] == {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90}
-    assert note_id("ki90", date(2024, 2, 29)) == "ki90:2024-02-29"
-    assert parse_note_id("ki90:2024-02-29") == ("ki90", date(2024, 2, 29))
-    for bad in ("2024-02-29", "ki80:2024-02-29", "ki90:2024-13-01"):
+    from gpin.events import BOOKS, BookSpec, note_id, parse_note_id
+
+    assert [f.name for f in dataclasses.fields(BookSpec)] == [
+        "id", "ki_pct", "first_ko_month", "maturity_months", "elapsed_months", "ki_below_spot", "booking"]
+    assert BOOKS == {"ki75": BookSpec("ki75", 0.75, 3, 24, 0, None, "sample"),
+                     "seas6": BookSpec("seas6", 0.75, 1, 6, 18, 0.07, "weekly")}
+    assert {k: dataclasses.asdict(v) for k, v in BOOKS.items()} == {
+        k: {"id": k, **v} for k, v in load_prereg()["books"].items()}
+    assert note_id("seas6", date(2024, 2, 29)) == "seas6:2024-02-29"
+    assert parse_note_id("seas6:2024-02-29") == ("seas6", date(2024, 2, 29))
+    for bad in ("2024-02-29", "ki80:2024-02-29", "ki90:2024-02-29", "seas6:2024-13-01"):
         with pytest.raises(StudyDataError):
             parse_note_id(bad)
 
 
-def test_scan_ki_level_is_a_parameter_a_90_book_knocks_in_where_the_75_does_not():
+def test_ki75_terms_and_levels_are_the_product_s():
+    from gpin.events import book_levels, book_terms
+    from s2ts.note import build_terms
+
+    assert book_terms("ki75", START) == build_terms(START)
+    assert book_levels("ki75", 6000.0) == (6000.0, 6000.0, pytest.approx(0.75 * 6000.0, rel=1e-15))
+    with pytest.raises(StudyDataError):
+        book_terms("ki90", START)
+    with pytest.raises(StudyDataError):
+        book_levels("ki90", 100.0)
+
+
+def test_seas6_terms_are_six_monthly_observations_and_levels_follow_the_booking_spot():
+    """AC4b, hand-computed: booked 2024-01-02, KO on the month anniversaries 1..6 rolled to the next SSE trading day
+    (2024-03-02 is a Saturday, 2024-05-02 is inside the Labour Day closure), the sixth is the maturity; KI daily after
+    the booking day; the KI level 7% below the spot, the strike and KO level at KI / 0.75."""
+    from gpin.events import book_levels, book_terms
+
+    terms = book_terms("seas6", START)
+    assert terms.ko_dates == (date(2024, 2, 2), date(2024, 3, 4), date(2024, 4, 2), date(2024, 5, 6),
+                              date(2024, 6, 3), date(2024, 7, 2))
+    assert terms.maturity_date == date(2024, 7, 2) == terms.ko_dates[-1] and terms.inception == START
+    assert terms.maturity_years == (date(2024, 7, 2) - START).days / 365.0
+    assert terms.ko_times == tuple((d - START).days / 365.0 for d in terms.ko_dates)
+    assert terms.ki_dates == tuple(trading_days(date(2024, 1, 3), date(2024, 7, 2)))
+    assert START not in terms.ki_dates and terms.ki_times[0] == 1 / 365.0
+    strike, ko, ki = book_levels("seas6", 6000.0)
+    assert ki == pytest.approx(6000.0 / 1.07, rel=1e-15)
+    assert strike == ko == pytest.approx(ki / 0.75, rel=1e-15)
+    assert ki / strike == pytest.approx(0.75, rel=1e-15)
+
+
+def seas6_path(end: date, overrides: dict = None):
+    """A flat 100 booking path: the KI level is 93.457 (7% below), the strike and KO level 124.61."""
+    return make_path(end, overrides, base=100.0)
+
+
+def test_seas6_scan_knock_in_maturity_without_knock_in_and_ko_on_hand_computed_dates():
+    from gpin.events import book_terms
+
+    terms = book_terms("seas6", START)
+    maturity = terms.maturity_date
+    days = trading_days(START, maturity)
+    # never touches either level: the note matures on the sixth observation, no KI approach (100 / 93.46 - 1 = 7%)
+    sc = scan_one(seas6_path(maturity + timedelta(days=5)), START, "seas6")
+    assert (sc.ko_date, sc.ki_date, sc.end_reason, sc.end_date, sc.ko_observations) == (None, None, "maturity", maturity, 6)
+    assert sc.ki_approaches == () and sc.book == "seas6" and sc.anchored
+    # a knock-in on one close (93.0 <= 93.457), recovered: knocked in, to maturity
+    sc = scan_one(seas6_path(maturity, {days[10]: 93.0}), START, "seas6")
+    assert (sc.ko_date, sc.ki_date, sc.end_reason, sc.end_date) == (None, days[10], "maturity", maturity)
+    assert [(a.start, a.end, a.knocked_in) for a in sc.ki_approaches] == [(days[10], days[10], True)]
+    # a hair above the level does not knock in; it is a near approach (within 3% and inside the 5% band)
+    sc = scan_one(seas6_path(maturity, {days[10]: 93.46}), START, "seas6")
+    assert sc.ki_date is None and [(a.start, a.end, a.knocked_in) for a in sc.ki_approaches] == [(days[10], days[10], False)]
+    # a fired KO at the first observation (month 1): 125 >= 124.61; 124.0 on the day before is a miss, not a pin event
+    ko1 = terms.ko_dates[0]
+    prev = trading_days(START, ko1)[-2]
+    sc = scan_one(seas6_path(maturity, {ko1: 125.0, prev: 124.0}), START, "seas6")
+    assert (sc.ko_date, sc.ki_date, sc.end_reason, sc.end_date, sc.ko_observations) == (ko1, None, "ko", ko1, 1)
+    assert sc.ko_events == ()                                  # a seasoned book records no KO pin events
+    # knocked in, then called at the third observation (a knocked-in note can still knock out)
+    ko3 = terms.ko_dates[2]
+    sc = scan_one(seas6_path(maturity, {days[3]: 90.0, ko3: 125.0}), START, "seas6")
+    assert (sc.ko_date, sc.ki_date, sc.end_reason, sc.end_date, sc.ko_observations) == (ko3, days[3], "ko", ko3, 3)
+    # spot at or above the KO level on the maturity day is a KO, not a maturity
+    sc = scan_one(seas6_path(maturity, {maturity: 130.0}), START, "seas6")
+    assert (sc.end_reason, sc.ko_date) == ("ko", maturity)
+    # a path that ends before the maturity is truncated
+    sc = scan_one(seas6_path(days[-3]), START, "seas6")
+    assert sc.end_reason == "truncated" and sc.end_date == days[-3] and sc.ko_observations == 5
+
+
+def test_seas6_scan_books_the_first_anchored_chain_day_of_each_iso_week():
     from gpin.events import scan
 
-    days = trading_days(START, START + timedelta(days=60))
-    path = make_path(days[-1], {days[5]: 89.0, days[6]: 95.0}, base=95.0)
-    s75 = next(s for s in scan(path, {START: 0.0}) if s.inception == START)
-    s90 = next(s for s in scan(path, {START: 0.0}, ki_pct=0.90) if s.inception == START)
-    assert s75.ki_date is None and s75.ki_pct == 0.75
-    assert s90.ki_date == days[5] and s90.ki_pct == 0.90
-    assert [(a.start, a.end, a.knocked_in) for a in s90.ki_approaches][-1] == (days[5], days[5], True)
-    assert (s90.ko_date, s90.ko_events, s90.end_reason) == (s75.ko_date, s75.ko_events, s75.end_reason)  # KO unchanged
-    # 90 x 1.05 = 94.5: a 95 is outside the window of the 90 book, 94.5 is on its edge (tolerant) and 92 is within 3%
-    edge = make_path(days[-1], {days[5]: 94.5, days[6]: 92.0}, base=95.0)
-    (a,) = [a for a in next(s for s in scan(edge, {START: 0.0}, ki_pct=0.90) if s.inception == START).ki_approaches]
-    assert (a.start, a.end, a.knocked_in) == (days[5], days[6], False)
+    days = trading_days(START, START + timedelta(days=40))
+    path = [Bar(d, S0_SYN) for d in days]
+    by_week = {}
+    for d in days:
+        by_week.setdefault(d.isocalendar()[:2], []).append(d)
+    weeks = sorted(by_week)
+    # week 1: the Monday is not anchored, so the Tuesday is booked; week 2: the Monday; week 3: nothing anchored
+    anchors = {by_week[weeks[0]][1]: 0.0, by_week[weeks[0]][2]: 0.0, by_week[weeks[1]][0]: 0.0, by_week[weeks[1]][3]: 0.0,
+               by_week[weeks[3]][4]: 0.0}
+    scans = scan(path, anchors, "seas6")
+    assert [s.inception for s in scans] == [by_week[weeks[0]][1], by_week[weeks[1]][0], by_week[weeks[3]][4]]
+    assert all(s.anchored and s.book == "seas6" for s in scans)
+    with pytest.raises(StudyDataError):
+        scan(path[:3] + path[4:], anchors, "seas6")           # a missing trading day still fails closed
+    with pytest.raises(StudyDataError):
+        scan(path, anchors, "ki90")                            # an unknown book
 
 
-def test_select_lifted_books_take_three_notes_a_week_and_no_ko_pin_set():
+def test_select_seas6_lists_every_booking_as_headline_with_no_pin_set_and_no_ko_events():
     from gpin.events import select
 
-    incs = [date(2024, 1, 2) + timedelta(days=i) for i in range(30)]
+    incs = [date(2024, 1, 2) + timedelta(days=7 * i) for i in range(5)]
     t = date(2025, 3, 5)
-    wk6 = (date(2024, 2, 5), date(2024, 2, 9))          # ISO 2024-W06
-    wk7 = (date(2024, 2, 12), date(2024, 2, 14))        # ISO 2024-W07
-    scans = [fake_scan(i, ki=[(*wk6, False)], ko=[(t, 0.001, True)], ki_pct=0.90) for i in incs]
-    scans += [fake_scan(date(2023, 6, 2) + timedelta(days=i), ki=[(*wk7, False)], ki_pct=0.90) for i in range(2)]
-    sample = select(scans, book="ki90")
-    week6 = [i for i in sample.pin if i >= date(2024, 1, 2)]
-    assert week6 == [incs[p] for p in (0, 15, 29)]                       # 3 evenly spaced of 30 in the week
-    assert sum(1 for i in sample.pin if date(2023, 6, 2) <= i <= date(2023, 6, 3)) == 2   # fewer than 3: all of them
-    assert sample.reasons[incs[15]] == ("ki 2024-W06 position 16 of 30",)
-    assert all(r.startswith("ki ") for why in sample.reasons.values() for r in why)
-    assert all(type(e).__name__ == "KiApproach" for e in sample.events)       # no KO pin events for a lifted book
-    assert {e.inception for e in sample.events} == set(sample.pin) | set(sample.headline)
-    ko75 = select([fake_scan(i, ko=[(t, 0.001, True)]) for i in incs[:3]])
-    assert [r for why in ko75.reasons.values() for r in why] == ["ko 2025-W10 rank 1", "ko 2025-W10 rank 2"]
-    assert any(type(e).__name__ == "KoEvent" for e in ko75.events)
+    ap = (date(2024, 2, 5), date(2024, 2, 9))
+    scans = [fake_scan(i, ki=[(*ap, i == incs[2])], ko=[(t, 0.001, True)], book="seas6") for i in incs]
+    scans.append(fake_scan(date(2024, 3, 1), anchored=False, book="seas6"))
+    sample = select(scans, "seas6")
+    assert sample.headline == tuple(incs) and sample.pin == () and sample.reasons == {}
+    assert [type(e).__name__ for e in sample.events] == ["KiApproach"] * 5                 # no KO pin events
+    assert select(list(reversed(scans)), "seas6") == sample
     with pytest.raises(StudyDataError):
-        select(scans, book="ki75")                                            # the scans are not that book's
+        select(scans, "ki75")                                                                # not that book's scans
+    with pytest.raises(StudyDataError):
+        select([fake_scan(incs[0])], "seas6")
 
 
 def test_sample_fields_match_contract_c2_positionally():

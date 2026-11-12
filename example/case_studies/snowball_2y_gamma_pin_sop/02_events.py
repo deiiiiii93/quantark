@@ -1,7 +1,10 @@
 """Stage 2: pricing-free lifecycle scan of every inception, the pin-event sample and the train/test split.
 
 Reads ``OUTPUT_DIR/chain.pkl`` (``01_data.py``), scans every trading-day inception, selects the headline and pin
-sets (spec D5) and writes ``results/events.json`` atomically. Per book (a KI level: ki75, ki85, ki90). Prints the sample sizes per book, slice and barrier type, and distinct weeks.
+sets (spec D5) and writes ``results/events.json`` atomically. Per book: ``ki75`` the 2Y product (every trading-day
+inception scanned, headline and pin sets selected) and ``seas6`` the seasoned book (one booking per ISO week, every
+booking priced). Prints, per book and slice, the notes with an approach, the approaches, the knocked-in ones and the
+distinct ISO weeks, per barrier type.
 """
 
 from __future__ import annotations
@@ -86,7 +89,7 @@ def _book_block(book: str, scans: Sequence[NoteScan], sample: Sample) -> Dict[st
             sizes[sl].update(ko_events=len(ko_s), ko_weeks=len({week_key(e.obs_date) for e in ko_s}),
                              ko_fired=sum(1 for e in ko_s if e.fired))
     block: Dict[str, Any] = {
-        "ki_pct": BOOKS[book],
+        "ki_pct": BOOKS[book].ki_pct,
         "headline": [d.isoformat() for d in sample.headline],
         "pin": [{"inception": d.isoformat(), "why": list(sample.reasons[d])} for d in sample.pin],
         "notes": {d.isoformat(): {"ko_date": None if by_inception[d].ko_date is None else by_inception[d].ko_date.isoformat(),
@@ -122,8 +125,8 @@ def build_payload(scans_by_book: Mapping[str, Sequence[NoteScan]], samples: Mapp
 def main() -> None:
     chains = load_chain(CHAIN_PATH)
     anchors = anchor_series(chains, load_prereg()["data"]["anchor_window"])
-    scans_by_book = {b: scan(chains, anchors, ki_pct=level) for b, level in BOOKS.items()}
-    samples = {b: select(scans_by_book[b], book=b) for b in BOOKS}
+    scans_by_book = {b: scan(chains, anchors, b) for b in BOOKS}
+    samples = {b: select(scans_by_book[b], b) for b in BOOKS}
     payload = build_payload(scans_by_book, samples)
     write_json_atomic(EVENTS_PATH, payload)
 
@@ -135,19 +138,23 @@ def main() -> None:
     for b in BOOKS:
         blk = payload["books"][b]
         z = blk["sample_sizes"]
-        print(f"\nbook {b} (KI {BOOKS[b]:.0%}): headline notes {z['headline_notes']}, pin notes {z['pin_notes']}, "
+        print(f"\nbook {b} (KI {BOOKS[b].ki_pct:.0%}, {BOOKS[b].elapsed_months} months elapsed, "
+              f"{BOOKS[b].maturity_months} to run): headline notes {z['headline_notes']}, pin notes {z['pin_notes']}, "
               f"priced notes {z['priced_notes']}")
         r = blk["restricted"]
         print(f"  restricted (all {r['inceptions']} anchored inceptions): {r['ki_approaches']} KI approaches, "
               f"{r['notes_knocked_in']} notes knock in, {r['ki_weeks']} distinct weeks; "
               + "; ".join(f"{sl}: {r[sl]['ki_approaches']} approaches / {r[sl]['ki_knocked_in']} knocked in / "
                           f"{r[sl]['ki_weeks']} weeks" for sl in SLICES))
-        head = f"  sample, selected notes: {'slice':>6} {'KI approaches':>14} {'knocked in':>11} {'KI weeks':>9}"
+        head = (f"  sample, selected notes: {'slice':>6} {'notes':>6} {'KI approaches':>14} {'knocked in':>11} "
+                f"{'KI weeks':>9}")
         if b == PRODUCT_BOOK:
             head += f" {'KO events':>10} {'fired':>6} {'KO weeks':>9}"
         print(head)
         for sl in SLICES:
-            line = f"  {'':>23}{sl:>6} {z[sl]['ki_approaches']:>14} {z[sl]['ki_knocked_in']:>11} {z[sl]['ki_weeks']:>9}"
+            n_notes = len({r["inception"] for r in blk["ki_approaches"] if r["slice"] == sl})
+            line = (f"  {'':>23}{sl:>6} {n_notes:>6} {z[sl]['ki_approaches']:>14} {z[sl]['ki_knocked_in']:>11} "
+                    f"{z[sl]['ki_weeks']:>9}")
             if b == PRODUCT_BOOK:
                 line += f" {z[sl]['ko_events']:>10} {z[sl]['ko_fired']:>6} {z[sl]['ko_weeks']:>9}"
             print(line)
