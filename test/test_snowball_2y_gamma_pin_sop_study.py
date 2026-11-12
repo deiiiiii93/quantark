@@ -2626,3 +2626,154 @@ def test_the_context_a_technique_sees_is_dated_at_or_before_the_decision_day():
     ])
     alt = _run(changed, Base(), boards2, chains2)
     assert alt.rows[:2] == base.rows[:2] and alt.rows[2] != base.rows[2]
+
+
+# ---- seller view on the real probe (AC15) and the baseline against the stored tail-stability run (AC10) ----
+
+def _probe_two_day_states(probe_states):
+    """The probe note's records of the close before the KO observation and of the KO day, as a two-day note (the
+    first day plays the inception: the ledger only needs consecutive recorded days)."""
+    states, by_day = probe_states
+    out = json.loads(json.dumps(states.to_json()))
+    out["days"] = [r for r in out["days"] if r["date"] in (PROBE_DAY.isoformat(), PROBE_KO_DAY.isoformat())]
+    assert len(out["days"]) == 2
+    return out
+
+
+def test_probe_ledger_rows_are_the_sellers_negative_delta_positive_hedge_and_negative_ko_cash(
+        probe_states, real_chains, real_boards):
+    from gpin.techniques import Base
+
+    states = _probe_two_day_states(probe_states)
+    run = _run(states, Base(), real_boards, real_chains, "close")
+    day, ko = run.rows
+    ko_rec = states["days"][1]
+    assert day["date"] == PROBE_DAY.isoformat() and ko["date"] == PROBE_KO_DAY.isoformat()
+    spot = real_boards[PROBE_DAY].spot
+    # the seller is short the note: negative position delta, a long IM hedge of equal size
+    assert day["position_delta"] < 0 and day["im_lots"] > 0
+    assert day["position_delta"] == pytest.approx(-175.5e-2 * NOTIONAL_ / spot, rel=2e-3)    # the 175.5% bump delta
+    assert day["hedge_ratio"] * NOTIONAL_ / spot == pytest.approx(-day["position_delta"], rel=1e-12)
+    assert day["seller_pv"] == pytest.approx(-states["days"][0]["states"]["true"]["engine_price"][12])
+    assert day["position_gamma"] == pytest.approx(-states["days"][0]["states"]["true"]["engine_gamma"][12])
+    # the KO fires: the seller pays the coupon and the redemption leaves the book
+    assert ko_rec["engine_note_cash"] > 0 and ko["note_cash"] == pytest.approx(-ko_rec["engine_note_cash"])
+    assert ko["note_cash"] < 0 and ko["seller_pv"] == 0.0 and ko["im_lots"] == 0.0
+    # the same under next_open: the hedge is carried through the fixing and flattened at the next IM open
+    nxt = _run(states, Base(), real_boards, real_chains, "next_open")
+    assert len(nxt.rows) == 3 and "fixing_deferred" in nxt.rows[1]["flags"] and nxt.rows[1]["im_lots"] > 0
+    assert nxt.rows[2]["im_lots"] == 0.0 and nxt.rows[2]["note_pnl"] == 0.0 and "deferred_fill" in nxt.rows[2]["flags"]
+
+
+def test_a_knocked_in_maturity_pays_the_seller_a_positive_cash():
+    from gpin.techniques import Base
+
+    d = _weekdays(3)
+    states, boards, chains = _world([
+        _day(d[0], 4000.0, -300000.0, -500.0, knocked_in=True, next_ko=d[2], im={"IM2403": dict(close=4000.0)}),
+        _day(d[1], 4000.0, -310000.0, -500.0, knocked_in=True, next_ko=d[2], im={"IM2403": dict(close=4000.0)}),
+        # maturity, knocked in: the holder of the note receives a negative amount (it loses): engine cash < 0
+        _day(d[2], 3900.0, 0.0, 0.0, alive=False, cash=-1200000.0, knocked_in=True, end_reason="maturity",
+             im={"IM2403": dict(close=3900.0)}),
+    ])
+    run = _run(states, Base(), boards, chains)
+    assert run.rows[2]["note_cash"] == 1200000.0                                          # the seller receives the loss
+    assert run.rows[0]["position_delta"] == 500.0 and run.rows[0]["im_lots"] < 0         # long note delta -> short IM hedge
+
+
+EXISTING_RUNS = Path("/Users/fuxinyao/quant-ark/example/output/snowball_2y_tail_stability/runs")
+AC10_INCEPTION = date(2023, 10, 9)
+AC10_DAYS = 30
+
+
+@pytest.fixture(scope="module")
+def ac10_case(real_chains, real_anchors, real_scans, engine):
+    """The stored tail-stability run of ``AC10_INCEPTION`` (tail converge_hl100) and the same note's first 30 days
+    priced here (about 30 solves) under the stored coupon at the 75% book."""
+    from types import SimpleNamespace
+
+    from gpin.pricing import price_note
+
+    path = EXISTING_RUNS / f"{AC10_INCEPTION.isoformat()}__converge_hl100.json"
+    if not path.exists():
+        pytest.skip("the tail-stability study's stored runs are absent")
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    scan_rec = next(s for s in real_scans if s.inception == AC10_INCEPTION)
+    states = price_note(AC10_INCEPTION, stored["coupon"], real_chains, real_anchors, scan_rec, engine=engine,
+                        max_days=AC10_DAYS)
+    return SimpleNamespace(stored=stored, states=states)
+
+
+def test_baseline_under_close_reproduces_the_stored_note_pnl_and_book_a_pnl_row_by_row(
+        ac10_case, real_chains, real_boards):
+    from gpin.techniques import Base
+
+    run = _run(ac10_case.states, Base(), real_boards, real_chains, "close")
+    stored_days = ac10_case.stored["days"][:AC10_DAYS]
+    mine = run.rows[1:AC10_DAYS + 1]                         # the stored rows start on day 1
+    assert [r["date"] for r in mine] == [r["date"] for r in stored_days]
+    d_note = max(abs(m["note_pnl"] - s["note_pnl"]) for m, s in zip(mine, stored_days))
+    d_im = max(abs(m["im_vm"] + m["mo_mtm"] - s["pnl_a"]) for m, s in zip(mine, stored_days))
+    print(f"AC10 max |note_pnl diff| = {d_note:.3e} CNY, max |im pnl diff| = {d_im:.3e} CNY")
+    assert d_note < 1e-6 and d_im < 1e-6
+    assert all(m["mo_mtm"] == 0.0 and m["legs"] == {} for m in mine)
+    assert run.clip_count == 0                                # the clip does not bind on these days
+    assert "data_end" in mine[-1]["flags"]
+
+
+# ---- AC7: one synthetic path with an IM roll, a leg opened and closed, a surviving note and a fired KO, three clocks ----
+
+def _combined_world(fire_ko):
+    """Six days. IM2403 until day 2, IM2404 from day 3 (IM2403 is then on the board only). A call is wanted on days 1
+    and 2 and closed on day 3. ``fire_ko``: the observation is day 4 and the KO fires (day 5 is the next chain day);
+    else the note survives to the data end (day 5)."""
+    d = _weekdays(6)
+    last = d[0] + timedelta(days=60)
+    vols = [0.2, 0.21, 0.22, 0.2, 0.2, 0.2]
+    spots = [5000.0, 5050.0, 4980.0, 5020.0, 4950.0, 4900.0]
+    ims = [
+        {"IM2403": dict(close=5000.0, open=4995.0, vwap=4998.0, volume=900)},
+        {"IM2403": dict(close=5060.0, open=5010.0, vwap=5040.0, volume=900)},
+        {"IM2403": dict(close=4990.0, open=5050.0, vwap=5000.0, volume=900)},
+        {"IM2403": dict(close=5030.0, listed=False), "IM2404": dict(close=5100.0, open=5040.0, vwap=5090.0, volume=700)},
+        {"IM2404": dict(close=5020.0, open=5110.0, vwap=5060.0, volume=700)},
+        {"IM2404": dict(close=4960.0, open=5000.0, vwap=4970.0, volume=700)},
+    ]
+    days = []
+    for i, day in enumerate(d):
+        q = {("C", 5000.0): (_px(day, last, "C", 5000.0, vols[i], forward=5000.0), None, 20000, 10000)}
+        mo = {SERIES: dict(last=last, forward=5000.0, quotes=q)}
+        dead = fire_ko and i >= 4
+        days.append(_day(day, spots[i], 100000.0 - 500.0 * i, 800.0 + 100.0 * i, alive=not dead,
+                         cash=900000.0 if (dead and i == 4) else 0.0, end_reason="ko" if dead else None,
+                         next_ko=d[4] if (fire_ko and i < 4) else None, im=ims[i], mo=mo))
+    return _world(days, n_records=5 if fire_ko else 6), d
+
+
+@pytest.mark.parametrize("fire_ko", [False, True])
+def test_the_identity_holds_in_all_three_clocks_with_a_roll_a_leg_and_a_fired_ko_or_a_survivor(fire_ko):
+    from gpin.techniques import Base
+
+    (states, boards, chains), d = _combined_world(fire_ko)
+    tech_for = lambda: _Scripted(lambda ctx: {KEY_C5000: 1.0} if ctx.day_index in (1, 2) else {}, note_delta=900.0)
+    runs = {m: _run(states, tech_for(), boards, chains, m, desk_notional=NOTIONAL_) for m in ("close", "twap", "next_open")}
+    for mode, run in runs.items():
+        assert any("roll" in r["flags"] for r in run.rows), mode
+        assert [r["legs"] for r in run.rows[:4]] == [{}, {STR_C5000: 1.0}, {STR_C5000: 1.0}, {}], mode
+        assert run.rows[-1]["im_lots"] == 0.0 and not run.rows[-1]["legs"], mode
+        _check_identity(run)
+    # fills differ between clocks, yet the end-of-day positions agree on every non-fixing day
+    nonfixing = 4 if fire_ko else 6
+    for k in range(nonfixing):
+        assert runs["close"].rows[k]["im_lots"] == pytest.approx(runs["twap"].rows[k]["im_lots"]), k
+        assert runs["close"].rows[k]["im_lots"] == pytest.approx(runs["next_open"].rows[k]["im_lots"]), k
+        assert runs["close"].rows[k]["legs"] == runs["twap"].rows[k]["legs"] == runs["next_open"].rows[k]["legs"], k
+    assert any(r["fill_pnl"] != 0.0 for r in runs["twap"].rows) and all(r["fill_pnl"] == 0.0 for r in runs["close"].rows)
+    if fire_ko:
+        # close: flat on the fixing day; next_open: the hedge is carried through it and flattened the day after
+        assert len(runs["close"].rows) == 5 and runs["close"].rows[4]["im_lots"] == 0.0
+        assert len(runs["next_open"].rows) == 6 and runs["next_open"].rows[4]["im_lots"] != 0.0
+        assert runs["next_open"].rows[5]["im_lots"] == 0.0
+        assert runs["next_open"].rows[5]["im_vm"] == pytest.approx(
+            runs["next_open"].rows[4]["im_lots"] * (5000.0 - 5020.0) * 200.0)           # held lots x (open - close) x 200
+        assert runs["close"].rows[4]["note_cash"] == -900000.0
