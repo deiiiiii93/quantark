@@ -3,8 +3,13 @@
     "registered": "2026-11-12",
     "title": "2Y CSI 1000 snowball: gamma pin-risk techniques and SOPs",
     "view": "seller",
-    "books": {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90},
-    "book_notes": "three books differing only in the KI level and the coupon solved for it; ki75 is the product; ki85 and ki90 lift the barrier so real history holds KI approaches in enough separate weeks; KO pin events are measured on ki75 only",
+    "books": {
+        "ki75": {"ki_pct": 0.75, "first_ko_month": 3, "maturity_months": 24, "elapsed_months": 0, "ki_below_spot": null,
+                 "booking": "sample"},
+        "seas6": {"ki_pct": 0.75, "first_ko_month": 1, "maturity_months": 6, "elapsed_months": 18, "ki_below_spot": 0.07,
+                  "booking": "weekly"}
+    },
+    "book_notes": "ki75 is the product, sampled by the headline and pin sets; seas6 is the same 75% product in its last 6 months (18 months elapsed, coupon accrued over the full 24, not knocked in), booked on the first anchored chain day of each ISO week with its KI barrier 7% below the booking-day spot, because the knock-in pin is a property of a short remaining life; KO pin events are measured on ki75 only",
     "data": {"start": "2023-05-04", "end": "2026-11-06", "anchor_window": 63},
     "note": {
         "underlying": "000852.SH",
@@ -18,8 +23,7 @@
         "coupon": "solved to PV = 0 under hold_forward at inception, shared by every technique",
         "engine": "SnowballQuadEngineV2 defaults, flat vol = the day's far-MO ATM vol"
     },
-    "sample": {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12,
-               "lifted_ki_notes_per_week": 3},
+    "sample": {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12},
     "windows": {
         "ko_days": 10,
         "ko_band": 0.10,
@@ -93,22 +97,22 @@
     ],
     "overlay": {"scenario_cap_x_payoff": 3.0, "scenario_move": "one daily sigma either side of the barrier"},
     "selection": {"criterion": "es10_event_window", "clock": "close", "slice": "train", "tie": "lower_cost",
-                  "ko_book": "ki75", "ki_book": "ki90"},
+                  "ko_book": "ki75", "ki_book": "seas6"},
     "statistics": {"es_alpha": 0.10, "bootstrap_n": 10000, "seed": 20261112, "cluster": "iso_week", "p_max": 0.10,
                    "p_definition": "share of replicates with ES10(technique) - ES10(base) <= 0",
                    "multiplicity": "raw p decides; Holm-adjusted p across eligible KO rows is printed beside it"},
     "verdict": {
         "tail": "ES10 higher than base, worst event not lower, p < p_max, on test events under the primary clock",
         "ko_book": "ki75",
-        "ki_book": "ki90",
-        "ki_transfer_books": ["ki85", "ki75"],
-        "whole_life_set": "headline of the same book",
+        "ki_book": "seas6",
+        "ki_transfer_books": ["ki75"],
+        "whole_life_set": "unselected notes of the same book (ki75 headline set; every seas6 booking), day-0 row left out",
         "std_ratio_max": 1.05,
         "terminal_slack_bp": 10.0,
         "min_events": 20,
         "min_weeks": 10,
         "robust": "also passes the tail test under twap and next_open",
-        "ki_transfer": "the ki90 training picks are reported on ki85 and ki75 test approaches without a verdict; the ki75 rows rest on two episodes"
+        "ki_transfer": "the seas6 training picks are reported on the ki75 test approaches without a verdict; the ki75 rows rest on two episodes with a long life left"
     },
     "event_windows": {
         "ko": "daily rows from the first trading day with the observation at most 10 trading days ahead through the trading day after it",
@@ -116,7 +120,9 @@
     },
     "amendments": [
         {"date": "2026-11-12", "before_any_ledger_run": true,
-         "text": "added the lifted-KI books ki85 and ki90 and moved the KI verdict to ki90 (was: descriptive only on ki75); narrowed the KI window from 10% to 5% above the barrier; added H8; lifted books sample 3 notes per ISO week of approach date"}
+         "text": "added the lifted-KI books ki85 and ki90 and moved the KI verdict to ki90 (was: descriptive only on ki75); narrowed the KI window from 10% to 5% above the barrier; added H8; lifted books sample 3 notes per ISO week of approach date"},
+        {"date": "2026-11-12", "before_any_ledger_run": true,
+         "text": "dropped the lifted-KI books ki85 and ki90 because they hold no knock-in pin: for a fresh note 3% above its KI barrier the gap between the not-knocked-in and the knocked-in price is 8.6 bp of notional at a 75% barrier with 24 months left and 384.2 bp with 3 months left, and at 85% and 90% it is zero beyond 12 months (85%: 1.9 bp at 12 months, 0.1 bp at 18, 0.0 at 24; 90%: 0.0 bp at 12, 18 and 24 months): with a long life left a note near its barrier knocks in later anyway, so being knocked in today is worth nothing. Replaced them by the seasoned book seas6 (the 75% product with 18 months elapsed and 6 left, booked weekly, KI barrier 7% below the booking-day spot), on which the KI verdict now rests; ki75 stays the KO book and the KI transfer check"}
     ],
     "deviation_protocol": "a defect found after test numbers have been seen is fixed, training selection and the test are re-run, and the README lists the headline numbers before and after; grid and thresholds are never changed after unblinding",
     "hypotheses": [
@@ -127,6 +133,6 @@
         {"id": "H5", "text": "the wrong-way controls are worse than the baseline on the tail"},
         {"id": "H6", "text": "the ranking is the same under close and twap fills; next_open widens the gaps without changing the order"},
         {"id": "H7", "text": "gap_ko is positive on the large majority of KO-window observations"},
-        {"id": "H8", "text": "the ranking of the KI rules (ki_cap, ki_shift, secant, mo_ki against base) is the same on ki90, ki85 and ki75"}
+        {"id": "H8", "text": "the ranking of the KI rules on the seasoned book (seas6) is the same as on the 2Y product's own approaches (ki75)"}
     ]
 }

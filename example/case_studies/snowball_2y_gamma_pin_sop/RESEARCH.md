@@ -204,8 +204,8 @@ Fixed now, so the results cannot be read into them afterwards.
 - H6. The ranking is the same under `close` and `twap` fills; `next_open` widens the gaps
   between techniques without changing their order.
 - H7. `gap_KO` is positive on the large majority of KO-window days.
-- H8. The ranking of the KI rules (`ki_cap`, `ki_shift`, `secant`, `mo_ki` against the
-  baseline) is the same at a 90%, an 85% and a 75% knock-in barrier.
+- H8. The ranking of the KI rules on the seasoned book (`seas6`) is the same as on the 2Y
+  product's own approaches (`ki75`).
 
 ## 5. Draft SOP (v0)
 
@@ -237,14 +237,22 @@ thresholds.
 
 Three things about how the evidence will be read, also fixed now:
 
-- **Both barriers get a verdict, on different books.** KO: the 75% product. KI: real
-  history holds knock-ins of the 75% product in two episodes only (January-February 2024
-  and October 2026), about five test weeks, which cannot carry a test. So the same note is
-  also run with the knock-in barrier lifted to 85% and to 90% on the same real paths; at
-  90% the approaches spread over 31 training and 13 test weeks (5% window, `events.json`). KI rules are picked and
-  tested on the 90% book and then shown on the 85% and 75% books as transfer checks. A
-  lifted barrier has a smaller jump (the put the seller receives is 10% in the money, not
-  25%), so the three books are shown side by side.
+- **Both barriers get a verdict, on different books.** KO: the 2Y product (`ki75`). KI: real
+  history holds knock-ins of the 2Y product in two episodes only (January-February 2024 and
+  October 2026), about five test weeks, which cannot carry a test, and lifting the barrier
+  does not help: the seller's gain on a knock-in (the gap between the not-knocked-in and the
+  knocked-in value) is almost nil while the note has a long life left, because a note near
+  its barrier knocks in later anyway (section 9, 2026-11-12). The knock-in pin is a property
+  of a short remaining life. So the KI sample is the same 75% product in its last six months:
+  `seas6` = 18 months elapsed, 6 left, coupon accrued over the full 24 months, not knocked in,
+  booked on the first anchored chain day of each ISO week, with its knock-in barrier 7% below
+  the booking-day spot. Every booking is priced and none is picked for having a pin. A
+  pricing-free scan gives 168 bookings with 97 training approaches in 28 weeks and 79 test
+  approaches in 24 weeks. KI rules are picked on the `seas6` training approaches and tested on
+  its test approaches, then shown on the `ki75` test approaches as a transfer check without a
+  verdict (five weeks of one episode, and a small gap because those notes have 15 to 21 months
+  to run). The report states both limits. The `seas6` bookings are notes the desk did not
+  write on those dates and weekly bookings overlap in calendar time.
 - **Three execution clocks.** `close` (fills at the close, the proxy for a 14:55 day-end
   order) decides. `twap` (fills at the day VWAP) and `next_open` (on a fixing day the
   adjustment waits for the next IM open) are reported beside it.
@@ -316,6 +324,29 @@ Corrections to sections 1-8 after the pre-registration commit:
   in 13. The lifted books are sampled 3 notes per ISO week of approach date (not 6 per month, which
   left the 90% test slice at exactly the 10-week minimum), so no week of the universe is dropped: the
   sampled 90% notes carry 121 training and 41 test approaches in 31 and 13 weeks.
+
+- 2026-11-12, before any ledger run. Second amendment to the pre-registration: the lifted
+  books `ki85` and `ki90` are dropped and the seasoned book `seas6` replaces them. A probe
+  (`00_ki_gap_probe.py`, `results/ki_gap_probe.json`; a fresh note with its spot 3% above the
+  knock-in barrier, monthly KO from month 1, coupon 20%, flat vol 25%, q 5%) measured, per
+  barrier and remaining life, the gap = the not-knocked-in engine price minus the knocked-in
+  engine price (what the seller gains when the note knocks in, bp of notional), and the hedge
+  step = the hedge of the not-knocked-in note minus that of the knocked-in note (the long futures
+  the seller must sell when the note knocks in, % of notional):
+
+  | KI barrier | 1 month left | 3 | 6 | 12 | 18 | 24 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 75% | 768.2 bp / 177.8 | 384.2 / 96.7 | 222.7 / 57.0 | 81.0 / 20.8 | 27.1 / 6.9 | 8.6 / 2.2 |
+  | 85% | 354.3 / 77.9 | 131.5 / 31.3 | 34.5 / 8.2 | 1.9 / 0.5 | 0.1 / 0.0 | 0.0 / 0.0 |
+  | 90% | 168.0 / 35.1 | 31.7 / 7.0 | 2.3 / 0.5 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
+
+  (each cell: gap in bp of notional / hedge step in % of notional). The knock-in pin is a seasoned-note problem: lifting the barrier on a long-dated note
+  removes it, a short remaining life creates it. With a long life left, a note near its barrier
+  knocks in later anyway, so being knocked in today is worth nothing to the seller, and a higher
+  barrier makes that more certain; with three months left the 75% barrier carries a gap of 384
+  bp and a hedge step of 97% of notional, and with one month left 768 bp and 178%. The books
+  lifted to 85% and 90% were built and measured before this probe; they are removed. Nothing in
+  the technique grid, windows or thresholds changed.
 
 Results per hypothesis are added here when the backtest has run.
 

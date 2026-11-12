@@ -56,9 +56,12 @@ def test_prereg_numbers_match_the_spec():
     assert p["view"] == "seller"
     assert p["split_date"] == "2025-07-01"
     assert p["data"] == {"start": "2023-05-04", "end": "2026-11-06", "anchor_window": 63}
-    assert p["books"] == {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90}
-    assert p["sample"] == {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12,
-                           "lifted_ki_notes_per_week": 3}
+    assert p["books"] == {
+        "ki75": {"ki_pct": 0.75, "first_ko_month": 3, "maturity_months": 24, "elapsed_months": 0,
+                 "ki_below_spot": None, "booking": "sample"},
+        "seas6": {"ki_pct": 0.75, "first_ko_month": 1, "maturity_months": 6, "elapsed_months": 18,
+                  "ki_below_spot": 0.07, "booking": "weekly"}}
+    assert p["sample"] == {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12}
     assert p["windows"] == {"ko_days": 10, "ko_band": 0.10, "ki_band": 0.05, "trigger_z": 2.0,
                             "days_per_year": 244, "overlay_ko_days": 5, "overlay_ki_min_days_left": 3}
     assert p["clocks"] == {"primary": "close", "others": ["twap", "next_open"]}
@@ -76,11 +79,19 @@ def test_prereg_numbers_match_the_spec():
     assert (s["es_alpha"], s["bootstrap_n"], s["seed"], s["cluster"], s["p_max"]) == (0.10, 10000, 20261112, "iso_week", 0.10)
     v = p["verdict"]
     assert (v["std_ratio_max"], v["terminal_slack_bp"], v["min_events"], v["min_weeks"]) == (1.05, 10.0, 20, 10)
-    assert v["whole_life_set"] == "headline of the same book"
-    assert (v["ko_book"], v["ki_book"], v["ki_transfer_books"]) == ("ki75", "ki90", ["ki85", "ki75"])
-    assert p["amendments"][0]["before_any_ledger_run"] is True
+    assert v["whole_life_set"] == ("unselected notes of the same book (ki75 headline set; every seas6 booking), "
+                                   "day-0 row left out")
+    assert (v["ko_book"], v["ki_book"], v["ki_transfer_books"]) == ("ki75", "seas6", ["ki75"])
+    assert [a["before_any_ledger_run"] for a in p["amendments"]] == [True, True]
+    assert [a["date"] for a in p["amendments"]] == ["2026-11-12", "2026-11-12"]
+    assert "ki85" in p["amendments"][1]["text"] and "seas6" in p["amendments"][1]["text"]
+    assert "384.2" in p["amendments"][1]["text"] and "8.6" in p["amendments"][1]["text"]
+    assert "holder" not in json.dumps(p).lower()
     assert p["selection"] == {"criterion": "es10_event_window", "clock": "close", "slice": "train", "tie": "lower_cost",
-                              "ko_book": "ki75", "ki_book": "ki90"}
+                              "ko_book": "ki75", "ki_book": "seas6"}
+    h8 = {h["id"]: h["text"] for h in p["hypotheses"]}["H8"]
+    assert h8 == ("the ranking of the KI rules on the seasoned book (seas6) is the same as on the 2Y product's own "
+                  "approaches (ki75)")
     assert [h["id"] for h in p["hypotheses"]] == [f"H{i}" for i in range(1, 9)]
 
 
@@ -168,6 +179,8 @@ def test_research_file_is_complete_and_seller_side():
     for h in range(1, 9):
         assert f"- H{h}." in text
     assert "holder" not in text.lower()
+    assert "ki85" in text and "knock-in pin is a seasoned-note problem" in text and "seas6" in text
+    assert "The ranking of the KI rules on the seasoned book (`seas6`) is the same as on the 2Y" in text
     hyp = {h["id"] for h in load_prereg()["hypotheses"]}
     assert hyp == {f"H{i}" for i in range(1, 9)}
 
