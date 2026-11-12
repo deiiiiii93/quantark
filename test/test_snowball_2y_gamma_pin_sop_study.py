@@ -1754,3 +1754,93 @@ def test_the_ko_shift_flag_is_a_tolerant_comparison():
     m = _models()
     assert m.HedgeModel("x", "ko", ko_shift=1e-13).needs_ko_dir is False
     assert m.HedgeModel("x", "ko", ko_shift=0.005).needs_ko_dir is True
+
+
+# ---------------------------------------------------------------------------
+# T4 — Black-76 helper, technique interface, ledger
+# ---------------------------------------------------------------------------
+
+from scipy.stats import norm as _norm  # noqa: E402
+
+
+def _series(days_to_last=73, forward=5000.0, rate=0.014, last=None, anchor=date(2024, 1, 2)):
+    from gpin.board import SeriesInfo
+
+    tenor = days_to_last / 365.0
+    return SeriesInfo(last or anchor + timedelta(days=days_to_last), tenor, forward, math.exp(-rate * tenor))
+
+
+def _bs(info, strike, vol, call=True):
+    """Independent Black-76 on the forward: price, forward delta, forward gamma."""
+    s = vol * math.sqrt(info.tenor)
+    d1 = (math.log(info.forward / strike) + 0.5 * s * s) / s
+    d2 = d1 - s
+    if call:
+        price = info.discount * (info.forward * _norm.cdf(d1) - strike * _norm.cdf(d2))
+        delta = _norm.cdf(d1)
+    else:
+        price = info.discount * (strike * _norm.cdf(-d2) - info.forward * _norm.cdf(-d1))
+        delta = _norm.cdf(d1) - 1.0
+    gamma = _norm.pdf(d1) / (info.forward * s)
+    return price, delta, gamma
+
+
+@pytest.mark.parametrize("call", [True, False])
+def test_black_value_and_implied_vol_round_trip(call):
+    from gpin import black
+
+    info = _series()
+    cp = "C" if call else "P"
+    price, _, _ = _bs(info, 5100.0, 0.23, call)
+    assert black.value(0.23, cp, 5100.0, info) == pytest.approx(price, rel=1e-12)
+    assert black.implied_vol(price, cp, 5100.0, info) == pytest.approx(0.23, abs=1e-9)
+
+
+def test_black_implied_vol_is_none_when_it_cannot_be_inverted():
+    from gpin import black
+
+    info = _series()
+    intrinsic = info.discount * (5000.0 - 4500.0)
+    assert black.implied_vol(intrinsic - 1.0, "C", 4500.0, info) is None        # below the no-arbitrage bound
+    assert black.implied_vol(info.discount * 5000.0 + 1.0, "C", 4500.0, info) is None  # above forward x discount
+    assert black.implied_vol(0.0, "C", 4500.0, info) is None
+    assert black.implied_vol(10.0, "C", 5100.0, _series(days_to_last=0)) is None  # zero tenor
+
+
+def test_black_index_delta_and_gamma_scale_the_forward_with_spot():
+    from gpin import black
+
+    info = _series()
+    spot, strike, vol = 4950.0, 5100.0, 0.21
+    _, dfwd, gfwd = _bs(info, strike, vol, True)
+    assert black.index_delta(vol, "C", strike, info, spot) == pytest.approx(info.discount * dfwd * info.forward / spot, rel=1e-12)
+    _, pfwd, _ = _bs(info, strike, vol, False)
+    assert black.index_delta(vol, "P", strike, info, spot) == pytest.approx(info.discount * pfwd * info.forward / spot, rel=1e-12)
+    assert black.index_gamma(vol, "C", strike, info, spot) == pytest.approx(
+        info.discount * gfwd * (info.forward / spot) ** 2, rel=1e-12)
+    # delta and gamma are the derivatives of the price when the forward moves with spot
+    h = 0.5
+
+    def price_at(s):
+        return black.value_at(vol, "C", strike, info, spot, s, info.tenor)
+
+    assert price_at(spot) == pytest.approx(black.value(vol, "C", strike, info), rel=1e-12)
+    assert (price_at(spot + h) - price_at(spot - h)) / (2 * h) == pytest.approx(
+        black.index_delta(vol, "C", strike, info, spot), rel=1e-6)
+    assert (price_at(spot + h) - 2 * price_at(spot) + price_at(spot - h)) / h ** 2 == pytest.approx(
+        black.index_gamma(vol, "C", strike, info, spot), rel=1e-4)
+
+
+def test_black_value_at_uses_the_time_left_and_the_scaled_forward():
+    from gpin import black
+    from s2ts import RATE
+
+    info = _series()
+    left = 30 / 365.0
+    scenario = 5200.0
+    spot = 5000.0
+    moved = type(info)(info.last_trading_day, left, info.forward * scenario / spot, math.exp(-RATE * left))
+    assert black.value_at(0.2, "P", 5000.0, info, spot, scenario, left) == pytest.approx(
+        black.value(0.2, "P", 5000.0, moved), rel=1e-12)
+    # no time left: the payoff
+    assert black.value_at(0.2, "C", 5000.0, info, spot, 5300.0, 0.0) == pytest.approx(info.forward * 5300.0 / spot - 5000.0)
