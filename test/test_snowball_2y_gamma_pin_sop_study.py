@@ -1990,3 +1990,147 @@ def test_base_targets_the_true_bump_delta_every_day_and_noclip_only_differs_in_t
     for tech in (base, noclip):
         t = tech.target(ctx)
         assert t.note_delta == pytest.approx(750.0, rel=1e-12) and dict(t.legs) == {} and t.note_delta_if_filled is None
+
+
+# ---- ledger core (C7), close clock, IM only ----
+
+LEDGER_ROW_KEYS = ["date", "seller_pv", "position_delta", "position_gamma", "note_cash", "note_pnl", "im_vm", "mo_mtm",
+                   "fill_pnl", "accrual", "cost", "hedged", "cash", "hedge_ratio", "im_lots", "legs", "phi", "clipped",
+                   "unfilled", "flags"]
+IM_COST = 1e-4
+IM_MULT_ = 200.0
+ACT_ = 365.0
+RATE_ = 0.014
+NOTIONAL_ = 10_000_000.0
+CASH_TOL = 1e-6
+
+
+def _run(states, tech, boards, chains, mode="close", *, mo_cost_pt=0.2, desk_notional=NOTIONAL_ * 50, until=None):
+    from gpin.ledger import run_technique
+
+    return run_technique(states, tech, boards, chains, mode=mode, mo_cost_pt=mo_cost_pt, desk_notional=desk_notional,
+                         until=until)
+
+
+def _by_date(run):
+    return {r["date"]: r for r in run.rows}
+
+
+def _check_identity(run, boards=None):
+    """The C7 identity: sum of ``hedged`` = ``cash_end + seller_pv_end + option value_end`` (flat book: no option value)."""
+    last = run.rows[-1]
+    value_end = 0.0
+    assert not last["legs"], "the identity helper handles a flat option book at the end"
+    total = sum(r["hedged"] for r in run.rows)
+    assert total == pytest.approx(last["cash"] + last["seller_pv"] + value_end, abs=CASH_TOL)
+
+
+def _world_a():
+    """Three days, the note survives; IM close 5000 / 5100 / 5000; the last day is the data end."""
+    d = _weekdays(3)
+    return _world([
+        _day(d[0], 5000.0, 100000.0, 1000.0, im={"IM2403": dict(close=5000.0)}),
+        _day(d[1], 5100.0, 95000.0, 1200.0, im={"IM2403": dict(close=5100.0)}),
+        _day(d[2], 5000.0, 105000.0, 1000.0, im={"IM2403": dict(close=5000.0)}),
+    ])
+
+
+def test_close_clock_baseline_on_a_surviving_note_matches_hand_computed_rows():
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_a()
+    run = _run(states, Base(), boards, chains)
+    assert len(run.rows) == 3
+    for r in run.rows:
+        assert list(r) == LEDGER_ROW_KEYS
+        assert "holder" not in "".join(r)
+    r0, r1, r2 = run.rows
+    dt = 1.0 / ACT_
+    # day 0: sold at 0, so note_pnl is the seller PV; 5 lots (1000 x 5000 / (200 x 5000)) opened at 5000
+    cost0 = IM_COST * 5 * 5000.0 * IM_MULT_
+    assert (r0["date"], r0["seller_pv"], r0["position_delta"], r0["note_cash"]) == (WORLD_START.isoformat(), -100000.0, -1000.0, 0.0)
+    assert r0["position_gamma"] == 0.0
+    assert r0["note_pnl"] == -100000.0 and r0["im_vm"] == 0.0 and r0["mo_mtm"] == 0.0 and r0["accrual"] == 0.0
+    assert r0["cost"] == pytest.approx(cost0, abs=CASH_TOL) and r0["hedged"] == pytest.approx(-100000.0 - cost0, abs=CASH_TOL)
+    assert r0["cash"] == pytest.approx(-cost0, abs=CASH_TOL)
+    assert r0["im_lots"] == pytest.approx(5.0) and r0["hedge_ratio"] == pytest.approx(5 * 200 * 5000.0 / NOTIONAL_)
+    assert (r0["phi"], r0["clipped"], r0["unfilled"], r0["legs"], r0["flags"]) == (1.0, False, {}, {}, [])
+    # day 1: 5 lots earn 5 x 100 x 200; the target becomes 1200 x 5100 / (200 x 5100) = 6 lots, one more at 5100
+    accrual1 = r0["cash"] * RATE_ * dt
+    cost1 = IM_COST * 1 * 5100.0 * IM_MULT_
+    assert r1["im_vm"] == pytest.approx(5 * 100.0 * 200.0) and r1["note_pnl"] == pytest.approx(-95000.0 + 100000.0)
+    assert r1["accrual"] == pytest.approx(accrual1) and r1["cost"] == pytest.approx(cost1)
+    assert r1["hedged"] == pytest.approx(5000.0 + 100000.0 + accrual1 - cost1)
+    assert r1["cash"] == pytest.approx(r0["cash"] + accrual1 + 100000.0 - cost1)
+    assert r1["im_lots"] == pytest.approx(6.0) and r1["fill_pnl"] == 0.0
+    # day 2: the data end, the note is alive: 6 lots earn 6 x (-100) x 200, then everything is closed at the close
+    accrual2 = r1["cash"] * RATE_ * dt
+    cost2 = IM_COST * 6 * 5000.0 * IM_MULT_
+    assert r2["im_vm"] == pytest.approx(-120000.0) and r2["note_pnl"] == pytest.approx(-105000.0 + 95000.0)
+    assert r2["cost"] == pytest.approx(cost2) and r2["im_lots"] == 0.0 and r2["hedge_ratio"] == 0.0
+    assert r2["hedged"] == pytest.approx(-10000.0 - 120000.0 + accrual2 - cost2)
+    assert "data_end" in r2["flags"]
+    _check_identity(run)
+
+
+def test_a_fired_ko_ends_the_rows_on_the_ko_day_and_pays_the_seller_side_cash():
+    from gpin.techniques import Base
+
+    d = _weekdays(3)
+    states, boards, chains = _world([
+        _day(d[0], 5000.0, 100000.0, 1000.0, im={"IM2403": dict(close=5000.0)}),
+        _day(d[1], 5100.0, 95000.0, 1200.0, im={"IM2403": dict(close=5100.0)}),
+        _day(d[2], 5000.0, 0.0, 0.0, alive=False, cash=700000.0, end_reason="ko", im={"IM2403": dict(close=5000.0)}),
+    ])
+    run = _run(states, Base(), boards, chains)
+    assert [r["date"] for r in run.rows] == [x.isoformat() for x in d]          # flat on the KO day: no row after
+    r2 = run.rows[2]
+    assert r2["note_cash"] == -700000.0                                           # the seller pays the KO coupon
+    assert r2["seller_pv"] == 0.0 and r2["position_delta"] == 0.0 and r2["im_lots"] == 0.0
+    assert r2["note_pnl"] == pytest.approx((0.0 - (-95000.0)) - 700000.0)
+    assert "data_end" not in r2["flags"]
+    assert r2["cash"] == pytest.approx(run.rows[1]["cash"] + r2["accrual"] - 700000.0 + r2["im_vm"] - r2["cost"])
+    _check_identity(run)
+
+
+def test_an_im_roll_closes_the_old_contract_and_opens_the_new_one_marking_from_the_board():
+    from gpin.techniques import Base
+
+    d = _weekdays(5)
+
+    def im(**codes):
+        return {c: dict(close=v[0], listed=v[1]) for c, v in codes.items()}
+
+    states, boards, chains = _world([
+        _day(d[0], 5000.0, 100000.0, 1000.0, im=im(IM2403=(5000.0, True))),
+        _day(d[1], 5000.0, 100000.0, 1000.0, im=im(IM2403=(5100.0, True))),
+        _day(d[2], 5000.0, 100000.0, 1000.0, im=im(IM2403=(5050.0, True))),
+        # day 3: the old contract is no longer in the chain (under 7 days), its close is only on the board
+        _day(d[3], 5000.0, 100000.0, 1000.0, im=im(IM2403=(5030.0, False), IM2404=(5100.0, True))),
+        _day(d[4], 5000.0, 100000.0, 1000.0, im=im(IM2404=(5120.0, True))),
+    ])
+    run = _run(states, Base(), boards, chains)
+    lots = [1000.0 * 5000.0 / (200.0 * f) for f in (5000.0, 5100.0, 5050.0, 5100.0)]
+    rows = run.rows
+    assert [r["im_lots"] for r in rows[:4]] == pytest.approx(lots)
+    assert rows[1]["im_vm"] == pytest.approx(lots[0] * 100.0 * 200.0)
+    assert rows[2]["im_vm"] == pytest.approx(lots[1] * -50.0 * 200.0)
+    assert rows[3]["im_vm"] == pytest.approx(lots[2] * -20.0 * 200.0)             # the board's 5030 marks the old contract
+    cost3 = IM_COST * lots[2] * 5030.0 * 200.0 + IM_COST * lots[3] * 5100.0 * 200.0   # old closed at its close, new opened
+    assert rows[3]["cost"] == pytest.approx(cost3) and "roll" in rows[3]["flags"]
+    assert rows[4]["im_vm"] == pytest.approx(lots[3] * 20.0 * 200.0)              # the new contract is held from day 3
+    assert rows[4]["im_lots"] == 0.0 and "data_end" in rows[4]["flags"]
+    _check_identity(run)
+
+
+def test_the_run_carries_its_identity_and_serialises():
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_a()
+    run = _run(states, Base(), boards, chains, mo_cost_pt=1.0, desk_notional=1e8)
+    assert (run.book, run.inception, run.technique, run.params, run.mode) == ("ki75", WORLD_START, "base", {}, "close")
+    assert (run.mo_cost_pt, run.desk_notional, run.coupon) == (1.0, 1e8, 0.1)
+    payload = json.loads(json.dumps(run.to_json(), allow_nan=False))
+    assert payload["technique"] == "base" and payload["mode"] == "close" and payload["desk_notional"] == 1e8
+    assert payload["inception"] == WORLD_START.isoformat() and len(payload["rows"]) == 3
+    assert "holder" not in json.dumps(payload)
