@@ -309,9 +309,10 @@ def solve_book_coupon(dc, engine, ki_pct: float) -> float:
     return float(coupon)
 
 
-def coupon_stamp_parts(*, s2ts_dir: Optional[Path] = None, data_digest: Optional[str] = None) -> Dict[str, Any]:
-    """What a solved coupon depends on: the chain's content hash, the ``s2ts`` files, the engine parameters and the
-    book levels (not this package's code: the solve is ``s2ts``'s method run on its note)."""
+def coupon_stamp_parts(*, s2ts_dir: Optional[Path] = None, data_digest: Optional[str] = None,
+                       pkg_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """What a solved coupon depends on: the chain's content hash, the ``s2ts`` files, the engine parameters, the
+    book levels and this file (``solve_book_coupon`` lives here), so an edit of the solver re-solves the cache."""
     from quantark.asset.equity.param import QuadV2Params
 
     s2ts_dir = (STUDY_DIR.parent / "snowball_2y_tail_stability" / "s2ts") if s2ts_dir is None else Path(s2ts_dir)
@@ -320,12 +321,14 @@ def coupon_stamp_parts(*, s2ts_dir: Optional[Path] = None, data_digest: Optional
         "s2ts": {name: _file_digest(s2ts_dir / name) for name in S2TS_FILES},
         "engine": repr(QuadV2Params()),
         "books": dict(BOOKS),
+        "solver": _file_digest((Path(__file__).resolve().parent if pkg_dir is None else Path(pkg_dir)) / "pricing.py"),
     }
 
 
-def coupon_stamp(*, s2ts_dir: Optional[Path] = None, data_digest: Optional[str] = None) -> str:
+def coupon_stamp(*, s2ts_dir: Optional[Path] = None, data_digest: Optional[str] = None,
+                 pkg_dir: Optional[Path] = None) -> str:
     """Hash of ``coupon_stamp_parts``."""
-    canonical = json.dumps(coupon_stamp_parts(s2ts_dir=s2ts_dir, data_digest=data_digest), sort_keys=True,
+    canonical = json.dumps(coupon_stamp_parts(s2ts_dir=s2ts_dir, data_digest=data_digest, pkg_dir=pkg_dir), sort_keys=True,
                            separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
