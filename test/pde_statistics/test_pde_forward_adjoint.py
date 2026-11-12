@@ -188,6 +188,58 @@ ROUTES = {
     "dated_kr_aged": (_flat(KOResetSnowballPDESolver), dated_ko_reset, lambda: dated_env(AGED)),
     "trading_clock_sb_cki": (_flat(SnowballPDESolver), grid.snowball, lambda: trading_clock_env()[0]),
 }
+
+
+# --- CP4: a KI schedule that ends before the note does (the price's knock-in-side row then has no event) ---------
+
+#: a narrow spatial domain: the knock-in-side far edge absorbs measurable mass (num_std 3: ~6e-4 after the last
+#: KI observation on the truncated snowball)
+NARROW = GridConfig(num_std=3.0)
+#: the truncated KI schedule (the notes run to 1.0; KO-reset's first schedule to 1.0 as well)
+KI_ENDS = (0.25, 0.5)
+
+
+def _truncated(make):
+    """``make()`` with its discrete KI schedule cut to ``KI_ENDS``."""
+    from dataclasses import replace
+
+    def build():
+        product = make()
+        bc = product.barrier_config
+        if bc.ki_observation_schedule is not None:
+            level = float(bc.ki_barrier)
+            bc = replace(bc, ki_observation_schedule=ObservationSchedule(records=[
+                ObservationRecord(observation_time=float(t), barrier=level) for t in KI_ENDS]))
+        else:
+            bc = replace(bc, ki_observation_dates=list(KI_ENDS))
+        product.barrier_config = bc
+        product.validate()
+        return product
+
+    return build
+
+
+TRUNCATED = {
+    "sb_trunc_dki": (_flat(SnowballPDESolver), _truncated(lambda: grid.snowball("discrete")), grid.flat_env),
+    "sb_trunc_dki_narrow": (_flat(SnowballPDESolver, grid=NARROW), _truncated(lambda: grid.snowball("discrete")),
+                            grid.flat_env),
+    "ph_trunc_dki_narrow": (_flat(PhoenixPDESolver, grid=NARROW), _truncated(lambda: grid.phoenix(ki="discrete")),
+                            grid.flat_env),
+    "lv_sb_trunc_dki": (_lv(LocalVolSnowballPDESolver), _truncated(lambda: grid.snowball("discrete")),
+                        grid.grid_env),
+    "lv_sb_trunc_dki_narrow": (_lv(LocalVolSnowballPDESolver, grid=NARROW),
+                               _truncated(lambda: grid.snowball("discrete")), grid.grid_env),
+    "kr_trunc_dki": (_flat(KOResetSnowballPDESolver), _truncated(grid.ko_reset), grid.flat_env),
+    "kr_trunc_dki_narrow": (_flat(KOResetSnowballPDESolver, grid=NARROW), _truncated(grid.ko_reset), grid.flat_env),
+    "lv_kr_trunc_dki": (_lv(LocalVolKOResetSnowballPDESolver), _truncated(grid.ko_reset), grid.grid_env),
+    "lv_kr_trunc_dki_narrow": (_lv(LocalVolKOResetSnowballPDESolver, grid=NARROW), _truncated(grid.ko_reset),
+                               grid.grid_env),
+    # the full schedule on the narrow domain: the edge knocks in up to the last observation, then has no event
+    "sb_dki_narrow": (_flat(SnowballPDESolver, grid=NARROW), lambda: grid.snowball("discrete"), grid.flat_env),
+    "sb_cki_narrow": (_flat(SnowballPDESolver, grid=NARROW), grid.snowball, grid.flat_env),
+    "kr_abs_dki_narrow": (_flat(KOResetSnowballPDESolver, grid=NARROW), grid.ko_reset, grid.flat_env),
+}
+ROUTES.update(TRUNCATED)
 #: carried knock-in: no forward pass for the KI path statistics (definitional), but the adjoint identity holds from
 #: the knocked-in surface's readout too
 CARRIED = {
@@ -337,12 +389,14 @@ def test_continuous_rows_are_trading_days(name):
 
 
 @pytest.mark.parametrize("name", ["sb_cki", "sb_dki", "ph_mem_expiry", "ph_arrears_dki", "kr_abs_dki", "kr_abs_cki",
-                                  "lv_sb_cki", "lv_kr_abs", "sb_reverse", "dated_sb_dki_aged"])
+                                  "lv_sb_cki", "lv_kr_abs", "sb_reverse", "dated_sb_dki_aged", *TRUNCATED])
 def test_knock_in_before_ko_is_the_settlement_of_the_twin_that_never_knocks_out_after_ki(name):
     """An independent backward number: with ``disable_ko_after_ki`` the knocked-in surface never knocks out, so its
     knocked-in settlement IS P(KI before any KO) of the original note (the not-knocked-in surface is the same march;
     a same-instant discrete tie goes to the knock-out in both; the not-knocked-in surface's knock-in-side far edge
-    settles knocked in in both). Agreement within the two marches' discount errors (``TWIN_BOUND``)."""
+    knocks in exactly where the price's own row does, in both). Agreement within the two marches' discount errors
+    (``TWIN_BOUND``) -- on the truncated KI schedules and the narrow domains too, where the far edge absorbs mass after
+    the last KI observation that matures not knocked in."""
     from dataclasses import replace
 
     _, product, env, stats = _stats(name)
@@ -356,6 +410,157 @@ def test_knock_in_before_ko_is_the_settlement_of_the_twin_that_never_knocks_out_
     # and the two genuinely differ from the original's own settlement wherever a knock-out follows a knock-in
     if not product.barrier_config.disable_ko_after_ki:
         assert stats.knock_in.probability - stats.ki_settlement.probability > 100.0 * RESIDUAL_BOUND
+
+
+# --- CP4: the statistics describe the price's own march (D23) ----------------------------------------------------
+
+@pytest.mark.parametrize("name", list(ROUTES))
+def test_knock_in_settlement_never_exceeds_knock_in_before_ko(name):
+    """Settling knocked in needs a first knock-in before any knock-out: KIS <= P(KI before KO) (within the march's
+    discount residual). A knock-in-side edge row labelled knocked in where the price's row has no event breaks it
+    (the truncated narrow snowball read KIS - P = +1.6e-4)."""
+    _, _, _, stats = _stats(name)
+    assert stats.ki_settlement.probability <= stats.knock_in.probability + RESIDUAL_BOUND, (
+        stats.ki_settlement.probability, stats.knock_in.probability)
+
+
+def _edge_rows(name):
+    """Per march step: (time, the price's alive / knocked-in EdgeRows, the statistics rows), and the statistics."""
+    solver, product, env = _route(name)
+    p = prepare(solver, product, env, OutputRequest(Operation.EVENT_STATS, event_stats=True))
+    out = []
+    with market_scope(p.solver, p.env, p.market_fps), p.adapter.scope(p.product, p.env):
+        march(p)
+        st = p.statistics
+        for j in range(len(st.t) - 1):
+            tau_rem = float(st.tau - st.t[j])
+            alive = p.solver._boundary_rows_v0(j, tau_rem, product, env, st.s)
+            ki = p.solver._boundary_rows_v1(j, tau_rem, product, env, st.s)
+            out.append((j, p.solver._total_tau - tau_rem, alive, ki, st.rows(j, None)))
+    return p, out
+
+
+@pytest.mark.parametrize("name", ["sb_trunc_dki_narrow", "sb_dki_narrow", "sb_cki_narrow", "ph_trunc_dki_narrow",
+                                  "lv_sb_trunc_dki_narrow", "kr_trunc_dki_narrow", "lv_kr_trunc_dki_narrow",
+                                  "kr_abs_dki_narrow", "sb_reverse"])
+def test_edge_rows_settle_where_the_price_row_does(name):
+    """The not-knocked-in surface's knock-in-side row settles knocked in (KIS / U_post = DF to the determination,
+    its maturity cash in the knocked-in column) exactly where the price's own row is a knock-in (``copy_from_ki`` or a
+    ``*_certain_ki`` row); elsewhere it has no event (U0 / U_pre = DF, cash in the not-knocked-in column). The
+    knocked-in surface's knock-out-side row pays the knocked-in maturity (no knock-out term): KIS / U_post = DF."""
+    p, steps = _edge_rows(name)
+    st, solver, product, env = p.statistics, p.solver, p.product, p.env
+    L, w = st.layout, st.n_cols
+    reverse = bool(product.is_reverse)
+    kr = isinstance(product, KnockOutResetSnowballOption)
+    pre_maturity = float(product.get_pre_maturity_time(env)) if kr else None
+    seen = set()
+    for j, current, (lo0, up0), (lo1, up1), (lower, upper) in steps:
+        alive_edge, alive_row = (up0, upper[:w]) if reverse else (lo0, lower[:w])
+        ko1_edge, ko1_row = (lo1, lower[w:]) if reverse else (up1, upper[w:])
+        knocks_in = alive_edge.copy_from_ki or alive_edge.branch.endswith("_certain_ki")
+        det = solver._df_between_times(env, current, solver._total_tau)
+        if kr and current > pre_maturity + 1e-12:
+            continue                                     # the not-knocked-in surface is staged there
+        seen.add(knocks_in)
+        if kr:
+            u_pre, u_post = int(L.maturity_unit[0]), int(L.maturity_unit[1])
+            det_pre = solver._df_between_times(env, current, pre_maturity)
+            assert alive_row[u_post] == (det if knocks_in else 0.0), (j, alive_edge.branch)
+            assert alive_row[u_pre] == (0.0 if knocks_in else det_pre), (j, alive_edge.branch)
+            assert ko1_row[u_post] == det, (j, ko1_edge.branch)
+        else:
+            assert alive_row[L.kis] == (det if knocks_in else 0.0), (j, alive_edge.branch)
+            assert alive_row[int(L.maturity_unit[0])] == (0.0 if knocks_in else det), (j, alive_edge.branch)
+            assert ko1_row[L.kis] == det, (j, ko1_edge.branch)
+        if not alive_edge.copy_from_ki:
+            cash = sum(term.value for term in alive_edge.terms if term.column == "M")
+            settled, other = (L.maturity[1], L.maturity[0]) if knocks_in else (L.maturity[0], L.maturity[1])
+            assert alive_row[int(settled)] == cash and alive_row[int(other)] == 0.0, (j, alive_edge.branch)
+    if "trunc" in name:
+        assert seen == {True, False}, seen                # knocks in up to the last KI date, then no event
+    else:
+        assert seen == {True}, seen                       # a KI observation (or continuous KI) up to maturity
+
+
+@pytest.mark.parametrize("name", ["sb_cki", "sb_reverse", "sb_dki", "ph_mem_instant", "kr_abs_dki"])
+def test_outcomes_partition_on_a_narrow_domain(name):
+    """On a domain narrow enough that the knocked-in surface's knock-out-side row carries mass (num_std 2), every
+    outcome still sums to one within the march's discount residual: that row pays the knocked-in maturity, so it
+    settles knocked in (it leaked +1.0e-7 on sb_cki, +7.8e-7 on sb_reverse while labelled neither)."""
+    solver, product, env = _route(name)
+    narrow = type(solver)(PDEParams(grid=GridConfig(num_std=2.0)))
+    stats = narrow.calculate_event_stats(product, env)
+    assert abs(stats.probability_residual) <= RESIDUAL_BOUND, stats.probability_residual
+
+
+def test_forward_pass_reproduces_the_flat_vol_surrogate_columns():
+    """AC14 on the 2D solvers' ``flat_vol_surrogate`` statistics (the 1D statistics march at the strike-implied vol,
+    pv from the 2D solve), which now carry the KI table too."""
+    from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import HestonSnowballPDESolver
+    from quantark.volmodels.heston import HestonParams
+
+    hp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+    product, env = grid.snowball("discrete"), grid.flat_env()
+    solver = HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16, statistics="flat_vol_surrogate")
+    pv = float(solver.price(product, env))
+    p = prepare(solver, product, env, OutputRequest(Operation.EVENT_STATS, price=False, event_stats=True,
+                                                    external_pv=pv))
+    with market_scope(p.solver, p.env, p.market_fps), p.adapter.scope(p.product, p.env):
+        result = march(p)
+        forward = adjoint.forward_pass(p.statistics, result.states, result.captures, reconstruct=True)
+        at = p.statistics._reader(result.states, result.captures)
+    units, cash = _unit_columns(p.statistics)
+    for c in units:
+        assert abs(forward.reconstructed[c] - at(c)) <= ADJOINT_BOUND, (c, forward.reconstructed[c], at(c))
+    for c in cash:
+        assert math.isclose(forward.reconstructed[c], at(c), rel_tol=1e-12, abs_tol=1e-12), (c,)
+    stats = HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16, statistics="flat_vol_surrogate").calculate_event_stats(
+        product, env)
+    assert stats.knock_in.probability > 0.0 and "knock_in.probability" not in stats.unavailable
+    assert math.isclose(float(np.sum(stats.ki_table.probability)), stats.knock_in.probability, rel_tol=1e-12)
+
+
+def _two_close_ki_dates():
+    """KI observed on two dates one calendar day apart, the grid 0.2 steps a day (5-day steps)."""
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0, is_reverse=False,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_dates=list(grid.KO_DATES), ki_barrier=90.0,
+                                     ki_observation_type=ObservationType.DISCRETE,
+                                     ki_observation_dates=[0.5, 0.5 + 1.0 / 365.0]),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=True))
+
+
+def test_two_knock_in_dates_inside_one_step_are_both_grid_times():
+    """Two KI dates can never share a time step: every KI observation is a grid time (the event times are pinned
+    into the time grid), so each date takes its own row, here with a 5-day step around two dates one day apart."""
+    env = grid.flat_env()
+    solver = SnowballPDESolver(PDEParams(grid=GridConfig(steps_per_day=0.2)))
+    p = prepare(solver, _two_close_ki_dates(), env, OutputRequest(Operation.EVENT_STATS, event_stats=True))
+    t = np.asarray(p.layout.time.t, dtype=float)
+    for date in (0.5, 0.5 + 1.0 / 365.0):
+        assert np.min(np.abs(t - date)) <= 1e-12, date
+    stats = SnowballPDESolver(PDEParams(grid=GridConfig(steps_per_day=0.2))).calculate_event_stats(
+        _two_close_ki_dates(), env)
+    np.testing.assert_allclose(stats.ki_table.times, [0.5, 0.5 + 1.0 / 365.0], rtol=0, atol=1e-15)
+    assert np.all(stats.ki_table.probability > 0.0)
+
+
+def test_first_knock_in_mass_off_the_schedule_is_refused():
+    """The invariant behind the rows: first knock-in mass only at the product's KI observations. A schedule that
+    disagrees with the march (here: the table asked for one of the march's two dates) is refused, never rebinned."""
+    from quantark.util.exceptions import PricingError
+
+    env = grid.flat_env()
+    product = _two_close_ki_dates()
+    p = prepare(SnowballPDESolver(PDEParams()), product, env, OutputRequest(Operation.EVENT_STATS, event_stats=True))
+    with market_scope(p.solver, p.env, p.market_fps), p.adapter.scope(p.product, p.env):
+        result = march(p)
+        full = product.resolve_ki_observations(env)
+        p.statistics.product.resolve_ki_observations = lambda _env: full[:1]
+        with pytest.raises(PricingError, match="off the product's KI schedule"):
+            adjoint.knock_in_from_forward_pass(p.statistics, result.states, result.captures)
 
 
 # --- AC9 ------------------------------------------------------------------------------------------------------

@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from typing import NamedTuple, Optional
 
-__all__ = ["RowTerm", "EdgeRow"]
+__all__ = ["RowTerm", "EdgeRow", "CERTAIN_KI_BRANCHES", "knocks_in", "knocks_out"]
+
+#: the not-knocked-in rows a discretely observed knock-in makes certain (``_knock_in_side_row``): the knocked-in
+#: surface's row, while a KI observation remains and the edge lies beyond every KI level
+CERTAIN_KI_BRANCHES = frozenset({"v0_lower_certain_ki", "v0_upper_certain_ki"})
 
 
 # NamedTuples, not frozen dataclasses: the value builds four of each per step on every route, and a
@@ -31,3 +35,17 @@ class EdgeRow(NamedTuple):
     branch: str                      # the code branch that produced it (test_rows enumerates them)
     terms: tuple = ()                # sum(t.value * t.operand) == value, bit for bit, for one-term rows
     copy_from_ki: bool = False       # continuous KI: the alive knock-in-side row is the knocked-in row
+
+
+def knocks_in(edge: EdgeRow) -> bool:
+    """Whether the price's not-knocked-in row knocks in (unified event statistics D23: the statistics describe the
+    price's own march): the knocked-in row copied under continuous KI (``copy_from_ki``, set while the edge lies
+    beyond the knock-in level) or a discrete knock-in made certain (``CERTAIN_KI_BRANCHES``, set while a KI observation
+    remains and the edge lies beyond every level). Any other row has no knock-in: it matures not knocked in."""
+    return edge.copy_from_ki or edge.branch in CERTAIN_KI_BRANCHES
+
+
+def knocks_out(edge: EdgeRow) -> bool:
+    """Whether the price's row knocks out: it carries a knock-out term of a record ahead (``_boundary_rows_v0``'s
+    knock-out edge). A row without one pays its maturity on its own surface."""
+    return any(term.column == "KO" and term.record_time is not None for term in edge.terms)

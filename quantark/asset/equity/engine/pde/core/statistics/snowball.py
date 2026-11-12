@@ -29,6 +29,7 @@ from . import event_statistics as es
 from .columns import ColumnLayout
 from .group import RollingStatistics
 from .readout import assemble_autocallable
+from .rows import knocks_in, knocks_out
 
 __all__ = ["SnowballStatistics", "SnowballBreach"]
 
@@ -96,6 +97,8 @@ class SnowballStatistics(RollingStatistics):
         self.breach = self._breach()
         self.knocked_in_at_valuation = bool(prepared.solve_state["knocked_in"])
         self.already_knocked_in = bool(getattr(self.product, "_otc_lifecycle_knocked_in", False))
+        #: step -> whether the price's not-knocked-in knock-in-side row knocks in (``rows``; the forward pass)
+        self._edge_knocks_in = {}
 
     def _layout(self):
         # the termination outcomes are never pruned (DESIGN §4.9b): KIS, M0, M1 and U0 on every request
@@ -167,6 +170,10 @@ class SnowballStatistics(RollingStatistics):
         lower, upper = np.zeros(2 * w), np.zeros(2 * w)
         r_lo0, r_lo1, r_up0, r_up1 = lower[:w], lower[w:], upper[:w], upper[w:]
         reverse = bool(product.is_reverse)
+        # the price's own label of its not-knocked-in knock-in-side row (D23): the statistics settle that edge
+        # knocked in exactly where the price's row knocks in, and the forward pass reads the same per-step flag
+        knocked_in_edge = knocks_in(up0 if reverse else lo0)
+        self._edge_knocks_in[j] = knocked_in_edge
         self._fill_cash(r_lo1, lo1, "ki")
         self._fill_cash(r_up1, up1, "ki")
         for r0, r1, edge, ki_edge in ((r_up0, r_up1, up0, reverse), (r_lo0, r_lo1, lo0, not reverse)):
@@ -177,11 +184,20 @@ class SnowballStatistics(RollingStatistics):
                 if self._alive_ki_edge_copies_ki:
                     r0[:] = r1
             else:
-                self._fill_cash(r0, edge, "alive", ki_edge)
+                self._fill_cash(r0, edge, "alive", ki_edge and knocked_in_edge)
         if self.layout.kis is not None:
-            self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1, (lo0, up0))
+            self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1, (lo0, up0, lo1, up1), knocked_in_edge)
         self._probability_rows(j, current, (r_lo0, r_up0, r_lo1, r_up1), (lo0, up0, lo1, up1))
         return lower, upper
+
+    def alive_ki_edge_knocks_in(self, j) -> bool:
+        """Whether the not-knocked-in surface's knock-in-side row at step ``j`` knocks in: the price's own label of
+        that row (``rows.knocks_in``), recorded when the march set the row (else read off the price's row function)."""
+        flag = self._edge_knocks_in.get(j)
+        if flag is None:
+            lo0, up0 = self._value_rows("v0", j, self.tau - self.t[j])
+            flag = self._edge_knocks_in[j] = knocks_in(up0 if self.product.is_reverse else lo0)
+        return flag
 
     #: SnowballAdapter.allocate exposes the knocked-in grid to the alive knock-in-side row (``solver._grid_v1``)
     _alive_ki_edge_copies_ki = True
@@ -198,33 +214,32 @@ class SnowballStatistics(RollingStatistics):
                 return stash[4], stash[5]
         return getattr(solver, f"_boundary_rows_{which}")(j, tau_rem, self.product, self.env, self.s)
 
-    def _ki_rows(self, current, r_lo0, r_up0, r_lo1, r_up1, alive_edges):
-        """The maturity outcomes' unit rows, in determination units ``DF(t, T)``, by edge (spec 3B §5.1).
+    def _ki_rows(self, current, r_lo0, r_up0, r_lo1, r_up1, edges, knocked_in_edge):
+        """The maturity outcomes' unit rows, in determination units ``DF(t, T)``, by edge (spec 3B §5.1), each
+        labelled by the price's own row there (D23; ``edges`` = the price's ``(lo0, up0, lo1, up1)``).
 
-        The knock-out edge is the upper one (the lower on a reverse product). There the knocked-in
-        surface settles knocked in unless the knock-out survives the knock-in, and the
-        not-knocked-in surface never knocks in; at the knock-in edge both settle knocked in (on the
-        not-knocked-in surface: copied under continuous KI, a certain discrete knock-in otherwise).
-        The not-knocked-in maturity unit ``U0`` takes the rest of the not-knocked-in surface: an edge that
-        neither settles knocked in nor knocks out (the knock-in edge of a note without a barrier, a
-        knock-out edge with no knock-out record ahead) matures not knocked in.
+        The knock-out edge is the upper one (the lower on a reverse product). There the knocked-in surface's row
+        pays its knocked-in maturity unless it carries a knock-out (the price's knocked-in rows never do: it settles
+        knocked in), and the not-knocked-in surface knocks out on a record ahead, else matures not knocked in. At
+        the knock-in edge the knocked-in surface settles knocked in; the not-knocked-in surface settles knocked in
+        exactly where the price's row knocks in (``knocked_in_edge``: copied under continuous KI beyond the level, a
+        certain discrete knock-in while an observation remains) and otherwise matures not knocked in (``U0``).
         """
         solver, product, L = self.solver, self.product, self.layout
         df_det = solver._df_between_times(self.env, current, solver._total_tau)
+        lo0, up0, lo1, up1 = edges
         ko1, ki1 = (r_lo1, r_up1) if product.is_reverse else (r_up1, r_lo1)
         ko0, ki0 = (r_lo0, r_up0) if product.is_reverse else (r_up0, r_lo0)
-        ko_edge0 = alive_edges[0] if product.is_reverse else alive_edges[1]
+        ko_edge0, ko_edge1 = (lo0, lo1) if product.is_reverse else (up0, up1)
         ki1[L.kis] = df_det
-        ko1[L.kis] = 0.0 if solver._ko_survives_ki(product) else df_det
-        reachable = df_det if product.has_ki_barrier else 0.0
-        ki0[L.kis] = reachable
+        ko1[L.kis] = 0.0 if knocks_out(ko_edge1) else df_det
+        ki0[L.kis] = df_det if knocked_in_edge else 0.0
         ko0[L.kis] = 0.0
         u0 = int(L.maturity_unit[0])
         ki1[u0] = 0.0
         ko1[u0] = 0.0
-        ki0[u0] = 0.0 if product.has_ki_barrier else df_det
-        ko_ahead = any(term.column == "KO" and term.record_time is not None for term in ko_edge0.terms)
-        ko0[u0] = 0.0 if ko_ahead else df_det
+        ki0[u0] = 0.0 if knocked_in_edge else df_det
+        ko0[u0] = 0.0 if knocks_out(ko_edge0) else df_det
 
     def _probability_rows(self, j, current, rows, edges):
         """Family hook (Phoenix: the trigger rows; KO-reset: the maturity units). ``rows`` are the
@@ -239,9 +254,10 @@ class SnowballStatistics(RollingStatistics):
 
     def _maturity_column(self, surface, ki_edge):
         """The maturity cash column of an ``M`` term: the knocked-in outcome's on the knocked-in surface and on the
-        not-knocked-in surface's knock-in edge of a note with a barrier (where the unit rows settle it knocked
-        in, ``_ki_rows``), else the not-knocked-in outcome's."""
-        knocked_in = surface == "ki" or (ki_edge and self.product.has_ki_barrier)
+        not-knocked-in surface's knock-in edge where the price's row knocks in (``ki_edge``: the caller's
+        ``rows.knocks_in`` of that row; the unit rows settle it knocked in, ``_ki_rows``), else the not-knocked-in
+        outcome's."""
+        knocked_in = surface == "ki" or ki_edge
         return int(self.layout.maturity[1 if knocked_in else 0])
 
     def _column_of_term(self, term, surface, ki_edge=False):

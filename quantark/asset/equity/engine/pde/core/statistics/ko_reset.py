@@ -25,6 +25,7 @@ from quantark.util.numerical import Tolerance, is_close
 from . import adjoint
 from . import event_statistics as es
 from .columns import ColumnLayout
+from .rows import knocks_out
 from .snowball import SnowballBreach, SnowballStatistics
 
 __all__ = ["KOResetStatistics", "KOResetBreach"]
@@ -176,18 +177,26 @@ class KOResetStatistics(SnowballStatistics):
         return stages
 
     def _probability_rows(self, j, current, rows, edges):
-        """The maturity units' rows, in determination units: the knocked-in surface matures on the post
-        schedule unless its knock-out edge knocks it out; the not-knocked-in surface knocks in at its
-        knock-in edge (a post-schedule maturity then) and knocks out at the other."""
+        """The maturity units' rows, in determination units, each labelled by the price's own row there (D23): the
+        knocked-in surface matures on the post schedule unless its knock-out-side row knocks out (the price's
+        knocked-in rows never do); the not-knocked-in surface knocks in at its knock-in edge where the price's row
+        knocks in (a post-schedule maturity then), else matures on the first schedule (``U_pre``, while that
+        surface lives), and knocks out at the other."""
         solver, product, L = self.solver, self.product, self.layout
         r_lo0, r_up0, r_lo1, r_up1 = rows
+        lo0, up0, lo1, up1 = edges
         det_post = solver._df_between_times(self.env, current, solver._total_tau)
+        pre_maturity = float(product.get_pre_maturity_time(self.env))
+        alive = current <= pre_maturity or is_close(current, pre_maturity, abs_tol=Tolerance.PRECISION)
+        det_pre = solver._df_between_times(self.env, current, pre_maturity) if alive else 0.0
         ko1, ki1 = (r_lo1, r_up1) if product.is_reverse else (r_up1, r_lo1)
         ko0, ki0 = (r_lo0, r_up0) if product.is_reverse else (r_up0, r_lo0)
+        ko_edge1 = lo1 if product.is_reverse else up1
+        knocked_in_edge = self._edge_knocks_in[j]
         u_pre, u_post = int(L.maturity_unit[0]), int(L.maturity_unit[1])
         ki1[u_post] = det_post
-        ko1[u_post] = 0.0 if solver._ko_survives_ki(product) else det_post
-        ki0[u_pre], ki0[u_post] = 0.0, (det_post if product.has_ki_barrier else 0.0)
+        ko1[u_post] = 0.0 if knocks_out(ko_edge1) else det_post
+        ki0[u_pre], ki0[u_post] = (0.0, det_post) if knocked_in_edge else (det_pre, 0.0)
         ko0[u_pre], ko0[u_post] = 0.0, 0.0
         for r in (r_lo1, r_up1):
             r[u_pre] = 0.0

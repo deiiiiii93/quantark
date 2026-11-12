@@ -254,9 +254,10 @@ class ForwardResult:
     knock-in copy (the nodes in the knock-in region at ``t[j]``) and by the first-passage correction (crossings
     inside the step after ``t[j]``); ``clean_ko[j]``: the discounted mass knocked out at ``t[j]`` with no knock-in
     before it. ``ki_edge[j]``: the not-knocked-in surface's dual absorbed by its knock-in-side Dirichlet row over the
-    step from ``t[j]`` -- the far edge the statistics rows settle knocked in (T12 ``_ki_rows``: ``KIS`` = the step's
-    DF there), so ``ki_edge[j] / DF(t[j])`` is first knock-in mass whose knock-in is certain from ``t[j]`` (continuous:
-    the edge copies the knocked-in row; discrete: the next KI observation). ``reconstructed``: with
+    step from ``t[j]``, on the steps where the price's own row there knocks in (D23, ``rows.knocks_in``; the
+    statistics rows settle exactly those knocked in, ``_ki_rows``: ``KIS`` = the step's DF), so
+    ``ki_edge[j] / DF(t[j])`` is first knock-in mass whose knock-in is certain from ``t[j]`` (continuous: the edge
+    copies the knocked-in row; discrete: the next KI observation); 0 where the row has no event. ``reconstructed``: with
     ``reconstruct=True``, the pass's value of every column of the read surface
     (the adjoint identity: equal to the backward readout).
     """
@@ -358,7 +359,10 @@ class _Pass:
         out[:, -1] = dt * (1.0 - theta) * u2 * q[-1]
         on_lower = p[:, 0] + dt * theta * l1 * q[0]
         on_upper = p[:, -1] + dt * theta * u2 * q[-1]
-        self.ki_edge[j] = float((on_upper if self.ki_edge_row == -1 else on_lower)[ALIVE])
+        if self.statistics.alive_ki_edge_knocks_in(j):
+            # the price's not-knocked-in row there knocks in (D23, ``rows.knocks_in``): its absorbed dual is first
+            # knock-in mass; a row with no event matures not knocked in and is no knock-in
+            self.ki_edge[j] = float((on_upper if self.ki_edge_row == -1 else on_lower)[ALIVE])
         if self.reconstruct:
             w = self.statistics.n_cols
             lower, upper = self.statistics.rows(j, None)
@@ -523,12 +527,15 @@ def knock_in_from_forward_pass(statistics, states, captures):
             raise PricingError("the forward pass found first knock-in mass off the product's KI schedule at "
                                f"t = {t[off_schedule & (mass != 0.0)].tolist()}")
         probability = np.array([mass[c] for c in columns], dtype=float)
-        # the knock-in edge over the step from t[j]: certain at the next KI observation at or after t[j] (the rows'
-        # own rule, ``_knock_in_side_row``); after the last one nothing can knock in
-        if times.size:
-            row_of_step = np.searchsorted(times, t[:-1] - Tolerance.ZERO, side="left")
-            live = row_of_step < times.size
-            np.add.at(probability, row_of_step[live], edge_p[:-1][live])
+        # the knock-in edge over the step from t[j]: the price's row there knocks in only while a KI observation
+        # remains at or after t[j] (``_knock_in_side_row``), so the knock-in is certain at the next one; mass the
+        # price's rows knock in with no observation of the horizon left is refused (an invariant, never rebinned)
+        row_of_step = np.searchsorted(times, t[:-1] - Tolerance.ZERO, side="left")
+        live = row_of_step < times.size
+        if np.any(edge_p[:-1][~live] != 0.0):
+            raise PricingError("the forward pass found knock-in-side edge mass after the product's last KI "
+                               f"observation in the horizon (t = {t[:-1][~live & (edge_p[:-1] != 0.0)].tolist()})")
+        np.add.at(probability, row_of_step[live], edge_p[:-1][live])
         total = float(np.sum(probability))
         midpoint_mass = float(np.sum(times * probability))
         dates = tuple(r.observation_date for r in records)

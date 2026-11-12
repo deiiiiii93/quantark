@@ -535,8 +535,8 @@ def _knocked_in_settlement_marched_directly(live: dict, banked: dict, record: di
 # --- moves (T13: the PDE 1D forward adjoint pass fills the KI table) -------------------------------------------
 #
 # Base had no PDE KI stream, so every PDE AT_KI leg raised. Each check pins the new stream to the product's own KI
-# schedule, to an independent backward number (the disable_ko_after_ki twin's KI settlement) and, on flat vol, to
-# an RQMC run row by row.
+# schedule, to independent backward numbers (the disable_ko_after_ki twin's KI settlement; discrete rows: the twins
+# cut to their first k KI dates) and, on flat vol, to an RQMC run row by row.
 
 #: the discrete KI rows' MC reference tolerance: 4 batch SEs (floored at the binomial SE of the PDE's own row) plus
 #: 1e-3, the stated allowance for the MC's own time discretisation (daily steps; local vol Euler) -- a row moved to
@@ -559,6 +559,24 @@ def _mc_knock_in_rows(product, env):
             np.asarray(stats.standard_errors["ki_table.probability"], dtype=float), 16 * 4096)
 
 
+def _ki_schedule_cut(product, k, env):
+    """``product`` with its KI schedule cut to its first ``k`` observations and ``disable_ko_after_ki`` set: its
+    knocked-in settlement is P(first KI at one of those k dates before any KO) of the original note."""
+    from dataclasses import replace
+
+    from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
+
+    bc = product.barrier_config
+    schedule = (None if bc.ki_observation_schedule is None
+                else ObservationSchedule(records=list(bc.ki_observation_schedule.records[:k])))
+    dates = None if bc.ki_observation_dates is None else list(bc.ki_observation_dates[:k])
+    product.barrier_config = replace(bc, ki_observation_schedule=schedule, ki_observation_dates=dates,
+                                     disable_ko_after_ki=True)
+    product.validate()
+    assert len(product.resolve_ki_observations(env)) == k
+    return product
+
+
 def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
     """Cause (e), PDE 1D (T13). Base carried no KI stream (the legacy PDE table was empty and the converter dropped
     it), so the AT_KI leg raised. Now the forward adjoint pass fills the KI table. Pinned without the statistics
@@ -571,8 +589,10 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
       before a knock-out settles knocked in; same not-knocked-in march, a same-instant tie to the knock-out), within
       the march's discount residual (T12 RESIDUAL_BOUND 1e-8). A KI-ever table (a knock-in after a knock-out
       counted) or the note's own settlement (no knock-out after a knock-in) fails it;
-    * discrete KI on flat vol, row by row: each row against an RQMC run on the same product within 4 batch SEs plus a
-      stated 1e-3 allowance (a row moved to another date fails it, even on a KI schedule that is the KO grid);
+    * discrete KI, row by row: the first k rows' sum against the KI settlement of the twin cut to its first k KI
+      observations, within 1e-8 (a row moved to another date fails it, even on a KI schedule that is the KO grid;
+      CP4: possible since the statistics settle the knock-in-side edge knocked in only where the price's row does);
+      on flat vol also each row against an RQMC run within 4 batch SEs plus a stated 1e-3 allowance;
     * the leg is ``sign · amount · Σ P_row · DF(t_row + offset)`` on those rows (D8)."""
     from dataclasses import replace
 
@@ -608,10 +628,21 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
     own = engine.calculate_event_stats(product, env).ki_settlement.probability
     assert float(probability.sum()) - own > 1e-4, f"{record['id']}: the KI stream is the note's own settlement"
     continuous = bc.ki_continuous or bc.ki_observation_type == ObservationType.CONTINUOUS
+    if not continuous:
+        # discrete rows one by one against backward numbers (CP4): the first k rows' sum is the KI settlement of the
+        # twin cut to its first k KI observations (no knock-out after a knock-in; its knock-in-side edge has no event
+        # after its last observation, exactly as the price's row) -- measured <= 2.2e-10 on every discrete record
+        cumulative = np.cumsum(probability)
+        for k in range(1, times.size + 1):
+            cut = _ki_schedule_cut(case.fresh()[1], k, env)
+            settles_k = case.fresh()[0].calculate_event_stats(cut, env).ki_settlement.probability
+            assert abs(cumulative[k - 1] - settles_k) <= 1e-8, (
+                f"{record['id']}: Σ first {k} KI rows {cumulative[k - 1]!r} != the cut twin's KI settlement "
+                f"{settles_k!r}")
     if record["engine_kind"] == "pde_1d" and not continuous:
-        # discrete rows one by one against MC on the same product: a row moved to another date fails. Flat vol only:
-        # on this skewed market the LV PDE and LV MC disagree on every outcome (first KO 0.426 vs 0.387, measured,
-        # backward columns included -- not the forward pass), so the LV record is pinned by its total and axis
+        # and against MC on the same product: a row moved to another date fails. Flat vol only: on this skewed
+        # market the LV PDE and LV MC disagree on every outcome (first KO 0.426 vs 0.387, measured, backward columns
+        # included -- not the forward pass), so the LV record is pinned by the cut twins above
         mc, se, paths = _mc_knock_in_rows(case.fresh()[1], env)
         floor = np.sqrt(np.clip(probability, 0.0, 1.0) * (1.0 - np.clip(probability, 0.0, 1.0)) / paths)
         excess = np.abs(probability - mc) - 4.0 * np.maximum(se, floor) - _KI_ROW_MC_ALLOWANCE

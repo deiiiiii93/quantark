@@ -135,7 +135,9 @@ def test_knock_in_rows_are_determination_units(lag):
         u0 = L.maturity_unit[0]
         assert lo1[L.kis] == df_det and lo1[u0] == 0.0, j     # knocked in, at the knock-in edge
         assert lo0[L.kis] == df_det and lo0[u0] == 0.0, j     # a certain discrete knock-in
-        assert up1[L.kis] == 0.0 and up1[u0] == 0.0, j        # the knock-out survives the knock-in
+        # the knock-out survives the knock-in, but the price's knocked-in knock-out-side row carries no knock-out:
+        # it pays the knocked-in maturity, so it settles knocked in (D23, CP4)
+        assert up1[L.kis] == df_det and up1[u0] == 0.0, j
         assert up0[L.kis] == 0.0, j                           # the not-knocked-in knock-out edge never knocks in
         # the maturity leg's rows are the value's own rows (the lag's discount included), on the knocked-in
         # outcome's column at the knock-in edge (T12: the not-knocked-in outcome's M0 carries nothing there)
