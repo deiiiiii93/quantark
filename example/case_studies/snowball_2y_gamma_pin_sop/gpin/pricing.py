@@ -12,14 +12,15 @@ Windows (pre-registration ``windows``; the report's measurement of them is the l
 
 * KO window: the next KO observation (the first KO date strictly after the day) is at most ``ko_days`` trading days
   ahead, counted as days in (day, T] on the SSE calendar (the chain holds every one of them; the calendar also
-  covers the days past the data end), and ``|S / B - 1| <= ko_band`` with ``B`` the true KO barrier. Inside it the
-  pass prices ``surv`` first and computes ``gap_ko``; with a direction it prices the KO shift models.
-* KI window: the note is alive, not knocked in, and ``S / K - 1 <= ki_band`` (5%), ``K`` the book's KI level (a
-  book is a KI level: ``ki75`` the product, ``ki85``, ``ki90``). Inside it: the KI shift models and ``kin``.
+  covers the days past the data end), and ``|S / B - 1| <= ko_band`` with ``B`` the book's true KO barrier. Inside it
+  the pass prices ``surv`` first and computes ``gap_ko``; with a direction it prices the KO shift models.
+* KI window: the note is alive, not knocked in, and ``S / K - 1 <= ki_band`` (5%), ``K`` the book's KI level.
+  Inside it: the KI shift models and ``kin``.
 
-Books: every model, the note itself, the KI window test and the scan cross-check use the book's KI level
-(``ki_pct``); the coupon is solved per (book, inception) to PV = 0 under hold-forward (``solve_book_coupon``, the
-method of ``s2ts.note.solve_coupon``).
+Books (``gpin.events.BOOKS``): the note, every model, the two windows and the scan cross-check use the book's terms,
+levels and payoffs (``gpin.models``). The coupon of ``ki75`` is solved per inception to PV = 0 under hold-forward
+(``solve_book_coupon``, the method of ``s2ts.note.solve_coupon``); a seasoned book is booked with the ``ki75``
+coupon of its booking day (the coupon the note was sold with is not solved again).
 
 ``gap_ko`` is in engine terms (the engine prices the long note), CNY per note: the KO cash paid at the next
 observation, discounted at the flat rate from the observation date to today (ACT/365), minus the ``surv`` engine
@@ -41,7 +42,7 @@ import json
 import platform
 import time
 from bisect import bisect_right
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
@@ -57,12 +58,12 @@ from quantark.util.numerical import is_close, is_valid_number, is_zero, safe_exp
 
 from s2ts import ACT, NOTIONAL, RATE
 from s2ts.chain import sse_trading_days
-from s2ts.note import COUPON_PROBES, COUPON_PV_TOL_FRACTION, COUPON_TAIL, KI_PCT, KO_PCT, NoteLife, build_terms, make_env
+from s2ts.note import COUPON_PROBES, COUPON_PV_TOL_FRACTION, COUPON_TAIL, NoteLife, make_env
 from s2ts.runner import v2_engine, write_json_atomic
 from s2ts.tails import build_curve
 
 from . import CHAIN_PATH, LADDER, STUDY_DIR, TAIL, StudyDataError, load_prereg
-from .events import BOOKS, NoteScan, note_id
+from .events import BOOKS, PRODUCT_BOOK, NoteScan, book_levels, book_terms, note_id
 from .models import MODELS, HedgeModel, book_note, next_ko_index
 
 _WINDOWS = load_prereg()["windows"]
@@ -73,7 +74,8 @@ KI_BAND: float = float(_WINDOWS["ki_band"])
 #: The s2ts files this pass imports, hashed into the fingerprint (``books`` is imported by ``runner``).
 S2TS_FILES = ("__init__.py", "books.py", "chain.py", "note.py", "runner.py", "tails.py")
 #: This package's files hashed into the fingerprint; ledger-side code is deliberately not among them.
-GPIN_FILES = ("__init__.py", "models.py", "pricing.py")
+#: ``events.py`` is in it because ``book_terms`` / ``book_levels`` define every book's contract.
+GPIN_FILES = ("__init__.py", "events.py", "models.py", "pricing.py")
 
 _STATE_KEYS = ("engine_price", "engine_delta", "engine_gamma")
 
@@ -88,24 +90,17 @@ def _at_most(value: float, bound: float) -> bool:
     return value < bound or is_close(value, bound)
 
 
-def in_ko_window(spot: float, s0: float, days_to_ko: Optional[int]) -> bool:
-    """The KO window of the module docstring (``days_to_ko`` is ``None`` when no observation is left)."""
+def in_ko_window(spot: float, s0: float, days_to_ko: Optional[int], *, book: str) -> bool:
+    """The KO window of the module docstring (``days_to_ko`` is ``None`` when no observation is left); ``s0`` is the
+    booking spot of ``book``'s note."""
     if days_to_ko is None or days_to_ko > KO_DAYS:
         return False
-    return _at_most(abs(spot / (KO_PCT * s0) - 1.0), KO_BAND)
+    return _at_most(abs(spot / book_levels(book, s0)[1] - 1.0), KO_BAND)
 
 
-def in_ki_window(spot: float, s0: float, knocked_in: bool, ki_pct: float = KI_PCT) -> bool:
+def in_ki_window(spot: float, s0: float, knocked_in: bool, *, book: str) -> bool:
     """The KI window of the module docstring (the caller has checked that the note is alive)."""
-    return (not knocked_in) and _at_most(spot / (ki_pct * s0) - 1.0, KI_BAND)
-
-
-def book_of(ki_pct: float) -> str:
-    """The book whose KI level is ``ki_pct``; ``StudyDataError`` when there is none."""
-    for name, level in BOOKS.items():
-        if is_close(level, ki_pct):
-            return name
-    raise StudyDataError(f"no book has the KI level {ki_pct}; books are {BOOKS}")
+    return (not knocked_in) and _at_most(spot / book_levels(book, s0)[2] - 1.0, KI_BAND)
 
 
 class KoDirection:
@@ -142,9 +137,8 @@ def calendar_for(chains: Sequence) -> TradingCalendar:
 # ---------------------------------------------------------------------------
 
 
-def expected_solves(chains: Sequence, scan: NoteScan, calendar: TradingCalendar, *,
-                    price_days: Optional[Set[date]] = None, max_days: Optional[int] = None,
-                    ki_pct: float = KI_PCT) -> Dict[str, int]:
+def expected_solves(chains: Sequence, scan: NoteScan, calendar: TradingCalendar, *, book: str,
+                    price_days: Optional[Set[date]] = None, max_days: Optional[int] = None) -> Dict[str, int]:
     """Counts the pass will make for ``scan``'s note, from the chain and the scan record alone: priced days, days in
     each window, and the solves (1 for ``true`` + ``1 + n_ko_shift`` in the KO window + ``n_ki`` in the KI window,
     assuming every first KO gap is non-zero, i.e. every shift model is priced)."""
@@ -153,7 +147,7 @@ def expected_solves(chains: Sequence, scan: NoteScan, calendar: TradingCalendar,
     last = by_day[scan.end_date]
     if max_days is not None:
         last = min(last, i0 + int(max_days))
-    terms = build_terms(scan.inception)
+    terms = book_terms(book, scan.inception)
     s0 = chains[i0].spot
     n_ko_models = sum(1 for m in MODELS.values() if m.window == "ko")      # surv + shifts
     n_ki_models = sum(1 for m in MODELS.values() if m.window == "ki")
@@ -167,11 +161,11 @@ def expected_solves(chains: Sequence, scan: NoteScan, calendar: TradingCalendar,
         out["solves"] += 1
         j = next_ko_index(terms, dc.day)
         n = None if j is None else calendar.between(dc.day, terms.ko_dates[j])
-        if in_ko_window(dc.spot, s0, n):
+        if in_ko_window(dc.spot, s0, n, book=book):
             out["ko_window_days"] += 1
             out["solves"] += n_ko_models
         knocked_in = scan.ki_date is not None and dc.day >= scan.ki_date
-        if in_ki_window(dc.spot, s0, knocked_in, ki_pct):
+        if in_ki_window(dc.spot, s0, knocked_in, book=book):
             out["ki_window_days"] += 1
             out["solves"] += n_ki_models
     return out
@@ -208,11 +202,10 @@ def solve_ladder(engine, product, env, spots: np.ndarray, lifecycle_state, label
 
 
 def aged_model_product(life: NoteLife, model: HedgeModel, terms, s0: float, coupon: float, day: date,
-                       inception: date, env, ko_dir: Optional[int], ki_pct: float = KI_PCT):
-    """``model``'s product for ``day`` in the book whose KI level is ``ki_pct``, aged by the tracker exactly as
-    the true note is."""
+                       inception: date, env, ko_dir: Optional[int], *, book: str):
+    """``model``'s product for ``day`` in ``book``, aged by the tracker exactly as the true note is."""
     elapsed = (day - inception).days / ACT
-    product = model.product(terms, s0, coupon, day, ko_dir, ki_pct)
+    product = model.product(terms, s0, coupon, day, ko_dir, book=book)
     aged = life.tracker.age_copy(product, elapsed, pd.Timestamp(day), env, initial=(day == inception))
     aged = _trim_ko_levels(aged, terms, elapsed)
     left = len(aged.barrier_config.ko_observation_dates or ())
@@ -249,10 +242,9 @@ def _trim_ko_levels(product, terms, elapsed: float):
 
 
 def model_ladder(engine, life: NoteLife, model: HedgeModel, terms, s0: float, coupon: float, day: date,
-                 inception: date, env, spots: np.ndarray, ko_dir: Optional[int],
-                 ki_pct: float = KI_PCT) -> Dict[str, List]:
+                 inception: date, env, spots: np.ndarray, ko_dir: Optional[int], *, book: str) -> Dict[str, List]:
     """The ladder of ``model`` on ``day``: aged variant, the model's lifecycle state (true state except ``kin``)."""
-    product = aged_model_product(life, model, terms, s0, coupon, day, inception, env, ko_dir, ki_pct)
+    product = aged_model_product(life, model, terms, s0, coupon, day, inception, env, ko_dir, book=book)
     return solve_ladder(engine, product, env, spots, model.lifecycle(life.lifecycle), label=f"{model.id} {day}")
 
 
@@ -286,15 +278,17 @@ def gap_ko_engine(payoff: float, obs_date: date, day: date, spots: np.ndarray, s
 # ---------------------------------------------------------------------------
 
 
-def solve_book_coupon(dc, engine, ki_pct: float) -> float:
-    """Coupon with PV = 0 on ``dc`` under hold-forward for the note struck at ``dc.spot`` with KI level ``ki_pct``:
-    the method of ``s2ts.note.solve_coupon`` (PV is affine in the coupon: two probes, one root, one re-price check,
-    fails closed), so ``ki_pct = 0.75`` gives its number."""
-    terms = build_terms(dc.day)
+def solve_book_coupon(dc, engine, book: str) -> float:
+    """The coupon ``book``'s note is booked with on ``dc``. ``ki75``: the coupon with PV = 0 on ``dc`` under
+    hold-forward for the 2Y note struck at ``dc.spot`` (the method of ``s2ts.note.solve_coupon``: PV is affine in the
+    coupon, two probes, one root, one re-price check, fails closed). A seasoned book was sold with the ``ki75`` coupon
+    of its booking day: that is the number returned (it is not solved again for the seasoned contract)."""
+    source = PRODUCT_BOOK if BOOKS[book].elapsed_months else book
+    terms = book_terms(source, dc.day)
     env = make_env(dc, build_curve(dc, COUPON_TAIL, None).to_dividend_yield(FlatRateCurve(RATE)))
 
     def pv_at(c: float) -> float:
-        return float(engine.price(book_note(c, dc.spot, terms, ki_pct), env))
+        return float(engine.price(book_note(c, dc.spot, terms, book=source), env))
 
     c0, c1 = COUPON_PROBES
     v0, v1 = pv_at(c0), pv_at(c1)
@@ -305,38 +299,21 @@ def solve_book_coupon(dc, engine, ki_pct: float) -> float:
     pv = pv_at(coupon)
     tol = COUPON_PV_TOL_FRACTION * NOTIONAL
     if abs(pv) > tol:
-        raise ValidationError(f"{dc.day}: KI {ki_pct}: coupon {coupon:.6f} re-prices to {pv:.4f} > tol {tol:.4f}")
+        raise ValidationError(f"{dc.day}: book {source}: coupon {coupon:.6f} re-prices to {pv:.4f} > tol {tol:.4f}")
     return float(coupon)
 
 
-def coupon_stamp_parts(*, s2ts_dir: Optional[Path] = None, data_digest: Optional[str] = None,
-                       pkg_dir: Optional[Path] = None) -> Dict[str, Any]:
-    """What a solved coupon depends on: the chain's content hash, the ``s2ts`` files, the engine parameters, the
-    book levels and this file (``solve_book_coupon`` lives here), so an edit of the solver re-solves the cache."""
-    from quantark.asset.equity.param import QuadV2Params
-
-    s2ts_dir = (STUDY_DIR.parent / "snowball_2y_tail_stability" / "s2ts") if s2ts_dir is None else Path(s2ts_dir)
-    return {
-        "data": chain_digest() if data_digest is None else data_digest,
-        "s2ts": {name: _file_digest(s2ts_dir / name) for name in S2TS_FILES},
-        "engine": repr(QuadV2Params()),
-        "books": dict(BOOKS),
-        "solver": _file_digest((Path(__file__).resolve().parent if pkg_dir is None else Path(pkg_dir)) / "pricing.py"),
-    }
-
-
-def coupon_stamp(*, s2ts_dir: Optional[Path] = None, data_digest: Optional[str] = None,
-                 pkg_dir: Optional[Path] = None) -> str:
-    """Hash of ``coupon_stamp_parts``."""
-    canonical = json.dumps(coupon_stamp_parts(s2ts_dir=s2ts_dir, data_digest=data_digest, pkg_dir=pkg_dir), sort_keys=True,
-                           separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+def coupon_stamp(*, pkg_dir: Optional[Path] = None, s2ts_dir: Optional[Path] = None,
+                 data_digest: Optional[str] = None) -> str:
+    """What a solved coupon is stamped with: the full pricing fingerprint (``pricing_fingerprint``), so an edit of
+    the models, the pricing code, the books, the ``s2ts`` files, the engine parameters or the data re-solves it."""
+    return pricing_fingerprint(pkg_dir=pkg_dir, s2ts_dir=s2ts_dir, data_digest=data_digest)
 
 
 def book_coupons(ids: Sequence[str], path: Path, stamp: str, solver) -> Dict[str, float]:
     """``{note id: coupon}`` for the note ids ``"<book>:<inception>"``, solved with ``solver(book, inception)`` and
     cached in ``path`` together with ``stamp``; a cache stamped differently (or unreadable) is discarded and every
-    requested coupon is re-solved."""
+    requested coupon is re-solved. The cache is written after each solved coupon, so an interrupted run keeps them."""
     from .events import parse_note_id
 
     path = Path(path)
@@ -348,14 +325,13 @@ def book_coupons(ids: Sequence[str], path: Path, stamp: str, solver) -> Dict[str
     except (OSError, ValueError):
         pass
     out: Dict[str, float] = {}
-    changed = False
     for nid in ids:
         if nid not in cached:
             book, inception = parse_note_id(nid)
             cached[nid] = float(solver(book, inception))
-            changed = True
+            write_json_atomic(path, {"stamp": stamp, "coupons": cached})
         out[nid] = cached[nid]
-    if changed or not path.exists():
+    if not path.exists():
         write_json_atomic(path, {"stamp": stamp, "coupons": cached})
     return out
 
@@ -373,15 +349,26 @@ class NoteStates:
 
     inception: date
     coupon: float
+    book: str
     days: List[Dict[str, Any]] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=dict)
-    book: str = "ki75"
-    ki_pct: float = KI_PCT
+
+    @property
+    def ki_pct(self) -> float:
+        """The book's KI level over its strike."""
+        return BOOKS[self.book].ki_pct
 
     def to_json(self, fingerprint: Optional[str] = None) -> Dict[str, Any]:
+        """The state file: ``note`` / ``book`` / ``ki_pct`` / ``inception`` / ``coupon`` / ``days`` / ``meta`` (what the
+        ledger reads) and the book's contract: ``spec`` (the pre-registered book) and the booking-day ``spot0``,
+        ``strike``, ``ko_level`` and ``ki_level`` in index points."""
+        spot0 = float(self.days[0]["spot"]) if self.days else None
         out: Dict[str, Any] = {"note": note_id(self.book, self.inception), "book": self.book, "ki_pct": self.ki_pct,
                                "inception": self.inception.isoformat(), "coupon": self.coupon,
-                               "days": self.days, "meta": self.meta}
+                               "days": self.days, "meta": self.meta, "spec": asdict(BOOKS[self.book])}
+        if spot0 is not None:
+            strike, ko_level, ki_level = book_levels(self.book, spot0)
+            out.update(spot0=spot0, strike=strike, ko_level=ko_level, ki_level=ki_level)
         if fingerprint is not None:
             out["fingerprint"] = fingerprint
         return out
@@ -407,16 +394,15 @@ def _check_against_scan(scan: NoteScan, ko_date: Optional[date], ki_date: Option
 
 
 def price_note(inception: date, coupon: float, chains: Sequence, anchors: Mapping[date, float], scan: NoteScan, *,
-               ki_pct: float = KI_PCT, engine=None, price_days: Optional[Set[date]] = None,
+               book: str, engine=None, price_days: Optional[Set[date]] = None,
                max_days: Optional[int] = None) -> NoteStates:
-    """The recorded states of one note of the book whose KI level is ``ki_pct`` (module docstring); ``scan`` must be
-    that book's scan record. ``price_days`` / ``max_days`` are for tests and diagnostics (the lifecycle is stepped
-    on every day, only those days are priced / the run stops after ``max_days`` days). Raises ``StudyDataError``
-    when the realised lifecycle differs from ``scan``."""
+    """The recorded states of one note of ``book`` (module docstring); ``scan`` must be that book's scan record.
+    ``price_days`` / ``max_days`` are for tests and diagnostics (the lifecycle is stepped on every day, only those
+    days are priced / the run stops after ``max_days`` days). Raises ``StudyDataError`` when the realised lifecycle
+    differs from ``scan``."""
     started = time.perf_counter()
-    book = book_of(ki_pct)
-    if not is_close(scan.ki_pct, ki_pct):
-        raise StudyDataError(f"scan of {scan.inception} is for KI {scan.ki_pct}, not book {book} ({ki_pct})")
+    if scan.book != book:
+        raise StudyDataError(f"scan of {scan.inception} is for book {scan.book}, not book {book}")
     engine = engine if engine is not None else v2_engine()
     by_day = {c.day: i for i, c in enumerate(chains)}
     if inception not in by_day:
@@ -427,11 +413,11 @@ def price_note(inception: date, coupon: float, chains: Sequence, anchors: Mappin
     if max_days is not None:
         path = path[: int(max_days) + 1]
     calendar = calendar_for(chains)
-    terms = build_terms(inception)
+    terms = book_terms(book, inception)
     s0 = float(path[0].spot)
-    barrier = KO_PCT * s0
+    _, barrier, _ = book_levels(book, s0)
     rate_curve = FlatRateCurve(RATE)
-    life = NoteLife(book_note(coupon, s0, terms, ki_pct), inception)
+    life = NoteLife(book_note(coupon, s0, terms, book=book), inception)
     ko_direction = KoDirection()
     ladder = np.asarray(LADDER, dtype=float)
     ko_models = [m for m in MODELS.values() if m.window == "ko" and not m.disable_next_ko]
@@ -472,10 +458,11 @@ def price_note(inception: date, coupon: float, chains: Sequence, anchors: Mappin
         states = rec["states"]
         states["true"] = solve_ladder(engine, nd.product, env, spots, life.lifecycle, label=f"true {day}")
         solves += 1
-        if in_ko_window(dc.spot, s0, days_to_ko):
+        if in_ko_window(dc.spot, s0, days_to_ko, book=book):
             ko_window_days += 1
             surv = MODELS["surv"]
-            states["surv"] = model_ladder(engine, life, surv, terms, s0, coupon, day, inception, env, spots, None, ki_pct)
+            states["surv"] = model_ladder(engine, life, surv, terms, s0, coupon, day, inception, env, spots, None,
+                                          book=book)
             solves += 1
             payoff = ko_cash(nd.product, env, next_ko, day, terms)
             gap = gap_ko_engine(payoff, next_ko, day, spots, states["surv"]["engine_price"], barrier)
@@ -484,27 +471,27 @@ def price_note(inception: date, coupon: float, chains: Sequence, anchors: Mappin
             if rec["ko_dir"] != 0:
                 for model in ko_models:
                     states[model.id] = model_ladder(engine, life, model, terms, s0, coupon, day, inception, env,
-                                                    spots, rec["ko_dir"], ki_pct)
+                                                    spots, rec["ko_dir"], book=book)
                     solves += 1
-        if in_ki_window(dc.spot, s0, nd.knocked_in, ki_pct):
+        if in_ki_window(dc.spot, s0, nd.knocked_in, book=book):
             ki_window_days += 1
             for model in ki_models:
                 states[model.id] = model_ladder(engine, life, model, terms, s0, coupon, day, inception, env,
-                                                spots, None, ki_pct)
+                                                spots, None, book=book)
                 solves += 1
 
     natural = (not alive) or path[-1].day == chains[-1].day
     last_day = days[-1]["date"]
     _check_against_scan(scan, ko_date, ki_date, end_reason, date.fromisoformat(last_day), path[-1].day, natural)
     meta = {
-        "book": book, "ki_pct": float(ki_pct), "coupon": float(coupon), "solves": solves, "seconds": time.perf_counter() - started,
+        "book": book, "ki_pct": BOOKS[book].ki_pct, "coupon": float(coupon), "solves": solves, "seconds": time.perf_counter() - started,
         "ko_window_days": ko_window_days, "ki_window_days": ki_window_days, "live_days": len(days),
         "end_reason": end_reason, "end_date": last_day, "ko_date": None if ko_date is None else ko_date.isoformat(),
         "ki_date": None if ki_date is None else ki_date.isoformat(), "tail": TAIL,
         "max_days": max_days, "price_days": None if price_days is None else sorted(d.isoformat() for d in price_days),
         "ladder": list(LADDER),
     }
-    return NoteStates(inception, float(coupon), days, meta, book, float(ki_pct))
+    return NoteStates(inception, float(coupon), book, days, meta)
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +539,7 @@ def pricing_fingerprint(*, pkg_dir: Optional[Path] = None, s2ts_dir: Optional[Pa
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def states_path(out_dir: Path, inception: date, book: str = "ki75") -> Path:
+def states_path(out_dir: Path, inception: date, book: str) -> Path:
     """``out_dir/<book>__<inception>.json``."""
     return Path(out_dir) / f"{book}__{inception.isoformat()}.json"
 
@@ -584,11 +571,10 @@ def read_current(path: Path, note: str, fingerprint: str, coupon: float) -> Opti
 
 
 def price_one(inception: date, coupon: float, chains: Sequence, anchors: Mapping[date, float], scan: NoteScan,
-              out_dir: Path, fingerprint: str, *, ki_pct: float = KI_PCT, engine=None,
+              out_dir: Path, fingerprint: str, *, book: str, engine=None,
               price_days: Optional[Set[date]] = None, max_days: Optional[int] = None) -> Dict[str, Any]:
     """Price one note into ``out_dir`` unless a complete file for this coupon stamped ``fingerprint`` is already
     there. Returns ``{"note", "inception", "reused", "seconds", "solves", "live_days"}``."""
-    book = book_of(ki_pct)
     nid = note_id(book, inception)
     path = states_path(out_dir, inception, book)
     cached = read_current(path, nid, fingerprint, coupon)
@@ -597,7 +583,7 @@ def price_one(inception: date, coupon: float, chains: Sequence, anchors: Mapping
         return {"note": nid, "inception": inception.isoformat(), "reused": True, "seconds": 0.0,
                 "solves": int(meta.get("solves", 0)), "live_days": len(cached["days"])}
     started = time.perf_counter()
-    states = price_note(inception, coupon, chains, anchors, scan, ki_pct=ki_pct, engine=engine,
+    states = price_note(inception, coupon, chains, anchors, scan, book=book, engine=engine,
                         price_days=price_days, max_days=max_days)
     write_states_atomic(path, states.to_json(fingerprint))
     return {"note": nid, "inception": inception.isoformat(), "reused": False,

@@ -15,6 +15,20 @@ model id            definition                                                  
 ``kin``             the note priced with a copy of the lifecycle state, knocked in    KI window
 ==================  ================================================================  ===========
 
+Books (``gpin.events.BOOKS``): every model is built off the book's terms (``book_terms``), levels (``book_levels``) and
+payoffs (``book_note``). The 2Y product (``ki75``) is ``s2ts.note.build_note``'s contract. The seasoned book
+(``seas6``: 18 months elapsed, 6 to run) pays what a 2Y note that has already run 18 months pays, built through the
+same factory and the same configuration fields, with no back-dated lifecycle (``e`` = elapsed years, ``c`` the
+coupon, ``t`` the time from the booking day, one unit = ``NOTIONAL`` at the strike):
+
+* KO cash at an observation ``c x (e + t) x NOTIONAL``: ``accrual_factors`` = ``[e + t_i]`` (``AccrualConfig``) with the
+  scalar annualized ``ko_rate = c``; an explicit factor is the observation's cumulative accrual and ageing takes the
+  observations behind the valuation date off its front, as it does the barrier levels;
+* the payment at maturity when never knocked in ``c x (e + T) x NOTIONAL``: a flat rebate (``is_annualized_rebate``
+  False) of ``c x (e + T)``;
+* knocked in and not knocked out at maturity: the put loss on the strike, ``max(0, strike - S_T) x NOTIONAL / strike``
+  paid to the seller (the standard knock-in leg, flat), with ``contract_multiplier = NOTIONAL / strike``.
+
 ``ko_dir`` is the pricing pass's choice of the over-hedge direction for one observation (-1 when redemption costs
 the seller, see ``gpin.pricing``). Products are built unaged and numeric exactly as ``s2ts.note.build_note`` builds
 the note, except for the per-observation KO barrier list; the pricing pass ages them with the tracker's
@@ -40,14 +54,16 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
 from s2ts import NOTIONAL
-from s2ts.note import KI_PCT, KO_PCT, Terms
+from s2ts.note import Terms
 
 from . import load_prereg
+from .events import BOOKS, book_levels
 
 #: Barrier multiple (of the strike) that disables a KO observation: no path reaches it.
 SURV_OFF_MULTIPLE = 1.0e3
 
 WINDOWS = ("always", "ko", "ki")
+MONTHS_PER_YEAR = 12.0
 
 
 @dataclass(frozen=True)
@@ -68,27 +84,11 @@ class HedgeModel:
         """True for the models that move the KO barrier in the over-hedge direction."""
         return not is_zero(self.ko_shift)
 
-    def product(self, terms: Terms, s0: float, coupon: float, day: date, ko_dir: Optional[int],
-                ki_pct: float = KI_PCT):
-        """The unaged numeric note with this model's barrier schedule, valued on ``day`` (``day`` only decides
-        which KO observation ``surv`` disables). ``ki_pct``: the book's KI level; ``ki_shift`` is relative to it."""
-        return create_standard_snowball(
-            initial_price=s0,
-            strike=s0,
-            maturity=terms.maturity_years,
-            contract_multiplier=NOTIONAL / s0,
-            ko_barrier=ko_levels(self, terms, day, ko_dir, s0=s0),
-            ko_rate=float(coupon),
-            ki_barrier=ki_level(self, s0, ki_pct),
-            num_observations=len(terms.ko_times),
-            is_reverse=False,
-            ko_observation_dates=list(terms.ko_times),
-            ki_continuous=False,
-            ki_observation_type=ObservationType.DISCRETE,
-            ki_observation_dates=list(terms.ki_times),
-            rebate_rate=float(coupon),
-            include_principal=False,
-        )
+    def product(self, terms: Terms, s0: float, coupon: float, day: date, ko_dir: Optional[int], *, book: str):
+        """The unaged numeric note of ``book`` booked at ``s0`` with this model's barrier schedule, valued on ``day``
+        (``day`` only decides which KO observation ``surv`` disables). ``ki_shift`` is relative to the book's KI level."""
+        return book_snowball(book, terms, s0, coupon, ko_levels(self, terms, day, ko_dir, s0, book=book),
+                             ki_level(self, s0, book=book))
 
     def lifecycle(self, state: Any) -> Any:
         """The lifecycle state to price with: ``kin`` a deep copy with ``knocked_in`` forced on, every other model
@@ -109,11 +109,13 @@ def next_ko_index(terms: Terms, day: date) -> Optional[int]:
     return None
 
 
-def ko_levels(model: HedgeModel, terms: Terms, day: date, ko_dir: Optional[int], s0: float = 1.0) -> List[float]:
-    """One KO barrier level per observation of the term sheet, as ``build_note`` takes them (past observations
-    included; ageing drops them). Levels are in index points for ``s0`` (relative to the strike by default).
-    ``surv`` sets the next observation's barrier to ``SURV_OFF_MULTIPLE x s0``."""
-    base = KO_PCT * s0
+def ko_levels(model: HedgeModel, terms: Terms, day: date, ko_dir: Optional[int], s0: float = 1.0, *,
+              book: str) -> List[float]:
+    """One KO barrier level per observation of the term sheet, as ``book_snowball`` takes them (past observations
+    included; ageing drops them). Levels are in index points for a booking at ``s0`` (relative to the booking spot by
+    default). ``surv`` sets the next observation's barrier to ``SURV_OFF_MULTIPLE x strike``."""
+    strike, ko_level, _ = book_levels(book, s0)
+    base = ko_level
     if model.needs_ko_dir:
         if ko_dir not in (-1, 1):
             raise ValidationError(f"model {model.id} shifts the KO barrier and needs ko_dir -1 or +1, got {ko_dir!r}")
@@ -123,27 +125,29 @@ def ko_levels(model: HedgeModel, terms: Terms, day: date, ko_dir: Optional[int],
         i = next_ko_index(terms, day)
         if i is None:
             raise ValidationError(f"{model.id}: no KO observation after {day}")
-        levels[i] = SURV_OFF_MULTIPLE * s0
+        levels[i] = SURV_OFF_MULTIPLE * strike
     return levels
 
 
-def ki_level(model: HedgeModel, s0: float, ki_pct: float = KI_PCT) -> float:
-    """The KI barrier level (index points for ``s0``) of this model in the book whose KI level is ``ki_pct``:
-    ``ki_pct x s0 x (1 + ki_shift)``."""
-    return ki_pct * s0 * (1.0 + model.ki_shift)
+def ki_level(model: HedgeModel, s0: float, *, book: str) -> float:
+    """The KI barrier level (index points) of this model in ``book`` booked at ``s0``: the book's KI level x
+    ``(1 + ki_shift)``."""
+    return book_levels(book, s0)[2] * (1.0 + model.ki_shift)
 
 
-def book_note(coupon: float, s0: float, terms: Terms, ki_pct: float = KI_PCT):
-    """The book's note: ``s2ts.note.build_note`` (one scalar KO level) with the KI level ``ki_pct``; the same
-    factory call, so at 0.75 it is ``build_note``'s note exactly (``s2ts`` hardcodes 75%)."""
-    return create_standard_snowball(
-        initial_price=s0,
-        strike=s0,
+def book_snowball(book: str, terms: Terms, s0: float, coupon: float, ko_barrier, ki_barrier):
+    """The numeric snowball of ``book`` booked at ``s0`` with the given KO barrier (a level or one per observation)
+    and KI barrier: strike and one unit's notional per ``book_levels``, the payoffs of the module docstring."""
+    spec = BOOKS[book]
+    strike, _, _ = book_levels(book, s0)
+    config = dict(
+        initial_price=strike,
+        strike=strike,
         maturity=terms.maturity_years,
-        contract_multiplier=NOTIONAL / s0,
-        ko_barrier=KO_PCT * s0,
+        contract_multiplier=NOTIONAL / strike,
+        ko_barrier=ko_barrier,
         ko_rate=float(coupon),
-        ki_barrier=ki_pct * s0,
+        ki_barrier=ki_barrier,
         num_observations=len(terms.ko_times),
         is_reverse=False,
         ko_observation_dates=list(terms.ko_times),
@@ -153,6 +157,21 @@ def book_note(coupon: float, s0: float, terms: Terms, ki_pct: float = KI_PCT):
         rebate_rate=float(coupon),
         include_principal=False,
     )
+    if spec.elapsed_months:
+        elapsed = spec.elapsed_months / MONTHS_PER_YEAR
+        config.update(
+            accrual_factors=[elapsed + t for t in terms.ko_times],
+            rebate_rate=float(coupon) * (elapsed + terms.maturity_years),
+            is_annualized_rebate=False,
+        )
+    return create_standard_snowball(**config)
+
+
+def book_note(coupon: float, s0: float, terms: Terms, *, book: str):
+    """``book``'s true note: ``book_snowball`` with one scalar KO level and the book's KI level. For ``ki75`` it is
+    ``s2ts.note.build_note``'s note exactly (the same factory call)."""
+    _, ko_level, ki = book_levels(book, s0)
+    return book_snowball(book, terms, s0, coupon, ko_level, ki)
 
 
 def _tag(value: float) -> str:

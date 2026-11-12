@@ -860,19 +860,19 @@ def test_ko_levels_are_hand_computed_for_both_directions():
     n = len(terms.ko_dates)
     assert terms.ko_dates[0] == date(2024, 5, 29) and n == 22
     day = date(2024, 5, 28)
-    assert m.ko_levels(m.MODELS["true"], terms, day, -1, s0=S0_FIXED) == [S0_FIXED] * n
+    assert m.ko_levels(m.MODELS["true"], terms, day, -1, s0=S0_FIXED, book="ki75") == [S0_FIXED] * n
     for size_id, size in (("ko_s050", 0.005), ("ko_s100", 0.01), ("ko_s300", 0.03)):
-        down = m.ko_levels(m.MODELS[size_id], terms, day, -1, s0=S0_FIXED)
-        up = m.ko_levels(m.MODELS[size_id], terms, day, +1, s0=S0_FIXED)
+        down = m.ko_levels(m.MODELS[size_id], terms, day, -1, s0=S0_FIXED, book="ki75")
+        up = m.ko_levels(m.MODELS[size_id], terms, day, +1, s0=S0_FIXED, book="ki75")
         assert down == pytest.approx([S0_FIXED * (1 - size)] * n, rel=1e-15)
         assert up == pytest.approx([S0_FIXED * (1 + size)] * n, rel=1e-15)
     # the wrong-way control moves the booked level the other way
-    assert m.ko_levels(m.MODELS["ko_w100"], terms, day, -1, s0=S0_FIXED) == pytest.approx([S0_FIXED * 1.01] * n, rel=1e-15)
-    assert m.ko_levels(m.MODELS["ko_w100"], terms, day, +1, s0=S0_FIXED) == pytest.approx([S0_FIXED * 0.99] * n, rel=1e-15)
+    assert m.ko_levels(m.MODELS["ko_w100"], terms, day, -1, s0=S0_FIXED, book="ki75") == pytest.approx([S0_FIXED * 1.01] * n, rel=1e-15)
+    assert m.ko_levels(m.MODELS["ko_w100"], terms, day, +1, s0=S0_FIXED, book="ki75") == pytest.approx([S0_FIXED * 0.99] * n, rel=1e-15)
     # relative levels by default (strike = 1)
-    assert m.ko_levels(m.MODELS["ko_s200"], terms, day, -1) == pytest.approx([0.98] * n, rel=1e-15)
+    assert m.ko_levels(m.MODELS["ko_s200"], terms, day, -1, book="ki75") == pytest.approx([0.98] * n, rel=1e-15)
     # a model that does not shift the KO barrier ignores the direction (and needs none)
-    assert m.ko_levels(m.MODELS["ki_m100"], terms, day, None, s0=S0_FIXED) == [S0_FIXED] * n
+    assert m.ko_levels(m.MODELS["ki_m100"], terms, day, None, s0=S0_FIXED, book="ki75") == [S0_FIXED] * n
 
 
 def test_surv_disables_exactly_the_next_observation():
@@ -885,7 +885,7 @@ def test_surv_disables_exactly_the_next_observation():
                      (terms.ko_dates[0], 1),                       # the observation day itself is already processed
                      (terms.ko_dates[0] + timedelta(days=1), 1),
                      (terms.ko_dates[4], 5)):
-        lv = m.ko_levels(m.MODELS["surv"], terms, day, None, s0=S0_FIXED)
+        lv = m.ko_levels(m.MODELS["surv"], terms, day, None, s0=S0_FIXED, book="ki75")
         assert [i for i, x in enumerate(lv) if x == off] == [idx], day
         assert all(x == S0_FIXED for i, x in enumerate(lv) if i != idx)
 
@@ -899,16 +899,16 @@ def test_shift_models_require_a_direction():
     for mid in ("ko_s100", "ko_w100"):
         for bad in (None, 0):
             with pytest.raises(ValidationError):
-                m.ko_levels(m.MODELS[mid], terms, PROBE_DAY, bad, s0=S0_FIXED)
+                m.ko_levels(m.MODELS[mid], terms, PROBE_DAY, bad, s0=S0_FIXED, book="ki75")
 
 
 def test_ki_level_is_hand_computed():
     m = _models()
-    assert m.ki_level(m.MODELS["true"], S0_FIXED) == pytest.approx(0.75 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["ki_m100"], S0_FIXED) == pytest.approx(0.75 * 0.99 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["ki_m200"], S0_FIXED) == pytest.approx(0.75 * 0.98 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["ki_p100"], S0_FIXED) == pytest.approx(0.75 * 1.01 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["kin"], S0_FIXED) == pytest.approx(0.75 * S0_FIXED, rel=1e-15)
+    assert m.ki_level(m.MODELS["true"], S0_FIXED, book="ki75") == pytest.approx(0.75 * S0_FIXED, rel=1e-15)
+    assert m.ki_level(m.MODELS["ki_m100"], S0_FIXED, book="ki75") == pytest.approx(0.75 * 0.99 * S0_FIXED, rel=1e-15)
+    assert m.ki_level(m.MODELS["ki_m200"], S0_FIXED, book="ki75") == pytest.approx(0.75 * 0.98 * S0_FIXED, rel=1e-15)
+    assert m.ki_level(m.MODELS["ki_p100"], S0_FIXED, book="ki75") == pytest.approx(0.75 * 1.01 * S0_FIXED, rel=1e-15)
+    assert m.ki_level(m.MODELS["kin"], S0_FIXED, book="ki75") == pytest.approx(0.75 * S0_FIXED, rel=1e-15)
 
 
 def test_product_carries_the_levels_and_the_true_product_is_the_note():
@@ -917,14 +917,14 @@ def test_product_carries_the_levels_and_the_true_product_is_the_note():
     m = _models()
     terms = build_terms(PROBE_INCEPTION)
     note = build_note(PROBE_COUPON, S0_FIXED, terms)
-    true = m.MODELS["true"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, None)
+    true = m.MODELS["true"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, None, book="ki75")
     # build_note books one scalar level, a model one level per observation (the same schedule)
     assert list(true.barrier_config.ko_barrier) == [note.barrier_config.ko_barrier] * 22
     assert true.barrier_config.ki_barrier == note.barrier_config.ki_barrier
     assert true.maturity == note.maturity and true.contract_multiplier == note.contract_multiplier
-    shifted = m.MODELS["ko_s100"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, -1)
+    shifted = m.MODELS["ko_s100"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, -1, book="ki75")
     assert list(shifted.barrier_config.ko_barrier) == pytest.approx([S0_FIXED * 0.99] * 22, rel=1e-15)
-    ki = m.MODELS["ki_m200"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, None)
+    ki = m.MODELS["ki_m200"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, None, book="ki75")
     assert ki.barrier_config.ki_barrier == pytest.approx(0.75 * 0.98 * S0_FIXED, rel=1e-15)
 
 
@@ -1008,21 +1008,22 @@ def probe_states(real_chains, real_anchors, probe_scan, engine):
 
     days = {PROBE_MID_DAY, PROBE_FIRST_WINDOW_DAY, PROBE_DAY}
     states = price_note(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan,
-                        engine=engine, price_days=days)
+                        engine=engine, price_days=days, book="ki75")
     return states, {r["date"]: r for r in states.days}
 
 
-def _step_life(real_chains, real_anchors, inception, coupon, until, ki_pct=0.75):
+def _step_life(real_chains, real_anchors, inception, coupon, until, book="ki75"):
     """Step a NoteLife to ``until`` as the pricing pass does; returns (life, dc, env, nd, curve)."""
     from quantark.param import FlatRateCurve
     from s2ts import RATE
-    from s2ts.note import NoteLife, build_note, build_terms, make_env
+    from s2ts.note import NoteLife, make_env
     from s2ts.tails import build_curve
 
     i0 = next(i for i, c in enumerate(real_chains) if c.day == inception)
+    from gpin.events import book_terms
     from gpin.models import book_note
 
-    life = NoteLife(book_note(coupon, real_chains[i0].spot, build_terms(inception), ki_pct), inception)
+    life = NoteLife(book_note(coupon, real_chains[i0].spot, book_terms(book, inception), book=book), inception)
     for dc in real_chains[i0:]:
         curve = build_curve(dc, gpin.TAIL, real_anchors.get(dc.day))
         env = make_env(dc, curve.to_dividend_yield(FlatRateCurve(RATE)))
@@ -1135,7 +1136,7 @@ def test_true_model_ladder_equals_the_note_built_by_build_note(probe_run, probe_
     s0 = probe_run.s0
     spots = dc.spot * (1.0 + np.asarray(gpin.LADDER))
     rebuilt = model_ladder(engine, life, MODELS["true"], build_terms(PROBE_INCEPTION), s0, PROBE_COUPON, PROBE_DAY,
-                           PROBE_INCEPTION, env, spots, None)
+                           PROBE_INCEPTION, env, spots, None, book="ki75")
     assert rebuilt["engine_price"] == pytest.approx(r["states"]["true"]["engine_price"], abs=1e-9)
     assert rebuilt["engine_delta"] == pytest.approx(r["states"]["true"]["engine_delta"], abs=1e-9)
 
@@ -1171,10 +1172,10 @@ def test_expected_solves_equals_the_solves_made(real_chains, probe_scan, probe_s
 
     states, _ = probe_states
     plan = expected_solves(real_chains, probe_scan, calendar_for(real_chains),
-                           price_days={PROBE_MID_DAY, PROBE_FIRST_WINDOW_DAY, PROBE_DAY})
+                           price_days={PROBE_MID_DAY, PROBE_FIRST_WINDOW_DAY, PROBE_DAY}, book="ki75")
     assert plan["solves"] == states.meta["solves"] == 3 + 2 * 7
     assert plan["priced_days"] == 3 and plan["ko_window_days"] == states.meta["ko_window_days"] == 2
-    full = expected_solves(real_chains, probe_scan, calendar_for(real_chains))
+    full = expected_solves(real_chains, probe_scan, calendar_for(real_chains), book="ki75")
     assert (full["priced_days"], full["ko_window_days"], full["solves"]) == (59, 10, 59 + 10 * 7)
 
 
@@ -1189,9 +1190,9 @@ def test_the_pass_raises_when_the_tracker_disagrees_with_the_scan(real_chains, r
                      dataclasses.replace(probe_scan, end_date=date(2024, 6, 3))):
         with pytest.raises(StudyDataError, match="disagrees with the scan"):
             price_note(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, doctored,
-                       engine=engine, price_days=set())
+                       engine=engine, price_days=set(), book="ki75")
     ok = price_note(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan,
-                    engine=engine, price_days=set())
+                    engine=engine, price_days=set(), book="ki75")
     assert ok.meta["solves"] == 0 and len(ok.days) == 60 and all(r["states"] == {} for r in ok.days)
 
 
@@ -1201,12 +1202,12 @@ def test_a_horizon_is_checked_only_inside_itself(real_chains, real_anchors, prob
     from gpin.pricing import price_note
 
     short = price_note(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan,
-                       engine=engine, price_days=set(), max_days=20)
+                       engine=engine, price_days=set(), max_days=20, book="ki75")
     assert len(short.days) == 21 and short.meta["end_reason"] == "truncated"
     inside = dataclasses.replace(probe_scan, ko_date=date(2024, 3, 20))
     with pytest.raises(StudyDataError, match="disagrees with the scan"):
         price_note(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, inside,
-                   engine=engine, price_days=set(), max_days=20)
+                   engine=engine, price_days=set(), max_days=20, book="ki75")
 
 
 def test_a_second_run_reuses_a_complete_stamped_file_and_a_diagnostic_or_new_fingerprint_does_not(
@@ -1214,25 +1215,25 @@ def test_a_second_run_reuses_a_complete_stamped_file_and_a_diagnostic_or_new_fin
     from gpin.pricing import price_one, states_path, write_states_atomic
 
     kw = dict(engine=engine, price_days=set(), max_days=5)
-    first = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw)
+    first = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw, book="ki75")
     path = states_path(tmp_path, PROBE_INCEPTION, "ki75")
     assert path.name == "ki75__2024-02-29.json" and first["note"] == "ki75:2024-02-29"
     stamp = path.stat().st_mtime_ns
     assert first["reused"] is False and json.loads(path.read_text())["fingerprint"] == "fpA"
     # a run written with max_days / price_days is a diagnostic: never reused, even with the same stamp
-    again = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw)
+    again = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw, book="ki75")
     assert again["reused"] is False and path.stat().st_mtime_ns != stamp
     # a complete file (here: the same record with the diagnostics cleared) is reused under its fingerprint and coupon
     full = json.loads(path.read_text())
     full["meta"].update(max_days=None, price_days=None)
     write_states_atomic(path, full)
     stamp = path.stat().st_mtime_ns
-    hit = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw)
+    hit = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw, book="ki75")
     assert hit["reused"] is True and path.stat().st_mtime_ns == stamp
-    new_coupon = price_one(PROBE_INCEPTION, PROBE_COUPON + 0.01, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw)
+    new_coupon = price_one(PROBE_INCEPTION, PROBE_COUPON + 0.01, real_chains, real_anchors, probe_scan, tmp_path, "fpA", **kw, book="ki75")
     assert new_coupon["reused"] is False and json.loads(path.read_text())["coupon"] == PROBE_COUPON + 0.01
     write_states_atomic(path, full)
-    other = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpB", **kw)
+    other = price_one(PROBE_INCEPTION, PROBE_COUPON, real_chains, real_anchors, probe_scan, tmp_path, "fpB", **kw, book="ki75")
     assert other["reused"] is False and json.loads(path.read_text())["fingerprint"] == "fpB"
     assert not list(tmp_path.glob("*.tmp"))
 
@@ -1260,8 +1261,8 @@ def test_kin_differs_from_true_before_the_knock_in_equals_it_after_and_spares_th
         life, dc, env, nd, _ = _step_life(real_chains, real_anchors, note.inception, PROBE_COUPON, until)
         assert nd.knocked_in is equal
         spots = dc.spot * (1.0 + np.asarray(gpin.LADDER))
-        true = model_ladder(engine, life, MODELS["true"], terms, s0, PROBE_COUPON, until, note.inception, env, spots, None)
-        kin = model_ladder(engine, life, MODELS["kin"], terms, s0, PROBE_COUPON, until, note.inception, env, spots, None)
+        true = model_ladder(engine, life, MODELS["true"], terms, s0, PROBE_COUPON, until, note.inception, env, spots, None, book="ki75")
+        kin = model_ladder(engine, life, MODELS["kin"], terms, s0, PROBE_COUPON, until, note.inception, env, spots, None, book="ki75")
         diff = max(abs(a - b) for a, b in zip(true["engine_price"], kin["engine_price"]))
         assert (diff == 0.0) is equal, (until, diff)
         assert life.lifecycle.knocked_in is equal                  # the tracker's state is unchanged
@@ -1269,11 +1270,225 @@ def test_kin_differs_from_true_before_the_knock_in_equals_it_after_and_spares_th
     from gpin.pricing import price_note
 
     states = price_note(note.inception, PROBE_COUPON, real_chains, real_anchors, note,
-                        engine=engine, price_days={before, note.ki_date}, max_days=days.index(note.ki_date) - days.index(note.inception))
+                        engine=engine, price_days={before, note.ki_date}, max_days=days.index(note.ki_date) - days.index(note.inception), book="ki75")
     by = {r["date"]: r for r in states.days}
     assert {"ki_m100", "ki_m200", "ki_p100", "kin"} <= set(by[before.isoformat()]["states"])
     assert not {"ki_m100", "ki_m200", "ki_p100", "kin"} & set(by[note.ki_date.isoformat()]["states"])
     assert by[note.ki_date.isoformat()]["knocked_in"] is True
+
+
+# ---------------------------------------------------------------------------
+# T3c — the seasoned book's payoffs, proved on the library lifecycle and on the QUAD V2 engine
+# ---------------------------------------------------------------------------
+
+SEAS_COUPON = 0.20
+SEAS_S0 = 100.0
+SEAS_ELAPSED = 1.5          # 18 months
+
+
+def seasoned_life(path, coupon: float = SEAS_COUPON, inception: date = START):
+    """Step the seas6 note booked at ``inception`` (spot 100) through ``path`` with ``s2ts.note.NoteLife`` (the
+    library tracker, no pricing): ``(reason, end_day, cash, ki_day, steps)`` with ``cash`` the holder-side cash of
+    the day the note ended (``steps``: ``[(day, NoteDay)]``)."""
+    from gpin.events import book_terms
+    from gpin.models import book_note
+    from s2ts.note import NoteLife, make_env
+
+    life = NoteLife(book_note(coupon, SEAS_S0, book_terms("seas6", inception), book="seas6"), inception)
+    ki_day, steps = None, []
+    for bar in path:
+        dc = SimpleNamespace(day=bar.day, spot=bar.spot, mo=SimpleNamespace(vol=0.2))
+        nd = life.step(dc, make_env(dc, None))
+        steps.append((bar.day, nd))
+        if nd.knocked_in and ki_day is None:
+            ki_day = bar.day
+        if not nd.alive:
+            return nd.end_reason, bar.day, nd.cash, ki_day, steps
+    return "truncated", path[-1].day, 0.0, ki_day, steps
+
+
+def test_seas6_note_is_priced_off_the_strike_with_the_unit_at_the_strike():
+    from gpin.events import book_levels, book_terms
+    from gpin.models import book_note
+    from s2ts import NOTIONAL
+
+    terms = book_terms("seas6", START)
+    note = book_note(SEAS_COUPON, SEAS_S0, terms, book="seas6")
+    strike, ko, ki = book_levels("seas6", SEAS_S0)
+    assert note.strike == note.initial_price == pytest.approx(strike, rel=1e-15)
+    assert note.contract_multiplier == pytest.approx(NOTIONAL / strike, rel=1e-15)
+    assert note.barrier_config.ko_barrier == pytest.approx(ko, rel=1e-15)
+    assert note.barrier_config.ki_barrier == pytest.approx(ki, rel=1e-15)
+    assert note.barrier_config.ko_rate == SEAS_COUPON and note.maturity == terms.maturity_years
+    assert note.accrual_config.accrual_factors == pytest.approx([SEAS_ELAPSED + t for t in terms.ko_times], rel=1e-15)
+    assert note.accrual_config.is_annualized_rebate is False
+    assert note.payoff_config.rebate_rate == pytest.approx(SEAS_COUPON * (SEAS_ELAPSED + terms.maturity_years), rel=1e-15)
+
+
+def test_seas6_pays_the_seasoned_ko_cash_on_the_library_lifecycle():
+    """AC4b: a fired KO pays ``coupon x (1.5 + t) x NOTIONAL``, ``t`` the years from the booking day."""
+    from gpin.events import book_terms
+    from s2ts import NOTIONAL
+
+    terms = book_terms("seas6", START)
+    for i in (0, 2, 4):
+        ko = terms.ko_dates[i]
+        reason, end, cash, ki, _ = seasoned_life(seas6_path(terms.maturity_date, {ko: 125.0}))
+        assert (reason, end, ki) == ("ko", ko, None)
+        assert cash == pytest.approx(SEAS_COUPON * (SEAS_ELAPSED + (ko - START).days / 365.0) * NOTIONAL, rel=1e-12)
+        assert cash == pytest.approx(SEAS_COUPON * (SEAS_ELAPSED + terms.ko_times[i]) * NOTIONAL, rel=1e-12)
+    # a knocked-in note that later knocks out pays the KO cash as usual
+    ko3 = terms.ko_dates[2]
+    days = trading_days(START, terms.maturity_date)
+    reason, end, cash, ki, _ = seasoned_life(seas6_path(terms.maturity_date, {days[3]: 90.0, ko3: 125.0}))
+    assert (reason, end, ki) == ("ko", ko3, days[3])
+    assert cash == pytest.approx(SEAS_COUPON * (SEAS_ELAPSED + terms.ko_times[2]) * NOTIONAL, rel=1e-12)
+
+
+def test_seas6_pays_coupon_over_the_full_24_months_at_a_maturity_without_knock_in():
+    """AC4b: never knocked in, the maturity pays ``coupon x (1.5 + T) x NOTIONAL`` (about ``coupon x 2.0``)."""
+    from gpin.events import book_terms
+    from s2ts import NOTIONAL
+
+    terms = book_terms("seas6", START)
+    reason, end, cash, ki, _ = seasoned_life(seas6_path(terms.maturity_date, {terms.maturity_date: 110.0}))
+    assert (reason, end, ki) == ("maturity", terms.maturity_date, None)
+    assert cash == pytest.approx(SEAS_COUPON * (SEAS_ELAPSED + terms.maturity_years) * NOTIONAL, rel=1e-12)
+    assert cash == pytest.approx(SEAS_COUPON * 2.0 * NOTIONAL, rel=2e-3)
+    # the same cash as a KO on the maturity day (the last observation)
+    reason, _, ko_cash_at_maturity, _, _ = seasoned_life(seas6_path(terms.maturity_date, {terms.maturity_date: 130.0}))
+    assert reason == "ko" and ko_cash_at_maturity == pytest.approx(cash, rel=1e-12)
+
+
+def test_seas6_pays_the_put_loss_on_the_strike_at_a_knocked_in_maturity():
+    """AC4b: knocked in and not knocked out, the maturity pays ``max(0, strike - S_T) x NOTIONAL / strike`` to the
+    seller (negative holder-side cash); a knocked-in note whose last close is at or above the strike is a KO."""
+    from gpin.events import book_levels, book_terms
+    from s2ts import NOTIONAL
+
+    terms = book_terms("seas6", START)
+    strike, _, _ = book_levels("seas6", SEAS_S0)
+    days = trading_days(START, terms.maturity_date)
+    for s_t in (100.0, 93.0, 120.0, 60.0):
+        reason, end, cash, ki, _ = seasoned_life(seas6_path(terms.maturity_date, {days[10]: 93.0, terms.maturity_date: s_t}))
+        assert (reason, end, ki) == ("maturity", terms.maturity_date, days[10])
+        assert cash == pytest.approx(-(strike - s_t) / strike * NOTIONAL, rel=1e-12)
+        assert cash < 0.0
+    # a knocked-in note finishing above the strike is called, not put
+    reason, _, cash, _, _ = seasoned_life(seas6_path(terms.maturity_date, {days[10]: 93.0, terms.maturity_date: 130.0}))
+    assert reason == "ko" and cash > 0.0
+
+
+def _seasoned_engine_price(engine, until: date, last_spot: float, force_ki: bool, extra: dict = None):
+    """QUAD V2 price (holder side) of the seas6 note booked on ``START``, valued on ``until`` after the library
+    lifecycle was stepped there, with the last close at ``last_spot``."""
+    from quantark.param.div.dividend_yield import ContinuousDividendYield
+    from gpin.events import book_terms
+    from gpin.models import MODELS, book_note
+    from s2ts.note import NoteLife, make_env
+
+    terms = book_terms("seas6", START)
+    life = NoteLife(book_note(SEAS_COUPON, SEAS_S0, terms, book="seas6"), START)
+    nd = None
+    overrides = dict(extra or {})
+    overrides[until] = last_spot
+    for bar in seas6_path(until, overrides):
+        dc = SimpleNamespace(day=bar.day, spot=bar.spot, mo=SimpleNamespace(vol=0.2))
+        nd = life.step(dc, make_env(dc, ContinuousDividendYield(0.02)))
+        assert nd.alive
+    state = MODELS["kin"].lifecycle(life.lifecycle) if force_ki else life.lifecycle
+    return float(engine.price(nd.product, make_env(dc, ContinuousDividendYield(0.02)), lifecycle_state=state)), terms
+
+
+def test_quad_v2_prices_the_seasoned_ko_cash_one_day_before_a_certain_ko(engine):
+    """The engine reads the same contract: with the spot far above the KO level the day before the first observation
+    the price is the discounted seasoned KO cash."""
+    from gpin.events import book_terms
+    from s2ts import NOTIONAL, RATE
+
+    terms = book_terms("seas6", START)
+    ko1 = terms.ko_dates[0]
+    prev = trading_days(START, ko1)[-2]
+    price, _ = _seasoned_engine_price(engine, prev, 200.0, force_ki=False)
+    cash = SEAS_COUPON * (SEAS_ELAPSED + terms.ko_times[0]) * NOTIONAL
+    discount = math.exp(-RATE * (ko1 - prev).days / 365.0)
+    assert price == pytest.approx(cash * discount, rel=1e-3)
+    assert 1e4 * cash / NOTIONAL > 3000.0                       # a seasoned cash (about 30% of notional), not 1 month's
+
+
+def test_quad_v2_prices_the_seasoned_maturity_payments_one_day_before_maturity(engine):
+    """Never knocked in, mid-range spot the day before maturity: the discounted ``coupon x (1.5 + T) x NOTIONAL``;
+    forced knocked in, the discounted put loss on the strike."""
+    from gpin.events import book_levels, book_terms
+    from s2ts import NOTIONAL, RATE
+
+    terms = book_terms("seas6", START)
+    prev = trading_days(START, terms.maturity_date)[-2]
+    discount = math.exp(-RATE * (terms.maturity_date - prev).days / 365.0)
+    price, _ = _seasoned_engine_price(engine, prev, 110.0, force_ki=False)
+    cash = SEAS_COUPON * (SEAS_ELAPSED + terms.maturity_years) * NOTIONAL
+    assert price == pytest.approx(cash * discount, rel=2e-3)
+    strike, _, _ = book_levels("seas6", SEAS_S0)
+    price_ki, _ = _seasoned_engine_price(engine, prev, 100.0, force_ki=True)
+    loss = (100.0 * math.exp((RATE - 0.02) * (terms.maturity_date - prev).days / 365.0) - strike) / strike * NOTIONAL
+    assert price_ki == pytest.approx(loss * discount, rel=5e-3)
+    assert price_ki < 0.0
+
+
+# ---- 00_ki_gap_probe.py (AC4c): the KI gap and the hedge step by barrier and remaining life ----
+
+KI_GAP_JSON = STUDY_DIR / "results" / "ki_gap_probe.json"
+
+
+@pytest.fixture(scope="module")
+def probe_stage():
+    return _load_stage("00_ki_gap_probe.py")
+
+
+def test_ki_gap_probe_json_pins_the_75_row_to_the_nearest_bp_against_a_recomputation(probe_stage, engine):
+    """AC4c: the committed rows at 24 and 3 months left for the 75% barrier equal a recomputation to the nearest bp (and
+    the hedge step to the nearest point); the fixed inputs are the pre-stated ones."""
+    data = json.loads(KI_GAP_JSON.read_text(encoding="utf-8"))
+    assert data["inputs"]["coupon"] == 0.20 and data["inputs"]["vol"] == 0.25 and data["inputs"]["q"] == 0.05
+    assert data["inputs"]["above_barrier"] == 0.03 and data["inputs"]["notional"] == 1e7
+    assert data["inputs"]["r"] == load_prereg()["note"]["rate"]
+    assert data["barriers"] == [0.75, 0.85, 0.90] and data["months_left"] == [1, 3, 6, 12, 18, 24]
+    rows = {(r["ki_pct"], r["months_left"]): r for r in data["rows"]}
+    assert len(rows) == len(data["rows"]) == 18
+    for months in (24, 3):
+        fresh = probe_stage.probe_cell(engine, 0.75, months)
+        stored = rows[(0.75, months)]
+        assert round(stored["gap_bp"]) == round(fresh["gap_bp"]), months
+        assert round(stored["hedge_step_pct"]) == round(fresh["hedge_step_pct"]), months
+        assert stored["gap_bp"] == pytest.approx(fresh["gap_bp"], rel=1e-9)
+    assert round(rows[(0.75, 24)]["gap_bp"]) == 9 and round(rows[(0.75, 3)]["gap_bp"]) == 384
+    assert "seller" in data["seller_view"] and "holder" not in json.dumps(data).lower()
+
+
+def test_ki_gap_probe_gap_falls_as_life_lengthens_and_as_the_barrier_rises():
+    data = json.loads(KI_GAP_JSON.read_text(encoding="utf-8"))
+    gap = {(r["ki_pct"], r["months_left"]): r["gap_bp"] for r in data["rows"]}
+    step = {(r["ki_pct"], r["months_left"]): r["hedge_step_pct"] for r in data["rows"]}
+    for k in data["barriers"]:
+        for a, b in zip(data["months_left"], data["months_left"][1:]):
+            assert gap[(k, a)] >= gap[(k, b)] and step[(k, a)] >= step[(k, b)], (k, a, b)
+    assert all(gap[(0.75, a)] > gap[(0.75, b)] for a, b in zip(data["months_left"], data["months_left"][1:]))
+    for m in data["months_left"]:
+        for lo, hi in zip(data["barriers"], data["barriers"][1:]):
+            assert gap[(lo, m)] >= gap[(hi, m)], (lo, hi, m)
+    assert all(gap[(0.75, m)] > gap[(0.90, m)] for m in data["months_left"])
+    assert all(g >= 0.0 for g in gap.values())
+    assert gap[(0.90, 24)] < 0.05 < gap[(0.75, 3)]
+
+
+def test_ki_gap_probe_uses_the_lifecycle_state_the_engine_reads(probe_stage, engine):
+    """The knocked-in side is priced with a lifecycle-state copy forced to knocked-in (as the ``kin`` model), never a
+    product attribute: the product the two sides share has no ``_otc_lifecycle_knocked_in``."""
+    alive, kin, spots = probe_stage.price_both(engine, 0.75, 3)
+    assert alive["price"][1] > kin["price"][1]
+    import inspect
+
+    assert "_otc_lifecycle_knocked_in" not in inspect.getsource(probe_stage)
 
 
 # ---- 03_pricing.py: the sample, the plan, the pool's failure / lock / resume behaviour ----
@@ -1293,12 +1508,13 @@ def test_stage3_plan_is_per_book_and_in_total(stage3, real_chains, book_scans):
     sizes = {b: sample["books"][b]["sample_sizes"]["priced_notes"] for b in BOOKS}
     assert {b: sum(1 for n in notes if parse_note_id(n)[0] == b) for b in BOOKS} == sizes
     assert len(notes) == sum(sizes.values()) and len(set(notes)) == len(notes)
-    assert stage3.sample_notes(sample, books=["ki90"]) == [n for n in notes if n.startswith("ki90:")]
+    assert stage3.sample_notes(sample, books=["seas6"]) == [n for n in notes if n.startswith("seas6:")]
+    assert sizes == {"ki75": 153, "seas6": 168}
     by_book = {b: {s.inception: s for s in book_scans[b]} for b in BOOKS}
     summary = stage3.plan(real_chains, by_book, notes, workers=4)
     cal = calendar_for(real_chains)
     for b in BOOKS:
-        per_note = [expected_solves(real_chains, by_book[b][parse_note_id(n)[1]], cal, ki_pct=BOOKS[b])
+        per_note = [expected_solves(real_chains, by_book[b][parse_note_id(n)[1]], cal, book=b)
                     for n in notes if parse_note_id(n)[0] == b]
         z = summary["books"][b]
         assert z["notes"] == sizes[b]
@@ -1322,14 +1538,21 @@ def test_stage3_plan_is_per_book_and_in_total(stage3, real_chains, book_scans):
     assert "total" in text and "h wall" in text
 
 
-def test_stage3_quick_notes_are_two_ki75_notes_and_a_ki90_pin_note(stage3):
+def test_stage3_quick_notes_are_two_ki75_notes_and_a_seas6_note_that_enters_its_ki_window_early(stage3):
     sample = stage3.load_sample()
     picks = stage3.quick_notes(sample)
     assert len(picks) == 3
     assert picks[0] == f"ki75:{sample['books']['ki75']['headline'][0]}" and picks[1] == "ki75:2024-02-29"
     assert "2024-02-29" in {p["inception"] for p in sample["books"]["ki75"]["pin"]}
     book, inception = picks[2].split(":")
-    assert book == "ki90" and inception in {p["inception"] for p in sample["books"]["ki90"]["pin"]}
+    blk = sample["books"]["seas6"]
+    assert book == "seas6" and inception in blk["notes"]
+    starts = [r["start"] for r in blk["ki_approaches"] if r["inception"] == inception]
+    assert starts and (date.fromisoformat(min(starts)) - date.fromisoformat(inception)).days <= stage3.QUICK_CALENDAR_DAYS
+    # the earliest booking that does so
+    early = sorted(r["inception"] for r in blk["ki_approaches"]
+                   if (date.fromisoformat(r["start"]) - date.fromisoformat(r["inception"])).days <= stage3.QUICK_CALENDAR_DAYS)
+    assert inception == early[0]
 
 
 def test_stage3_notes_failed_is_a_quantark_exception(stage3):
@@ -1341,7 +1564,7 @@ def test_stage3_notes_failed_is_a_quantark_exception(stage3):
 def test_stage3_pool_records_failures_and_goes_on_and_refuses_a_second_instance(stage3, tmp_path):
     from s2ts.runner import OutDirLocked, _acquire_lock, _release_lock
 
-    notes = ["ki75:2024-02-29", "ki90:2024-02-29", "ki90:2024-03-04"]
+    notes = ["ki75:2024-02-29", "seas6:2024-02-29", "seas6:2024-03-04"]
 
     def job(nid):
         if nid == notes[1]:
@@ -1353,8 +1576,8 @@ def test_stage3_pool_records_failures_and_goes_on_and_refuses_a_second_instance(
     lines = []
     with pytest.raises(stage3.NotesFailed, match="1 of 3 notes failed"):
         stage3.run_notes(notes, {}, tmp_path, "fp", workers=0, job=job, log=lines.append)
-    err = json.loads((tmp_path / "ki90__2024-02-29.error.json").read_text())
-    assert err["note"] == "ki90:2024-02-29" and "boom" in err["error"] and "Traceback" in err["traceback"]
+    err = json.loads((tmp_path / "seas6__2024-02-29.error.json").read_text())
+    assert err["note"] == "seas6:2024-02-29" and "boom" in err["error"] and "Traceback" in err["traceback"]
     assert not (tmp_path / "ki75__2024-02-29.error.json").exists() and not (tmp_path / "stale.json.tmp").exists()
     assert not (tmp_path / ".lock").exists()                       # released on exit
     assert any("ki75:2024-02-29" in ln and "7 solves" in ln and "1 s" in ln for ln in lines)   # a line per finished note
@@ -1369,7 +1592,7 @@ def test_stage3_pool_records_failures_and_goes_on_and_refuses_a_second_instance(
     ok = stage3.run_notes(notes, {}, tmp_path, "fp", workers=0,
                           job=lambda nid: {"note": nid, "inception": nid.split(":")[1], "reused": True, "seconds": 0.0,
                                            "solves": 0, "live_days": 1}, log=lines.append)
-    assert [p.name for p in ok] == ["ki75__2024-02-29.json", "ki90__2024-02-29.json", "ki90__2024-03-04.json"]
+    assert [p.name for p in ok] == ["ki75__2024-02-29.json", "seas6__2024-02-29.json", "seas6__2024-03-04.json"]
     assert not list(tmp_path.glob("*.error.json"))
 
 
@@ -1378,38 +1601,73 @@ def test_stage3_pool_records_failures_and_goes_on_and_refuses_a_second_instance(
 # ---------------------------------------------------------------------------
 
 
-def test_ki_level_follows_the_books_level():
+def test_levels_follow_the_books_for_both_directions_and_the_models():
+    from gpin.events import book_levels
+
     m = _models()
-    assert m.ki_level(m.MODELS["true"], S0_FIXED, 0.90) == pytest.approx(0.90 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["ki_m100"], S0_FIXED, 0.90) == pytest.approx(0.891 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["ki_p100"], S0_FIXED, 0.85) == pytest.approx(0.85 * 1.01 * S0_FIXED, rel=1e-15)
-    assert m.ki_level(m.MODELS["true"], S0_FIXED) == pytest.approx(0.75 * S0_FIXED, rel=1e-15)   # the product by default
+    strike, ko, ki = book_levels("seas6", S0_FIXED)
+    assert (strike, ko) == (pytest.approx(S0_FIXED / 1.07 / 0.75, rel=1e-15), pytest.approx(S0_FIXED / 1.07 / 0.75, rel=1e-15))
+    assert m.ki_level(m.MODELS["true"], S0_FIXED, book="seas6") == pytest.approx(S0_FIXED / 1.07, rel=1e-15)
+    assert m.ki_level(m.MODELS["ki_m100"], S0_FIXED, book="seas6") == pytest.approx(0.99 * S0_FIXED / 1.07, rel=1e-15)
+    assert m.ki_level(m.MODELS["ki_m200"], S0_FIXED, book="seas6") == pytest.approx(0.98 * S0_FIXED / 1.07, rel=1e-15)
+    assert m.ki_level(m.MODELS["ki_p100"], S0_FIXED, book="seas6") == pytest.approx(1.01 * S0_FIXED / 1.07, rel=1e-15)
+    assert m.ki_level(m.MODELS["kin"], S0_FIXED, book="seas6") == pytest.approx(S0_FIXED / 1.07, rel=1e-15)
+    from gpin.events import book_terms
+
+    terms = book_terms("seas6", date(2024, 1, 2))
+    n = len(terms.ko_dates)
+    day = date(2024, 1, 31)
+    assert m.ko_levels(m.MODELS["true"], terms, day, None, S0_FIXED, book="seas6") == pytest.approx([ko] * n, rel=1e-15)
+    for direction in (-1, +1):
+        shifted = m.ko_levels(m.MODELS["ko_s200"], terms, day, direction, S0_FIXED, book="seas6")
+        assert shifted == pytest.approx([ko * (1.0 + direction * 0.02)] * n, rel=1e-15)
+        wrong = m.ko_levels(m.MODELS["ko_w100"], terms, day, direction, S0_FIXED, book="seas6")
+        assert wrong == pytest.approx([ko * (1.0 - direction * 0.01)] * n, rel=1e-15)
+    surv = m.ko_levels(m.MODELS["surv"], terms, day, None, S0_FIXED, book="seas6")
+    assert [i for i, x in enumerate(surv) if x > ko * 10] == [0]                 # exactly the next observation
+    assert surv[0] == pytest.approx(m.SURV_OFF_MULTIPLE * strike, rel=1e-15)
+    assert surv[1:] == pytest.approx([ko] * (n - 1), rel=1e-15)
+    later = m.ko_levels(m.MODELS["surv"], terms, terms.ko_dates[1], None, S0_FIXED, book="seas6")
+    assert [i for i, x in enumerate(later) if x > ko * 10] == [2]
 
 
-def test_book_note_is_build_note_at_75_and_carries_the_level_otherwise():
+def test_book_note_is_build_note_at_75_and_the_models_carry_the_seasoned_contract():
     from s2ts.note import build_note, build_terms
+
+    from gpin.events import book_levels, book_terms
 
     m = _models()
     terms = build_terms(PROBE_INCEPTION)
     ref = build_note(PROBE_COUPON, S0_FIXED, terms)
-    same = m.book_note(PROBE_COUPON, S0_FIXED, terms, 0.75)
+    same = m.book_note(PROBE_COUPON, S0_FIXED, terms, book="ki75")
     assert same.barrier_config == ref.barrier_config and same.maturity == ref.maturity
-    assert same.contract_multiplier == ref.contract_multiplier
-    lifted = m.book_note(PROBE_COUPON, S0_FIXED, terms, 0.90)
-    assert lifted.barrier_config.ki_barrier == pytest.approx(0.90 * S0_FIXED, rel=1e-15)
-    assert lifted.barrier_config.ko_barrier == ref.barrier_config.ko_barrier
-    prod = m.MODELS["ko_s100"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, -1, ki_pct=0.90)
-    assert prod.barrier_config.ki_barrier == pytest.approx(0.90 * S0_FIXED, rel=1e-15)
-    shifted = m.MODELS["ki_m100"].product(terms, S0_FIXED, PROBE_COUPON, PROBE_DAY, None, ki_pct=0.90)
-    assert shifted.barrier_config.ki_barrier == pytest.approx(0.891 * S0_FIXED, rel=1e-15)
+    assert same.payoff_config == ref.payoff_config and same.accrual_config == ref.accrual_config
+    assert (same.strike, same.initial_price, same.contract_multiplier) == (ref.strike, ref.initial_price, ref.contract_multiplier)
+    assert same.accrual_config.accrual_factors is None                    # the 2Y product has no seasoning
+    # a seasoned model product: the book's levels per observation and the seasoned accrual factors
+    st = book_terms("seas6", PROBE_INCEPTION)
+    strike, ko, ki = book_levels("seas6", S0_FIXED)
+    prod = m.MODELS["ko_s100"].product(st, S0_FIXED, PROBE_COUPON, date(2024, 3, 5), -1, book="seas6")
+    assert list(prod.barrier_config.ko_barrier) == pytest.approx([ko * 0.99] * 6, rel=1e-15)
+    assert prod.barrier_config.ki_barrier == pytest.approx(ki, rel=1e-15) and prod.strike == pytest.approx(strike, rel=1e-15)
+    assert prod.accrual_config.accrual_factors == pytest.approx([1.5 + t for t in st.ko_times], rel=1e-15)
+    shifted = m.MODELS["ki_m100"].product(st, S0_FIXED, PROBE_COUPON, date(2024, 3, 5), None, book="seas6")
+    assert shifted.barrier_config.ki_barrier == pytest.approx(0.99 * ki, rel=1e-15)
 
 
-def test_the_ki_window_follows_the_books_level():
-    from gpin.pricing import in_ki_window
+def test_the_windows_follow_the_books_levels():
+    from gpin.pricing import in_ki_window, in_ko_window
 
-    assert in_ki_window(78.75, 100.0, False) and not in_ki_window(78.8, 100.0, False)
-    assert in_ki_window(94.5, 100.0, False, ki_pct=0.90) and not in_ki_window(94.6, 100.0, False, ki_pct=0.90)
-    assert not in_ki_window(90.0, 100.0, True, ki_pct=0.90)           # a knocked-in note has no KI window
+    assert in_ki_window(78.75, 100.0, False, book="ki75") and not in_ki_window(78.8, 100.0, False, book="ki75")
+    ki = 100.0 / 1.07                                           # seas6 booked at 100: KI 93.458, strike = KO 124.61
+    assert in_ki_window(ki * 1.05, 100.0, False, book="seas6") and not in_ki_window(ki * 1.0501, 100.0, False, book="seas6")
+    assert in_ki_window(ki * 0.9, 100.0, False, book="seas6")
+    assert not in_ki_window(ki * 1.01, 100.0, True, book="seas6")           # a knocked-in note has no KI window
+    ko = ki / 0.75
+    assert in_ko_window(ko * 0.9, 100.0, 10, book="seas6") and not in_ko_window(ko * 0.8999, 100.0, 10, book="seas6")
+    assert in_ko_window(ko * 1.1, 100.0, 1, book="seas6") and not in_ko_window(ko * 1.11, 100.0, 1, book="seas6")
+    assert not in_ko_window(ko, 100.0, 11, book="seas6") and not in_ko_window(ko, 100.0, None, book="seas6")
+    assert in_ko_window(100.0, 100.0, 5, book="ki75") and not in_ko_window(100.0, 100.0, 5, book="seas6")
 
 
 def test_the_ki_window_is_five_percent():
@@ -1418,7 +1676,7 @@ def test_the_ki_window_is_five_percent():
     assert pricing.KI_BAND == 0.05 == load_prereg()["windows"]["ki_band"]
 
 
-def test_books_coupons_ki75_equals_solve_coupon_and_higher_levels_pay_more(real_chains, engine):
+def test_book_coupons_ki75_equals_solve_coupon_and_seas6_uses_the_ki75_coupon_of_its_booking_day(real_chains, engine):
     from gpin.models import book_note
     from gpin.pricing import solve_book_coupon
     from quantark.param import FlatRateCurve
@@ -1427,44 +1685,94 @@ def test_books_coupons_ki75_equals_solve_coupon_and_higher_levels_pay_more(real_
     from s2ts.tails import build_curve
 
     dc = next(c for c in real_chains if c.day == PROBE_INCEPTION)
-    c75 = solve_book_coupon(dc, engine, 0.75)
+    c75 = solve_book_coupon(dc, engine, "ki75")
     assert c75 == solve_coupon(dc, engine)                               # the same method, the same number
-    c90 = solve_book_coupon(dc, engine, 0.90)
-    assert c90 > c75                                                     # a higher barrier needs a higher coupon
+    assert solve_book_coupon(dc, engine, "seas6") == c75                 # not solved again for the seasoned contract
     env = make_env(dc, build_curve(dc, "hold_forward", None).to_dividend_yield(FlatRateCurve(RATE)))
-    pv = float(engine.price(book_note(c90, dc.spot, build_terms(dc.day), 0.90), env))
+    pv = float(engine.price(book_note(c75, dc.spot, build_terms(dc.day), book="ki75"), env))
     assert abs(pv) <= 1e-6 * NOTIONAL                                    # reprices to zero under hold-forward
 
 
-def test_price_note_builds_every_model_off_the_books_level(real_chains, real_anchors, real_scans, engine):
-    from gpin.events import scan
+@pytest.fixture(scope="module")
+def seas_run(real_chains, real_anchors, book_scans):
+    """A real seasoned booking stepped (library lifecycle) to the day after its second KO observation: its aged
+    state, plus the booking's scan record and terms."""
+    from types import SimpleNamespace
+
+    from gpin.events import book_terms
+
+    rec = next(s for s in book_scans["seas6"] if s.end_reason == "maturity" and s.ki_date is None
+               and s.inception >= date(2024, 3, 1))
+    terms = book_terms("seas6", rec.inception)
+    day = next(c.day for c in real_chains if c.day > terms.ko_dates[1])
+    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, rec.inception, PROBE_COUPON, day, book="seas6")
+    return SimpleNamespace(scan=rec, terms=terms, day=day, life=life, dc=dc, env=env, nd=nd,
+                           s0=next(c.spot for c in real_chains if c.day == rec.inception))
+
+
+def test_the_aged_seasoned_variant_keeps_the_seasoned_cash_and_equals_the_trackers_note(seas_run, engine):
+    """Ageing past two KO observations takes the first two accrual factors and levels off the front: the surviving
+    KO records still pay ``coupon x (1.5 + t) x NOTIONAL`` with ``t`` from the booking day, and the rebuilt ``true``
+    variant prices like the tracker's own pricing copy."""
+    from gpin.models import MODELS, SURV_OFF_MULTIPLE
+    from gpin.pricing import aged_model_product, model_ladder, solve_ladder
+    from s2ts import NOTIONAL
+
+    r = seas_run
+    assert r.nd.alive and len(r.terms.ko_dates) == 6
+    aged = aged_model_product(r.life, MODELS["true"], r.terms, r.s0, PROBE_COUPON, r.day, r.scan.inception, r.env, None,
+                              book="seas6")
+    records = aged.resolve_ko_observations(r.env)
+    assert len(records) == 4
+    for rec, t in zip(records, r.terms.ko_times[2:]):
+        assert rec.payoff == pytest.approx(PROBE_COUPON * (1.5 + t) * NOTIONAL, rel=1e-12)
+    spots = r.dc.spot * (1.0 + np.asarray(gpin.LADDER))
+    rebuilt = model_ladder(engine, r.life, MODELS["true"], r.terms, r.s0, PROBE_COUPON, r.day, r.scan.inception, r.env,
+                           spots, None, book="seas6")
+    tracker = solve_ladder(engine, r.nd.product, r.env, spots, r.life.lifecycle)
+    for key in ("engine_price", "engine_delta"):
+        assert rebuilt[key] == pytest.approx(tracker[key], abs=1e-9), key
+    surv = aged_model_product(r.life, MODELS["surv"], r.terms, r.s0, PROBE_COUPON, r.day, r.scan.inception, r.env, None,
+                              book="seas6")
+    sr = list(surv.barrier_config.ko_observation_schedule.records)
+    strike = r.s0 / 1.07 / 0.75
+    assert len(sr) == len(surv.barrier_config.ko_barrier) == len(surv.accrual_config.accrual_factors) == 4
+    assert sr[0].barrier == pytest.approx(SURV_OFF_MULTIPLE * strike) and all(x.barrier == pytest.approx(strike) for x in sr[1:])
+
+
+def test_price_note_builds_every_model_off_the_seasoned_book(real_chains, real_anchors, book_scans, real_scans, engine):
     from gpin.models import MODELS
     from gpin.pricing import aged_model_product, price_note
-    from s2ts.note import build_terms
+    from gpin.events import book_levels, book_terms
 
-    s90 = next(s for s in scan(real_chains, real_anchors, ki_pct=0.90) if s.inception == PROBE_INCEPTION)
-    states = price_note(PROBE_INCEPTION, 0.2, real_chains, real_anchors, s90, ki_pct=0.90, engine=engine,
-                        price_days={PROBE_MID_DAY}, max_days=44)
-    assert states.book == "ki90" and states.ki_pct == 0.90
+    rec = next(s for s in book_scans["seas6"] if s.inception >= date(2024, 3, 1))
+    states = price_note(rec.inception, 0.2, real_chains, real_anchors, rec, book="seas6", engine=engine,
+                        price_days={rec.inception}, max_days=3)
+    assert states.book == "seas6" and states.ki_pct == 0.75
     out = states.to_json("fp")
-    assert (out["book"], out["ki_pct"], out["note"]) == ("ki90", 0.90, "ki90:2024-02-29")
-    with pytest.raises(StudyDataError, match="not book"):                # the 75 scan is not the 90 book's
-        price_note(PROBE_INCEPTION, 0.2, real_chains, real_anchors,
-                   next(s for s in real_scans if s.inception == PROBE_INCEPTION), ki_pct=0.90, engine=engine,
+    spot0 = next(c.spot for c in real_chains if c.day == rec.inception)
+    strike, ko, ki = book_levels("seas6", spot0)
+    assert (out["book"], out["ki_pct"], out["note"]) == ("seas6", 0.75, f"seas6:{rec.inception}")
+    assert (out["spot0"], out["strike"], out["ko_level"], out["ki_level"]) == (spot0, strike, ko, ki)
+    assert out["spec"] == {"id": "seas6", "ki_pct": 0.75, "first_ko_month": 1, "maturity_months": 6, "elapsed_months": 18,
+                           "ki_below_spot": 0.07, "booking": "weekly"}
+    assert {"days", "coupon", "inception", "fingerprint", "meta"} <= set(out)           # the keys the ledger reads
+    with pytest.raises(StudyDataError, match="not book"):                # the 75 scan is not the seasoned book's
+        price_note(rec.inception, 0.2, real_chains, real_anchors,
+                   next(s for s in real_scans if s.inception == rec.inception), book="seas6", engine=engine,
                    price_days=set(), max_days=3)
-    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, PROBE_INCEPTION, 0.2, PROBE_MID_DAY, ki_pct=0.90)
-    s0 = next(c.spot for c in real_chains if c.day == PROBE_INCEPTION)
-    terms = build_terms(PROBE_INCEPTION)
-    for mid, mult in (("true", 0.90), ("ki_m100", 0.891), ("kin", 0.90)):
-        aged = aged_model_product(life, MODELS[mid], terms, s0, 0.2, PROBE_MID_DAY, PROBE_INCEPTION, env, None,
-                                  ki_pct=0.90)
-        assert aged.barrier_config.ki_barrier == pytest.approx(mult * s0, rel=1e-12), mid
+    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, rec.inception, 0.2, rec.inception, book="seas6")
+    terms = book_terms("seas6", rec.inception)
+    for mid, mult in (("true", 1.0), ("ki_m100", 0.99), ("kin", 1.0)):
+        aged = aged_model_product(life, MODELS[mid], terms, spot0, 0.2, rec.inception, rec.inception, env, None,
+                                  book="seas6")
+        assert aged.barrier_config.ki_barrier == pytest.approx(mult * ki, rel=1e-12), mid
 
 
 def test_state_files_are_named_by_book(tmp_path):
     from gpin.pricing import states_path
 
-    assert states_path(tmp_path, date(2024, 2, 29), "ki90").name == "ki90__2024-02-29.json"
+    assert states_path(tmp_path, date(2024, 2, 29), "seas6").name == "seas6__2024-02-29.json"
     assert states_path(tmp_path, date(2024, 2, 29), "ki75").name == "ki75__2024-02-29.json"
 
 
@@ -1478,9 +1786,9 @@ def test_coupon_cache_is_stamped_and_re_solved_when_the_stamp_differs(tmp_path):
         return 0.1 + 0.01 * len(calls)
 
     path = tmp_path / "coupons.json"
-    ids = ["ki75:2024-02-29", "ki90:2024-02-29"]
+    ids = ["ki75:2024-02-29", "seas6:2024-02-29"]
     first = book_coupons(ids, path, "stampA", solver)
-    assert len(calls) == 2 and first["ki75:2024-02-29"] != first["ki90:2024-02-29"]
+    assert len(calls) == 2 and first["ki75:2024-02-29"] != first["seas6:2024-02-29"]
     assert book_coupons(ids, path, "stampA", solver) == first and len(calls) == 2         # reused
     assert book_coupons(ids[:1], path, "stampA", solver) == {ids[0]: first[ids[0]]}
     again = book_coupons(ids, path, "stampB", solver)                                      # stamp differs: re-solved
@@ -1491,7 +1799,29 @@ def test_coupon_cache_is_stamped_and_re_solved_when_the_stamp_differs(tmp_path):
     assert len(calls) == 5
 
 
-def test_coupon_stamp_covers_data_s2ts_engine_books_and_the_solver_file(tmp_path):
+def test_coupon_cache_is_written_after_each_solved_coupon(tmp_path):
+    """A run that dies on the third coupon keeps the first two on disk."""
+    from gpin.pricing import book_coupons
+
+    ids = [f"ki75:2024-02-{d:02d}" for d in (27, 28, 29)]
+    calls = []
+
+    def solver(book, inception):
+        calls.append(inception)
+        if len(calls) == 3:
+            raise RuntimeError("killed")
+        return 0.1 * len(calls)
+
+    path = tmp_path / "coupons.json"
+    with pytest.raises(RuntimeError):
+        book_coupons(ids, path, "stampA", solver)
+    assert json.loads(path.read_text()) == {"stamp": "stampA", "coupons": {ids[0]: 0.1, ids[1]: 0.2}}
+    assert not list(tmp_path.glob("*.tmp"))
+    resumed = book_coupons(ids[:2], path, "stampA", solver)                                # nothing is solved again
+    assert resumed == {ids[0]: 0.1, ids[1]: 0.2} and len(calls) == 3
+
+
+def test_coupon_stamp_is_the_full_pricing_fingerprint(tmp_path):
     import shutil
 
     from gpin import pricing
@@ -1502,18 +1832,14 @@ def test_coupon_stamp_covers_data_s2ts_engine_books_and_the_solver_file(tmp_path
     shutil.copytree(STUDY_DIR / "gpin", pkg, ignore=shutil.ignore_patterns("__pycache__"))
     kw = dict(s2ts_dir=s2, pkg_dir=pkg, data_digest="d")
     base = pricing.coupon_stamp(**kw)
-    assert base == pricing.coupon_stamp(**kw)
+    assert base == pricing.pricing_fingerprint(**kw)
     assert pricing.coupon_stamp(**{**kw, "data_digest": "e"}) != base
+    for name in ("models.py", "pricing.py", "events.py"):       # an edit to any pricing-side file re-solves the coupons
+        before = pricing.coupon_stamp(**kw)
+        (pkg / name).write_text((pkg / name).read_text() + "\n# edit\n")
+        assert pricing.coupon_stamp(**kw) != before, name
     (s2 / "note.py").write_text((s2 / "note.py").read_text() + "\n# edit\n")
-    edited = pricing.coupon_stamp(**kw)
-    assert edited != base
-    (pkg / "events.py").write_text((pkg / "events.py").read_text() + "\n# edit\n")
-    assert pricing.coupon_stamp(**kw) == edited                       # only the solver's file counts
-    (pkg / "pricing.py").write_text((pkg / "pricing.py").read_text() + "\n# edit\n")   # an edit of the solver
-    assert pricing.coupon_stamp(**kw) != edited
-    parts = pricing.coupon_stamp_parts(**kw)
-    assert set(parts) == {"data", "s2ts", "engine", "books", "solver"}
-    assert parts["books"] == {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90}
+    assert pricing.coupon_stamp(**kw) != pricing.pricing_fingerprint(**{**kw, "s2ts_dir": S2TS_DIR / "s2ts"})
 
 
 def test_the_fingerprint_names_the_quantark_version():
@@ -1528,19 +1854,19 @@ def test_the_fingerprint_names_the_quantark_version():
 def test_state_file_reuse_needs_fingerprint_coupon_and_a_complete_run(tmp_path):
     from gpin import pricing
 
-    path = tmp_path / "ki90__2024-02-29.json"
-    base = {"note": "ki90:2024-02-29", "inception": "2024-02-29", "fingerprint": "A", "coupon": 0.2, "days": [],
+    path = tmp_path / "seas6__2024-02-29.json"
+    base = {"note": "seas6:2024-02-29", "inception": "2024-02-29", "fingerprint": "A", "coupon": 0.2, "days": [],
             "meta": {"max_days": None, "price_days": None}}
     pricing.write_states_atomic(path, base)
-    assert pricing.read_current(path, "ki90:2024-02-29", "A", 0.2) == base
-    assert pricing.read_current(path, "ki90:2024-02-29", "B", 0.2) is None            # fingerprint
-    assert pricing.read_current(path, "ki90:2024-02-29", "A", 0.2000001) is None      # a re-solved coupon
+    assert pricing.read_current(path, "seas6:2024-02-29", "A", 0.2) == base
+    assert pricing.read_current(path, "seas6:2024-02-29", "B", 0.2) is None            # fingerprint
+    assert pricing.read_current(path, "seas6:2024-02-29", "A", 0.2000001) is None      # a re-solved coupon
     assert pricing.read_current(path, "ki75:2024-02-29", "A", 0.2) is None            # another book's note
     for key, value in (("max_days", 5), ("price_days", ["2024-03-01"])):
         pricing.write_states_atomic(path, {**base, "meta": {**base["meta"], key: value}})
-        assert pricing.read_current(path, "ki90:2024-02-29", "A", 0.2) is None, key   # a diagnostic run is never reused
+        assert pricing.read_current(path, "seas6:2024-02-29", "A", 0.2) is None, key   # a diagnostic run is never reused
     pricing.write_states_atomic(path, {k: v for k, v in base.items() if k != "meta"})
-    assert pricing.read_current(path, "ki90:2024-02-29", "A", 0.2) is None            # no provenance, no reuse
+    assert pricing.read_current(path, "seas6:2024-02-29", "A", 0.2) is None            # no provenance, no reuse
 
 
 # ---------------------------------------------------------------------------
@@ -1564,7 +1890,7 @@ def probe_run(real_chains, real_anchors):
     from gpin.models import book_note
 
     i0 = next(i for i, c in enumerate(real_chains) if c.day == PROBE_INCEPTION)
-    life = NoteLife(book_note(PROBE_COUPON, real_chains[i0].spot, build_terms(PROBE_INCEPTION)), PROBE_INCEPTION)
+    life = NoteLife(book_note(PROBE_COUPON, real_chains[i0].spot, build_terms(PROBE_INCEPTION), book="ki75"), PROBE_INCEPTION)
     out = SimpleNamespace(s0=real_chains[i0].spot)
     for dc in real_chains[i0:]:
         curve = build_curve(dc, gpin.TAIL, real_anchors.get(dc.day))
@@ -1599,12 +1925,12 @@ def test_an_aged_variant_after_a_ko_observation_keeps_the_ladder_and_disables_th
     terms = build_terms(AGED_INCEPTION)
     spots = run.dc.spot * (1.0 + np.asarray(gpin.LADDER))
     rebuilt = model_ladder(engine, run.life, MODELS["true"], terms, run.s0, PROBE_COUPON, AGED_DAY, AGED_INCEPTION,
-                           run.env, spots, None)
+                           run.env, spots, None, book="ki75")
     tracker = solve_ladder(engine, run.nd.product, run.env, spots, run.life.lifecycle)
     for key in ("engine_price", "engine_delta"):
         assert rebuilt[key] == pytest.approx(tracker[key], abs=1e-9), key      # the whole ladder
     surv = aged_model_product(run.life, MODELS["surv"], terms, run.s0, PROBE_COUPON, AGED_DAY, AGED_INCEPTION,
-                              run.env, None)
+                              run.env, None, book="ki75")
     records = list(surv.barrier_config.ko_observation_schedule.records)
     assert len(records) == len(surv.barrier_config.ko_observation_dates) == len(surv.barrier_config.ko_barrier) == 20
     assert records[0].barrier == pytest.approx(SURV_OFF_MULTIPLE * run.s0)    # the first SURVIVING record is the disabled one
@@ -1645,7 +1971,7 @@ def test_ko_dir_is_kept_per_observation_through_price_note_and_reset_for_the_nex
     monkeypatch.setattr(pricing, "solve_ladder", fake_solve)
     note = next(s for s in real_scans if s.anchored and s.inception >= date(2023, 9, 1) and s.ko_observations >= 3
                 and s.ki_date is None and s.end_reason == "ko")
-    states = pricing.price_note(note.inception, PROBE_COUPON, real_chains, real_anchors, note, engine=engine)
+    states = pricing.price_note(note.inception, PROBE_COUPON, real_chains, real_anchors, note, engine=engine, book="ki75")
     by_obs = {}
     for r in states.days:
         if r["ko_dir"] is not None:
@@ -2799,7 +3125,7 @@ def ac10_case(real_chains, real_anchors, real_scans, engine):
     stored = json.loads(path.read_text(encoding="utf-8"))
     scan_rec = next(s for s in real_scans if s.inception == AC10_INCEPTION)
     states = price_note(AC10_INCEPTION, stored["coupon"], real_chains, real_anchors, scan_rec, engine=engine,
-                        max_days=AC10_DAYS)
+                        max_days=AC10_DAYS, book="ki75")
     return SimpleNamespace(stored=stored, states=states)
 
 
