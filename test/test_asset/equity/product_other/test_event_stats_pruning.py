@@ -111,8 +111,13 @@ def _phoenix():
 # Unified event statistics T12: the statistics are ``EventStatistics``; SNOWBALL_KI is the KI settlement row
 # (knocked in and not knocked out, the marched KIS column — unmoved, bitwise). The KI-ever golden is dropped: a
 # knock-in after a knock-out is no knock-in, and P(KI before KO) comes from the forward pass (T13).
+# Unified event statistics T13: SNOWBALL_KI_BEFORE_KO replaces the KI-ever golden -- P(KI before any KO), the PDE
+# forward adjoint pass's (frozen at 76f2c3d2 + T13 on ARM64). It lies between the KI settlement (KI and no KO
+# after it, 0.1137) and the dropped KI-ever 0.1506 (a knock-in after a knock-out counted); its independent pin is
+# the disable_ko_after_ki twin's KI settlement (``test_pde_forward_adjoint.py``) and the MC reference.
 SNOWBALL_PV = 987699.4565124855  # re-frozen with the FIRST_PASSAGE default
 SNOWBALL_KI = 0.1137292604459367
+SNOWBALL_KI_BEFORE_KO = 0.11520555726411394
 
 
 def test_snowball_full_stream_matches_golden():
@@ -127,6 +132,8 @@ def test_snowball_full_stream_matches_golden():
     # relative bound is far tighter in absolute terms than the old 1e-9.
     assert_close(float(stats.pv), SNOWBALL_PV, msg="snowball pv")
     assert_close(float(stats.ki_settlement.probability), SNOWBALL_KI, msg="snowball ki")
+    assert_close(float(stats.knock_in.probability), SNOWBALL_KI_BEFORE_KO, msg="snowball ki before ko")
+    assert abs(float(np.sum(stats.ki_table.probability)) - float(stats.knock_in.probability)) <= 1e-12
 
 
 def test_snowball_ki_pruning_preserves_ko_and_pv():
@@ -151,6 +158,8 @@ def test_snowball_ki_pruning_preserves_ko_and_pv():
     assert lean.ki_settlement.probability == full.ki_settlement.probability > 0.0
     assert lean.knock_in.probability is None and lean.ki_table is None
     assert lean.unavailable["knock_in.probability"] == "not requested"
+    # ...while the full request reports P(KI before any KO) from the forward pass (T13)
+    assert full.knock_in.probability > full.ki_settlement.probability
 
 
 def test_npv_passthrough_skips_internal_price():

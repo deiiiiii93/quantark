@@ -166,19 +166,21 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
         params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)
     ).calculate_event_stats(ph, env)
 
-    # QUAD: legacy object (KI ever, KI-and-no-KO) until T17; PDE 1D (T12) and MC: unified statistics — the PDE's
-    # P(KI before any KO) comes with its forward pass (T13), its settles-knocked-in row is marched now
-    assert p.knock_in.probability is None and "T13" in p.unavailable["knock_in.probability"]
+    # QUAD: legacy object (KI ever, KI-and-no-KO) until T17; PDE 1D (T12, T13) and MC: unified statistics --
+    # P(KI before any KO) (the PDE's from its forward adjoint pass) and P(KI and no KO)
     assert p.knock_in.probability_no_ko == p.ki_settlement.probability
     evers = [float(q.ki_ever_probability)]
     survs = [float(q.ki_survive_knocked_in_probability), p.ki_settlement.probability, m.knock_in.probability_no_ko]
+    befores = [p.knock_in.probability, m.knock_in.probability]
     assert max(survs) - min(survs) < 0.015, survs
+    assert max(befores) - min(befores) < 0.015, befores
     # The two definitions genuinely differ (this is the whole point).
     for ever, surv in zip(evers, survs):
         assert ever > surv + 0.02, (ever, surv)
     # KI before any KO lies between them, well below KI ever: a knock-in after a knock-out is no knock-in
-    # (DESIGN §4.5; measured 0.104 vs KI ever ~0.14, settles knocked in 0.103)
-    assert m.knock_in.probability_no_ko <= m.knock_in.probability < min(evers) - 0.02
+    # (DESIGN §4.5; measured 0.104 vs KI ever ~0.14, settles knocked in 0.103; PDE 0.1040 vs 0.1028)
+    for engine in (p, m):
+        assert engine.knock_in.probability_no_ko <= engine.knock_in.probability < min(evers) - 0.02
     assert abs(float(q.ki_probability) - float(q.ki_survive_knocked_in_probability)) < 1e-9
 
 

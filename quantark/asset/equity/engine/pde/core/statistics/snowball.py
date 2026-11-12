@@ -21,7 +21,10 @@ from quantark.asset.equity.engine.settlement_support import resolve_terminal_tim
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
+from quantark.asset.equity.engine.pde.grid import project_between
+
 from ..groups import VALUE, Backend, ColumnGroup
+from . import adjoint
 from . import event_statistics as es
 from .columns import ColumnLayout
 from .group import RollingStatistics
@@ -330,7 +333,7 @@ class SnowballStatistics(RollingStatistics):
         terminal = resolve_terminal_timing(product, env)
         maturity, ki_settlement = self._maturity_rows(at, terminal)
         unavailable = {}
-        knock_in, ki_table = self._knock_in(ki_settlement, unavailable)
+        knock_in, ki_table = self._knock_in(ki_settlement, unavailable, states, captures)
         lifetime = float(np.sum(observations.probability * observations.times)) + (
             maturity.probability + ki_settlement.probability) * float(terminal.determination_time)
         return es.assemble(family=self.family, pv=pv, observations=observations, coupons=None, maturity=maturity,
@@ -351,10 +354,138 @@ class SnowballStatistics(RollingStatistics):
         ki_settlement = es.outcome_row(env, probability=at(L.kis) / df_det, discounted=at(L.maturity[1]), **timing)
         return maturity, ki_settlement
 
-    def _knock_in(self, ki_settlement, unavailable):
-        """``(KnockInStatistics, ki_table)``: the valuation-date rules, else the forward pass's (T13)."""
+    def _knock_in(self, ki_settlement, unavailable, states, captures):
+        """``(KnockInStatistics, ki_table)``: the valuation-date rules, else the forward adjoint pass (T13), run only
+        when the request asks for the knock-in stream (D17)."""
         rule = es.knock_in_rule(self.product, knocked_out_now=False, knocked_in_now=self.knocked_in_at_valuation)
         loss = es.expected_loss(self.product, self.env, probability=ki_settlement.probability,
                                 discounted_cash=ki_settlement.discounted_cash, payment_time=ki_settlement.payment_time)
         return es.knock_in_fields(rule, want=self.want_ki_path, probability_no_ko=ki_settlement.probability,
-                                  expected_loss=loss, unavailable=unavailable)
+                                  expected_loss=loss, unavailable=unavailable,
+                                  forward=lambda: adjoint.knock_in_from_forward_pass(self, states, captures))
+
+    # --- the forward adjoint pass's stage plans (unified event statistics T13) ----------------------------------
+    #
+    # Each plan lists, in the march's own order, the stages ``step_events`` (``terminal`` at maturity) applies at
+    # time index ``j`` to a probability column, built from the very primitive the march calls with the same
+    # arguments (``adjoint.py``).
+
+    def knock_in_horizon(self) -> float:
+        """The end of the knock-in monitoring window: the note's maturity."""
+        return float(self.tau)
+
+    def adjoint_stages(self, j, ops):
+        if j == len(self.t) - 1:
+            return self._adjoint_terminal(ops)
+        schedule = self.prepared.events
+        if schedule is not None and j > 0:
+            return self._adjoint_schedule(j, schedule, ops)
+        return self._adjoint_two_surface(j, ops)
+
+    def _ko_surfaces(self):
+        return [adjoint.ALIVE, adjoint.KI] if self.solver._ko_survives_ki(self.product) else [adjoint.ALIVE]
+
+    def _adjoint_ko_columns(self, j, record, surfaces, ops):
+        """``solver._ko_columns`` at ``j`` on ``surfaces``."""
+        solver, s, rev = self.solver, self.s, bool(self.product.is_reverse)
+        barrier = record.barrier
+        if solver._event_uses_projection(j):
+            fn = lambda vs, vb: solver._project_event_values(s, barrier, rev, True, vs, vb)  # noqa: E731
+            return [ops.surface_map(sf, ("ko_columns", barrier, rev), fn) for sf in surfaces]
+        mask = solver._event_nodal_mask(s, barrier, rev, True, at_valuation=(j == 0))
+        return [ops.nodal_ko(sf, mask) for sf in surfaces]
+
+    def _adjoint_terminal_ko(self, record, surfaces, ops):
+        """``solver._terminal_ko_columns`` on ``surfaces``."""
+        solver, s, rev = self.solver, self.s, bool(self.product.is_reverse)
+        barrier = record.barrier
+        if solver._use_cell_average_events():
+            fn = lambda vs, vb: solver._project_event_values(s, barrier, rev, True, vs, vb)  # noqa: E731
+            return [ops.surface_map(sf, ("ko_columns", barrier, rev), fn) for sf in surfaces]
+        mask = solver._get_barrier_mask(s, barrier, rev, is_up_barrier=True)
+        return [ops.nodal_ko(sf, mask) for sf in surfaces]
+
+    def _adjoint_ki_columns(self, j, ops):
+        """``solver._ki_columns`` at ``j``: the projected discrete knock-in, or the nodal one, then FIRST_PASSAGE on
+        an interior step."""
+        solver, s, rev = self.solver, self.s, bool(self.product.is_reverse)
+        barrier = solver._resolve_ki_barrier_at_tidx(j)
+        discrete = not solver._ki_continuous
+        fp = None
+        if solver._ki_fp is not None and 0 < j < len(self.t) - 1:
+            fp = adjoint.first_passage(solver, j, s, barrier)
+        if solver._event_uses_projection(j) and discrete:
+            fn = lambda alive, ki: solver._project_event_values(s, barrier, rev, False, alive, ki)  # noqa: E731
+            return ops.knock_in(("ki_columns", barrier, rev), fn, fp)
+        mask = solver._event_nodal_mask(s, barrier, rev, False, at_valuation=(j == 0 and discrete))
+        return ops.nodal_knock_in(mask, fp)
+
+    def _adjoint_ki_applies(self, j) -> bool:
+        solver = self.solver
+        return bool(self.product.has_ki_barrier and (solver._ki_continuous or j in solver._ki_observation_indices))
+
+    def _adjoint_two_surface(self, j, ops):
+        """``solver._two_surface_events`` at ``j``."""
+        solver = self.solver
+        record = solver._ko_observation_indices.get(j)
+        ki = self._adjoint_ki_applies(j)
+        ko_last = record is not None and ki and solver._ko_jump_goes_last(self.product)
+        stages = []
+        if record is not None and not ko_last:
+            stages += self._adjoint_ko_columns(j, record, self._ko_surfaces(), ops)
+        if ki:
+            stages.append(self._adjoint_ki_columns(j, ops))
+        if ko_last:
+            stages += self._adjoint_ko_columns(j, record, self._ko_surfaces(), ops)
+        return stages
+
+    def _adjoint_schedule(self, j, schedule, ops):
+        """The event table's interior stages at ``j`` (its evidence rows are its staging order) and its continuous
+        stage (``SnowballAdapter._event_schedule``)."""
+        solver, rev = self.solver, bool(self.product.is_reverse)
+        spatial = self.prepared.layout.spatial
+        stages = []
+        rows = schedule.evidence()
+        for row in rows:
+            if row[0] == "ko" and row[1] == j:
+                _, _, _, barrier, _, breach_up, hits_ki, treatment = row
+                surfaces = [adjoint.ALIVE, adjoint.KI] if hits_ki else [adjoint.ALIVE]
+                if treatment == "nodal":
+                    mask = solver._event_nodal_mask(spatial.s, barrier, rev, True)
+                    stages += [ops.nodal_ko(sf, mask) for sf in surfaces]
+                else:
+                    def fn(vs, vb, _b=barrier, _up=breach_up):
+                        return project_between(spatial, _b, _up, vb, vs)
+                    stages += [ops.surface_map(sf, ("schedule_ko", barrier, breach_up), fn) for sf in surfaces]
+            elif row[0] == "ki" and row[1] == j:
+                _, _, _, barrier, breach_up, treatment = row
+                if treatment == "nodal":
+                    stages.append(ops.nodal_knock_in(solver._event_nodal_mask(spatial.s, barrier, rev, False)))
+                else:
+                    def fn(alive, ki, _b=barrier, _up=breach_up):
+                        return project_between(spatial, _b, _up, ki, alive)
+                    stages.append(ops.knock_in(("schedule_ki", barrier, breach_up), fn))
+        for row in rows:
+            if row[0] == "continuous_ki":
+                _, barrier, reverse = row
+                s = spatial.s
+                mask = (s >= barrier) if reverse else (s <= barrier)
+                stages.append(ops.nodal_knock_in(mask, adjoint.first_passage(solver, j, s, barrier)))
+        return stages
+
+    def _adjoint_terminal(self, ops):
+        """``terminal``'s events: the terminal knock-out and knock-in in the value adapter's order."""
+        solver, product = self.solver, self.product
+        num_t = len(self.t)
+        is_terminal_ki = self._adjoint_ki_applies(num_t - 1)
+        terminal_ko = solver._has_terminal_ko and solver._ko_terminal_record is not None
+        ko_last = terminal_ko and is_terminal_ki and solver._ko_jump_goes_last(product)
+        surfaces = [adjoint.ALIVE, adjoint.KI] if solver._ko_survives_ki(product) else [adjoint.ALIVE]
+        stages = []
+        if terminal_ko and not ko_last:
+            stages += self._adjoint_terminal_ko(solver._ko_terminal_record, surfaces, ops)
+        if is_terminal_ki:
+            stages.append(self._adjoint_ki_columns(num_t - 1, ops))
+        if ko_last:
+            stages += self._adjoint_terminal_ko(solver._ko_terminal_record, surfaces, ops)
+        return stages

@@ -92,3 +92,23 @@ unchanged; HestonSnowballPDESolver's price leaf is the recorded pre-existing fai
 
 The payload's `event_times` key is now the KO stream's axis (`stream_times[KO]`), identical to the old single
 axis for every case here.
+
+## 2026-11-12: unified event statistics T13 (PDE 1D forward adjoint pass)
+
+Spec: `.ship/2026-11-11-unified-event-stats/spec.md` AC13/AC14 (the PDE 1D statistics now carry the per-date
+knock-in table, so `price_with_events(emit_distribution=True)` carries the KI stream).
+Not a regeneration: one leaf **added** per phase-4 event case of `pde_phase4_goldens.json`
+(`price_with_events.event_distribution.probabilities.KI`, copied from the live payload), after a field-level diff
+(spec D22) of every phase-4 case showed it is the only leaf outside `golden_compare` tolerance. No existing line of
+the file changed (diff: additions only). Prices, npv, KO probabilities and maturity splits are untouched (the
+MATURITY_NO_KO leaves of Snowball / Phoenix / Snowball::refined differ from live by 1 ULP, inside tolerance, and were
+not edited). HestonSnowballPDESolver's price leaf is the recorded pre-existing failure and was not touched.
+
+| case | KI rows | Σ P(first KI before any KO) |
+|---|---|---|
+| SnowballPDESolver | 252 (one per trading day, continuous KI) | 0.1314772800541091 |
+| SnowballPDESolver::refined | 252 | 0.1314335951247501 |
+| PhoenixPDESolver | 252 | 0.13146192770889353 |
+| KOResetSnowballPDESolver | 252 | 0.16935814292128348 |
+| LocalVolSnowballPDESolver | 252 | 0.1415394353904827 |
+| HestonSnowballPDESolver | 252 | 0.1415408110683148 |

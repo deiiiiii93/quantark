@@ -11,8 +11,9 @@ turns the columns read at the spot into the one result type:
   producer's own undiscounted column on path-dependent rows (memory EXPIRY coupons);
 * the knock-in path statistics by the valuation-date rules (DESIGN §4.5): knocked out at valuation, knocked in
   at valuation (carried, or decided now), no knock-in barrier. Elsewhere P(knock in), the expected first
-  knock-in time and the per-date knock-in table come from the forward adjoint pass (spec T13): until it exists
-  they are ``None`` with the reason :data:`PENDING_FORWARD_PASS`, never a stand-in;
+  knock-in time and the per-date knock-in table come from the forward adjoint pass (spec T13, ``adjoint.py``),
+  run only when the request asks for the knock-in stream; a route the pass cannot transpose reports its reason,
+  never a stand-in;
 * the expected knocked-in loss (DESIGN §4.5): ``E[DF(payment) (principal - knocked-in redemption) 1{settles
   knocked in}] = principal DF(payment) P(KI settlement) - KI settlement cash``, both marched columns.
 
@@ -20,7 +21,7 @@ turns the columns read at the spot into the one result type:
 """
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence
+from typing import Callable, Dict, Optional, Sequence
 
 import numpy as np
 
@@ -56,8 +57,8 @@ __all__ = [
 
 #: the reason of the knock-in path statistics a PDE 1D statistics march does not produce (spec T13 adds the pass)
 PENDING_FORWARD_PASS = (
-    "pending: P(knock in), its expected time and the per-date knock-in table come from the PDE 1D forward "
-    "adjoint pass (unified event statistics T13)"
+    "undefined: this statistics group has no forward adjoint pass for P(knock in), its expected time and the "
+    "per-date knock-in table"
 )
 #: a pruned value (DESIGN §4.9b)
 NOT_REQUESTED = "not requested"
@@ -159,8 +160,12 @@ def outcome_row(env, *, time: float, payment_time: float, date=None, payment_dat
 
 
 def knock_in_fields(rule: str, *, want: bool, probability_no_ko: float, expected_loss: float,
-                    unavailable: Dict[str, str]):
-    """``(KnockInStatistics, ki_table)`` by the valuation-date ``rule``; the reasons go into ``unavailable``."""
+                    unavailable: Dict[str, str], forward: Optional[Callable[[], tuple]] = None):
+    """``(KnockInStatistics, ki_table)`` by the valuation-date ``rule``; the reasons go into ``unavailable``.
+
+    ``forward``: the forward adjoint pass (``adjoint.knock_in_from_forward_pass`` bound to the march), run only for
+    the ``FORWARD`` rule of a request that asks for the knock-in stream (D17: a pruned request never runs it); it
+    returns ``(probability, expected_time, ki_table, expected_time_reason)`` or raises ``AdjointUnavailable``."""
     if rule == KnockInRule.KNOCKED_IN_NOW:
         table = KnockInTable(times=np.zeros(1), payment_times=np.zeros(1), probability=np.ones(1),
                              survival=np.zeros(1), interpolated=np.zeros(1, dtype=bool))
@@ -172,7 +177,21 @@ def knock_in_fields(rule: str, *, want: bool, probability_no_ko: float, expected
         stats = KnockInStatistics(probability=0.0, probability_no_ko=probability_no_ko, expected_time=None,
                                   expected_loss=expected_loss)
         return stats, KnockInTable.empty()
-    reason = PENDING_FORWARD_PASS if want else NOT_REQUESTED
+    if want and forward is not None:
+        from .adjoint import AdjointUnavailable
+
+        try:
+            probability, expected_time, table, time_reason = forward()
+        except AdjointUnavailable as refused:
+            reason = refused.reason
+        else:
+            if time_reason is not None:
+                unavailable["knock_in.expected_time"] = time_reason
+            stats = KnockInStatistics(probability=probability, probability_no_ko=probability_no_ko,
+                                      expected_time=expected_time, expected_loss=expected_loss)
+            return stats, table
+    else:
+        reason = PENDING_FORWARD_PASS if want else NOT_REQUESTED
     for key in ("knock_in.probability", "knock_in.expected_time", "ki_table"):
         unavailable[key] = reason
     stats = KnockInStatistics(probability=None, probability_no_ko=probability_no_ko, expected_time=None,

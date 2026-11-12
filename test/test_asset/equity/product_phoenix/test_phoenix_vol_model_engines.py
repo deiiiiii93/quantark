@@ -281,8 +281,9 @@ def _assert_phoenix_event_statistics(stats, product: PhoenixOption):
 
 def _assert_phoenix_pde_event_statistics(stats, product: PhoenixOption):
     """The PDE 1D march (local vol, and the 2D solvers' flat-vol surrogate) reports ``EventStatistics`` since
-    unified event statistics T12: coupon table on the observation grid, KI settlement marched, P(KI) pending the
-    forward pass (T13); the ledger reconciles to the reported pv up to ``reconciliation_error``."""
+    unified event statistics T12: coupon table on the observation grid, KI settlement marched, P(KI before any KO)
+    and its table from the forward adjoint pass (T13); the ledger reconciles to the reported pv up to
+    ``reconciliation_error``."""
     from quantark.asset.equity.engine.event_stats import EventStatistics
 
     assert isinstance(stats, EventStatistics) and stats.product_family == "phoenix"
@@ -291,7 +292,9 @@ def _assert_phoenix_pde_event_statistics(stats, product: PhoenixOption):
     assert np.isfinite(stats.pv)
     assert np.all(np.isfinite(stats.observations.probability)) and np.all(np.isfinite(stats.coupons.probability))
     assert np.all(stats.observations.probability >= -1e-10) and np.all(stats.coupons.probability >= -1e-10)
-    assert stats.knock_in.probability is None and "T13" in stats.unavailable["knock_in.probability"]
+    assert stats.knock_in.probability is not None and "knock_in.probability" not in stats.unavailable
+    assert stats.knock_in.probability_no_ko <= stats.knock_in.probability + 1e-8
+    assert abs(float(np.sum(stats.ki_table.probability)) - stats.knock_in.probability) <= 1e-12
     assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability
     parts = float(np.sum(stats.ledger.discounted_cash))
     assert float(stats.pv) - parts == pytest.approx(float(stats.reconciliation_error), abs=1e-7)

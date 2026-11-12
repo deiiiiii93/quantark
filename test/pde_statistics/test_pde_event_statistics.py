@@ -2,9 +2,9 @@
 
 Snowball, Phoenix and KO-reset ABSOLUTE (REBASED KO-reset is MC-only: the PDE refuses it, DESIGN §4.9a):
 
-- AC7: ``EventStatistics`` with nothing unavailable but the knock-in path statistics the forward adjoint pass
-  produces (spec T13: ``knock_in.probability``, ``knock_in.expected_time``, ``ki_table``, each with the T13
-  reason) and, where P(knock in) = 0 by the valuation-date rules, the undefined expected time;
+- AC7: ``EventStatistics`` with nothing unavailable on a full request (the knock-in path statistics come from the
+  forward adjoint pass, T13, ``test_pde_forward_adjoint.py``) and, where P(knock in) = 0 by the valuation-date
+  rules, the undefined expected time;
 - D23: ``pv`` is ``price()``'s value bitwise, and so is ``price_with_events(...).npv``;
 - AC8 (D16): ``|reconciliation_error|`` at round-off; ``|probability_residual|`` within the banked bound
   (measured, see ``RESIDUAL_BOUND``), shrinking under refinement (the march's discount error, O(dt^2));
@@ -48,8 +48,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 EXPIRY = CouponPayType.EXPIRY
 
-#: the knock-in path statistics the forward adjoint pass (spec T13) produces
-PENDING_KEYS = {"knock_in.probability", "knock_in.expected_time", "ki_table"}
 #: |reconciliation_error| / max(1, |pv|): the value and the cash columns take the same linear stages (round-off)
 RECONCILIATION_BOUND = 1e-12
 #: |probability_residual| at the accuracy presets (steps_per_day >= 4): the march's discount error on the unit
@@ -112,14 +110,14 @@ def _df(env, t):
 # --- AC7 -------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", list(ROUTES))
-def test_full_request_is_an_event_statistics_pending_only_the_forward_pass(name):
+def test_full_request_is_an_event_statistics_with_nothing_unavailable(name):
     solver, _, _, stats = _stats(name)
     assert isinstance(stats, EventStatistics)
     assert stats.product_family == ROUTES[name][3]
     assert (stats.coupons is None) == (ROUTES[name][3] != "phoenix")           # AC11
-    assert set(stats.unavailable) == PENDING_KEYS, dict(stats.unavailable)
-    assert all("T13" in reason and "forward adjoint pass" in reason for reason in stats.unavailable.values())
-    assert stats.knock_in.probability is None and stats.knock_in.expected_time is None and stats.ki_table is None
+    assert dict(stats.unavailable) == {}, dict(stats.unavailable)
+    assert stats.knock_in.probability is not None and stats.knock_in.expected_time is not None
+    assert stats.ki_table is not None and stats.ki_table.size > 0
     assert stats.knock_in.expected_loss is not None and stats.knock_in.expected_loss >= 0.0
     assert stats.ledger.cash_to_pay is not None
     assert stats.coupons is None or stats.coupons.probability is not None
@@ -190,14 +188,15 @@ def _certain_knock_out_first(first_barrier):
 def test_a_knock_in_after_a_certain_knock_out_settles_nothing_knocked_in():
     """AC9 on the backward columns: nothing settles knocked in and nothing is lost when the knock-out is certain
     before the barrier is observed, while the barrier is reachable (the same note with an ordinary first barrier
-    settles knocked in on a large share of paths). P(knock in) itself is the forward pass's (T13)."""
+    settles knocked in on a large share of paths). P(knock in) itself: ``test_pde_forward_adjoint.py`` (T13)."""
     env = grid.flat_env()
     stats = SnowballPDESolver(PDEParams()).calculate_event_stats(_certain_knock_out_first(1.0), env)
     assert stats.observations.probability[0] > 1.0 - 1e-9
     assert abs(stats.ki_settlement.probability) <= 1e-12
     assert abs(stats.ki_settlement.discounted_cash) <= 1e-10
     assert abs(stats.knock_in.expected_loss) <= 1e-10
-    assert stats.unavailable["knock_in.probability"] == stats.unavailable["ki_table"]
+    assert abs(stats.knock_in.probability) <= 1e-12
+    assert stats.unavailable["knock_in.expected_time"].startswith("undefined:")
     reachable = SnowballPDESolver(PDEParams()).calculate_event_stats(_certain_knock_out_first(103.0), env)
     assert reachable.ki_settlement.probability > 0.2 and reachable.knock_in.expected_loss > 1.0
 

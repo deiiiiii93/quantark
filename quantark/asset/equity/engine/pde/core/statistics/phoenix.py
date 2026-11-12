@@ -35,6 +35,7 @@ from quantark.util.enum import CouponPayType
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
+from . import adjoint
 from . import event_statistics as es
 from .columns import ColumnLayout
 from .readout import assemble_autocallable
@@ -350,6 +351,90 @@ class PhoenixStatistics(SnowballStatistics):
                 X[:, S[m]] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
                     lows, his, b_c_x, b_ko_x, trig_up, ko_here, s_ko_value, pay, self._missed(X0, earned)))
 
+    # --- the forward adjoint pass's stage plans (unified event statistics T13) ----------------------------------
+    #
+    # The probability columns sit in ``F`` (not the trigger): the coupon stage projects them against themselves,
+    # the knock-in copies them, the knock-out (``_ko_update``) or the joint projection sets their target.
+
+    def adjoint_stages(self, j, ops):
+        """``step_events`` at ``j`` (``terminal`` at maturity): coupon, knock-in, knock-out."""
+        solver = self.solver
+        num_t = len(self.t)
+        obs_idx = solver._coupon_observation_indices.get(j)
+        stages = []
+        if j == num_t - 1:
+            if obs_idx is not None:
+                stages += self._adjoint_coupon(j, obs_idx, ops)
+            if self._adjoint_ki_applies(j):
+                stages.append(self._adjoint_ki_columns(j, ops))
+            if solver._has_terminal_ko and solver._ko_terminal_record is not None:
+                stages += self._adjoint_ko_stage(j, solver._ko_terminal_record, ops)
+            return stages
+        if obs_idx is not None and not solver._joint_coupon_ko_projection_active(j):
+            stages += self._adjoint_coupon(j, obs_idx, ops)
+        if self._adjoint_ki_applies(j):
+            stages.append(self._adjoint_ki_columns(j, ops))
+        record = solver._ko_observation_indices.get(j)
+        if record is not None:
+            stages += self._adjoint_ko_stage(j, record, ops)
+        return stages
+
+    def _adjoint_coupon(self, j, obs_idx, ops):
+        """``_coupon_stage`` on a probability column: its pay and miss branches are the column itself, so a nodal
+        fan-in leaves it unchanged and the projection averages it across the coupon barrier's cell."""
+        solver, s, rev = self.solver, self.s, bool(self.product.is_reverse)
+        if obs_idx < 0 or obs_idx >= solver._coupon_barriers.shape[0]:
+            return []
+        if not solver._event_uses_projection(j):
+            return []
+        barrier = float(solver._coupon_barriers[obs_idx])
+        fn = lambda v: solver._coupon_update(s, barrier, rev, j, v, v, None)  # noqa: E731
+        return [ops.smoothing(sf, ("coupon", barrier, rev), fn) for sf in (adjoint.ALIVE, adjoint.KI)]
+
+    def _adjoint_ko_stage(self, j, record, ops):
+        """``_ko_stage`` on a probability column: ``_ko_update``, or the joint coupon + knock-out projection."""
+        solver, product, s = self.solver, self.product, self.s
+        rev = bool(product.is_reverse)
+        obs_idx = solver._coupon_observation_indices.get(j)
+        projection = solver._event_uses_projection(j)
+        if projection and solver._joint_coupon_ko_projection_active(j):
+            return self._adjoint_joint(j, record, obs_idx, ops)
+        ko_mask = None
+        if not projection:
+            _, ko_mask = solver._coupon_masks(s, j, obs_idx, record, product)
+            if not ko_mask.any():
+                return []
+        surfaces = [adjoint.ALIVE] + ([adjoint.KI] if solver._ko_survives_ki(product) else [])
+        barrier = record.barrier
+        fn = lambda vs, vb: solver._ko_update(s, barrier, rev, j, vs, vb, ko_mask)  # noqa: E731
+        key = ("phoenix_ko", barrier, rev, projection, None if projection else (j == 0))
+        return [ops.surface_map(sf, key, fn) for sf in surfaces]
+
+    def _adjoint_joint(self, j, record, obs_idx, ops):
+        """``_joint_stage`` on a probability column: the knock-out region takes its target, the pay and miss regions
+        the column itself -- one piecewise cell average (``_joint_branches``)."""
+        solver, product, s, n = self.solver, self.product, self.s, len(self.s)
+        cb, kob = float(solver._coupon_barriers[obs_idx]), float(record.barrier)
+        x_vec = np.log(np.asarray(s, dtype=float))
+        trig_up = not bool(product.is_reverse)
+        breaks = sorted((np.log(cb), np.log(kob)))
+        lows, his = [-np.inf] + breaks, breaks + [np.inf]
+        b_c_x, b_ko_x = np.log(cb), np.log(kob)
+        stages = []
+        for surface, ko_here in ((adjoint.ALIVE, True), (adjoint.KI, solver._ko_survives_ki(product))):
+            def linear(_ko=ko_here):
+                eye = np.eye(n)
+                return project_piecewise_event(x_vec, breaks, solver._joint_branches(
+                    lows, his, b_c_x, b_ko_x, trig_up, _ko, lambda m_pay: np.zeros((n, n)), eye, eye))
+
+            def breach():
+                return project_piecewise_event(x_vec, breaks, solver._joint_branches(
+                    lows, his, b_c_x, b_ko_x, trig_up, True, lambda m_pay: np.ones(n), np.zeros(n), np.zeros(n)))
+
+            stages.append(ops.joint(surface, ("joint", cb, kob, trig_up, ko_here), linear,
+                                    breach if ko_here else None))
+        return stages
+
     def _column_of_term(self, term, surface, ki_edge=False):
         if term.column == "U":
             return int(self.layout.unit)
@@ -501,7 +586,7 @@ class PhoenixStatistics(SnowballStatistics):
         coupons, path_dependent_cash = self._coupon_table(observations, terminal, cash, trigger, buckets, cash_u,
                                                           unavailable)
         maturity, ki_settlement = self._maturity_rows(at, terminal)
-        knock_in, ki_table = self._knock_in(ki_settlement, unavailable)
+        knock_in, ki_table = self._knock_in(ki_settlement, unavailable, states, captures)
         lifetime = float(np.sum(observations.probability * observations.times)) + (
             maturity.probability + ki_settlement.probability) * float(terminal.determination_time)
         return es.assemble(family=self.family, pv=pv, observations=observations, coupons=coupons,

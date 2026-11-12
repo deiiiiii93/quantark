@@ -22,6 +22,7 @@ from quantark.asset.equity.engine.settlement_support import resolve_terminal_tim
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_close
 
+from . import adjoint
 from . import event_statistics as es
 from .columns import ColumnLayout
 from .snowball import SnowballBreach, SnowballStatistics
@@ -123,6 +124,57 @@ class KOResetStatistics(SnowballStatistics):
                                    solver._total_tau - (self.tau - self.t[j]), self.product, self.env,
                                    breach=self.breach)
 
+    # --- the forward adjoint pass's stage plans (unified event statistics T13) ----------------------------------
+
+    def knock_in_horizon(self) -> float:
+        """The knock-in monitors the not-knocked-in surface, which lives up to the first schedule's maturity."""
+        return float(self.product.get_pre_maturity_time(self.env))
+
+    def adjoint_stages(self, j, ops):
+        if j == len(self.t) - 1:
+            return self._adjoint_terminal(ops)
+        return self._adjoint_two_surface(j, ops)
+
+    def _adjoint_two_surface(self, j, ops):
+        """``KOResetSnowballPDESolver._two_surface_events`` at ``j``: the staged seed, the first schedule on the
+        not-knocked-in surface, the second on the knocked-in one, the knock-in (while the first lives)."""
+        solver, product = self.solver, self.product
+        stages = []
+        seed = solver._v0_seed_idx
+        if seed is not None and j == seed:
+            stages.append(adjoint.Seed(adjoint.ALIVE))
+        pre = solver._pre_ko_observation_indices.get(j)
+        pre_last = pre is not None and solver._pre_ko_goes_last()
+        if pre is not None and not pre_last:
+            stages += self._adjoint_ko_columns(j, pre, [adjoint.ALIVE], ops)
+        post = solver._post_ko_observation_indices.get(j)
+        if post is not None and not product.barrier_config.disable_ko_after_ki:
+            stages += self._adjoint_ko_columns(j, post, [adjoint.KI], ops)
+        if (seed is None or j <= seed) and self._adjoint_ki_applies(j):
+            stages.append(self._adjoint_ki_columns(j, ops))
+        if pre_last:
+            stages += self._adjoint_ko_columns(j, pre, [adjoint.ALIVE], ops)
+        return stages
+
+    def _adjoint_terminal(self, ops):
+        """``terminal``'s events (the not-knocked-in surface takes none when it is staged)."""
+        solver, product = self.solver, self.product
+        num_t = len(self.t)
+        staged = self.seed_idx is not None
+        pre_terminal = solver._has_pre_terminal_ko and solver._pre_ko_terminal_record is not None
+        pre_last = pre_terminal and solver._pre_ko_goes_last()
+        stages = []
+        if pre_terminal and not pre_last:
+            stages += self._adjoint_terminal_ko(solver._pre_ko_terminal_record, [adjoint.ALIVE], ops)
+        if (solver._has_post_terminal_ko and solver._post_ko_terminal_record is not None
+                and not product.barrier_config.disable_ko_after_ki):
+            stages += self._adjoint_terminal_ko(solver._post_ko_terminal_record, [adjoint.KI], ops)
+        if not staged and self._adjoint_ki_applies(num_t - 1):
+            stages.append(self._adjoint_ki_columns(num_t - 1, ops))
+        if pre_last:
+            stages += self._adjoint_terminal_ko(solver._pre_ko_terminal_record, [adjoint.ALIVE], ops)
+        return stages
+
     def _probability_rows(self, j, current, rows, edges):
         """The maturity units' rows, in determination units: the knocked-in surface matures on the post
         schedule unless its knock-out edge knocks it out; the not-knocked-in surface knocks in at its
@@ -186,7 +238,7 @@ class KOResetStatistics(SnowballStatistics):
             observations = replace(observations, survival=observations.survival - np.where(
                 obs_times >= maturity.time, maturity.probability, 0.0))
         unavailable = {}
-        knock_in, ki_table = self._knock_in(ki_settlement, unavailable)
+        knock_in, ki_table = self._knock_in(ki_settlement, unavailable, states, captures)
         lifetime = (float(np.sum(observations.probability * obs_times)) + maturity.probability * maturity.time
                     + ki_settlement.probability * ki_settlement.time)
         return es.assemble(family=self.family, pv=pv, observations=observations, coupons=None, maturity=maturity,

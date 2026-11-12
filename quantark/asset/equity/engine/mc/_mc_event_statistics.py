@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from quantark.util.calendar.day_counter import calculate_year_fraction
+from quantark.asset.equity.engine.knock_in_days import STEP_OVERLAP, knock_in_day_axis, step_overlap
+from quantark.asset.equity.engine.knock_in_days import not_a_grid_time as _not_a_grid_time
 from quantark.util.numerical import Tolerance
 
 __all__ = [
@@ -48,80 +48,14 @@ SINGLE_BATCH = "undefined: single batch"
 DEPENDENT_BATCHES = "undefined: deterministic QMC batches are not independent"
 FEW_KNOCK_IN_PATHS = "undefined: fewer than two knock-in paths"
 NO_KNOCK_IN = "undefined: P(knock in) = 0"
-#: the continuous knock-in rows' interpolation scheme (spec D18)
-STEP_OVERLAP = "step_overlap"
-
 Field = Union[float, np.ndarray]
 
 
 # --- the continuous knock-in table (spec AC13, D18) ------------------------------------------------------
-
-
-def knock_in_day_axis(product, pricing_env, horizon: float) -> Tuple[np.ndarray, Optional[tuple]]:
-    """End time (and date) of each trading day of the continuous knock-in window ``(0, horizon]``.
-
-    A dated product (``ProductClock.DATE``) priced in an environment with a business calendar: one row per
-    business day after the valuation date, at its time on the environment's axis, the last row the day the
-    window ends (its time is ``horizon``). Otherwise (a numeric-clock contract, or no calendar to tell trading
-    days): steps of ``1 / bus_days_in_year`` on the product's time axis, the last row at ``horizon``, no dates.
-    An empty axis when the window ends at the valuation.
-    """
-    from quantark.asset.clock import ProductClock, product_clock
-
-    horizon = float(horizon)
-    calendar = getattr(pricing_env, "calendar", None)
-    dated = product_clock(product) is ProductClock.DATE and calendar is not None
-    if horizon <= Tolerance.ZERO:
-        return np.zeros(0, dtype=float), (() if dated else None)
-    if dated:
-        valuation: datetime = pricing_env.valuation_date
-        times: List[float] = []
-        dates: List[datetime] = []
-        day = valuation
-        while True:
-            day = day + timedelta(days=1)
-            time = calculate_year_fraction(
-                valuation, day, pricing_env.day_count_convention, pricing_env.bus_days_in_year,
-                calendar=calendar,
-            )
-            if time >= horizon - Tolerance.ZERO:
-                times.append(horizon)
-                dates.append(day)
-                break
-            if calendar.is_business_day(day):
-                times.append(float(time))
-                dates.append(day)
-        return np.asarray(times, dtype=float), tuple(dates)
-    days_per_year = float(pricing_env.bus_days_in_year)
-    count = int(math.ceil(horizon * days_per_year - Tolerance.ZERO))
-    times = [k / days_per_year for k in range(1, count + 1) if k / days_per_year < horizon - Tolerance.ZERO]
-    times.append(horizon)
-    return np.asarray(times, dtype=float), None
-
-
-def step_overlap(step_ends: np.ndarray, step_mass: np.ndarray, day_ends: np.ndarray) -> np.ndarray:
-    """Mass per day: each step's mass spread over the days it overlaps in proportion to the overlap (D18).
-
-    Step ``k`` spans ``(step_ends[k-1], step_ends[k]]`` (the first from 0); day ``d`` spans
-    ``(day_ends[d-1], day_ends[d]]``. Spreading a step's mass uniformly over its time is the cumulative mass,
-    linear between step ends, so day ``d`` holds ``C(day_ends[d]) - C(day_ends[d-1])``; mass of a step past
-    the last day end is kept on the last day.
-    """
-    step_ends = np.asarray(step_ends, dtype=float)
-    day_ends = np.asarray(day_ends, dtype=float)
-    if day_ends.size == 0:
-        return np.zeros(0, dtype=float)
-    knots = np.concatenate([[0.0], step_ends])
-    cumulative = np.concatenate([[0.0], np.cumsum(np.asarray(step_mass, dtype=float))])
-    at_day_end = np.interp(day_ends, knots, cumulative)
-    at_day_end[-1] = cumulative[-1]
-    return np.diff(np.concatenate([[0.0], at_day_end]))
-
-
-def _not_a_grid_time(boundaries: np.ndarray, grid: np.ndarray) -> np.ndarray:
-    idx = np.clip(np.searchsorted(grid, boundaries), 0, grid.size - 1)
-    nearest = np.minimum(np.abs(grid[idx] - boundaries), np.abs(grid[np.maximum(idx - 1, 0)] - boundaries))
-    return nearest > Tolerance.ZERO
+#
+# ``knock_in_day_axis`` / ``step_overlap`` / ``_not_a_grid_time`` live in the engine-neutral
+# ``quantark.asset.equity.engine.knock_in_days`` (the PDE forward adjoint pass shares them, unified event
+# statistics T13) and are re-exported here unchanged.
 
 
 @dataclass(frozen=True)

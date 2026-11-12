@@ -29,8 +29,15 @@ def test_snowball_pruning_is_reporting_only(streams):
     solver, product, e = SnowballPDESolver(PDEParams()), CASES["sb_cont"][0](), CASES["sb_cont"][1]()
     full, lean = solver.calculate_event_stats(product, e), solver.calculate_event_stats(product, e, streams=streams)
     _assert_outcomes_kept(full, lean)
-    reason = lean.unavailable["knock_in.probability"]
-    assert reason == (full.unavailable["knock_in.probability"] if EventType.KI in streams else "not requested")
+    if EventType.KI in streams:
+        # the forward pass runs on the KI stream alone and reads the same march: the same numbers, bit for bit (T13)
+        assert "knock_in.probability" not in lean.unavailable
+        assert lean.knock_in.probability == full.knock_in.probability
+        assert lean.knock_in.expected_time == full.knock_in.expected_time
+        assert np.array_equal(lean.ki_table.probability, full.ki_table.probability)
+        assert np.array_equal(lean.ki_table.survival, full.ki_table.survival)
+    else:
+        assert lean.unavailable["knock_in.probability"] == "not requested"
 
 
 @pytest.mark.parametrize("case", ["ph_cont", "ph_memory"])
