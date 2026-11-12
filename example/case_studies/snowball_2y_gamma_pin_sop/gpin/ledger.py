@@ -419,6 +419,7 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
         next_idx = start + i + 1
         has_next = next_idx < len(chains) and (until is None or chains[next_idx].day <= until)
         final = (alive and i == len(records) - 1) or not has_next
+        cut_by_until = until is not None and next_idx < len(chains) and chains[next_idx].day > until
         is_fixing = rec is not None and i > 0 and (
             records[i - 1]["next_ko"] == rec["date"] or (rec["knocked_in"] and not records[i - 1]["knocked_in"]))
         acc = _Acc()
@@ -461,7 +462,7 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
                          rules, used, bounds, im_rate)
             if alive or not pos.flat():
                 _flatten(acc, pos, board, dc, rules, im_rate)
-                acc.flag("data_end")
+                acc.flag("until" if cut_by_until else "data_end")
             if mode == "next_open" and is_fixing:
                 acc.flag("last_day_fixing")
         else:

@@ -2509,3 +2509,120 @@ def test_a_missing_mark_for_a_held_leg_fails_closed():
     (states, boards, chains), d = _leg_world(4, last, q)
     with pytest.raises(StudyDataError):
         _run(states, _Scripted(lambda ctx: {KEY_C5000: 1.0} if ctx.day_index >= 1 else {}), boards, chains, desk_notional=NOTIONAL_)
+
+
+# ---- the D9 clip, next_open legs, until, fail-closed data, no look-ahead through the context ----
+
+def test_the_d9_clip_binds_at_3_and_is_counted_and_base_noclip_is_not_clipped():
+    from gpin.techniques import Base, BaseNoClip
+
+    d = _weekdays(4)
+    # delta 6800 CNY per point at spot 5000 is a hedge ratio h = 6800 x 5000 / 10 mio = 3.4
+    states, boards, chains = _world([_day(x, 5000.0, 100000.0, 6800.0, im={"IM2403": dict(close=5000.0)}) for x in d])
+    run = _run(states, Base(), boards, chains)
+    assert [r["clipped"] for r in run.rows] == [True, True, True, False]            # the data-end flatten is not a hedge
+    assert run.clip_count == 3
+    assert run.rows[0]["im_lots"] == pytest.approx(6000.0 * 5000.0 / (200.0 * 5000.0))      # clipped to h = 3.0: 30 lots
+    assert run.rows[0]["hedge_ratio"] == pytest.approx(3.0)
+    free = _run(states, BaseNoClip(), boards, chains)
+    assert [r["clipped"] for r in free.rows] == [False] * 4 and free.clip_count == 0
+    assert free.rows[0]["im_lots"] == pytest.approx(34.0) and free.rows[0]["hedge_ratio"] == pytest.approx(3.4)
+    assert free.technique == "base_noclip" and free.family == "control"
+    # the lower bound is -0.25
+    states, boards, chains = _world([_day(x, 5000.0, 100000.0, -1000.0, im={"IM2403": dict(close=5000.0)}) for x in d])
+    short = _run(states, Base(), boards, chains)
+    assert short.rows[0]["clipped"] and short.rows[0]["hedge_ratio"] == pytest.approx(-0.25)
+    assert short.rows[0]["im_lots"] == pytest.approx(-2.5)
+
+
+def test_next_open_a_fixing_day_defers_the_leg_adjustment_to_the_next_settlement():
+    n = 5
+    d = _weekdays(n)
+    last = d[0] + timedelta(days=60)
+    vols = [0.2, 0.2, 0.2, 0.21, 0.2]
+    q = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, vols[i]), None, 20000, 10000)} for i in range(n)]
+    days = []
+    for i, day in enumerate(d):
+        days.append(_day(day, 5000.0, 100000.0, 1000.0, knocked_in=i >= 2, im={"IM2403": dict(close=5000.0, open=5000.0)},
+                         mo={SERIES: dict(last=last, forward=LEG_FORWARD, quotes=q[i])}))
+    states, boards, chains = _world(days)
+    tech = _Scripted(lambda ctx: {KEY_C5000: 2.0} if ctx.day_index >= 2 else {})
+    run = _run(states, tech, boards, chains, "next_open", desk_notional=NOTIONAL_)
+    r2, r3 = run.rows[2], run.rows[3]
+    assert r2["legs"] == {} and "fixing_deferred" in r2["flags"] and r2["cost"] == 0.0
+    s3 = q[3][("C", 5000.0)][0]
+    assert r3["legs"] == {STR_C5000: 2.0} and "deferred_fill" in r3["flags"]
+    assert r3["mo_mtm"] == 0.0                                                      # bought today at the settlement
+    assert r3["cost"] >= 0.2 * 100.0 * 2.0
+    assert r3["cash"] == pytest.approx(r2["cash"] + r3["accrual"] + r3["im_vm"] - 2.0 * s3 * 100.0 - r3["cost"])
+    leg3 = _leg_delta(d[3], last, "C", 5000.0, 0.21, 2.0)
+    assert r3["im_lots"] == pytest.approx((1000.0 - leg3) * 5000.0 / (200.0 * 5000.0))
+    _check_identity(run)
+
+
+def test_until_stops_the_run_and_marks_everything_flat_with_a_flag():
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_a()
+    d = [c.day for c in chains]
+    run = _run(states, Base(), boards, chains, until=d[1])
+    assert [r["date"] for r in run.rows] == [d[0].isoformat(), d[1].isoformat()]
+    assert "until" in run.rows[1]["flags"] and run.rows[1]["im_lots"] == 0.0
+    full = _run(states, Base(), boards, chains)
+    assert run.rows[0] == full.rows[0]                                              # nothing before the cut changes
+    assert run.rows[1]["note_pnl"] == full.rows[1]["note_pnl"]
+    assert run.rows[1]["im_vm"] == full.rows[1]["im_vm"]
+    assert run.to_json()["until"] == d[1].isoformat()
+    _check_identity(run)
+
+
+def test_the_ledger_fails_closed_on_missing_data():
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_a()
+    unpriced = json.loads(json.dumps(states))
+    unpriced["days"][1]["states"] = {}
+    with pytest.raises(StudyDataError):
+        _run(unpriced, Base(), boards, chains)
+    skewed = json.loads(json.dumps(states))
+    skewed["days"][1]["date"] = "2024-02-01"
+    with pytest.raises(StudyDataError):
+        _run(skewed, Base(), boards, chains)
+    with pytest.raises(StudyDataError):
+        _run(states, Base(), {k: v for k, v in boards.items() if k != chains[1].day}, chains)
+    # a held IM contract that neither the chain nor the board can mark
+    d = _weekdays(3)
+    states, boards, chains = _world([
+        _day(d[0], 5000.0, 1.0, 1000.0, im={"IM2403": dict(close=5000.0)}),
+        _day(d[1], 5000.0, 1.0, 1000.0, im={"IM2404": dict(close=5000.0)}),
+        _day(d[2], 5000.0, 1.0, 1000.0, im={"IM2404": dict(close=5000.0)}),
+    ])
+    with pytest.raises(StudyDataError):
+        _run(states, Base(), boards, chains)
+    with pytest.raises(ValidationError):
+        _run(states, Base(), boards, chains, "weekly")
+
+
+def test_the_context_a_technique_sees_is_dated_at_or_before_the_decision_day():
+    from gpin.techniques import Base
+
+    class Spy(_Scripted):
+        pass
+
+    states, boards, chains = _world_a()
+    spy = Spy(lambda ctx: {})
+    _run(states, spy, boards, chains)
+    assert [c.day for c in spy.seen] == [chains[0].day, chains[1].day]            # the final day is flattened, not decided
+    for c in spy.seen:
+        assert c.board.day == c.day and c.record["date"] == c.day.isoformat()
+        assert c.prev is None or c.prev.day < c.day
+    assert spy.seen[1].prev is spy.seen[0] and spy.seen[0].held_im == {} and spy.seen[1].held_im == pytest.approx({"IM2403": 5.0})
+    # changing any state, board or chain dated after day 1 leaves the rows up to day 1 untouched
+    base = _run(states, Base(), boards, chains)
+    changed, boards2, chains2 = _world([
+        _day(chains[0].day, 5000.0, 100000.0, 1000.0, im={"IM2403": dict(close=5000.0)}),
+        _day(chains[1].day, 5100.0, 95000.0, 1200.0, im={"IM2403": dict(close=5100.0)}),
+        _day(chains[2].day, 4000.0, 777.0, 4321.0, im={"IM2403": dict(close=4100.0)}),
+    ])
+    alt = _run(changed, Base(), boards2, chains2)
+    assert alt.rows[:2] == base.rows[:2] and alt.rows[2] != base.rows[2]
