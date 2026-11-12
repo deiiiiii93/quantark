@@ -1070,7 +1070,7 @@ def test_the_pass_ends_on_the_ko_day_with_the_lifecycle_cash(probe_states):
 
 
 def test_true_ladder_centre_equals_the_engine_price_and_the_daily_greeks_delta(
-        real_chains, real_anchors, probe_states, engine):
+        probe_run, probe_states, engine):
     from s2ts import NOTIONAL
     from s2ts.note import daily_greeks
     from s2ts.tails import pillar_inputs
@@ -1078,7 +1078,8 @@ def test_true_ladder_centre_equals_the_engine_price_and_the_daily_greeks_delta(
 
     _, by = probe_states
     r = by[PROBE_DAY.isoformat()]
-    life, dc, env, nd, curve = _step_life(real_chains, real_anchors, PROBE_INCEPTION, PROBE_COUPON, PROBE_DAY)
+    a = probe_run.at_day
+    life, dc, env, nd, curve = a.life, a.dc, a.env, a.nd, a.curve
     price = float(engine.price(nd.product, env, lifecycle_state=life.lifecycle))
     centre = r["states"]["true"]["engine_price"][LADDER_CENTRE]
     one_millionth_bp = 1e-6 * 1e-4 * NOTIONAL                      # 1e-6 bp of notional, in CNY
@@ -1088,7 +1089,7 @@ def test_true_ladder_centre_equals_the_engine_price_and_the_daily_greeks_delta(
     assert is_close(_bump_delta(r["states"]["true"], r["spot"]), g.spot_delta, rel_tol=1e-9)
 
 
-def test_true_model_ladder_equals_the_note_built_by_build_note(real_chains, real_anchors, probe_states, engine):
+def test_true_model_ladder_equals_the_note_built_by_build_note(probe_run, probe_states, engine):
     """The rebuilt-and-aged ``true`` variant is the tracker's own pricing copy: same prices on the whole ladder."""
     from gpin.models import MODELS
     from gpin.pricing import model_ladder
@@ -1096,8 +1097,8 @@ def test_true_model_ladder_equals_the_note_built_by_build_note(real_chains, real
 
     _, by = probe_states
     r = by[PROBE_DAY.isoformat()]
-    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, PROBE_INCEPTION, PROBE_COUPON, PROBE_DAY)
-    s0 = next(c.spot for c in real_chains if c.day == PROBE_INCEPTION)
+    life, dc, env, nd = probe_run.at_day.life, probe_run.at_day.dc, probe_run.at_day.env, probe_run.at_day.nd
+    s0 = probe_run.s0
     spots = dc.spot * (1.0 + np.asarray(gpin.LADDER))
     rebuilt = model_ladder(engine, life, MODELS["true"], build_terms(PROBE_INCEPTION), s0, PROBE_COUPON, PROBE_DAY,
                            PROBE_INCEPTION, env, spots, None)
@@ -1105,21 +1106,14 @@ def test_true_model_ladder_equals_the_note_built_by_build_note(real_chains, real
     assert rebuilt["engine_delta"] == pytest.approx(r["states"]["true"]["engine_delta"], abs=1e-9)
 
 
-def test_ko_cash_is_what_the_lifecycle_pays(real_chains, real_anchors):
+def test_ko_cash_is_what_the_lifecycle_pays(probe_run):
     """``ko_cash`` (first aged record's payoff) equals the cash ``NoteLife`` reports when that observation fires."""
     from gpin.pricing import ko_cash
     from s2ts.note import build_terms
 
-    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, PROBE_INCEPTION, PROBE_COUPON, PROBE_DAY)
-    cash = ko_cash(nd.product, env, PROBE_KO_DAY, PROBE_DAY, build_terms(PROBE_INCEPTION))
-    nxt = next(c for c in real_chains if c.day == PROBE_KO_DAY)
-    from quantark.param import FlatRateCurve
-    from s2ts import RATE
-    from s2ts.note import make_env
-    from s2ts.tails import build_curve
-
-    env2 = make_env(nxt, build_curve(nxt, gpin.TAIL, real_anchors.get(nxt.day)).to_dividend_yield(FlatRateCurve(RATE)))
-    fired = life.step(nxt, env2)
+    a = probe_run.at_day
+    cash = ko_cash(a.nd.product, a.env, PROBE_KO_DAY, PROBE_DAY, build_terms(PROBE_INCEPTION))
+    fired = probe_run.ko
     assert fired.alive is False and fired.end_reason == "ko"
     assert fired.cash == pytest.approx(cash, rel=1e-12)
     assert 1e4 * cash / 1e7 == pytest.approx(369.86, abs=0.01)    # 15% x 90 / 365 of notional
@@ -1505,6 +1499,158 @@ def test_state_file_reuse_needs_fingerprint_coupon_and_a_complete_run(tmp_path):
         assert pricing.read_current(path, "ki90:2024-02-29", "A", 0.2) is None, key   # a diagnostic run is never reused
     pricing.write_states_atomic(path, {k: v for k, v in base.items() if k != "meta"})
     assert pricing.read_current(path, "ki90:2024-02-29", "A", 0.2) is None            # no provenance, no reuse
+
+
+# ---------------------------------------------------------------------------
+# T3b — tests the checkpoint review asked for (one shared stepped lifecycle where several tests read the same day)
+# ---------------------------------------------------------------------------
+
+AGED_INCEPTION = date(2023, 10, 23)
+AGED_DAY = date(2024, 3, 22)                 # two KO observations (2024-01-23, 2024-02-23) behind, 2024-03-25 next
+
+
+@pytest.fixture(scope="module")
+def probe_run(real_chains, real_anchors):
+    """The probe note stepped once: its state at ``PROBE_DAY`` (a deep copy, so tests may price from it) and the
+    KO day's result."""
+    from types import SimpleNamespace
+
+    from quantark.param import FlatRateCurve
+    from s2ts import RATE
+    from s2ts.note import NoteLife, build_terms, make_env
+    from s2ts.tails import build_curve
+    from gpin.models import book_note
+
+    i0 = next(i for i, c in enumerate(real_chains) if c.day == PROBE_INCEPTION)
+    life = NoteLife(book_note(PROBE_COUPON, real_chains[i0].spot, build_terms(PROBE_INCEPTION)), PROBE_INCEPTION)
+    out = SimpleNamespace(s0=real_chains[i0].spot)
+    for dc in real_chains[i0:]:
+        curve = build_curve(dc, gpin.TAIL, real_anchors.get(dc.day))
+        env = make_env(dc, curve.to_dividend_yield(FlatRateCurve(RATE)))
+        nd = life.step(dc, env)
+        if dc.day == PROBE_DAY:
+            out.at_day = SimpleNamespace(life=copy.deepcopy(life), dc=dc, env=env, nd=nd, curve=curve)
+        if dc.day == PROBE_KO_DAY:
+            out.ko = nd
+            return out
+    raise AssertionError("the probe note did not reach its KO day")
+
+
+@pytest.fixture(scope="module")
+def aged_run(real_chains, real_anchors):
+    from types import SimpleNamespace
+
+    life, dc, env, nd, _ = _step_life(real_chains, real_anchors, AGED_INCEPTION, PROBE_COUPON, AGED_DAY)
+    return SimpleNamespace(life=life, dc=dc, env=env, nd=nd,
+                           s0=next(c.spot for c in real_chains if c.day == AGED_INCEPTION))
+
+
+def test_an_aged_variant_after_a_ko_observation_keeps_the_ladder_and_disables_the_next_level(aged_run, engine):
+    """Guards ``_trim_ko_levels`` and the left-count check: ageing drops the observed records but not the per-
+    observation level list, so without the trim the rebuilt variant does not validate."""
+    from gpin.models import MODELS, SURV_OFF_MULTIPLE
+    from gpin.pricing import aged_model_product, model_ladder, solve_ladder
+    from s2ts.note import build_terms
+
+    run = aged_run
+    assert run.nd.alive and not run.nd.knocked_in
+    terms = build_terms(AGED_INCEPTION)
+    spots = run.dc.spot * (1.0 + np.asarray(gpin.LADDER))
+    rebuilt = model_ladder(engine, run.life, MODELS["true"], terms, run.s0, PROBE_COUPON, AGED_DAY, AGED_INCEPTION,
+                           run.env, spots, None)
+    tracker = solve_ladder(engine, run.nd.product, run.env, spots, run.life.lifecycle)
+    for key in ("engine_price", "engine_delta"):
+        assert rebuilt[key] == pytest.approx(tracker[key], abs=1e-9), key      # the whole ladder
+    surv = aged_model_product(run.life, MODELS["surv"], terms, run.s0, PROBE_COUPON, AGED_DAY, AGED_INCEPTION,
+                              run.env, None)
+    records = list(surv.barrier_config.ko_observation_schedule.records)
+    assert len(records) == len(surv.barrier_config.ko_observation_dates) == len(surv.barrier_config.ko_barrier) == 20
+    assert records[0].barrier == pytest.approx(SURV_OFF_MULTIPLE * run.s0)    # the first SURVIVING record is the disabled one
+    assert all(r.barrier == pytest.approx(run.s0) for r in records[1:])
+    assert surv.barrier_config.ko_barrier[0] == pytest.approx(SURV_OFF_MULTIPLE * run.s0)
+
+
+def test_the_probe_centre_prices_order_by_the_signed_shift(probe_states):
+    """``ko_dir = -1`` books the KO level 1% lower: the long note is called sooner and is worth more at a spot that
+    sits on the level; the wrong-way control books it higher and is worth less."""
+    _, by = probe_states
+    r = by[PROBE_DAY.isoformat()]
+    assert r["ko_dir"] == -1
+    centre = {m: r["states"][m]["engine_price"][LADDER_CENTRE] for m in ("ko_s100", "true", "ko_w100")}
+    assert centre["ko_s100"] > centre["true"] > centre["ko_w100"]
+
+
+def test_ko_dir_is_kept_per_observation_through_price_note_and_reset_for_the_next(
+        real_chains, real_anchors, real_scans, engine, monkeypatch):
+    """Drives ``price_note`` with a gap whose sign flips inside every observation's window (the engine solves are
+    stubbed: the direction is bookkeeping). The first gap of an observation alternates in sign between observations."""
+    from gpin import pricing
+
+    state = {"seen": {}}
+
+    def fake_gap(payoff, obs_date, day, spots, surv_price, barrier):
+        n = state["seen"].setdefault(obs_date, [])
+        first_positive = len(state["seen"]) % 2 == 1          # obs 1: +, -, -, ...; obs 2: -, +, +, ...
+        n.append(1)
+        positive = first_positive if len(n) == 1 else not first_positive
+        return 100.0 if positive else -100.0
+
+    def fake_solve(engine_, product, env, spots, lifecycle_state, label=""):
+        zeros = [0.0] * len(spots)
+        return {"engine_price": list(zeros), "engine_delta": list(zeros), "engine_gamma": list(zeros)}
+
+    monkeypatch.setattr(pricing, "gap_ko_engine", fake_gap)
+    monkeypatch.setattr(pricing, "solve_ladder", fake_solve)
+    note = next(s for s in real_scans if s.anchored and s.inception >= date(2023, 9, 1) and s.ko_observations >= 3
+                and s.ki_date is None and s.end_reason == "ko")
+    states = pricing.price_note(note.inception, PROBE_COUPON, real_chains, real_anchors, note, engine=engine)
+    by_obs = {}
+    for r in states.days:
+        if r["ko_dir"] is not None:
+            by_obs.setdefault(r["next_ko"], []).append(r["ko_dir"])
+    long_windows = [k for k, v in by_obs.items() if len(v) >= 2]
+    assert len(long_windows) >= 2, by_obs
+    order = list(state["seen"])                                  # observations in the order the pass met them
+    for k, dirs in by_obs.items():
+        expected = -1 if order.index(date.fromisoformat(k)) % 2 == 0 else 1   # the sign of that observation's FIRST gap
+        assert set(dirs) == {expected}, (k, dirs)                # kept inside the window, set afresh for the next
+    assert {-1, 1} <= {d for v in by_obs.values() for d in v}
+
+
+def test_the_ko_day_record_carries_the_positive_lifecycle_cash(probe_states, probe_run):
+    from s2ts import NOTIONAL
+
+    _, by = probe_states
+    cash = by[PROBE_KO_DAY.isoformat()]["engine_note_cash"]
+    assert cash > 0.0                                             # engine side: the note pays the coupon
+    assert cash == probe_run.ko.cash
+    assert 1e4 * cash / NOTIONAL == pytest.approx(369.86, abs=0.01)    # 15% x 90 / 365 of notional
+    assert cash == pytest.approx(PROBE_COUPON * 90 / 365.0 * NOTIONAL, rel=1e-12)
+
+
+def test_clean_turns_a_nan_greek_into_null_and_a_nan_price_into_an_error():
+    from gpin.pricing import _clean
+
+    ladder = np.array([1.0, float("nan"), 3.0, float("inf")])
+    assert _clean(ladder, price=False, label="g") == [1.0, None, 3.0, None]    # a contractual jump stays a gap
+    assert _clean(np.array([1.0, 2.0]), price=True, label="p") == [1.0, 2.0]
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(StudyDataError, match="non-finite price"):
+            _clean(np.array([1.0, bad]), price=True, label="p")
+
+
+def test_the_probe_one_percent_bump_deltas_are_175_5_and_81_6(probe_states):
+    _, by = probe_states
+    r = by[PROBE_DAY.isoformat()]
+    pct = {m: 100.0 * _bump_delta(r["states"][m], r["spot"]) * r["spot"] / gpin_notional() for m in ("true", "surv")}
+    assert pct["true"] == pytest.approx(175.5, abs=0.1)
+    assert pct["surv"] == pytest.approx(81.6, abs=0.1)
+
+
+def gpin_notional() -> float:
+    from s2ts import NOTIONAL
+
+    return NOTIONAL
 
 
 # ---------------------------------------------------------------------------

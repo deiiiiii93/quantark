@@ -241,7 +241,7 @@ Three things about how the evidence will be read, also fixed now:
   history holds knock-ins of the 75% product in two episodes only (January-February 2024
   and October 2026), about five test weeks, which cannot carry a test. So the same note is
   also run with the knock-in barrier lifted to 85% and to 90% on the same real paths; at
-  90% the approaches spread over 32 training and 14 test weeks. KI rules are picked and
+  90% the approaches spread over 31 training and 13 test weeks (5% window, `events.json`). KI rules are picked and
   tested on the 90% book and then shown on the 85% and 75% books as transfer checks. A
   lifted barrier has a smaller jump (the put the seller receives is 10% in the money, not
   25%), so the three books are shown side by side.
@@ -309,7 +309,12 @@ Corrections to sections 1-8 after the pre-registration commit:
   (it had been "descriptive only" on the 75% product), the KI window was narrowed from 10%
   to 5% above the barrier, and H8 was added. Counts behind it, from a pricing-free scan:
   75%: 102 training approaches in 3 weeks and 65 test approaches in 5 weeks; 85%: 235 in
-  23 weeks and 128 in 9; 90%: 334 in 32 weeks and 182 in 14.
+  23 weeks and 128 in 9; 90%: 334 in 32 weeks and 182 in 14. Those counts used the 10%
+  window. With the 5% window the scan on the anchored inceptions (`results/events.json`,
+  `books.<book>.restricted`) gives: 75%: 106 training approaches in 4 weeks and 74 test
+  approaches in 5 weeks; 85%: 309 in 21 weeks and 138 in 9; 90%: 404 in 31 weeks and 196
+  in 13. The sampled notes (headline plus pin set) carry 123 training and 50 test
+  approaches in 28 and 10 weeks at 90%.
 
 Results per hypothesis are added here when the backtest has run.
 
