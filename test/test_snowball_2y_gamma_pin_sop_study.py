@@ -730,26 +730,58 @@ def _load_stage(name: str):
     return module
 
 
-def test_events_json_matches_a_fresh_scan_and_lists_every_event(real_scans):
-    from gpin.events import select
+@pytest.fixture(scope="module")
+def book_scans(real_chains, real_anchors, real_scans):
+    from gpin.events import BOOKS, scan
+
+    return {b: (real_scans if b == "ki75" else scan(real_chains, real_anchors, ki_pct=lv)) for b, lv in BOOKS.items()}
+
+
+def test_events_json_matches_a_fresh_scan_and_lists_every_event_per_book(book_scans):
+    from gpin.events import BOOKS, select
 
     stage = _load_stage("02_events.py")
-    sample = select(real_scans)
-    fresh = json.loads(json.dumps(stage.build_payload(real_scans, sample), sort_keys=True))
+    samples = {b: select(book_scans[b], book=b) for b in BOOKS}
+    fresh = json.loads(json.dumps(stage.build_payload(book_scans, samples), sort_keys=True))
     on_disk = json.loads(EVENTS_JSON.read_text(encoding="utf-8"))
     assert on_disk == fresh                                   # the committed file is the current scan
     assert on_disk["preregistration_hash"] == prereg_hash()
     assert on_disk["split_date"] == "2025-07-01"
-    assert len(on_disk["ko_events"]) + len(on_disk["ki_approaches"]) == len(sample.events)
-    for row in on_disk["ko_events"] + on_disk["ki_approaches"]:
-        assert row["slice"] == ("train" if row["date"] < "2025-07-01" else "test")
-        assert row["week"] == week_key_of(date.fromisoformat(row["date"]))
-    assert {r["inception"] for r in on_disk["ko_events"] + on_disk["ki_approaches"]} <= set(on_disk["notes"])
-    assert all(p["why"] for p in on_disk["pin"])
-    sizes = on_disk["sample_sizes"]
-    assert sizes["train"]["ko_events"] + sizes["test"]["ko_events"] == len(on_disk["ko_events"])
     assert on_disk["unrestricted"]["ko_pin_fired"] == 145 and on_disk["unrestricted"]["notes_knocked_in"] == 209
+    assert set(on_disk["books"]) == set(BOOKS)
+    for b, block in on_disk["books"].items():
+        sample = samples[b]
+        assert block["ki_pct"] == BOOKS[b]
+        ko_rows = block.get("ko_events", [])
+        assert len(ko_rows) + len(block["ki_approaches"]) == len(sample.events)
+        for row in ko_rows + block["ki_approaches"]:
+            assert row["slice"] == ("train" if row["date"] < "2025-07-01" else "test")
+            assert row["week"] == week_key_of(date.fromisoformat(row["date"]))
+        assert {r["inception"] for r in ko_rows + block["ki_approaches"]} <= set(block["notes"])
+        assert all(p["why"] for p in block["pin"])
+        sizes = block["sample_sizes"]
+        assert sizes["headline_notes"] == len(sample.headline) and sizes["pin_notes"] == len(sample.pin)
+        assert sizes["train"]["ki_approaches"] + sizes["test"]["ki_approaches"] == len(block["ki_approaches"])
+        r = block["restricted"]
+        assert r["train"]["ki_approaches"] + r["test"]["ki_approaches"] == r["ki_approaches"]
+    assert "ko_events" in on_disk["books"]["ki75"] and "ko_events" not in on_disk["books"]["ki85"]
+    assert "ko_events" not in on_disk["books"]["ki90"]
+    assert not any("ko " in w for p in on_disk["books"]["ki90"]["pin"] for w in p["why"])
+    # AC4b: the decidable KI test slice
+    k90 = on_disk["books"]["ki90"]["restricted"]["test"]
+    assert k90["ki_approaches"] >= 20 and k90["ki_weeks"] >= 10
     assert "holder" not in EVENTS_JSON.read_text(encoding="utf-8").lower()
+
+
+def test_ki75_sample_is_unchanged_by_the_books(real_scans, book_scans):
+    """Adding books does not touch the product's scan or sample: it is the same call, the same records."""
+    from gpin.events import select
+
+    assert book_scans["ki75"] is real_scans
+    assert select(real_scans) == select(real_scans, book="ki75")
+    for b in ("ki85", "ki90"):
+        assert [(s.inception, s.ko_date, s.ko_events, s.ko_observations) for s in book_scans[b]] == \
+            [(s.inception, s.ko_date, s.ko_events, s.ko_observations) for s in real_scans]   # KO side is book-free
 
 
 # ---------------------------------------------------------------------------
