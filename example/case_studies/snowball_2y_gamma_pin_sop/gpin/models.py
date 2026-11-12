@@ -68,9 +68,10 @@ class HedgeModel:
         """True for the models that move the KO barrier in the over-hedge direction."""
         return not is_zero(self.ko_shift)
 
-    def product(self, terms: Terms, s0: float, coupon: float, day: date, ko_dir: Optional[int]):
+    def product(self, terms: Terms, s0: float, coupon: float, day: date, ko_dir: Optional[int],
+                ki_pct: float = KI_PCT):
         """The unaged numeric note with this model's barrier schedule, valued on ``day`` (``day`` only decides
-        which KO observation ``surv`` disables)."""
+        which KO observation ``surv`` disables). ``ki_pct``: the book's KI level; ``ki_shift`` is relative to it."""
         return create_standard_snowball(
             initial_price=s0,
             strike=s0,
@@ -78,7 +79,7 @@ class HedgeModel:
             contract_multiplier=NOTIONAL / s0,
             ko_barrier=ko_levels(self, terms, day, ko_dir, s0=s0),
             ko_rate=float(coupon),
-            ki_barrier=ki_level(self, s0),
+            ki_barrier=ki_level(self, s0, ki_pct),
             num_observations=len(terms.ko_times),
             is_reverse=False,
             ko_observation_dates=list(terms.ko_times),
@@ -126,9 +127,32 @@ def ko_levels(model: HedgeModel, terms: Terms, day: date, ko_dir: Optional[int],
     return levels
 
 
-def ki_level(model: HedgeModel, s0: float) -> float:
-    """The KI barrier level (index points for ``s0``) of this model."""
-    return KI_PCT * s0 * (1.0 + model.ki_shift)
+def ki_level(model: HedgeModel, s0: float, ki_pct: float = KI_PCT) -> float:
+    """The KI barrier level (index points for ``s0``) of this model in the book whose KI level is ``ki_pct``:
+    ``ki_pct x s0 x (1 + ki_shift)``."""
+    return ki_pct * s0 * (1.0 + model.ki_shift)
+
+
+def book_note(coupon: float, s0: float, terms: Terms, ki_pct: float = KI_PCT):
+    """The book's note: ``s2ts.note.build_note`` (one scalar KO level) with the KI level ``ki_pct``; the same
+    factory call, so at 0.75 it is ``build_note``'s note exactly (``s2ts`` hardcodes 75%)."""
+    return create_standard_snowball(
+        initial_price=s0,
+        strike=s0,
+        maturity=terms.maturity_years,
+        contract_multiplier=NOTIONAL / s0,
+        ko_barrier=KO_PCT * s0,
+        ko_rate=float(coupon),
+        ki_barrier=ki_pct * s0,
+        num_observations=len(terms.ko_times),
+        is_reverse=False,
+        ko_observation_dates=list(terms.ko_times),
+        ki_continuous=False,
+        ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_dates=list(terms.ki_times),
+        rebate_rate=float(coupon),
+        include_principal=False,
+    )
 
 
 def _tag(value: float) -> str:
