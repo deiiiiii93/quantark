@@ -39,16 +39,18 @@ Measured on a probe with the study's engine (QUAD V2, note struck 2024-02-29, va
 | | value |
 | --- | ---: |
 | KO cash the seller pays if it fires | 370 bp of notional |
-| seller's PV of the survived branch at the barrier | +49 bp (the continuation is an asset to the seller here) |
-| `gap_KO` (seller's loss on redemption against survival) | 419 bp |
-| hedge the true model asks for at spot (long IM) | 193% of notional |
-| the same 2% above / 2% below spot | 32% / 120% |
-| hedge of the survived branch at spot | 82% |
+| seller's PV of the survived branch at the barrier | +54 bp (the continuation is an asset to the seller here) |
+| `gap_KO` (seller's loss on redemption against survival) | 424 bp |
+| hedge the true model asks for at spot (long IM), point delta | 193% of notional |
+| the same with the desk's 1% bump (the baseline of this study) | 176% |
+| point delta 2% above / 2% below spot | 32% / 120% |
+| hedge of the survived branch at spot (point and 1% bump) | 82% |
 
-So one day before a pinned fixing the model asks for 193% of notional in futures, of which
-about 110 points are the digital term; whichever way the fixing goes, that position is wrong
-the moment it is known (too long by 110 points if the note survives, by 193 if it is
-redeemed). That is the pin.
+So one day before a pinned fixing the model asks for 176-193% of notional in futures,
+depending on the bump, of which 94-111 points are the digital term; whichever way the fixing
+goes, that position is wrong the moment it is known (too long by about 100 points if the note
+survives, by all of it if the note is redeemed). That is the pin. The desk's 1% bump already
+smooths part of it, because the bump straddles the barrier.
 
 At the KI barrier the same shape appears with a daily observation: the seller gains when the
 note knocks in (its liability falls), the hedge the model asks for rises above 1x notional as
@@ -64,7 +66,7 @@ larger for a note that has already knocked in: "已敲入合约在敲出障碍�
 
 | # | Technique | What it does | What the sources say | Conclusion carried into the backtest |
 | --- | --- | --- | --- | --- |
-| 1 | Constant barrier shift | Hedge the note as if the barrier were elsewhere, so the booked product is conservative and the dangerous delta sits beyond the real barrier | Standard practice for digitals and barriers [S1, S2, S4]; "there is no clear procedure for choosing an appropriate value" [S1]; expensive when sized to a delta limit (+27% to +122% in price in the one published example [S2]) | Tested (`ko_shift`, `ki_shift`). A shift moves the delta peak, it does not shrink it (probe: a -1% KO shift cuts the hedge at spot from 193% to 122% and raises it to 209% one percent lower). Expected to help little at a daily clock |
+| 1 | Constant barrier shift | Hedge the note as if the barrier were elsewhere, so the booked product is conservative and the dangerous delta sits beyond the real barrier | Standard practice for digitals and barriers [S1, S2, S4]; "there is no clear procedure for choosing an appropriate value" [S1]; expensive when sized to a delta limit (+27% to +122% in price in the one published example [S2]) | Tested (`ko_shift`, `ki_shift`). A shift moves the delta peak, it does not shrink it (probe, point deltas: a -1% KO shift cuts the hedge at spot from 193% to 122% and raises it to 209% one percent lower). Expected to help little at a daily clock |
 | 2 | Digital booked as a spread | Replace the step by a ramp of width e ending at the barrier; equals the average of shifts from 0 to e | "Hedging a short digital with 1/e of the (K - e)/K call spread, so the hedge never pays less than the digital does" [S6, fetch] | Tested (`ko_spread`). Caps the digital delta at gap/e at the fixing: 2.8x notional for e = 1.5%, 1.4x for 3%. At the T-1 close it removes only 16-43% of the digital delta (inference, section 3.3) |
 | 3 | Bending | Apply the shift or spread only near the date | A progressive shift is cheaper than a constant one [S4, fetch]; the delta constraint binds "short before maturity and close to the barrier" [S2, raw] | Tested (`ko_bend`, 3 and 5 days). Should cost less than a constant spread for the same tail |
 | 4 | Delta-constrained payoff (face-lift) | Price the smallest dominating payoff whose delta respects a limit | Much cheaper than a shift for the same limit (+4% to +35%) [S1, S2] | **Not tested**: needs engine support, out of this study's scope |
@@ -283,6 +285,18 @@ Nothing below was confirmed from a document that was opened.
 9. The 22% vol and the Black-Scholes digital behind the arithmetic in sections 1 and 3.3.
    They give orders of magnitude; the backtest measures the real thing.
 10. Day VWAP as a stand-in for a TWAP fill. No intraday bars cover the history.
+
+## 9. Corrections, and what the backtest confirmed or rejected
+
+Corrections to sections 1-8 after the pre-registration commit:
+
+- 2026-11-12, before any ledger run. Section 1's probe table quoted the engine's point delta
+  (193%) as the hedge; the desk's 1% bump delta, which is this study's baseline, is 176% on
+  that date. The gap was quoted as 419 bp from the survived-branch value at spot; at the
+  barrier it is 424 bp. Both rows now show the corrected numbers. No grid point, window or
+  threshold depended on either number, and `results/preregistration.json` is unchanged.
+
+Results per hypothesis are added here when the backtest has run.
 
 ## References
 
