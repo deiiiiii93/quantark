@@ -1275,3 +1275,26 @@ def test_stage3_pool_records_failures_and_goes_on_and_refuses_a_second_instance(
                           job=lambda inc: {"inception": inc.isoformat(), "reused": True, "seconds": 0.0,
                                            "solves": 0, "live_days": 1}, log=lines.append)
     assert len(ok) == 3 and not list(tmp_path.glob("*.error.json"))
+
+
+# ---------------------------------------------------------------------------
+# T3b — small fixes
+# ---------------------------------------------------------------------------
+
+
+def test_a_short_im_or_mo_row_fails_closed_and_other_families_are_ignored():
+    from gpin.board import parse_cffex_full
+
+    good = cffex_payload([("IM2611", "1", "2", "0.5", "10", "5", "9", "1", "1")]).decode("gbk")
+    for code in ("IM2611", "MO2611-C-6000"):
+        bad = good + f"{code},1,2,0.5,10\n"
+        with pytest.raises(StudyDataError, match=code):
+            parse_cffex_full(bad.encode("gbk"))
+    other = good + "HO2611-C-3250,1,2\n"          # another family with a short row is not our data
+    assert set(parse_cffex_full(other.encode("gbk"))) == {"IM2611"}
+
+
+def test_the_ko_shift_flag_is_a_tolerant_comparison():
+    m = _models()
+    assert m.HedgeModel("x", "ko", ko_shift=1e-13).needs_ko_dir is False
+    assert m.HedgeModel("x", "ko", ko_shift=0.005).needs_ko_dir is True

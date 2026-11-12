@@ -130,9 +130,11 @@ def parse_cffex_full(payload: bytes) -> Dict[str, CffexRow]:
     col = {name: i for i, name in enumerate(h.strip() for h in header)}
     out: Dict[str, CffexRow] = {}
     for row in reader:
+        code = row[col["合约代码"]].strip() if row else ""
         if len(row) != len(CFFEX_HEADER):
+            if _IM_RE.match(code) or _MO_OPT_RE.match(code):
+                raise StudyDataError(f"{code}: {len(row)} fields, the header has {len(CFFEX_HEADER)}")
             continue
-        code = row[col["合约代码"]].strip()
         if _IM_RE.match(code):
             multiplier = IM_MULT
         elif _MO_OPT_RE.match(code):

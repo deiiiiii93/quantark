@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
 from quantark.util.enum import ObservationType
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 from s2ts import NOTIONAL
 from s2ts.note import KI_PCT, KO_PCT, Terms
@@ -65,7 +66,7 @@ class HedgeModel:
     @property
     def needs_ko_dir(self) -> bool:
         """True for the models that move the KO barrier in the over-hedge direction."""
-        return self.ko_shift != 0.0
+        return not is_zero(self.ko_shift)
 
     def product(self, terms: Terms, s0: float, coupon: float, day: date, ko_dir: Optional[int]):
         """The unaged numeric note with this model's barrier schedule, valued on ``day`` (``day`` only decides
