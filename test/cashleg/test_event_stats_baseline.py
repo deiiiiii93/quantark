@@ -532,6 +532,102 @@ def _knocked_in_settlement_marched_directly(live: dict, banked: dict, record: di
         f"{record['id']}: the move is round-off, not the residual")
 
 
+# --- moves (T13: the PDE 1D forward adjoint pass fills the KI table) -------------------------------------------
+#
+# Base had no PDE KI stream, so every PDE AT_KI leg raised. Each check pins the new stream to the product's own KI
+# schedule, to an independent backward number (the disable_ko_after_ki twin's KI settlement) and, on flat vol, to
+# an RQMC run row by row.
+
+#: the discrete KI rows' MC reference tolerance: 4 batch SEs (floored at the binomial SE of the PDE's own row) plus
+#: 1e-3, the stated allowance for the MC's own time discretisation (daily steps; local vol Euler) -- a row moved to
+#: another date (the legacy KO-grid fallback, an equal split) is off by ~1e-2
+_KI_ROW_MC_ALLOWANCE = 1e-3
+
+
+def _mc_knock_in_rows(product, env):
+    """(rows, SEs, paths) of P(first KI at each discrete KI date before any KO) by RQMC, 16 independent scrambles x
+    4096 paths, on the record's own product and (flat) market."""
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+    from quantark.asset.equity.param import MCParams
+    from quantark.util.enum.engine_enums import MonteCarloMethod
+
+    params = MCParams(num_paths=4096, seed=13, rqmc_min_batches=16, rqmc_max_batches=16, rqmc_target_std=1e-12,
+                      rqmc_paths_mode="per_batch", time_steps=504)
+    engine = SnowballMCEngine(params=params, method=MonteCarloMethod.RANDOMIZED_QUASI)
+    stats = engine.calculate_event_stats(product, env)
+    return (np.asarray(stats.ki_table.probability, dtype=float),
+            np.asarray(stats.standard_errors["ki_table.probability"], dtype=float), 16 * 4096)
+
+
+def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
+    """Cause (e), PDE 1D (T13). Base carried no KI stream (the legacy PDE table was empty and the converter dropped
+    it), so the AT_KI leg raised. Now the forward adjoint pass fills the KI table. Pinned without the statistics
+    object it checks:
+
+    * the axis is the product's own: its KI observations up to the knock-in horizon (discrete), or one numeric
+      trading day ``k / bus_days_in_year`` per row up to the horizon (continuous, AC13);
+    * the total is P(KI before any KO), checked against an independent backward number: the knocked-in settlement
+      of the note's ``disable_ko_after_ki`` twin (its knocked-in surface never knocks out, so every first knock-in
+      before a knock-out settles knocked in; same not-knocked-in march, a same-instant tie to the knock-out), within
+      the march's discount residual (T12 RESIDUAL_BOUND 1e-8). A KI-ever table (a knock-in after a knock-out
+      counted) or the note's own settlement (no knock-out after a knock-in) fails it;
+    * discrete KI on flat vol, row by row: each row against an RQMC run on the same product within 4 batch SEs plus a
+      stated 1e-3 allowance (a row moved to another date fails it, even on a KI schedule that is the KO grid);
+    * the leg is ``sign · amount · Σ P_row · DF(t_row + offset)`` on those rows (D8)."""
+    from dataclasses import replace
+
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.cashleg import EventType
+    from quantark.util.enum import ObservationType
+
+    assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv"), record["engine_kind"]
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
+    assert "value" in live, f"{record['id']}: still raises {live}"
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    horizon = float(product.get_pre_maturity_time(env) if isinstance(product, KnockOutResetSnowballOption)
+                    else product.get_maturity(env))
+    bc = product.barrier_config
+    if bc.ki_continuous or bc.ki_observation_type == ObservationType.CONTINUOUS:
+        times = _same_path().numeric_trading_days(horizon, env.bus_days_in_year)
+    else:
+        times = np.array([r.observation_time for r in product.resolve_ki_observations(env)
+                          if r.observation_time <= horizon + 1e-10], dtype=float)
+    dist, _ = _live_distribution(record)
+    np.testing.assert_allclose(np.asarray(dist.stream_times[EventType.KI], dtype=float), times, rtol=0, atol=1e-15)
+    assert EventType.KI not in dist.flagged_streams, dist.flagged_streams
+    probability = np.asarray(dist.probabilities[EventType.KI], dtype=float)
+    twin = case.fresh()[1]
+    twin.barrier_config = replace(twin.barrier_config, disable_ko_after_ki=True)
+    twin.validate()
+    settles = case.fresh()[0].calculate_event_stats(twin, env).ki_settlement.probability
+    assert abs(float(probability.sum()) - settles) <= 1e-8, (
+        f"{record['id']}: P(KI before KO) {probability.sum()!r} != the twin's KI settlement {settles!r}")
+    own = engine.calculate_event_stats(product, env).ki_settlement.probability
+    assert float(probability.sum()) - own > 1e-4, f"{record['id']}: the KI stream is the note's own settlement"
+    continuous = bc.ki_continuous or bc.ki_observation_type == ObservationType.CONTINUOUS
+    if record["engine_kind"] == "pde_1d" and not continuous:
+        # discrete rows one by one against MC on the same product: a row moved to another date fails. Flat vol only:
+        # on this skewed market the LV PDE and LV MC disagree on every outcome (first KO 0.426 vs 0.387, measured,
+        # backward columns included -- not the forward pass), so the LV record is pinned by its total and axis
+        mc, se, paths = _mc_knock_in_rows(case.fresh()[1], env)
+        floor = np.sqrt(np.clip(probability, 0.0, 1.0) * (1.0 - np.clip(probability, 0.0, 1.0)) / paths)
+        excess = np.abs(probability - mc) - 4.0 * np.maximum(se, floor) - _KI_ROW_MC_ALLOWANCE
+        assert np.all(excess <= 0.0), f"{record['id']}: KI rows {probability} vs MC {mc} (SE {se})"
+    expected = _leg_on_rows(_leg(record), env, times, probability)
+    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
+        f"{record['id']}: live {live['value']!r} != the leg on the KI rows {expected!r}")
+
+
+_T13_KI_AXIS = ("pde_snowball__snowball_cki", "pde_snowball__snowball_dki", "pde_snowball__snowball_reverse",
+                "pde_phoenix__phoenix_mem_instant", "pde_phoenix__phoenix_nomem_instant",
+                "pde_phoenix__phoenix_mem_expiry", "pde_phoenix__phoenix_nomem_expiry",
+                "pde_ko_reset__ko_reset_absolute", "pde_ko_reset__ko_reset_absolute_cki",
+                "pde_lv_snowball__snowball_cki", "pde_lv_phoenix__phoenix_mem_instant",
+                "pde_lv_ko_reset__ko_reset_absolute")
+
 _T12_KO_AT_VALUATION = ("pde_snowball__snowball_cki_ko_at_valuation", "pde_phoenix__phoenix_mem_instant_ko_at_valuation")
 _T12_KNOCKED_IN_SETTLEMENT = tuple(
     f"{case}__{leg}__event"
@@ -560,6 +656,8 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knocked_out_at_valuation_has_no_knock_in_row)
        for case in _T12_KO_AT_VALUATION},
     **{rid: MovedBy("d", _knocked_in_settlement_marched_directly) for rid in _T12_KNOCKED_IN_SETTLEMENT},
+    # T13: the PDE 1D forward adjoint pass
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T13_KI_AXIS},
 }
 
 
