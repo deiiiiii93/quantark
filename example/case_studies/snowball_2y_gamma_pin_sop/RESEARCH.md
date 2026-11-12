@@ -204,6 +204,8 @@ Fixed now, so the results cannot be read into them afterwards.
 - H6. The ranking is the same under `close` and `twap` fills; `next_open` widens the gaps
   between techniques without changing their order.
 - H7. `gap_KO` is positive on the large majority of KO-window days.
+- H8. The ranking of the KI rules (`ki_cap`, `ki_shift`, `secant`, `mo_ki` against the
+  baseline) is the same at a 90%, an 85% and a 75% knock-in barrier.
 
 ## 5. Draft SOP (v0)
 
@@ -235,9 +237,14 @@ thresholds.
 
 Three things about how the evidence will be read, also fixed now:
 
-- **KO gets a verdict, KI does not.** Real history holds knock-ins in two episodes only
-  (January-February 2024 and October 2026). KI rules are picked on the first and checked on
-  the second, and reported as a description, not a test.
+- **Both barriers get a verdict, on different books.** KO: the 75% product. KI: real
+  history holds knock-ins of the 75% product in two episodes only (January-February 2024
+  and October 2026), about five test weeks, which cannot carry a test. So the same note is
+  also run with the knock-in barrier lifted to 85% and to 90% on the same real paths; at
+  90% the approaches spread over 32 training and 14 test weeks. KI rules are picked and
+  tested on the 90% book and then shown on the 85% and 75% books as transfer checks. A
+  lifted barrier has a smaller jump (the put the seller receives is 10% in the money, not
+  25%), so the three books are shown side by side.
 - **Three execution clocks.** `close` (fills at the close, the proxy for a 14:55 day-end
   order) decides. `twap` (fills at the day VWAP) and `next_open` (on a fixing day the
   adjustment waits for the next IM open) are reported beside it.
@@ -295,6 +302,14 @@ Corrections to sections 1-8 after the pre-registration commit:
   that date. The gap was quoted as 419 bp from the survived-branch value at spot; at the
   barrier it is 424 bp. Both rows now show the corrected numbers. No grid point, window or
   threshold depended on either number, and `results/preregistration.json` is unchanged.
+
+- 2026-11-12, before any ledger run. Amendment to the pre-registration, at the desk's
+  request to make the product easier to knock in: two books with the knock-in barrier at
+  85% and 90% were added beside the 75% product, the KI verdict was moved to the 90% book
+  (it had been "descriptive only" on the 75% product), the KI window was narrowed from 10%
+  to 5% above the barrier, and H8 was added. Counts behind it, from a pricing-free scan:
+  75%: 102 training approaches in 3 weeks and 65 test approaches in 5 weeks; 85%: 235 in
+  23 weeks and 128 in 9; 90%: 334 in 32 weeks and 182 in 14.
 
 Results per hypothesis are added here when the backtest has run.
 

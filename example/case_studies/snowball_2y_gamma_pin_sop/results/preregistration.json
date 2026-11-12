@@ -3,6 +3,8 @@
     "registered": "2026-11-12",
     "title": "2Y CSI 1000 snowball: gamma pin-risk techniques and SOPs",
     "view": "seller",
+    "books": {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90},
+    "book_notes": "three books differing only in the KI level and the coupon solved for it; ki75 is the product; ki85 and ki90 lift the barrier so real history holds KI approaches in enough separate weeks; KO pin events are measured on ki75 only",
     "data": {"start": "2023-05-04", "end": "2026-11-06", "anchor_window": 63},
     "note": {
         "underlying": "000852.SH",
@@ -16,15 +18,15 @@
         "coupon": "solved to PV = 0 under hold_forward at inception, shared by every technique",
         "engine": "SnowballQuadEngineV2 defaults, flat vol = the day's far-MO ATM vol"
     },
-    "sample": {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12},
+    "sample": {"ko_prior_gap": 0.02, "ki_near": 0.03, "ko_notes_per_week": 2, "ki_notes_per_month": 12,
+               "lifted_ki_notes_per_month": 6},
     "windows": {
         "ko_days": 10,
         "ko_band": 0.10,
-        "ki_band": 0.10,
+        "ki_band": 0.05,
         "trigger_z": 2.0,
         "days_per_year": 244,
         "overlay_ko_days": 5,
-        "overlay_ki_band": 0.05,
         "overlay_ki_min_days_left": 3
     },
     "split_date": "2025-07-01",
@@ -90,24 +92,32 @@
         {"id": "band", "family": "cost lever", "role": "cost", "barrier": "both", "grid": [{"w": 0.02}, {"w": 0.05}]}
     ],
     "overlay": {"scenario_cap_x_payoff": 3.0, "scenario_move": "one daily sigma either side of the barrier"},
-    "selection": {"criterion": "es10_event_window", "clock": "close", "slice": "train", "tie": "lower_cost"},
+    "selection": {"criterion": "es10_event_window", "clock": "close", "slice": "train", "tie": "lower_cost",
+                  "ko_book": "ki75", "ki_book": "ki90"},
     "statistics": {"es_alpha": 0.10, "bootstrap_n": 10000, "seed": 20261112, "cluster": "iso_week", "p_max": 0.10,
                    "p_definition": "share of replicates with ES10(technique) - ES10(base) <= 0",
                    "multiplicity": "raw p decides; Holm-adjusted p across eligible KO rows is printed beside it"},
     "verdict": {
-        "tail": "ES10 higher than base, worst event not lower, p < p_max, on KO test events under the primary clock",
-        "whole_life_set": "headline",
+        "tail": "ES10 higher than base, worst event not lower, p < p_max, on test events under the primary clock",
+        "ko_book": "ki75",
+        "ki_book": "ki90",
+        "ki_transfer_books": ["ki85", "ki75"],
+        "whole_life_set": "headline of the same book",
         "std_ratio_max": 1.05,
         "terminal_slack_bp": 10.0,
         "min_events": 20,
         "min_weeks": 10,
         "robust": "also passes the tail test under twap and next_open",
-        "ki": "descriptive_only"
+        "ki_transfer": "the ki90 training picks are reported on ki85 and ki75 test approaches without a verdict; the ki75 rows rest on two episodes"
     },
     "event_windows": {
         "ko": "daily rows from the first trading day with the observation at most 10 trading days ahead through the trading day after it",
         "ki": "daily rows from the first day of the approach through the trading day after its last day"
     },
+    "amendments": [
+        {"date": "2026-11-12", "before_any_ledger_run": true,
+         "text": "added the lifted-KI books ki85 and ki90 and moved the KI verdict to ki90 (was: descriptive only on ki75); narrowed the KI window from 10% to 5% above the barrier; added H8"}
+    ],
     "deviation_protocol": "a defect found after test numbers have been seen is fixed, training selection and the test are re-run, and the README lists the headline numbers before and after; grid and thresholds are never changed after unblinding",
     "hypotheses": [
         {"id": "H1", "text": "surv_hold improves the KO event tail by more than any shift, spread or bend of up to 3%"},
@@ -116,6 +126,7 @@
         {"id": "H4", "text": "at KI, ki_cap and ki_shift move the tail in opposite directions; no prior on which is better"},
         {"id": "H5", "text": "the wrong-way controls are worse than the baseline on the tail"},
         {"id": "H6", "text": "the ranking is the same under close and twap fills; next_open widens the gaps without changing the order"},
-        {"id": "H7", "text": "gap_ko is positive on the large majority of KO-window observations"}
+        {"id": "H7", "text": "gap_ko is positive on the large majority of KO-window observations"},
+        {"id": "H8", "text": "the ranking of the KI rules (ki_cap, ki_shift, secant, mo_ki against base) is the same on ki90, ki85 and ki75"}
     ]
 }
