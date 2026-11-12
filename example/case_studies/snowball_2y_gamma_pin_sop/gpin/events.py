@@ -42,6 +42,10 @@ KI_NEAR: float = float(_PREREG["sample"]["ki_near"])
 KI_BAND: float = float(_PREREG["windows"]["ki_band"])
 KO_NOTES_PER_WEEK: int = int(_PREREG["sample"]["ko_notes_per_week"])
 KI_NOTES_PER_MONTH: int = int(_PREREG["sample"]["ki_notes_per_month"])
+LIFTED_KI_NOTES_PER_MONTH: int = int(_PREREG["sample"]["lifted_ki_notes_per_month"])
+#: The books of the study: a book is a KI level (pre-registration ``books``); ``ki75`` is the product.
+BOOKS: Dict[str, float] = {k: float(v) for k, v in _PREREG["books"].items()}
+PRODUCT_BOOK = "ki75"
 SPLIT_DATE: date = date.fromisoformat(_PREREG["split_date"])
 DATA_END: date = date.fromisoformat(_PREREG["data"]["end"])
 
@@ -83,6 +87,7 @@ class NoteScan:
     ko_observations: int
     ko_events: Tuple[KoEvent, ...]
     ki_approaches: Tuple[KiApproach, ...]
+    ki_pct: float = KI_PCT
 
 
 Event = Union[KoEvent, KiApproach]
@@ -91,13 +96,31 @@ Event = Union[KoEvent, KiApproach]
 @dataclass(frozen=True)
 class Sample:
     """``headline``: real inceptions (first chain day of a quarter, anchored); ``pin``: the pin set P;
-    ``reasons``: why each pin note was selected; ``events``: every KO pin event and KI approach of every note in
-    ``headline`` and ``pin``."""
+    ``events``: every KO pin event (``ki75`` only) and KI approach of every note in ``headline`` and ``pin``;
+    ``reasons``: why each pin note was selected."""
 
     headline: Tuple[date, ...]
     pin: Tuple[date, ...]
-    reasons: Dict[date, Tuple[str, ...]]
     events: Tuple[Event, ...]
+    reasons: Dict[date, Tuple[str, ...]]
+
+
+def note_id(book: str, inception: date) -> str:
+    """``"<book>:<inception ISO date>"``, the identity of a note (a book is a KI level)."""
+    if book not in BOOKS:
+        raise StudyDataError(f"unknown book {book!r}; books are {sorted(BOOKS)}")
+    return f"{book}:{inception.isoformat()}"
+
+
+def parse_note_id(text: str) -> Tuple[str, date]:
+    """Inverse of ``note_id``; ``StudyDataError`` on anything else."""
+    book, sep, iso = text.partition(":")
+    if not sep or book not in BOOKS:
+        raise StudyDataError(f"{text!r} is not a note id '<book>:<YYYY-MM-DD>' of a known book")
+    try:
+        return book, date.fromisoformat(iso)
+    except ValueError:
+        raise StudyDataError(f"{text!r} is not a note id '<book>:<YYYY-MM-DD>' of a known book") from None
 
 
 def _within(value: float, bound: float) -> bool:
@@ -105,8 +128,9 @@ def _within(value: float, bound: float) -> bool:
     return value < bound or is_close(value, bound)
 
 
-def scan(chains: Sequence, anchors: Mapping[date, float]) -> List[NoteScan]:
+def scan(chains: Sequence, anchors: Mapping[date, float], ki_pct: float = KI_PCT) -> List[NoteScan]:
     """One ``NoteScan`` per chain day that is an SSE trading day; no pricing. Reads ``.day`` and ``.spot`` only.
+    ``ki_pct`` is the book's KI level (the KO level is the note's); the KI window and approaches follow it.
 
     ``anchored``: the day has a carry anchor (it can be priced); unanchored days are kept so the unrestricted
     counts can be reproduced. The chain must hold every trading day between its first and last (fails closed).
@@ -120,14 +144,14 @@ def scan(chains: Sequence, anchors: Mapping[date, float]) -> List[NoteScan]:
         bad = next((d for d, e in zip(days, expected) if d != e), None)
         raise StudyDataError(f"chain days are not the SSE trading days of {days[0]}..{days[-1]} (first difference: {bad})")
     spots = [float(c.spot) for c in chains]
-    return [_scan_one(i, days, spots, i_day in anchors) for i, i_day in enumerate(days)]
+    return [_scan_one(i, days, spots, i_day in anchors, ki_pct) for i, i_day in enumerate(days)]
 
 
-def _scan_one(start: int, days: Sequence[date], spots: Sequence[float], anchored: bool) -> NoteScan:
+def _scan_one(start: int, days: Sequence[date], spots: Sequence[float], anchored: bool, ki_pct: float) -> NoteScan:
     inception, s0 = days[start], spots[start]
     terms = build_terms(inception)
     ko_dates = set(terms.ko_dates)
-    ko_barrier, ki_barrier = KO_PCT * s0, KI_PCT * s0
+    ko_barrier, ki_barrier = KO_PCT * s0, ki_pct * s0
 
     ko_date: Optional[date] = None
     ki_date: Optional[date] = None
@@ -177,7 +201,7 @@ def _scan_one(start: int, days: Sequence[date], spots: Sequence[float], anchored
             break
     close_run(False)
     return NoteScan(inception, anchored, ko_date, ki_date, end_reason, end_date, n_obs,
-                    tuple(ko_events), tuple(approaches))
+                    tuple(ko_events), tuple(approaches), float(ki_pct))
 
 
 def slice_of(event_date: date) -> str:
@@ -204,15 +228,24 @@ def _spaced_positions(n: int, cap: int) -> List[int]:
     return [(2 * i * (n - 1) + (cap - 1)) // (2 * (cap - 1)) for i in range(cap)]
 
 
-def select(scans: Sequence[NoteScan]) -> Sample:
-    """The sample of spec D5, deterministic and independent of the order of ``scans``; anchored inceptions only.
+def select(scans: Sequence[NoteScan], book: str = PRODUCT_BOOK) -> Sample:
+    """The sample of spec D5 for ``book``, deterministic and independent of the order of ``scans`` (which must be
+    that book's scan); anchored inceptions only.
 
-    Headline: the first chain day of each quarter, kept when anchored. KO pin set: per ISO week of the observation,
-    the ``KO_NOTES_PER_WEEK`` pin events with the smallest prior gap (ties: earlier inception). KI pin set: per
-    calendar month of the approach date, ``KI_NOTES_PER_MONTH`` notes at evenly spaced positions of the
-    inception-sorted list of notes with an approach that month. Events: every KO pin event and KI approach of
-    every selected note.
+    Headline: the first chain day of each quarter, kept when anchored. ``ki75`` KO pin set: per ISO week of the
+    observation, the ``KO_NOTES_PER_WEEK`` pin events with the smallest prior gap (ties: earlier inception). KI pin
+    set: per calendar month of the approach date, ``KI_NOTES_PER_MONTH`` notes (``LIFTED_KI_NOTES_PER_MONTH`` for a
+    lifted book) at evenly spaced positions of the inception-sorted list of notes with an approach that month.
+    Events: every KI approach of every selected note, and for ``ki75`` every KO pin event; a lifted book has no
+    KO pin set and records no KO pin events.
     """
+    if book not in BOOKS:
+        raise StudyDataError(f"unknown book {book!r}; books are {sorted(BOOKS)}")
+    for s in scans:
+        if not is_close(s.ki_pct, BOOKS[book]):
+            raise StudyDataError(f"scan of {s.inception} is for KI {s.ki_pct}, not book {book} ({BOOKS[book]})")
+    product = book == PRODUCT_BOOK
+    ki_cap = KI_NOTES_PER_MONTH if product else LIFTED_KI_NOTES_PER_MONTH
     ordered = sorted(scans, key=lambda s: s.inception)
     first_of_quarter: Dict[Tuple[int, int], NoteScan] = {}
     for s in ordered:
@@ -223,7 +256,7 @@ def select(scans: Sequence[NoteScan]) -> Sample:
     reasons: Dict[date, List[str]] = {}
 
     by_week: Dict[str, List[KoEvent]] = {}
-    for s in anchored:
+    for s in anchored if product else ():
         for ev in s.ko_events:
             by_week.setdefault(week_key(ev.obs_date), []).append(ev)
     for week, events in by_week.items():
@@ -236,7 +269,7 @@ def select(scans: Sequence[NoteScan]) -> Sample:
         for month in sorted({f"{a.end:%Y-%m}" for a in s.ki_approaches}):
             by_month.setdefault(month, []).append(s.inception)
     for month, notes in by_month.items():
-        for pos in _spaced_positions(len(notes), KI_NOTES_PER_MONTH):
+        for pos in _spaced_positions(len(notes), ki_cap):
             reasons.setdefault(notes[pos], []).append(f"ki {month} position {pos + 1} of {len(notes)}")
 
     pin = tuple(sorted(reasons))
@@ -244,9 +277,10 @@ def select(scans: Sequence[NoteScan]) -> Sample:
     events: List[Event] = []
     for s in ordered:
         if s.inception in selected:
-            events.extend(sorted(s.ko_events, key=lambda e: e.obs_date))
+            if product:
+                events.extend(sorted(s.ko_events, key=lambda e: e.obs_date))
             events.extend(sorted(s.ki_approaches, key=lambda a: a.end))
-    return Sample(headline, pin, {k: tuple(sorted(v)) for k, v in sorted(reasons.items())}, tuple(events))
+    return Sample(headline, pin, tuple(events), {k: tuple(sorted(v)) for k, v in sorted(reasons.items())})
 
 
 def event_date(event: Event) -> date:

@@ -483,12 +483,12 @@ def test_scan_knock_in_to_maturity_and_ko_on_the_maturity_day():
 
 def test_ki_approach_two_dips_in_one_run_are_one_approach():
     days = trading_days(START, START + timedelta(days=90))
-    # run (<= 82.5, i.e. S/K - 1 <= 10% for K = 75): 80, 77, 80, 77, 80 then 90 ends it; 82.5 is on the band
-    run = {days[5]: 82.5, days[6]: 80.0, days[7]: 77.0, days[8]: 80.0, days[9]: 77.0, days[10]: 80.0}
+    # run (<= 78.75, i.e. S/K - 1 <= 5% for K = 75): 78, 77, 78, 77, 78 then 90 ends it; 78.75 is on the band
+    run = {days[5]: 78.75, days[6]: 78.0, days[7]: 77.0, days[8]: 78.0, days[9]: 77.0, days[10]: 78.0}
     # a second run that touches the 3% line (77.25 -> 77.0 is inside)
     run.update({days[20]: 77.0})
-    # a third run that stays between 3% and 10%: no approach
-    run.update({days[30]: 80.0, days[31]: 81.0})
+    # a third run that stays between 3% and 5%: no approach
+    run.update({days[30]: 78.0, days[31]: 78.5})
     sc = assert_scan_matches_library(make_path(days[-1], run))
     assert [(a.start, a.end, a.knocked_in) for a in sc.ki_approaches] == [
         (days[5], days[10], False), (days[20], days[20], False)]
@@ -497,12 +497,12 @@ def test_ki_approach_two_dips_in_one_run_are_one_approach():
 
 def test_ki_approach_ended_by_a_knock_in_is_dated_by_the_knock_in_day():
     days = trading_days(START, START + timedelta(days=90))
-    path = make_path(days[-1], {days[5]: 80.0, days[6]: 76.0, days[7]: 74.0, days[8]: 73.0, days[9]: 76.0})
+    path = make_path(days[-1], {days[5]: 78.0, days[6]: 76.0, days[7]: 74.0, days[8]: 73.0, days[9]: 76.0})
     sc = assert_scan_matches_library(path)
     assert sc.ki_date == days[7]
     assert [(a.start, a.end, a.knocked_in) for a in sc.ki_approaches] == [(days[5], days[7], True)]  # none after the KI
     # a run that touches 3% only on its first day is still an approach; one at the data end is closed there
-    sc = assert_scan_matches_library(make_path(days[12], {days[11]: 77.0, days[12]: 80.0}))
+    sc = assert_scan_matches_library(make_path(days[12], {days[11]: 77.0, days[12]: 78.0}))
     assert [(a.start, a.end, a.knocked_in) for a in sc.ki_approaches] == [(days[11], days[12], False)]
 
 
@@ -543,14 +543,14 @@ def test_slice_of_and_week_key():
     assert week_key(date(2024, 1, 1)) == "2024-W01" and week_key(date(2023, 1, 1)) == "2022-W52"
 
 
-def fake_scan(inc, *, anchored=True, ko=(), ki=(), n_ko=0, ki_date=None):
+def fake_scan(inc, *, anchored=True, ko=(), ki=(), n_ko=0, ki_date=None, ki_pct=0.75):
     from gpin.events import KiApproach, KoEvent, NoteScan
 
     return NoteScan(
         inception=inc, anchored=anchored, ko_date=None, ki_date=ki_date, end_reason="truncated",
         end_date=date(2026, 11, 6), ko_observations=n_ko,
         ko_events=tuple(KoEvent(inc, d, g, f) for d, g, f in ko),
-        ki_approaches=tuple(KiApproach(inc, s, e, k) for s, e, k in ki))
+        ki_approaches=tuple(KiApproach(inc, s, e, k) for s, e, k in ki), ki_pct=ki_pct)
 
 
 def test_select_ko_two_smallest_gaps_per_iso_week_ties_to_earlier_inception():
@@ -1292,6 +1292,61 @@ def test_a_short_im_or_mo_row_fails_closed_and_other_families_are_ignored():
             parse_cffex_full(bad.encode("gbk"))
     other = good + "HO2611-C-3250,1,2\n"          # another family with a short row is not our data
     assert set(parse_cffex_full(other.encode("gbk"))) == {"IM2611"}
+
+
+def test_books_come_from_the_preregistration_and_note_ids_roundtrip():
+    from gpin.events import BOOKS, note_id, parse_note_id
+
+    assert BOOKS == load_prereg()["books"] == {"ki75": 0.75, "ki85": 0.85, "ki90": 0.90}
+    assert note_id("ki90", date(2024, 2, 29)) == "ki90:2024-02-29"
+    assert parse_note_id("ki90:2024-02-29") == ("ki90", date(2024, 2, 29))
+    for bad in ("2024-02-29", "ki80:2024-02-29", "ki90:2024-13-01"):
+        with pytest.raises(StudyDataError):
+            parse_note_id(bad)
+
+
+def test_scan_ki_level_is_a_parameter_a_90_book_knocks_in_where_the_75_does_not():
+    from gpin.events import scan
+
+    days = trading_days(START, START + timedelta(days=60))
+    path = make_path(days[-1], {days[5]: 89.0, days[6]: 95.0}, base=95.0)
+    s75 = next(s for s in scan(path, {START: 0.0}) if s.inception == START)
+    s90 = next(s for s in scan(path, {START: 0.0}, ki_pct=0.90) if s.inception == START)
+    assert s75.ki_date is None and s75.ki_pct == 0.75
+    assert s90.ki_date == days[5] and s90.ki_pct == 0.90
+    assert [(a.start, a.end, a.knocked_in) for a in s90.ki_approaches][-1] == (days[5], days[5], True)
+    assert (s90.ko_date, s90.ko_events, s90.end_reason) == (s75.ko_date, s75.ko_events, s75.end_reason)  # KO unchanged
+    # 90 x 1.05 = 94.5: a 95 is outside the window of the 90 book, 94.5 is on its edge (tolerant) and 92 is within 3%
+    edge = make_path(days[-1], {days[5]: 94.5, days[6]: 92.0}, base=95.0)
+    (a,) = [a for a in next(s for s in scan(edge, {START: 0.0}, ki_pct=0.90) if s.inception == START).ki_approaches]
+    assert (a.start, a.end, a.knocked_in) == (days[5], days[6], False)
+
+
+def test_select_lifted_books_take_six_notes_a_month_and_no_ko_pin_set():
+    from gpin.events import select
+
+    incs = [date(2024, 1, 2) + timedelta(days=i) for i in range(30)]
+    t = date(2025, 3, 5)
+    scans = [fake_scan(i, ki=[(date(2024, 2, 1), date(2024, 2, 9), False)], ko=[(t, 0.001, True)], ki_pct=0.90)
+             for i in incs]
+    sample = select(scans, book="ki90")
+    assert list(sample.pin) == [incs[p] for p in (0, 6, 12, 17, 23, 29)]       # 6 evenly spaced of 30
+    assert all(r.startswith("ki ") for why in sample.reasons.values() for r in why)
+    assert all(type(e).__name__ == "KiApproach" for e in sample.events)       # no KO pin events for a lifted book
+    assert {e.inception for e in sample.events} == set(sample.pin) | set(sample.headline)
+    ko75 = select([fake_scan(i, ko=[(t, 0.001, True)]) for i in incs[:3]])
+    assert [r for why in ko75.reasons.values() for r in why] == ["ko 2025-W10 rank 1", "ko 2025-W10 rank 2"]
+    assert any(type(e).__name__ == "KoEvent" for e in ko75.events)
+    with pytest.raises(StudyDataError):
+        select(scans, book="ki75")                                            # the scans are not that book's
+
+
+def test_sample_fields_match_contract_c2_positionally():
+    import dataclasses
+
+    from gpin.events import Sample
+
+    assert [f.name for f in dataclasses.fields(Sample)] == ["headline", "pin", "events", "reasons"]
 
 
 def test_the_ko_shift_flag_is_a_tolerant_comparison():
