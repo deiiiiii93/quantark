@@ -330,15 +330,17 @@ def _fill_legs(acc: _Acc, pos: _Positions, desired: Mapping[LegKey, float], boar
 
 
 def _legs_delta(pos: _Positions, board: DayBoard, dc: DayChain) -> float:
-    """CNY per index point of the legs held (Black-76 at each leg's implied vol of the day); fails closed."""
+    """CNY per index point of the legs held: Black-76 at each leg's implied vol of the day, and its zero-vol limit
+    for a settlement at or below the intrinsic bound (``black.greeks_at_settle``); any other leg without an implied
+    vol fails closed."""
     total = 0.0
     for key, lots in pos.held_legs().items():
         q = _held_quote(board, key, dc.day)
         info = board.series.get(key[0])
-        vol = None if info is None else black.implied_vol(q.settle, key[1], key[2], info)
-        if vol is None:
+        greeks = None if info is None else black.greeks_at_settle(q.settle, key[1], key[2], info, dc.spot)
+        if greeks is None:
             raise StudyDataError(f"{dc.day}: held leg {leg_key_str(key)} has no implied vol: its delta is unknown")
-        total += lots * black.index_delta(vol, key[1], key[2], info, dc.spot) * MO_MULT
+        total += lots * greeks[0] * MO_MULT
     return total
 
 
@@ -395,8 +397,13 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
     for k, rec in enumerate(records):
         if start + k >= len(chains) or chain_days[start + k].isoformat() != rec["date"]:
             raise StudyDataError(f"record {rec['date']} is not the chain's day {start + k}")
+    missing = [k for k in ("strike", "ko_level", "ki_level") if data.get(k) is None]
+    if missing:
+        raise StudyDataError(f"the state file carries no {', '.join(missing)}: the note's levels are the book's "
+                             "(a seasoned note is not struck at its booking spot) and are never derived here")
     note = NoteInfo(str(data.get("book", "ki75")), inception, float(data["coupon"]), float(data.get("ki_pct", 0.75)),
-                    KO_PCT, float(records[0]["spot"]))
+                    KO_PCT, float(records[0]["spot"]), float(data["strike"]), float(data["ko_level"]),
+                    float(data["ki_level"]))
     run = Run(note.book, inception, note.coupon, technique.id, technique.family, dict(technique.params), mode,
               float(mo_cost_pt), im_rate, float(desk_notional), until)
     im_kind = "vwap" if mode == "twap" else "close"

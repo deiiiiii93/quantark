@@ -2438,8 +2438,13 @@ def _world(days, *, coupon=0.1, book="ki75", n_records=None):
         boards[d] = DayBoard(d, w["spot"], bars, mo, infos)
         pillar = MoPillar("MO0000", d + timedelta(days=60), 60 / 365.0, w["spot"], 1.0, 1.0, w["spot"], w["vol"], ())
         chains.append(DayChain(d, w["spot"], tuple(listed), pillar, {}, 0.0))
+    # the book's contract in index points, as ``NoteStates.to_json`` writes it: the 2Y product is struck at its booking
+    # spot with the KI level at 75%; the seasoned book has its KI level 7% below the booking spot and strike = KI / 0.75
+    spot0 = days[0]["spot"]
+    ki_level = spot0 / 1.07 if book == "seas6" else 0.75 * spot0
+    strike = ki_level / 0.75 if book == "seas6" else spot0
     states = {"book": book, "ki_pct": 0.75, "inception": days[0]["day"].isoformat(), "coupon": coupon,
-              "days": records, "meta": {}}
+              "days": records, "meta": {}, "spot0": spot0, "strike": strike, "ko_level": strike, "ki_level": ki_level}
     return states, boards, chains
 
 
@@ -2448,7 +2453,7 @@ def test_day_context_is_frozen_and_checks_its_dates():
 
     states, boards, _ = _world([_day(WORLD_START, 5000.0, 1.0, 100.0, im={"IM2401": dict(close=5000.0)})])
     rec = states["days"][0]
-    note = NoteInfo("ki75", WORLD_START, 0.1, 0.75, 1.0, 5000.0)
+    note = NoteInfo("ki75", WORLD_START, 0.1, 0.75, 1.0, 5000.0, 5000.0, 5000.0, 3750.0)
     ctx = DayContext.build(WORLD_START, 0, 5000.0, 0.2, rec, boards[WORLD_START], note, {"IM2401": 5.0},
                            {("MO2401", "C", 5000.0): 1.0}, None)
     assert ctx.alive is True and ctx.knocked_in is False and ctx.gap_ko is None and ctx.ko_dir is None
@@ -2474,7 +2479,7 @@ def test_base_targets_the_true_bump_delta_every_day_and_noclip_only_differs_in_t
     from gpin.techniques import Base, BaseNoClip, DayContext, NoteInfo, Technique
 
     states, boards, _ = _world([_day(WORLD_START, 5000.0, 1.0, 750.0, gamma=0.0)])
-    note = NoteInfo("ki75", WORLD_START, 0.1, 0.75, 1.0, 5000.0)
+    note = NoteInfo("ki75", WORLD_START, 0.1, 0.75, 1.0, 5000.0, 5000.0, 5000.0, 3750.0)
     ctx = DayContext.build(WORLD_START, 0, 5000.0, 0.2, states["days"][0], boards[WORLD_START], note, {}, {}, None)
     base, noclip = Base(), BaseNoClip()
     assert isinstance(base, Technique) and isinstance(noclip, Technique)
@@ -3268,3 +3273,102 @@ def test_the_identity_holds_in_all_three_clocks_with_a_roll_a_leg_and_a_fired_ko
         assert runs["next_open"].rows[5]["im_vm"] == pytest.approx(
             runs["next_open"].rows[4]["im_lots"] * (5000.0 - 5020.0) * 200.0)           # held lots x (open - close) x 200
         assert runs["close"].rows[4]["note_cash"] == -900000.0
+
+
+# ---------------------------------------------------------------------------
+# T5 — techniques: ledger-side fixes, the registry, every family, overlay construction, composites
+# ---------------------------------------------------------------------------
+
+# ---- the note's levels come from the state file (a seasoned note is not struck at its booking spot) ----
+
+def _spy_note(states, boards, chains):
+    spy = _Scripted(lambda ctx: {})
+    _run(states, spy, boards, chains)
+    return spy.seen[0].note
+
+
+def test_note_levels_are_read_from_the_state_file_for_a_seasoned_note():
+    d = _weekdays(3)
+    days = [_day(x, 6420.0, 100000.0, 1000.0, im={"IM2403": dict(close=6400.0)}) for x in d]
+    states, boards, chains = _world(days, book="seas6")
+    # seas6 booked at 6420: KI level 7% below the booking spot = 6420 / 1.07 = 6000, strike = KO level = 6000 / 0.75 = 8000
+    assert (states["strike"], states["ko_level"], states["ki_level"]) == pytest.approx((8000.0, 8000.0, 6000.0))
+    note = _spy_note(states, boards, chains)
+    assert note.book == "seas6" and note.s0 == 6420.0
+    assert (note.strike, note.ko_level, note.ki_level) == pytest.approx((8000.0, 8000.0, 6000.0))
+    assert note.ko_level == pytest.approx(1.2461 * 6420.0, rel=1e-4) and note.ki_level == pytest.approx(0.9346 * 6420.0, rel=1e-4)
+    # the 2Y product is struck at its booking spot
+    states, boards, chains = _world(days)
+    note = _spy_note(states, boards, chains)
+    assert (note.strike, note.ko_level, note.ki_level) == pytest.approx((6420.0, 6420.0, 4815.0))
+
+
+@pytest.mark.parametrize("missing", ["strike", "ko_level", "ki_level"])
+def test_a_state_without_its_levels_fails_closed(missing):
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_a()
+    del states[missing]
+    with pytest.raises(StudyDataError, match=missing):
+        _run(states, Base(), boards, chains)
+
+
+# ---- a held leg at or below its intrinsic bound: the zero-vol limit of the Black-76 delta, gamma 0 ----
+
+def test_black_greeks_at_a_settlement_use_the_zero_vol_limit_at_or_below_the_intrinsic_bound():
+    from gpin import black
+
+    info = _series()                                    # forward 5000, 73 days
+    spot = 4950.0
+    unit = info.discount * 5000.0 / spot                # discount x forward / spot
+    intrinsic = info.discount * 500.0                   # the 4500 call and the 5500 put are 500 points in the money
+    # a settlement with an implied vol: Black-76 at that vol
+    price, _, _ = _bs(info, 5100.0, 0.23, True)
+    delta, gamma = black.greeks_at_settle(price, "C", 5100.0, info, spot)
+    assert delta == pytest.approx(black.index_delta(0.23, "C", 5100.0, info, spot), rel=1e-9)
+    assert gamma == pytest.approx(black.index_gamma(0.23, "C", 5100.0, info, spot), rel=1e-6)
+    # below and at the intrinsic bound, in the money: +/- discount x forward / spot, gamma 0
+    assert black.implied_vol(intrinsic - 1.0, "C", 4500.0, info) is None
+    assert black.greeks_at_settle(intrinsic - 1.0, "C", 4500.0, info, spot) == (pytest.approx(unit, rel=1e-12), 0.0)
+    assert black.greeks_at_settle(intrinsic, "C", 4500.0, info, spot) == (pytest.approx(unit, rel=1e-12), 0.0)
+    assert black.greeks_at_settle(intrinsic - 1.0, "P", 5500.0, info, spot) == (pytest.approx(-unit, rel=1e-12), 0.0)
+    # out of the money with a settlement at the bound 0: delta 0, gamma 0
+    assert black.greeks_at_settle(0.0, "C", 5500.0, info, spot) == (0.0, 0.0)
+    assert black.greeks_at_settle(0.0, "P", 4500.0, info, spot) == (0.0, 0.0)
+    # it is the limit of the Black-76 delta as the vol goes to 0
+    assert black.index_delta(1e-4, "C", 4500.0, info, spot) == pytest.approx(unit, rel=1e-9)
+    assert black.index_delta(1e-4, "P", 5500.0, info, spot) == pytest.approx(-unit, rel=1e-9)
+    assert black.index_delta(1e-4, "C", 5500.0, info, spot) == pytest.approx(0.0, abs=1e-12)
+    # any other failed inversion has no greeks: above the upper bound, no time left, exactly at the money
+    assert black.greeks_at_settle(info.discount * 5000.0 + 1.0, "C", 4500.0, info, spot) is None
+    assert black.greeks_at_settle(intrinsic - 1.0, "C", 4500.0, _series(days_to_last=0), spot) is None
+    assert black.greeks_at_settle(0.0, "C", 5000.0, info, spot) is None
+
+
+def _itm_leg_world(settle_day2):
+    """Four days; a 4500 call (forward 5000) is opened on day 1 at a 20% vol; ``settle_day2`` is its day-2 settlement."""
+    d = _weekdays(4)
+    last = d[0] + timedelta(days=60)
+    q = [{("C", 4500.0): (_px(d[i], last, "C", 4500.0, 0.2), None, 20000, 10000)} for i in range(4)]
+    q[2] = {("C", 4500.0): (settle_day2(_series_info(d[2], last, LEG_FORWARD)), None, 20000, 10000)}
+    (states, boards, chains), d = _leg_world(4, last, q)
+    tech = _Scripted(lambda ctx: {(SERIES, "C", 4500.0): 2.0} if ctx.day_index >= 1 else {})
+    return states, boards, chains, tech, d, last
+
+
+def test_a_held_leg_below_its_intrinsic_bound_is_hedged_with_the_zero_vol_delta():
+    states, boards, chains, tech, d, last = _itm_leg_world(lambda info: info.discount * 500.0 - 2.0)
+    run = _run(states, tech, boards, chains, desk_notional=NOTIONAL_)
+    r2 = run.rows[2]
+    info = _series_info(d[2], last, LEG_FORWARD)
+    assert r2["legs"] == {"MO2403:C:4500": 2.0} and "refused_open" not in r2["flags"]
+    leg = 2.0 * 100.0 * info.discount * 5000.0 / 5000.0                   # lots x 100 x discount x forward / spot
+    assert r2["im_lots"] == pytest.approx((1000.0 - leg) * 5000.0 / (200.0 * 5000.0), rel=1e-12)
+    _check_identity(run)
+
+
+def test_a_held_leg_with_any_other_failed_inversion_still_fails_closed():
+    # a settlement above discount x forward: no vol, and not the intrinsic bound
+    states, boards, chains, tech, _, _ = _itm_leg_world(lambda info: info.discount * 5000.0 + 5.0)
+    with pytest.raises(StudyDataError, match="implied vol"):
+        _run(states, tech, boards, chains, desk_notional=NOTIONAL_)

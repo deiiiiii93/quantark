@@ -10,13 +10,13 @@ Ledger-side code: no engine, no market data of its own.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from scipy.stats import norm
 
 from quantark.param.vol.marketquotes import black_price, implied_vol_black
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_zero, safe_divide, safe_exp, safe_log, safe_sqrt
+from quantark.util.numerical import is_close, is_zero, safe_divide, safe_exp, safe_log, safe_sqrt
 
 from s2ts import RATE
 
@@ -67,6 +67,31 @@ def index_gamma(vol: float, cp: str, strike: float, info: SeriesInfo, spot: floa
     d1 = _d1(vol, strike, info.forward, info.tenor)
     forward_gamma = norm.pdf(d1) / (info.forward * vol * safe_sqrt(info.tenor))
     return float(info.discount * forward_gamma * safe_divide(info.forward, spot) ** 2)
+
+
+def greeks_at_settle(settle: float, cp: str, strike: float, info: SeriesInfo,
+                     spot: float) -> Optional[Tuple[float, float]]:
+    """``(index_delta, index_gamma)`` of an option marked at ``settle``.
+
+    With an implied vol: Black-76 at that vol. A settlement at or below the intrinsic bound ``discount x max(+/-(forward
+    - strike), 0)`` has no implied vol; its greeks are the zero-vol limit of the Black-76 ones, which is exact: delta
+    ``discount x forward / spot`` for an in-the-money call, minus that for an in-the-money put, 0 out of the money, and
+    gamma 0. ``None`` for any other failed inversion (no time left, a settlement above the upper bound, a failed root
+    search) and exactly at the money, where the limit is not one of the three above."""
+    vol = implied_vol(settle, cp, strike, info)
+    if vol is not None:
+        return index_delta(vol, cp, strike, info, spot), index_gamma(vol, cp, strike, info, spot)
+    call = _is_call(cp)
+    if info.tenor <= 0.0 or is_zero(info.tenor) or is_close(info.forward, float(strike)):
+        return None
+    in_the_money = (info.forward > strike) if call else (info.forward < strike)
+    bound = info.discount * abs(info.forward - strike) if in_the_money else 0.0
+    if not (settle < bound or is_close(float(settle), bound)):
+        return None
+    if not in_the_money:
+        return 0.0, 0.0
+    unit = float(info.discount * safe_divide(info.forward, spot))
+    return (unit if call else -unit), 0.0
 
 
 def value_at(vol: float, cp: str, strike: float, info: SeriesInfo, spot_now: float, spot_scenario: float,

@@ -83,7 +83,10 @@ def freeze(obj: Any) -> Any:
 
 @dataclass(frozen=True)
 class NoteInfo:
-    """Static term information of the note (known at inception, never changes)."""
+    """Static term information of the note (known at booking, never changes). ``s0`` is the booking-day spot;
+    ``strike``, ``ko_level`` and ``ki_level`` are the book's levels in index points as the pricing pass wrote them to
+    the state file (``ki_pct`` / ``ko_pct`` are multiples of the STRIKE, which is the booking spot only for the 2Y
+    product: a seasoned note's strike is not its booking spot)."""
 
     book: str
     inception: date
@@ -91,16 +94,9 @@ class NoteInfo:
     ki_pct: float
     ko_pct: float
     s0: float
-
-    @property
-    def ko_level(self) -> float:
-        """The KO barrier in index points."""
-        return self.ko_pct * self.s0
-
-    @property
-    def ki_level(self) -> float:
-        """The KI barrier in index points."""
-        return self.ki_pct * self.s0
+    strike: float
+    ko_level: float
+    ki_level: float
 
 
 @dataclass(frozen=True)
