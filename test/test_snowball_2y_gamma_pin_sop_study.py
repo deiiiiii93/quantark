@@ -2275,3 +2275,237 @@ def test_a_fixing_on_the_last_data_day_fills_at_that_close_and_is_flagged():
     ])
     last = _run(states, Base(), boards, chains, "next_open").rows[-1]
     assert "last_day_fixing" in last["flags"] and "data_end" in last["flags"] and last["im_lots"] == 0.0
+
+
+# ---- option legs: fills, tradability, limits, expiry (D8) ----
+
+SERIES = "MO2403"
+KEY_C5000 = (SERIES, "C", 5000.0)
+STR_C5000 = "MO2403:C:5000"
+LEG_FORWARD = 5000.0
+
+
+class _Scripted:
+    """A test technique: ``legs_fn(ctx) -> dict`` of desired legs; ``note_delta`` constant (and the filled variant)."""
+
+    clip = True
+
+    def __init__(self, legs_fn, note_delta=1000.0, if_filled=None):
+        self.id, self.family, self.params = "scripted", "test", {}
+        self.legs_fn, self.note_delta, self.if_filled = legs_fn, note_delta, if_filled
+        self.seen = []
+
+    def target(self, ctx):
+        from gpin.techniques import Target
+
+        self.seen.append(ctx)
+        return Target(self.note_delta, self.legs_fn(ctx), self.if_filled)
+
+
+def _px(day, last, cp, strike, vol, forward=LEG_FORWARD):
+    """The settlement of an option at an implied vol ``vol`` on ``day`` (a Black-76 price, library function)."""
+    from gpin import black
+
+    return black.value(vol, cp, strike, _series_info(day, last, forward))
+
+
+def _leg_world(n_days, last, quotes_by_day, *, delta=1000.0, spots=None, records=None, alive_until=None, extra_days=0):
+    """``n_days`` days of a constant-delta note (spot 5000, IM 5000); ``quotes_by_day[i]`` = ``{(cp, strike):
+    (settle, close, volume, oi)}`` of series ``SERIES`` on day i (``None``: the series is not on the board)."""
+    d = _weekdays(n_days + extra_days)
+    days = []
+    for i, day in enumerate(d):
+        q = quotes_by_day[i] if i < len(quotes_by_day) else None
+        mo = {} if q is None else {SERIES: dict(last=last if last is not None else d[-1] + timedelta(days=60),
+                                                 forward=LEG_FORWARD, quotes=q)}
+        dead = alive_until is not None and i >= alive_until
+        days.append(_day(day, 5000.0 if spots is None else spots[i], 100000.0, delta, alive=not dead,
+                         cash=0.0 if not dead else 0.0, end_reason="ko" if dead else None,
+                         im={"IM2403": dict(close=5000.0)}, mo=mo))
+    return _world(days, n_records=records if records is not None else n_days), d
+
+
+def _leg_delta(day, last, cp, strike, vol, lots, spot=5000.0, forward=LEG_FORWARD):
+    """CNY per index point of ``lots`` options: Black-76 index delta x 100."""
+    from gpin import black
+
+    return lots * 100.0 * black.index_delta(vol, cp, strike, _series_info(day, last, forward), spot)
+
+
+def _hold_when(days_with_leg, lots):
+    return lambda ctx: {KEY_C5000: lots} if ctx.day in days_with_leg else {}
+
+
+def test_a_leg_opened_and_closed_marks_at_the_settlement_and_shifts_the_im_target():
+    from gpin.techniques import Base
+
+    n = 5
+    d = _weekdays(n)
+    last = d[0] + timedelta(days=60)
+    vols = [0.20, 0.22, 0.19, 0.21, 0.20]
+    quotes = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, vols[i]), None, 5000, 10000)} for i in range(n)]
+    (states, boards, chains), d = _leg_world(n, last, quotes)
+    tech = _Scripted(_hold_when({d[1], d[2]}, 2.0))
+    run = _run(states, tech, boards, chains, "close", desk_notional=NOTIONAL_)         # scale 1: no cut binds
+    rows = run.rows
+    s = [q[("C", 5000.0)][0] for q in quotes]
+    # day 1: two calls opened at the settlement, cost 0.2 points x 100 x 2 lots, premium 2 x s1 x 100
+    assert rows[1]["legs"] == {STR_C5000: 2.0} and rows[1]["phi"] == 1.0 and rows[1]["unfilled"] == {}
+    assert rows[1]["mo_mtm"] == 0.0 and rows[1]["fill_pnl"] == 0.0
+    assert rows[1]["cost"] == pytest.approx(0.2 * 100.0 * 2.0 + _im_cost_of_change(rows, 1))
+    leg1 = _leg_delta(d[1], last, "C", 5000.0, 0.22, 2.0)
+    assert rows[1]["im_lots"] == pytest.approx((1000.0 - leg1) * 5000.0 / (200.0 * 5000.0))       # the IM target nets the leg
+    # day 2: held 2 earn 2 x (s2 - s1) x 100
+    assert rows[2]["mo_mtm"] == pytest.approx(2.0 * (s[2] - s[1]) * 100.0)
+    leg2 = _leg_delta(d[2], last, "C", 5000.0, 0.19, 2.0)
+    assert rows[2]["im_lots"] == pytest.approx((1000.0 - leg2) * 5000.0 / (200.0 * 5000.0))
+    # day 3: closed at the settlement: it earns the day's move, the premium comes back
+    assert rows[3]["legs"] == {} and rows[3]["mo_mtm"] == pytest.approx(2.0 * (s[3] - s[2]) * 100.0)
+    assert rows[3]["cost"] == pytest.approx(0.2 * 100.0 * 2.0 + _im_cost_of_change(rows, 3))
+    assert rows[3]["im_lots"] == pytest.approx(1000.0 * 5000.0 / (200.0 * 5000.0))
+    # cash: premium paid on day 1, received on day 3
+    c1 = rows[0]["cash"] + rows[1]["accrual"] + rows[1]["im_vm"] - 2.0 * s[1] * 100.0 - rows[1]["cost"]
+    assert rows[1]["cash"] == pytest.approx(c1)
+    c3 = rows[2]["cash"] + rows[3]["accrual"] + rows[3]["im_vm"] + 2.0 * s[3] * 100.0 - rows[3]["cost"]
+    assert rows[3]["cash"] == pytest.approx(c3)
+    assert sum(r["mo_mtm"] for r in rows) == pytest.approx(2.0 * (s[3] - s[1]) * 100.0)
+    _check_identity(run)
+
+
+def _im_cost_of_change(rows, i):
+    """IM cost of the day's lot change at the close 5000 (every test world's IM close is 5000)."""
+    return IM_COST * abs(rows[i]["im_lots"] - rows[i - 1]["im_lots"]) * 5000.0 * 200.0
+
+
+@pytest.mark.parametrize("quote, why", [
+    ((None, None, 99, 10000), "volume"),
+    ((None, None, 5000, 499), "open_interest"),
+    ((None, None, 5000, None), "open_interest"),
+    (("itm", None, 5000, 10000), "implied_vol"),
+])
+def test_a_leg_is_not_opened_without_volume_open_interest_or_an_implied_vol(quote, why):
+    from gpin.techniques import Base
+
+    d = _weekdays(3)
+    last = d[0] + timedelta(days=60)
+    ok = _px(d[1], last, "C", 5000.0, 0.2)
+    settle = 300.0 if quote[0] == "itm" else ok                    # a settlement below the 4500 call's intrinsic: no vol
+    strike = 4500.0 if quote[0] == "itm" else 5000.0
+    q = [{("C", strike): (_px(d[i], last, "C", strike, 0.2), None, 5000, 10000)} for i in range(3)]
+    q[1] = {("C", strike): (settle, None, quote[2], quote[3])}
+    (states, boards, chains), d = _leg_world(3, last, q)
+    key = (SERIES, "C", strike)
+    run = _run(states, _Scripted(lambda ctx: {key: 2.0} if ctx.day_index >= 1 else {}), boards, chains, desk_notional=NOTIONAL_)
+    r1 = run.rows[1]
+    assert r1["legs"] == {} and r1["unfilled"] == {f"{SERIES}:C:{strike:g}": 2.0} and r1["phi"] == 0.0
+    assert "refused_open" in r1["flags"] and r1["cost"] == pytest.approx(_im_cost_of_change(run.rows, 1))
+    assert r1["im_lots"] == pytest.approx(5.0)                                  # no overlay: the plain note target
+
+
+def test_the_tradability_thresholds_are_inclusive():
+    d = _weekdays(3)
+    last = d[0] + timedelta(days=60)
+    q = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, 0.2), None, 100, 500)} for i in range(3)]
+    (states, boards, chains), d = _leg_world(3, last, q)
+    run = _run(states, _Scripted(lambda ctx: {KEY_C5000: 0.05} if ctx.day_index >= 1 else {}), boards, chains, desk_notional=NOTIONAL_)   # a twentieth of a lot, scale 1
+    assert run.rows[1]["legs"] == {STR_C5000: 0.05} and run.rows[1]["unfilled"] == {}
+
+
+def test_a_trade_above_the_volume_share_is_cut_and_the_half_filled_overlay_blends_the_im_target():
+    d = _weekdays(4)
+    last = d[0] + timedelta(days=60)
+    q = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, 0.2), None, 1000, 10000)} for i in range(4)]
+    (states, boards, chains), d = _leg_world(4, last, q)
+    # desk scale 100: 2 note-lots are 200 desk lots, a tenth of the day's 1000 lots is 100: half is filled
+    tech = _Scripted(lambda ctx: {KEY_C5000: 2.0} if ctx.day_index >= 1 else {}, note_delta=1000.0, if_filled=200.0)
+    run = _run(states, tech, boards, chains, desk_notional=NOTIONAL_ * 100)
+    r1 = run.rows[1]
+    assert r1["legs"] == {STR_C5000: 1.0} and r1["unfilled"] == {STR_C5000: 1.0}
+    assert r1["phi"] == pytest.approx(0.5) and "volume_cut" in r1["flags"]
+    leg = _leg_delta(d[1], last, "C", 5000.0, 0.2, 1.0)
+    assert r1["im_lots"] == pytest.approx((0.5 * 200.0 + 0.5 * 1000.0 - leg) * 5000.0 / (200.0 * 5000.0))
+    assert r1["cost"] == pytest.approx(0.2 * 100.0 * 1.0 + _im_cost_of_change(run.rows, 1))     # only the filled lot pays
+    # day 2: the second half is bought too (the day's cap is per day), the overlay is whole and phi is 1
+    assert run.rows[2]["legs"] == {STR_C5000: 2.0} and run.rows[2]["phi"] == 1.0
+    assert run.rows[2]["unfilled"] == {}
+
+
+def test_a_series_position_is_cut_to_1200_lots_per_side_at_desk_scale():
+    d = _weekdays(3)
+    last = d[0] + timedelta(days=60)
+    strikes = [("C", 5000.0), ("P", 5000.0), ("C", 5100.0)]
+    q = [{k: (_px(d[i], last, k[0], k[1], 0.2), None, 20000, 10000) for k in strikes} for i in range(3)]
+    (states, boards, chains), d = _leg_world(3, last, q)
+    # scale 100. One leg of 15 note-lots (1500 desk): 12 fill, 3 do not
+    run = _run(states, _Scripted(lambda ctx: {KEY_C5000: 15.0} if ctx.day_index >= 1 else {}), boards, chains, desk_notional=NOTIONAL_ * 100)
+    r1 = run.rows[1]
+    assert r1["legs"] == {STR_C5000: 12.0} and r1["unfilled"] == {STR_C5000: 3.0} and "series_limit" in r1["flags"]
+    # a long call and a short put are the same side of the series (both gain when the index rises): 8 + 8 -> 8 + 4;
+    # a short call is the other side and is not counted against it
+    desired = {KEY_C5000: 8.0, (SERIES, "P", 5000.0): -8.0, (SERIES, "C", 5100.0): -10.0}
+    run = _run(states, _Scripted(lambda ctx: dict(desired) if ctx.day_index >= 1 else {}), boards, chains, desk_notional=NOTIONAL_ * 100)
+    r1 = run.rows[1]
+    assert r1["legs"] == {STR_C5000: 8.0, "MO2403:P:5000": -4.0, "MO2403:C:5100": -10.0}
+    assert r1["unfilled"] == {"MO2403:P:5000": -4.0}
+
+
+def _cut_close_world():
+    d = _weekdays(4)
+    last = d[0] + timedelta(days=60)
+    vols = [20000, 20000, 500, 20000]                              # day 2: only 500 lots trade, a tenth is 50 desk lots
+    q = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, 0.2), None, vols[i], 10000)} for i in range(4)]
+    return _leg_world(3, last, q + [q[3]], alive_until=2, records=3, extra_days=1)
+
+
+def test_a_cut_close_leaves_the_leg_on_the_book_keeps_its_delta_in_the_im_target_and_rows_continue():
+    (states, boards, chains), d = _cut_close_world()
+    last = d[0] + timedelta(days=60)
+    tech = _Scripted(lambda ctx: {KEY_C5000: 1.0} if ctx.day_index >= 1 else {})
+    run = _run(states, tech, boards, chains, desk_notional=NOTIONAL_ * 100)
+    rows = run.rows
+    assert len(rows) == 4 and rows[1]["legs"] == {STR_C5000: 1.0}
+    # day 2: the note is dead (KO), the target is flat; 50 of the 100 desk lots close, half a lot stays
+    assert rows[2]["legs"] == {STR_C5000: 0.5} and rows[2]["unfilled"] == {STR_C5000: -0.5}
+    leg = _leg_delta(d[2], last, "C", 5000.0, 0.2, 0.5)
+    assert rows[2]["im_lots"] == pytest.approx((0.0 - leg) * 5000.0 / (200.0 * 5000.0))       # the leg's delta stays hedged
+    assert rows[2]["im_lots"] != 0.0
+    # day 3 (no record: the note is gone): the rest closes, the IM position goes
+    assert rows[3]["legs"] == {} and rows[3]["im_lots"] == 0.0 and rows[3]["seller_pv"] == 0.0
+    assert rows[3]["mo_mtm"] == pytest.approx(0.5 * (_px(d[3], last, "C", 5000.0, 0.2) - _px(d[2], last, "C", 5000.0, 0.2)) * 100.0)
+    _check_identity(run)
+
+
+@pytest.mark.parametrize("traded", [True, False])
+def test_on_its_last_trading_day_a_leg_exits_at_the_close_if_it_traded_else_at_the_settlement(traded):
+    d = _weekdays(4)
+    last = d[2]
+    s1 = _px(d[1], last, "C", 5000.0, 0.2)
+    settle2, close2 = 130.0, 128.0
+    q = [None,
+         {("C", 5000.0): (s1, None, 20000, 10000)},
+         {("C", 5000.0): (settle2, close2 if traded else None, 800 if traded else 0, 10000)},
+         None]
+    (states, boards, chains), d = _leg_world(4, last, q)
+    tech = _Scripted(lambda ctx: {KEY_C5000: 2.0} if ctx.day == d[1] else {})
+    run = _run(states, tech, boards, chains, desk_notional=NOTIONAL_)
+    r2 = run.rows[2]
+    exit_price = close2 if traded else settle2
+    assert r2["legs"] == {} and ("expiry_exit" if traded else "expiry_settled") in r2["flags"]
+    # the held 2 earn the day's settlement move; at the close the exit also earns (settle - close) per option sold
+    fill = -2.0 * (settle2 - exit_price) * 100.0
+    assert r2["fill_pnl"] == pytest.approx(fill)
+    assert r2["mo_mtm"] == pytest.approx(2.0 * (settle2 - s1) * 100.0 + fill)
+    cost = (0.2 * 100.0 * 2.0 if traded else 0.0) + _im_cost_of_change(run.rows, 2)
+    assert r2["cost"] == pytest.approx(cost)
+    c2 = run.rows[1]["cash"] + r2["accrual"] + r2["im_vm"] + 2.0 * exit_price * 100.0 - r2["cost"]
+    assert r2["cash"] == pytest.approx(c2)
+    _check_identity(run)
+
+
+def test_a_missing_mark_for_a_held_leg_fails_closed():
+    d = _weekdays(4)
+    last = d[0] + timedelta(days=60)
+    q = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, 0.2), None, 20000, 10000)} for i in range(2)] + [None, None]
+    (states, boards, chains), d = _leg_world(4, last, q)
+    with pytest.raises(StudyDataError):
+        _run(states, _Scripted(lambda ctx: {KEY_C5000: 1.0} if ctx.day_index >= 1 else {}), boards, chains, desk_notional=NOTIONAL_)
