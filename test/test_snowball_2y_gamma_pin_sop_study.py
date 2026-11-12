@@ -1762,6 +1762,8 @@ def test_the_ko_shift_flag_is_a_tolerant_comparison():
 
 from scipy.stats import norm as _norm  # noqa: E402
 
+from quantark.util.exceptions import ValidationError  # noqa: E402
+
 
 def _series(days_to_last=73, forward=5000.0, rate=0.014, last=None, anchor=date(2024, 1, 2)):
     from gpin.board import SeriesInfo
@@ -1844,3 +1846,147 @@ def test_black_value_at_uses_the_time_left_and_the_scaled_forward():
         black.value(0.2, "P", 5000.0, moved), rel=1e-12)
     # no time left: the payoff
     assert black.value_at(0.2, "C", 5000.0, info, spot, 5300.0, 0.0) == pytest.approx(info.forward * 5300.0 / spot - 5000.0)
+
+
+# ---- technique interface (C6) ----
+
+def _ladder_state(price0, delta, gamma, spot):
+    """A recorded ``{engine_price, engine_delta, engine_gamma}`` ladder of a quadratic-in-spot price (the 1% bump
+    delta is exactly ``delta`` when ``gamma`` is 0)."""
+    s = [spot * (1.0 + x) for x in gpin.LADDER]
+    return {"engine_price": [price0 + delta * (v - spot) + 0.5 * gamma * (v - spot) ** 2 for v in s],
+            "engine_delta": [delta + gamma * (v - spot) for v in s],
+            "engine_gamma": [gamma] * len(s)}
+
+
+def test_target_is_a_frozen_value_with_an_optional_filled_delta():
+    from gpin.techniques import Target
+
+    t = Target(1200.0, {("MO2401", "C", 5000.0): 2.0})
+    assert t.note_delta == 1200.0 and t.note_delta_if_filled is None and t.legs == {("MO2401", "C", 5000.0): 2.0}
+    assert Target(1.0, {}, note_delta_if_filled=2.0).note_delta_if_filled == 2.0
+    with pytest.raises(Exception):
+        t.note_delta = 5.0
+
+
+def test_hedge_delta_is_the_central_bump_delta_at_the_ladder_centre():
+    from gpin.techniques import hedge_delta
+
+    spot = 5000.0
+    st = _ladder_state(100.0, 1234.0, 0.0, spot)
+    assert hedge_delta(st, spot) == pytest.approx(1234.0, rel=1e-12)                 # models.bump = 1%: indices 11 and 13
+    curved = _ladder_state(100.0, 1234.0, 0.5, spot)
+    curved["engine_price"][15] += 1.0e5                                               # skews the wide bump only
+    s = [spot * (1.0 + x) for x in gpin.LADDER]
+    expect = (curved["engine_price"][13] - curved["engine_price"][11]) / (s[13] - s[11])
+    assert hedge_delta(curved, spot) == pytest.approx(expect, rel=1e-12)
+    wide = (curved["engine_price"][15] - curved["engine_price"][9]) / (s[15] - s[9])   # a 3% bump: indices 9 and 15
+    assert hedge_delta(curved, spot, bump=0.03) == pytest.approx(wide, rel=1e-12)
+    assert hedge_delta(curved, spot, bump=0.03) != hedge_delta(curved, spot)
+
+
+# ---- synthetic worlds for the ledger tests: a recorded note, boards and chains fabricated by hand ----
+
+WORLD_START = date(2024, 1, 2)       # a Tuesday; every world day is a consecutive weekday
+
+
+def _weekdays(n, start=WORLD_START):
+    out, d = [], start
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def _series_info(day, last, forward, rate=0.014):
+    from gpin.board import SeriesInfo
+
+    tenor = (last - day).days / 365.0
+    return SeriesInfo(last, tenor, forward, math.exp(-rate * tenor))
+
+
+def _day(day, spot, price, delta, *, gamma=0.0, alive=True, cash=0.0, knocked_in=False, next_ko=None,
+         im=None, mo=None, vol=0.2, end_reason=None, extra=None):
+    """One world day. ``price`` / ``delta`` / ``gamma``: the recorded engine ladder of the long note (raw engine
+    values). ``im``: ``{code: dict(close, open=None, vwap=None, volume=0, listed=True)}``. ``mo``:
+    ``{series: dict(last=date, forward=float, quotes={(cp, strike): (settle, close, volume, oi)})}``."""
+    return dict(day=day, spot=spot, price=price, delta=delta, gamma=gamma, alive=alive, cash=cash,
+                knocked_in=knocked_in, next_ko=next_ko, im=im or {}, mo=mo or {}, vol=vol, end_reason=end_reason,
+                extra=extra or {})
+
+
+def _world(days, *, coupon=0.1, book="ki75"):
+    """``(states, boards, chains)`` for the world days: ``states`` in the shape of ``NoteStates.to_json``."""
+    from gpin.board import DayBoard, ImBar, OptionQuote
+    from s2ts.chain import DayChain, ImQuote, MoPillar
+
+    records, boards, chains = [], {}, []
+    for i, w in enumerate(days):
+        d = w["day"]
+        rec = {"date": d.isoformat(), "spot": w["spot"], "alive": w["alive"], "knocked_in": w["knocked_in"],
+               "engine_note_cash": w["cash"], "end_reason": w["end_reason"],
+               "next_ko": None if w["next_ko"] is None else w["next_ko"].isoformat(),
+               "days_to_ko": None if w["next_ko"] is None else (w["next_ko"] - d).days,
+               "gap_ko": None, "ko_dir": None, "states": {}}
+        if w["alive"]:
+            rec["states"]["true"] = _ladder_state(w["price"], w["delta"], w["gamma"], w["spot"])
+        rec.update(w["extra"])
+        records.append(rec)
+        listed, bars = [], {}
+        for code, b in w["im"].items():
+            bars[code] = ImBar(b.get("open"), b["close"], b["close"], b.get("vwap"), b.get("volume", 0))
+            if b.get("listed", True):
+                listed.append(ImQuote(code, d + timedelta(days=60), 60 / 365.0, b["close"], b["close"]))
+        mo, infos = {}, {}
+        for series, s in w["mo"].items():
+            infos[series] = _series_info(d, s["last"], s["forward"])
+            mo[series] = {k: OptionQuote(q[0], q[1], None, None, q[2], q[3]) for k, q in s["quotes"].items()}
+        boards[d] = DayBoard(d, w["spot"], bars, mo, infos)
+        pillar = MoPillar("MO0000", d + timedelta(days=60), 60 / 365.0, w["spot"], 1.0, 1.0, w["spot"], w["vol"], ())
+        chains.append(DayChain(d, w["spot"], tuple(listed), pillar, {}, 0.0))
+    states = {"book": book, "ki_pct": 0.75, "inception": days[0]["day"].isoformat(), "coupon": coupon,
+              "days": records, "meta": {}}
+    return states, boards, chains
+
+
+def test_day_context_is_frozen_and_checks_its_dates():
+    from gpin.techniques import DayContext, NoteInfo
+
+    states, boards, _ = _world([_day(WORLD_START, 5000.0, 1.0, 100.0, im={"IM2401": dict(close=5000.0)})])
+    rec = states["days"][0]
+    note = NoteInfo("ki75", WORLD_START, 0.1, 0.75, 1.0, 5000.0)
+    ctx = DayContext.build(WORLD_START, 0, 5000.0, 0.2, rec, boards[WORLD_START], note, {"IM2401": 5.0},
+                           {("MO2401", "C", 5000.0): 1.0}, None)
+    assert ctx.alive is True and ctx.knocked_in is False and ctx.gap_ko is None and ctx.ko_dir is None
+    assert ctx.state("true")["engine_price"][12] == 1.0 and ctx.state("surv") is None
+    assert ctx.held_im == {"IM2401": 5.0} and ctx.prev is None and ctx.board.day == WORLD_START
+    with pytest.raises(Exception):
+        ctx.spot = 1.0                                               # frozen
+    with pytest.raises(TypeError):
+        ctx.record["alive"] = False                                  # the record is read-only
+    with pytest.raises(TypeError):
+        ctx.held_im["IM2401"] = 0.0                                  # so are the positions
+    with pytest.raises(TypeError):
+        ctx.state("true")["engine_price"][0] = 0.0                   # and the ladders (tuples)
+    # a record or a board of another day is refused; so is a previous context that is not earlier
+    other = _weekdays(2)[1]
+    with pytest.raises(ValidationError):
+        DayContext.build(other, 1, 5000.0, 0.2, rec, boards[WORLD_START], note, {}, {}, ctx)
+    with pytest.raises(ValidationError):
+        DayContext.build(WORLD_START, 1, 5000.0, 0.2, rec, boards[WORLD_START], note, {}, {}, ctx)
+
+
+def test_base_targets_the_true_bump_delta_every_day_and_noclip_only_differs_in_the_flag():
+    from gpin.techniques import Base, BaseNoClip, DayContext, NoteInfo, Technique
+
+    states, boards, _ = _world([_day(WORLD_START, 5000.0, 1.0, 750.0, gamma=0.0)])
+    note = NoteInfo("ki75", WORLD_START, 0.1, 0.75, 1.0, 5000.0)
+    ctx = DayContext.build(WORLD_START, 0, 5000.0, 0.2, states["days"][0], boards[WORLD_START], note, {}, {}, None)
+    base, noclip = Base(), BaseNoClip()
+    assert isinstance(base, Technique) and isinstance(noclip, Technique)
+    assert (base.id, base.family, base.params, base.clip) == ("base", "baseline", {}, True)
+    assert (noclip.id, noclip.family, noclip.params, noclip.clip) == ("base_noclip", "control", {}, False)
+    for tech in (base, noclip):
+        t = tech.target(ctx)
+        assert t.note_delta == pytest.approx(750.0, rel=1e-12) and dict(t.legs) == {} and t.note_delta_if_filled is None
