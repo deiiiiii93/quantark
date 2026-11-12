@@ -3,6 +3,12 @@
 The family owns payoffs, rows, coupon memory and event ordering. The ADI core
 owns the spot/variance operator. Columns are rolling; operator factorizations
 are shared across claims and no time history of knocked-in surfaces is kept.
+
+Statistics are ``EventStatistics`` (unified event statistics T14): the march
+logs its steps and event stages, and the knock-in path statistics come from
+the forward adjoint pass over that log (``vol_model_adjoint.py``). There is no
+knock-out-independent knock-in monitor: a knock-in after a knock-out is never
+counted (DESIGN §4.5).
 """
 from dataclasses import replace
 from types import SimpleNamespace
@@ -13,6 +19,11 @@ from quantark.asset.equity.engine.event_stats import StatisticsProvenance
 from quantark.asset.equity.engine.pde.core.prepare import OutputRequest, Operation, PreparedProblem
 from quantark.asset.equity.engine.pde.grid import Layout, SpatialLayout, TimeLayout
 from quantark.util.enum import ADIScheme
+
+from .vol_model_adjoint import ADIEvents, ADIStep, adi_forward_pass
+
+#: the key of the statistics surfaces' stacked rows (and the price's knock-in-side label) in a step's row map
+_STATS_ROWS = "__statistics_rows__"
 
 
 class _LinearReadout:
@@ -55,19 +66,6 @@ class _VarianceClaimBreach:
     def seed(self, block):
         base = self.stats.breach.seed(np.zeros((block.shape[0], self.stats.n_cols)))
         return np.repeat(base[:, None, :], self.n_v, axis=1).reshape(block.shape)
-
-
-def local_vol_ki_ever(solver, product, env):
-    """KO-independent monitoring even when today's note outcome is decided."""
-    from .core.prepare import prepare
-    from .core.march import march
-    request = OutputRequest(Operation.SESSION_OUTPUTS, price=False, event_stats=True,
-                            short_circuit=False)
-    p = prepare(solver, product, env, request)
-    result = march(p)
-    if p.statistics is None:
-        return 0.0
-    return p.statistics.read(result.states, result.captures, 0.0).ki_ever_probability
 
 
 def _family(owner, product):
@@ -140,80 +138,21 @@ def _prepare(owner, product, env, want_stats, streams, fold):
     return family, prepared, core, stats, corrections, fp
 
 
-def _ki_monitor(owner, family, p, core, st):
-    """One KO-independent underlying claim, with its own damping schedule."""
-    if not p.product.has_ki_barrier:
-        return 0.0
-    if p.solve_state['knocked_in']:
-        return 1.0
-    from .snowball_vol_pde_solvers import event_damped_step_keys
-    horizon = float(p.product.get_pre_maturity_time(p.env)) if hasattr(p.product, 'get_pre_maturity_time') else core.T
-    df_T = p.env.get_discount_factor(core.T)
-    ki_keys = {core.N_T-j: None for j in family._ki_observation_indices}
-    damped = event_damped_step_keys(st, {'ki': ki_keys}, core.N_T)
+def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None, fold=None, return_surface=False,
+               adjoint_check=False):
+    """Return native PV or statistics on the same ADI mesh and event stages.
 
-    def boundary(U, tau):
-        current = core.T-float(tau)
-        unit = family._df_between_times(p.env, current, core.T) if current <= horizon+1e-12 else 0.
-        if p.product.is_reverse:
-            U[0, :], U[-1, :] = 0., unit
-        else:
-            U[0, :], U[-1, :] = unit, 0.
-        return U
+    Statistics (``event_stats``) are ``EventStatistics`` (unified event statistics spec, T14): every termination
+    outcome from its own marched column (the PDE 1D family's statistics group, read at ``(spot, v0)``), ``pv`` the
+    value ``price()`` reads from the same march (spec D23; the marched outcome sum's difference is the
+    ``reconciliation_error``), and the knock-in path statistics -- P(knock in before any knock-out), its expected
+    time and the per-date table -- from the forward adjoint pass of this march (``vol_model_adjoint.py``), run only
+    when the request asks for the knock-in stream (D17). A note knocked out at valuation reports the decided
+    knock-out (no knock-in monitoring after it).
 
-    def event(U, tau, j=None, dt=0.):
-        current = core.T-float(tau)
-        if current > horizon+1e-12:
-            return U
-        if not p.solve_state['ki_continuous'] and j not in family._ki_observation_indices:
-            return U
-        barrier = family._ki_barrier if j is None else family._resolve_ki_barrier_at_tidx(j)
-        unit = family._df_between_times(p.env, current, core.T)
-        hit = np.full_like(U, unit)
-        if not p.solve_state['ki_continuous'] and j != 0 and family._use_cell_average_events():
-            return family._project_event_values(core.S_grid, barrier, p.product.is_reverse, False, U, hit)
-        mask = family._event_nodal_mask(core.S_grid, barrier, p.product.is_reverse, False,
-                                       at_valuation=j == 0)
-        U[mask, :] = unit
-        if p.solve_state['ki_continuous'] and j is not None and 0 < j < core.N_T and current+dt <= horizon+1e-12:
-            if owner._ki_fp is not None:
-                U += owner._ki_fp.step_correction(j, core.S_grid, barrier, hit-U)
-        return U
-
-    U = np.zeros((core.N_S, core.N_V))
-    boundary(U, 0.)
-    U = event(U, 0., core.N_T)
-    previous = core._boundary_hook
-    core._boundary_hook = boundary
-    try:
-        def advance(U, j, tau, dt, terminal=False):
-            damping = damped and core.N_T-j in damped
-            step = core._douglas_step if terminal or damping or owner.scheme == ADIScheme.DOUGLAS else core._cs_step
-            theta = 1. if terminal else float(st.event_theta if damping else st.theta)
-            from .adi_columns import step_columns
-            edge = boundary(np.zeros_like(U), tau)
-            return step_columns(core, U[:, :, None], dt, tau, theta, core.T-tau+.5*dt,
-                                np.array([edge[0, 0]]), np.array([edge[-1, 0]]),
-                                terminal or damping or owner.scheme == ADIScheme.DOUGLAS,
-                                force_scalar=True)[:, :, 0]
-        if st.terminal_damping_steps > 0:
-            dt = float(p.layout.time.dt[-1])
-            U = event(advance(U, core.N_T-1, .5*dt, .5*dt, True), .5*dt)
-            U = event(advance(U, core.N_T-1, dt, .5*dt, True), dt, core.N_T-1, dt)
-            first = core.N_T-2
-        else:
-            first = core.N_T-1
-        for j in range(first, -1, -1):
-            dt = float(p.layout.time.dt[j])
-            tau = core.T-float(p.layout.time.t[j])
-            U = event(advance(U, j, tau, dt), tau, j, dt)
-    finally:
-        core._boundary_hook = previous
-    return float(core.interpolate(U, np.log(p.env.spot), owner.model_params.v0) / df_T)
-
-
-def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None, fold=None, return_surface=False):
-    """Return native PV or statistics on the same ADI mesh and event stages."""
+    ``adjoint_check`` (tests): return the march's statistics, its readout and the forward pass with the adjoint
+    reconstruction (spec AC14) instead of the result.
+    """
     from .snowball_vol_pde_solvers import event_damped_step_keys
     from quantark.asset.equity.engine.pde.route_applicability import check_route_applicability
     from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
@@ -232,6 +171,8 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
     values = {name: np.zeros((core.N_S, core.N_V)) for name in value_names}
     blocks = ({name: np.zeros((core.N_S, core.N_V, stats.n_cols))
                for name in stats.group.surfaces} if stats is not None else {})
+    #: the statistics march's steps and event stages in march order (the forward adjoint pass replays it reversed)
+    log = [] if stats is not None else None
     # Terminal payoffs/events depend on spot and product state, not variance.
     # Initialize them once; repeating contract/calendar work per V column can
     # dominate a cold price, especially for deferred coupon claims.
@@ -262,7 +203,7 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
         n_x=int(core.N_S), n_v=int(core.N_V), time_nodes=p.layout.time.t.tolist(),
         statistics_columns=0 if stats is None else int(stats.n_cols),
         active_claims=sum(1 if A.ndim == 2 else A.shape[2] for _, A in active_claims()),
-        ki_monitor=bool(stats is not None and stats.want_ki),
+        knock_in_forward_pass=bool(stats is not None and stats.want_ki_path),
         discounting='exact',
         variance_transport='cubic_characteristic' if core._semi_lagrangian_v else core.v_drift_scheme,
     )
@@ -280,9 +221,10 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
             for i, name in enumerate(stats.group.surfaces):
                 rows[name] = (lo[i * stats.n_cols:(i + 1) * stats.n_cols],
                               hi[i * stats.n_cols:(i + 1) * stats.n_cols])
+            rows[_STATS_ROWS] = (lo, hi, stats.alive_ki_edge_knocks_in(j))
         return rows
 
-    def advance(tau, dt, j, terminal_half=False):
+    def advance(tau, dt, j, terminal_half=False, half_node=False):
         old_time = p.layout.time.t[j]
         try:
             if terminal_half:
@@ -304,11 +246,46 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
             width = 1 if A.ndim == 2 else A.shape[2]
             A[...] = out[:, :, c] if A.ndim == 2 else out[:, :, c:c+width]
             c += width
+        if log is not None:
+            lo, hi, knocks_in = rows[_STATS_ROWS]
+            log.append(ADIStep(j=j, node=core.T-tau, dt=dt, tau=tau, theta=theta, t_mid=core.T-tau+.5*dt,
+                               douglas=bool(douglas), low=np.array(lo, copy=True), high=np.array(hi, copy=True),
+                               knocks_in=bool(knocks_in), half=half_node))
         return
 
-    def events(j, half=False):
+    def stats_events_batched(j, target):
+        """The statistics' event stages at ``j`` on every variance column at once (``target``: blocks)."""
+        family._ki_fp = None if fp_2d is None else _VarianceClaimCorrection(fp_2d, core.N_V, stats.n_cols)
+        breach = _VarianceClaimBreach(stats, core.N_V)
+        a = target['stats_v0'].reshape(core.N_S, -1)
+        b = target['stats_v1'].reshape(core.N_S, -1)
+        if p.events is not None:
+            block = p.events.apply(j, {'alive': a, 'ki': b}, breach=breach)
+            block = p.events.continuous(j, block)
+            a[...], b[...] = block['alive'], block['ki']
+        else:
+            family._two_surface_events(a, b, core.S_grid, j, core.N_T+1,
+                float(p.layout.time.t[j]), product, env, breach=breach)
+
+    def stats_events_column(j, k, half, target, capture):
+        """The statistics' event stages at ``j`` on variance column ``k`` (``half``: the terminal half node's
+        continuous knock-in), with ``family._ki_fp`` already set for the column."""
+        if half:
+            if p.solve_state['ki_continuous']:
+                family._ki_columns(target['stats_v0'][:, k, :], target['stats_v1'][:, k, :],
+                                   core.S_grid, j, core.N_T+1, product)
+            return
+        view = {name: block[:, k, :] for name, block in target.items()}
+        stats.step_events(view, capture, j)
+        for name, block in view.items():
+            target[name][:, k, :] = block
+
+    def batched_events(j, half):
         from .core.adapters.phoenix import PhoenixAdapter
-        if j > 0 and not half and not isinstance(p.adapter, PhoenixAdapter):
+        return j > 0 and not half and not isinstance(p.adapter, PhoenixAdapter)
+
+    def events(j, half=False):
+        if batched_events(j, half):
             # Snowball/reset stages already accept a matrix of columns. Batch
             # V nodes too, so a daily KI projection is built once per date.
             family._ki_fp = fp_2d
@@ -326,17 +303,8 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
                 finally:
                     family._v0_seed_values = seed
             if stats is not None:
-                family._ki_fp = None if fp_2d is None else _VarianceClaimCorrection(fp_2d, core.N_V, stats.n_cols)
-                breach = _VarianceClaimBreach(stats, core.N_V)
-                a = blocks['stats_v0'].reshape(core.N_S, -1)
-                b = blocks['stats_v1'].reshape(core.N_S, -1)
-                if p.events is not None:
-                    block = p.events.apply(j, {'alive': a, 'ki': b}, breach=breach)
-                    block = p.events.continuous(j, block)
-                    a[...], b[...] = block['alive'], block['ki']
-                else:
-                    family._two_surface_events(a, b, core.S_grid, j, core.N_T+1,
-                        float(p.layout.time.t[j]), product, env, breach=breach)
+                stats_events_batched(j, blocks)
+                log.append(ADIEvents(j=j, half=False))
             return
         for k in range(core.N_V):
             family._ki_fp = None if half else corrections[k]
@@ -347,8 +315,7 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
                             family._ki_columns(values[a][:, k:k+1], values[b][:, k:k+1], core.S_grid,
                                                j, core.N_T+1, product)
                     if stats is not None:
-                        family._ki_columns(blocks['stats_v0'][:, k, :], blocks['stats_v1'][:, k, :],
-                                           core.S_grid, j, core.N_T+1, product)
+                        stats_events_column(j, k, True, blocks, None)
                 continue
             for name in value_names:
                 scratch[name][:, j] = values[name][:, k]
@@ -366,16 +333,15 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
             for name in value_names:
                 values[name][:, k] = scratch[name][:, j]
             if stats is not None:
-                view = {name: block[:, k, :] for name, block in blocks.items()}
-                stats.step_events(view, captures[k], j)
-                for name, block in view.items():
-                    blocks[name][:, k, :] = block
+                stats_events_column(j, k, False, blocks, captures[k])
+        if stats is not None:
+            log.append(ADIEvents(j=j, half=half))
 
     core._opt_is_call = True
     if st.terminal_damping_steps > 0:
         # Preserve the core's two half steps and its boundary monitoring.
         terminal_dt = float(p.layout.time.dt[-1])
-        advance(.5*terminal_dt, .5*terminal_dt, core.N_T-1, True)
+        advance(.5*terminal_dt, .5*terminal_dt, core.N_T-1, True, half_node=True)
         events(core.N_T-1, half=True)
         advance(terminal_dt, .5*terminal_dt, core.N_T-1, True)
         events(core.N_T-1)
@@ -405,25 +371,67 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
     if "_t0_readout_values" in captures[0]:
         family._t0_readout_values = tuple(float(np.interp(owner.model_params.v0, core.V_grid,
             [c["_t0_readout_values"][m] for c in captures])) for m in range(2))
+
     # The family stages supply the surface selection, including carried KI.
-    if return_surface:
+    def value_surface():
         name = p.adapter._value_surface(1 if p.solve_state['knocked_in'] else 0)
         if "t0_pre_event" in captures[0]:
             sel = 1 if p.solve_state['knocked_in'] else 0
-            return core, np.stack([c['t0_pre_event'][sel] for c in captures], axis=1)
-        return core, values[name]
+            return np.stack([c['t0_pre_event'][sel] for c in captures], axis=1)
+        return values[name]
+
+    if return_surface:
+        return core, value_surface()
     result = SimpleNamespace(states=reduced, captures=cap)
     pv = p.adapter._price(p, p.adapter._columns(p, result))
     if stats is None:
         return None if event_stats else pv
-    reduced_blocks = {name: reduce(A) for name, A in blocks.items()}
-    report = stats.read(reduced_blocks, cap, float(pv if npv is None else npv))
-    if stats.want_ki:
-        report = replace(report, ki_ever_probability=_ki_monitor(owner, family, p, core, st))
+    if npv is not None:
+        pv = float(npv)
+    elif getattr(owner, '_native_pv_from_surface', False):
+        # D23: the value price() reads -- the surface readout of the same march (the column readout above differs
+        # from it by round-off; the statistics' own readout difference stays in reconciliation_error)
+        pv = float(core.interpolate(value_surface(), np.log(float(env.spot)), owner.model_params.v0))
+    provenance = StatisticsProvenance(owner._price_model, owner._price_model)
     decision = family._valuation_decision(product, env)
     if decision.knocked_out:
-        from .core.statistics.terminal import knocked_out_statistics
+        from .core.statistics.terminal import knocked_out_event_statistics
         known_pv = family._get_immediate_ko_payoff(product, env) if npv is None else npv
-        known = knocked_out_statistics(family, product, env, p.request, decision, pv=known_pv)
-        report = replace(known, ki_ever_probability=report.ki_ever_probability)
-    return replace(report, provenance=StatisticsProvenance(owner._price_model, owner._price_model))
+        known = knocked_out_event_statistics(family, product, env, p.request, decision, pv=known_pv)
+        return replace(known, provenance=provenance)
+    reduced_blocks = {name: reduce(A) for name, A in blocks.items()}
+    sel = 1 if stats.knocked_in_at_valuation else 0
+    has_t0_pre = "stats_t0_pre" in captures[0]
+    read_block = (np.stack([c["stats_t0_pre"][sel] for c in captures], axis=1) if has_t0_pre
+                  else blocks[stats.group.surfaces[sel]])
+
+    def affine_events(entry):
+        """The march's event stages at ``entry`` applied to zero blocks (the reconstruction's event sources)."""
+        zero = {name: np.zeros_like(block) for name, block in blocks.items()}
+        if entry.j == core.N_T and not entry.half:
+            view = {name: block[:, 0, :] for name, block in zero.items()}
+            family._ki_fp = corrections[0]
+            stats.terminal(view)
+            for block in zero.values():
+                block[...] = block[:, 0:1, :]
+        elif batched_events(entry.j, entry.half):
+            stats_events_batched(entry.j, zero)
+        else:
+            for k in range(core.N_V):
+                family._ki_fp = None if entry.half else corrections[k]
+                stats_events_column(entry.j, k, entry.half, zero, {})
+        family._ki_fp = fp_2d
+        return zero
+
+    def forward(reconstruct=False):
+        return adi_forward_pass(owner=owner, family=family, prepared=p, core=core, statistics=stats, log=log,
+                                fp_2d=fp_2d, captures_have_t0_pre=has_t0_pre, read_block=read_block,
+                                reconstruct=reconstruct, affine_events=affine_events)
+
+    stats.forward_runner = forward
+    if adjoint_check:
+        at = stats._reader(reduced_blocks, cap)
+        return SimpleNamespace(statistics=stats, forward=forward(reconstruct=True), at=at,
+                               report=stats.read_statistics(reduced_blocks, cap, pv))
+    report = stats.read_statistics(reduced_blocks, cap, pv)
+    return replace(report, provenance=provenance)

@@ -184,6 +184,9 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
     _adapter_class = Heston2DSnowballAdapter
     #: ``price_folded`` folds on this route's own 2D ADI march (``price_folded_2d``)
     supports_cash_leg_folding = True
+    #: ``price()`` reads the value surface of the native march (``core.interpolate``): the native statistics' ``pv``
+    #: is read the same way (unified event statistics D23)
+    _native_pv_from_surface = True
     DEFAULT_V_GRID_POWER = 2.5
     DEFAULT_BARRIER_GREEK_STEPS_PER_TICK = 8
     PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK = 16
@@ -616,7 +619,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             stats = self.calculate_event_stats(product, pricing_env, streams=streams)
             if stats is not None:
                 return PDESessionOutputs(npv=float(stats.pv), solution=None,
-                    event_stats=stats, event_distribution=EventDistribution.from_autocallable_stats(stats))
+                    event_stats=stats, event_distribution=EventDistribution.from_statistics(stats))
 
         npv = float(self.price(product, pricing_env))
         stats = None
@@ -626,7 +629,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
                 product, pricing_env, npv=npv, streams=streams
             )
             if stats is not None:
-                dist = EventDistribution.from_autocallable_stats(stats)
+                dist = EventDistribution.from_statistics(stats)
         return PDESessionOutputs(
             npv=npv, solution=None, event_stats=stats, event_distribution=dist
         )

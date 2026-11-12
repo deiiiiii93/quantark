@@ -414,7 +414,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             stats = self.calculate_event_stats(product, pricing_env, streams=streams)
             if stats is not None:
                 return PDESessionOutputs(npv=float(stats.pv), solution=None,
-                    event_stats=stats, event_distribution=EventDistribution.from_autocallable_stats(stats))
+                    event_stats=stats, event_distribution=EventDistribution.from_statistics(stats))
 
         npv = float(self.price(product, pricing_env))
         stats = None
@@ -424,7 +424,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                 product, pricing_env, npv=npv, streams=streams
             )
             if stats is not None:
-                dist = EventDistribution.from_autocallable_stats(stats)
+                dist = EventDistribution.from_statistics(stats)
         return PDESessionOutputs(
             npv=npv, solution=None, event_stats=stats, event_distribution=dist
         )

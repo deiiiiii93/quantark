@@ -37,7 +37,7 @@ approximated.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import scipy.sparse as sp
@@ -62,6 +62,7 @@ __all__ = [
     "KI",
     "AdjointOps",
     "AdjointUnavailable",
+    "ColumnarFirstPassage",
     "ForwardResult",
     "KnockIn",
     "Seed",
@@ -131,18 +132,32 @@ class Seed:
 
 
 @dataclass(frozen=True, eq=False)
+class ColumnarFirstPassage:
+    """The FIRST_PASSAGE correction of a 2D (spot, variance) march: per variance column ``m`` the rank-one
+    ``alive[:, m] += g[:, m] (ki[k[m], m] - alive[k[m], m])`` with that column's own coefficients (``g[:, m]`` zero
+    where the column adds nothing)."""
+
+    g: np.ndarray                   # (n_spot, n_variance)
+    k: np.ndarray                   # (n_variance,) int
+
+
+@dataclass(frozen=True, eq=False)
 class KnockIn:
     """``alive <- A alive + B ki``, then (continuous KI, FIRST_PASSAGE) ``alive += g (ki[k] - alive[k])``."""
 
     copy: _Transposed               # A^T
     take: _Transposed               # B^T
-    fp: Optional[Tuple[np.ndarray, int]] = None
+    fp: Optional[object] = None     # (g, k) on a 1D march; ColumnarFirstPassage on a 2D one
 
     def transpose(self, p: np.ndarray):
         """``(p_in, transfer_copy, transfer_fp)``: the duals on the stage's inputs and the duals moved onto the
         knocked-in surface by the copy and by the first-passage correction."""
         pa = p[ALIVE]
         fp_transfer = None
+        if isinstance(self.fp, ColumnarFirstPassage):
+            # the per-variance-column coefficients belong to the 2D solvers' own pass (``pde/vol_model_adjoint.py``)
+            raise AdjointUnavailable("undefined: the forward adjoint pass of a 1D march has no per-column "
+                                     "first-passage coefficients")
         if self.fp is not None:
             g, k = self.fp
             moved = float(g @ pa)
@@ -227,16 +242,25 @@ class AdjointOps:
         return KnockIn(_Transposed(diag=np.where(mask, 0.0, 1.0)), _Transposed(diag=mask.astype(float)), fp)
 
 
-def first_passage(solver, t_idx: int, s_vec: np.ndarray, barrier: float) -> Optional[Tuple[np.ndarray, int]]:
+def first_passage(solver, t_idx: int, s_vec: np.ndarray, barrier: float):
     """``(g, k*)`` of the FIRST_PASSAGE correction the march adds at ``t_idx`` (``alive += g (ki[k*] - alive[k*])``),
-    from the solver's own per-solve state and geometry; ``None`` where it adds nothing."""
+    from the solver's own per-solve state and geometry; ``None`` where it adds nothing. Per-variance-column
+    coefficients (the 2D solvers', ``_ContinuousKIFirstPassage._columnar``) give a ``ColumnarFirstPassage`` from the
+    same geometry, column by column (``_columnar_correction``'s arithmetic)."""
     fp = solver._ki_fp
     if fp is None:
         return None
     if fp._columnar:
-        # TODO(unified event statistics T14): per-variance-column coefficients belong to the 2D solvers' own march
-        raise AdjointUnavailable("undefined: the forward adjoint pass of a 1D march has no per-column "
-                                 "first-passage coefficients")
+        dt = float(fp._dt[t_idx])
+        mu, sig2 = np.asarray(fp._mu[t_idx], dtype=float), np.asarray(fp._sig2[t_idx], dtype=float)
+        g = np.zeros((len(s_vec), mu.size))
+        k = np.zeros(mu.size, dtype=int)
+        for col in range(mu.size):
+            G, k_star, dist = fp._geometry(dt, float(mu[col]), float(sig2[col]), s_vec, float(barrier))
+            if G is not None:
+                g[:, col] = np.asarray(G, dtype=float) / dist
+                k[col] = int(k_star)
+        return ColumnarFirstPassage(g, k)
     G, k_star, dist = fp._geometry(float(fp._dt[t_idx]), float(fp._mu[t_idx]), float(fp._sig2[t_idx]),
                                    s_vec, float(barrier))
     if G is None:
@@ -268,6 +292,9 @@ class ForwardResult:
     clean_ko: np.ndarray
     ki_edge: np.ndarray
     reconstructed: Optional[np.ndarray] = None
+    #: the index on ``times`` of a KI observation time; ``None``: the march layout's own (the PDE 1D pass, whose
+    #: ``times`` are the layout's; the ADI pass adds the terminal damping's half node)
+    column_of: Optional[Callable[[float], int]] = None
 
 
 def _builtin_crank_nicolson(stepper) -> bool:
@@ -488,12 +515,16 @@ def knock_in_from_forward_pass(statistics, states, captures):
     (continuous, ``step_overlap`` where a day boundary is not a grid time); ``expected_time_reason`` is set when the
     expected time is undefined.
 
+    A statistics block marched by another engine family's loop carries its own pass (``statistics.forward_runner``:
+    the native ADI march's, ``pde/vol_model_adjoint.py``); the table is built from its result the same way.
+
     Raises:
         AdjointUnavailable: as ``forward_pass``.
     """
     from quantark.asset.equity.engine.event_stats import KnockInTable
 
-    result = forward_pass(statistics, states, captures)
+    runner = getattr(statistics, "forward_runner", None)
+    result = runner() if runner is not None else forward_pass(statistics, states, captures)
     prepared, product, env = statistics.prepared, statistics.product, statistics.env
     layout = prepared.layout
     t = result.times
@@ -519,7 +550,8 @@ def knock_in_from_forward_pass(statistics, states, captures):
                    if r.observation_time is not None
                    and -Tolerance.ZERO <= float(r.observation_time) <= horizon + Tolerance.ZERO]
         times = np.array([float(r.observation_time) for r in records], dtype=float)
-        columns = [_column_of(layout, float(x), tau) for x in times]
+        column_of = result.column_of or (lambda x: _column_of(layout, x, tau))
+        columns = [column_of(float(x)) for x in times]
         mass = copy_p + fp_p
         off_schedule = np.ones(len(t), dtype=bool)
         off_schedule[columns] = False
@@ -541,6 +573,14 @@ def knock_in_from_forward_pass(statistics, states, captures):
         dates = tuple(r.observation_date for r in records)
         dates = dates if dates and all(d is not None for d in dates) else None
         interpolated = np.zeros(times.size, dtype=bool)
+    if np.any(probability < -Tolerance.PROBABILITY):
+        # the march's own discrete transition is not monotone there (the ADI's mixed-derivative splitting on a coarse
+        # mesh, at short times far from the spot): its first knock-in mass on a row is negative beyond the contract's
+        # probability slack. Reported, never clipped (refining the mesh removes it)
+        k = int(np.argmin(probability))
+        raise AdjointUnavailable(f"undefined: the march's first knock-in mass is negative on the row at t = "
+                                 f"{float(times[k])!r} ({float(probability[k])!r}): its discrete transition is not "
+                                 f"monotone on this grid; refine the grid")
     survival = _survival(times, probability, ko_times, ko_probability)
     table = KnockInTable(times=times, payment_times=times, dates=dates, payment_dates=dates,
                          probability=probability, survival=survival, interpolated=interpolated,

@@ -31,19 +31,12 @@ def engine(model, family, **kwargs):
 
 
 def _ko_total(stats, family):
-    """Σ P(KO) of a legacy (native ADI, until T14) or an ``EventStatistics`` (PDE 1D local vol, T12) result."""
-    from quantark.asset.equity.engine.event_stats import EventStatistics
-    if isinstance(stats, EventStatistics):
-        return float(stats.observations.probability.sum())
-    return (stats.pre_ko_probability_total + stats.post_ko_probability_total if family == 'ko_reset'
-            else stats.ko_probability.sum())
+    """Σ P(KO) over both schedules (``EventStatistics``: the PDE 1D local vol T12, the native ADI T14)."""
+    return float(stats.observations.probability.sum())
 
 
 def _settles_knocked_in(stats):
-    from quantark.asset.equity.engine.event_stats import EventStatistics
-    if isinstance(stats, EventStatistics):
-        return stats.ki_settlement.probability
-    return stats.ki_survive_knocked_in_probability
+    return stats.ki_settlement.probability
 
 
 def note(family, carried=False, reverse=False, discrete=False, disabled=False, no_ko=False):
@@ -75,19 +68,15 @@ def test_native_outcomes_match_folded_prices(model, family, carried):
     inc = {x: e.price_folded(p, env, unit_overlay(p, env, x)) - base for x in ('ko', 'ki', 'no_ki')}
     assert _ko_total(stats, family) == pytest.approx(inc['ko'], abs=2e-10)
     assert _settles_knocked_in(stats) == pytest.approx(inc['ki'], abs=2e-10)
-    if model == 'lv':
-        # T12: the not-knocked-in maturity is its own marched column too, a price of the folded unit
-        assert stats.maturity.probability == pytest.approx(inc['no_ki'], abs=2e-10)
+    # the not-knocked-in maturity is its own marched column too, a price of the folded unit (T12; ADI T14)
+    assert stats.maturity.probability == pytest.approx(inc['no_ki'], abs=2e-10)
     # Raw claims are not normalized; native ADI integrates discounting exactly.
     assert sum(inc.values()) == pytest.approx(1., abs=2e-5)
     assert stats.pv == pytest.approx(base, abs=2e-10)
     assert abs(stats.reconciliation_error) < 2e-9
     assert not stats.provenance.surrogate
     if carried:
-        if model == 'lv':
-            assert stats.knock_in.probability == 1. and stats.knock_in.expected_time == 0.
-        else:
-            assert stats.ki_ever_probability == 1.
+        assert stats.knock_in.probability == 1. and stats.knock_in.expected_time == 0.
         assert _settles_knocked_in(stats) < 1.
 
 
@@ -98,7 +87,7 @@ def test_heston_event_order_and_reverse_match_price(family, reverse, discrete, d
     base = e.price(p, env)
     stats = e.calculate_event_stats(p, env)
     inc = e.price_folded(p, env, unit_overlay(p, env, 'ki')) - base
-    assert stats.ki_survive_knocked_in_probability == pytest.approx(inc, abs=2e-10)
+    assert stats.ki_settlement.probability == pytest.approx(inc, abs=2e-10)
 
 
 @pytest.mark.parametrize('family', CASES)
@@ -106,8 +95,8 @@ def test_unit_leverage_is_heston_for_prices_and_probabilities(family):
     p, env = note(family), _flat_env()
     a, b = engine('heston', family).calculate_event_stats(p, env), engine('slv', family).calculate_event_stats(p, env)
     assert a.pv == pytest.approx(b.pv, abs=1e-12)
-    assert a.ki_ever_probability == pytest.approx(b.ki_ever_probability, abs=1e-12)
-    assert a.ki_survive_knocked_in_probability == pytest.approx(b.ki_survive_knocked_in_probability, abs=1e-12)
+    assert a.knock_in.probability == pytest.approx(b.knock_in.probability, abs=1e-12)
+    assert a.ki_settlement.probability == pytest.approx(b.ki_settlement.probability, abs=1e-12)
 
 
 @pytest.mark.parametrize('memory', [False, True])
@@ -119,14 +108,14 @@ def test_deferred_memory_phoenix_native_cash_reconciles(memory):
     e, env = engine('heston', 'phoenix'), _flat_env()
     base = e.price(p, env)
     stats = e.calculate_event_stats(p, env)
-    assert stats.ki_survive_knocked_in_probability == pytest.approx(
+    assert stats.ki_settlement.probability == pytest.approx(
         e.price_folded(p, env, unit_overlay(p, env, 'ki')) - base, abs=2e-10)
     assert abs(stats.reconciliation_error) < 2e-9
 
 
 @pytest.mark.parametrize('model', CLASSES)
 @pytest.mark.parametrize('family', ['snowball', 'phoenix'])
-def test_immediate_ko_keeps_underlying_ki_monitoring(model, family):
+def test_immediate_ko_reports_no_knock_in(model, family):
     from datetime import datetime
     from intraday.conftest import dated_phoenix, dated_snowball, flat_env
     from quantark.util.calendar import CalendarType, create_calendar
@@ -137,29 +126,26 @@ def test_immediate_ko_keeps_underlying_ki_monitoring(model, family):
     env = flat_env(date, spot=110.)
     env.vol_surface = _flat_env().vol_surface
     s = engine(model, family).calculate_event_stats(p, env)
-    if model == 'lv':
-        # unified event statistics T12 (DESIGN §4.5): a knock-out at valuation without a carried knock-in is no
-        # knock-in, and the PDE 1D statistics run no forward calculation for it (the native ADI route keeps its
-        # KO-independent monitor until it migrates, T14)
-        assert s.observations.probability.sum() == 1.
-        assert s.ki_settlement.probability == 0.
-        assert s.knock_in.probability == 0. and s.ki_table.size == 0
-        return
-    assert s.ko_probability.sum() == 1.
-    assert s.ki_survive_knocked_in_probability == 0.
-    assert s.ki_ever_probability > 0.
+    # unified event statistics (DESIGN §4.5; T12 PDE 1D, T14 native ADI): a knock-out at valuation without a carried
+    # knock-in is no knock-in; no forward calculation runs for it (the ADI's KO-independent monitor is removed)
+    assert s.observations.probability.sum() == 1.
+    assert s.ki_settlement.probability == 0.
+    assert s.knock_in.probability == 0. and s.ki_table.size == 0
 
 
 @pytest.mark.parametrize('family', CASES)
-def test_ki_ever_keeps_monitoring_after_ko_on_identical_mesh(family):
+def test_knock_in_stops_at_the_knock_out_on_identical_mesh(family):
+    """T14: the KO-independent "KI ever" monitor is removed. On the same mesh, the note's P(KI before any KO) is
+    strictly below the unreachable-KO twin's (where every knock-in comes before a knock-out), and so is its knocked-in
+    settlement."""
     p, env, e = note(family), _flat_env(), engine('heston', family)
     # Freeze the S grid to isolate event semantics from changed critical levels.
     core = e._make_core(p, env, float(p.get_maturity(env)))
     e._layer_x_nodes = lambda *_: core.X_grid
     a = e.calculate_event_stats(p, env)
     b = e.calculate_event_stats(note(family, no_ko=True), env)
-    assert a.ki_ever_probability == pytest.approx(b.ki_ever_probability, abs=2e-12)
-    assert a.ki_survive_knocked_in_probability < b.ki_survive_knocked_in_probability
+    assert a.knock_in.probability < b.knock_in.probability - 1e-3
+    assert a.ki_settlement.probability < b.ki_settlement.probability
 
 
 @pytest.mark.parametrize('model', ['heston', 'slv'])
@@ -171,9 +157,12 @@ def test_batched_adi_is_scalar_adi_at_identical_settings(model, family, projecti
     a.params = b.params = replace(a.params, event_projection=projection)
     x, y = a.calculate_event_stats(p, env), b.calculate_event_stats(p, env)
     assert x.pv == pytest.approx(y.pv, abs=3e-12)
-    np.testing.assert_allclose(x.ko_probability, y.ko_probability, rtol=0., atol=3e-14)
-    assert x.ki_survive_knocked_in_probability == pytest.approx(y.ki_survive_knocked_in_probability, abs=3e-14)
-    assert x.ki_ever_probability == y.ki_ever_probability
+    np.testing.assert_allclose(x.observations.probability, y.observations.probability, rtol=0., atol=3e-14)
+    assert x.ki_settlement.probability == pytest.approx(y.ki_settlement.probability, abs=3e-14)
+    assert x.maturity.probability == pytest.approx(y.maturity.probability, abs=3e-14)
+    # T14: the forward adjoint pass transposes the batched column step only; the scalar sweep refuses with a reason
+    assert y.knock_in.probability is not None
+    assert x.knock_in.probability is None and x.unavailable['ki_table'].startswith('undefined:')
 
 
 def _sigma_collapse_core():
@@ -228,9 +217,9 @@ def test_characteristic_transport_preserves_outcome_cash_linearity(model, family
     base = e.price(p, env)
     s = e.calculate_event_stats(p, env)
     inc = {x: e.price_folded(p, env, unit_overlay(p, env, x))-base for x in ('ko', 'ki', 'no_ki')}
-    ko = (s.pre_ko_probability_total+s.post_ko_probability_total if family == 'ko_reset'
-          else s.ko_probability.sum())
-    assert s.ki_survive_knocked_in_probability == pytest.approx(inc['ki'], abs=2e-10)
+    ko = float(s.observations.probability.sum())
+    assert s.ki_settlement.probability == pytest.approx(inc['ki'], abs=2e-10)
+    assert s.maturity.probability == pytest.approx(inc['no_ki'], abs=2e-10)
     assert ko == pytest.approx(inc['ko'], abs=2e-10)
     assert sum(inc.values()) == pytest.approx(1., abs=2e-10)
     assert e._last_native_adi_diagnostics['variance_transport'] == 'cubic_characteristic'

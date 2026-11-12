@@ -38,7 +38,6 @@ from quantark.util.numerical import is_close
 from . import adjoint
 from . import event_statistics as es
 from .columns import ColumnLayout
-from .readout import assemble_autocallable
 from .snowball import SnowballBreach, SnowballStatistics
 
 __all__ = ["PhoenixStatistics", "PhoenixBreach"]
@@ -546,32 +545,6 @@ class PhoenixStatistics(SnowballStatistics):
             if df0 > 0.0:
                 coupon_probability[k] = float(trigger[k] / df0)
         return coupon_probability
-
-    def read(self, states, captures, pv):
-        """The legacy dataclass (the native ADI route until it migrates, unified event statistics T14)."""
-        solver, product, env, L = self.solver, self.product, self.env, self.layout
-        at, ed_unit, cash, trigger, buckets, _ = self._spot_columns(states, captures)
-        coupon_probability = self._coupon_probability(trigger)
-        recs = self.ko_records
-        det = [float(r.observation_time) for r in recs]
-        pay = [float(r.settlement_time if r.settlement_time is not None else r.observation_time) for r in recs]
-        det_dates, pay_dates = [r.observation_date for r in recs], [r.settlement_date for r in recs]
-        if L.expiry:
-            # the n + 1 payment buckets: each knock-out's settlement, then the terminal payment
-            terminal = resolve_terminal_timing(product, env)
-            coupon_rows = (det + [float(terminal.determination_time)], pay + [float(terminal.payment_time)],
-                           buckets, det_dates + [terminal.determination_date], pay_dates + [terminal.payment_date])
-        else:
-            coupon_rows = (det, pay, cash, det_dates, pay_dates)
-        if self.want_coupon:
-            extra = {"coupon_probability": coupon_probability, "expected_discounted_coupon_cashflow": cash}
-        else:       # the report is pruned; the ledger keeps the coupon rows (decision 3)
-            extra = {"coupon_probability": np.array([]), "expected_discounted_coupon_cashflow": np.array([])}
-        if L.expiry:
-            extra["coupon_payment_is_path_dependent"] = True
-        return assemble_autocallable(solver, product, env, pv=pv, ko_records=recs, ed_unit=ed_unit,
-                                     ki=self._ki_fields(at), extra_fields=extra,
-                                     maturity=at(L.maturity[0]) + at(L.maturity[1]), coupon_rows=coupon_rows)
 
     def read_statistics(self, states, captures, pv):
         """``EventStatistics`` of the march: the knock-out redemption on the observation table, the coupon paid at

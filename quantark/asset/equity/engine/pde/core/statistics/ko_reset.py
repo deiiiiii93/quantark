@@ -17,7 +17,6 @@ from dataclasses import replace
 
 import numpy as np
 
-from quantark.asset.equity.engine.event_stats import payment_aware_cashflow_fields
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_close
@@ -254,85 +253,3 @@ class KOResetStatistics(SnowballStatistics):
                            ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table,
                            expected_lifetime=lifetime, provenance=self.solver._native_provenance(),
                            unavailable=unavailable)
-
-    def read(self, states, captures, pv):
-        """The legacy dataclass (the native ADI route until it migrates, unified event statistics T14)."""
-        solver, product, env, L, prepared = self.solver, self.product, self.env, self.layout, self.prepared
-        grid = states["stats_v1"] if self.knocked_in_at_valuation else states["stats_v0"]
-
-        def at(col):
-            return float(prepared.readout.price(grid[:, col], env.spot, prepared.layout))
-
-        def schedule(records, cols):
-            times = np.array([float(r.observation_time) for r in records], dtype=float)
-            pay = np.array([float(r.settlement_time if r.settlement_time is not None else r.observation_time)
-                            for r in records], dtype=float)
-            unit = np.array([at(c) for c in cols], dtype=float)
-            payoff = np.array([float(r.payoff) if r.payoff is not None else 0.0 for r in records], dtype=float)
-            df0 = np.array([env.get_discount_factor(t) for t in pay], dtype=float)
-            prob = np.where(df0 > 0.0, unit / np.where(df0 > 0.0, df0, 1.0), 0.0)
-            return times, pay, prob, unit * payoff
-
-        pre_t, pre_pay, pre_prob, pre_cash = schedule(self.ko_records, L.ko)
-        post_t, post_pay, post_prob, post_cash = schedule(self.post_records, L.post_ko)
-        m_pre, m_post = at(L.maturity[0]), at(L.maturity[1])
-        terminal = resolve_terminal_timing(product, env)
-        delay = float(terminal.payment_time) - float(terminal.determination_time)
-        pre_maturity, post_maturity = float(product.get_pre_maturity_time(env)), float(self.tau)
-        df_pre, df_post = env.get_discount_factor(pre_maturity), env.get_discount_factor(post_maturity)
-        u_pre_prob = at(L.maturity_unit[0]) / df_pre if df_pre > 0.0 else 0.0
-        u_post_prob = at(L.maturity_unit[1]) / df_post if df_post > 0.0 else 0.0
-
-        # the pre maturity's dates: its last record's; its payment date only when no delay separates them
-        last_pre = self.ko_records[-1] if self.ko_records else None
-        pre_det_date = (last_pre.observation_date
-                        if last_pre is not None and is_close(float(last_pre.observation_time), pre_maturity)
-                        else None)
-        pre_pay_date = pre_det_date if is_close(delay, 0.0) else None
-        ledger = payment_aware_cashflow_fields(
-            env,
-            determination_times=[*pre_t, *post_t, pre_maturity, post_maturity],
-            payment_times=[*pre_pay, *post_pay, pre_maturity + delay, post_maturity + delay],
-            expected_discounted_cashflows=[*pre_cash, *post_cash, m_pre, m_post],
-            determination_dates=[*(r.observation_date for r in self.ko_records),
-                                 *(r.observation_date for r in self.post_records),
-                                 pre_det_date, terminal.determination_date],
-            payment_dates=[*(r.settlement_date for r in self.ko_records),
-                           *(r.settlement_date for r in self.post_records),
-                           pre_pay_date, terminal.payment_date],
-        )
-        ki_probability, ki_ever, ki_times, ki_event, ki_survival = self._ki_fields(at)
-        maturity = m_pre + m_post
-        return solver._make_event_stats(
-            pv=float(pv),
-            ko_times=pre_t,
-            ko_probability=pre_prob,
-            survival_probability=np.maximum(0.0, 1.0 - np.cumsum(pre_prob)),
-            expected_discounted_ko_cashflow=pre_cash,
-            ki_probability=ki_probability,
-            expected_discounted_maturity_cashflow=maturity,
-            reconciliation_error=float(pv - float(np.sum(pre_cash)) - float(np.sum(post_cash)) - m_pre - m_post),
-            ki_times=ki_times,
-            ki_event_probability=ki_event,
-            ki_survival_probability=ki_survival,
-            ki_ever_probability=ki_ever,
-            ki_survive_knocked_in_probability=ki_probability,
-            pre_ko_times=pre_t,
-            pre_ko_probability=pre_prob,
-            post_ko_times=post_t,
-            post_ko_probability=post_prob,
-            pre_ko_probability_total=float(np.sum(pre_prob)),
-            post_ko_probability_total=float(np.sum(post_prob)),
-            expected_discounted_post_ko_cashflow=float(np.sum(post_cash)),
-            pre_ko_payment_times=pre_pay,
-            post_ko_payment_times=post_pay,
-            expected_discounted_pre_maturity_cashflow=m_pre,
-            expected_discounted_post_maturity_cashflow=m_post,
-            pre_maturity_probability=float(u_pre_prob),
-            post_maturity_probability=float(u_post_prob),
-            pre_maturity_time=pre_maturity,
-            post_maturity_time=post_maturity,
-            pre_maturity_payment_time=pre_maturity + delay,
-            post_maturity_payment_time=post_maturity + delay,
-            **ledger,
-        )

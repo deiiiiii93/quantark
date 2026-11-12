@@ -35,6 +35,8 @@ class LocalVolKOResetSnowballPDESolver(LocalVolSurfaceMixin, LocalVolBarrierCros
 
 class _KOResetADI:
     _supported_product_type = KnockOutResetSnowballOption
+    #: ``price()`` reads the native march's column readout (``native_adi``'s pv), not the value surface
+    _native_pv_from_surface = False
 
     def _event_stats_product_type(self):
         return KnockOutResetSnowballOption

@@ -419,7 +419,7 @@ def test_memory_phoenix_folding_matches_native_probabilities():
     base = e.price(product, env)
     stats = e.calculate_event_stats(product, env)
     rise = e.price_folded(product, env, _hand_overlay(product, env, ko=1.0)) - base
-    assert rise == pytest.approx(stats.ko_probability.sum(), abs=2e-10)
+    assert rise == pytest.approx(stats.observations.probability.sum(), abs=2e-10)
 
 
 @pytest.mark.parametrize("state", ["ko-decided-at-valuation", "expired"])

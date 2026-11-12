@@ -10,8 +10,8 @@ Every cash operation the value applies is linear and is applied here column for 
 cash split by the column that pays it, so ``value = Σ_k payoff_k·KO_k + M0 + M1`` node for node; the
 readout reports that sum's residual against the pv as ``reconciliation_error``.
 
-``read_statistics`` returns ``EventStatistics`` (the PDE 1D facades). ``read`` keeps the legacy dataclass for
-the native ADI route, which migrates in its own task (unified event statistics T14).
+``read_statistics`` returns ``EventStatistics`` (the PDE 1D facades and the native ADI march, unified event
+statistics T12-T14).
 """
 from __future__ import annotations
 
@@ -28,18 +28,9 @@ from . import adjoint
 from . import event_statistics as es
 from .columns import ColumnLayout
 from .group import RollingStatistics
-from .readout import assemble_autocallable
 from .rows import knocks_in, knocks_out
 
 __all__ = ["SnowballStatistics", "SnowballBreach"]
-
-
-def _want(streams):
-    """(want_ki, want_coupon_report) from a stream selection (spec 3B §5.1 "streams"): the legacy readout's."""
-    if streams is None:
-        return True, True
-    from quantark.cashleg.event_distribution import EventType
-    return bool(streams & {EventType.KI, EventType.MATURITY_WITH_KI}), EventType.COUPON in streams
 
 
 class SnowballBreach:
@@ -69,6 +60,9 @@ class SnowballStatistics(RollingStatistics):
 
     #: ``EventStatistics.product_family``
     family = "snowball"
+    #: the forward adjoint pass of a march run by another engine family's loop (the native ADI march sets its own,
+    #: ``pde/vol_model_adjoint.py``); ``None``: the PDE 1D pass (``adjoint.forward_pass``)
+    forward_runner = None
 
     @classmethod
     def create(cls, prepared, streams):
@@ -83,7 +77,6 @@ class SnowballStatistics(RollingStatistics):
         self.x, self.s, self.t = sp.x, sp.s, prepared.layout.time.t
         if (len(self.x) - 2) <= 2:
             raise ValidationError("Event stats PDE currently requires banded solver path.")
-        self.want_ki, self.want_coupon = _want(streams)          # the legacy readout's (native ADI)
         self.want_ki_path = es.want_knock_in_path(streams)
         self.want_coupon_probability = es.want_coupon_probability(streams)
         self.ko_records = self.solver._filter_observations_by_tau(
@@ -310,34 +303,6 @@ class SnowballStatistics(RollingStatistics):
             return float(prepared.readout.price(grid[:, col], env.spot, prepared.layout))
 
         return at
-
-    def read(self, states, captures, pv):
-        """The legacy dataclass (the native ADI route until it migrates, unified event statistics T14)."""
-        L = self.layout
-        at = self._reader(states, captures)
-        ed_unit = np.array([at(c) for c in L.ko])
-        ki = self._ki_fields(at)
-        return assemble_autocallable(self.solver, self.product, self.env, pv=pv, ko_records=self.ko_records,
-                                     ed_unit=ed_unit, ki=ki, extra_fields={},
-                                     maturity=at(L.maturity[0]) + at(L.maturity[1]))
-
-    def _ki_fields(self, at):
-        """The legacy readout's ``(ki_probability, ki_ever, ki_times, ki_event_probability, ki_survival_probability)``.
-
-        A lifecycle knock-in (spec 3B stage 2 (d)) is ``ki_ever`` 1 at time 0, and the marched settlement
-        unit of the knocked-in surface is what settles knocked in; with the knock-in streams pruned it is
-        reported 0, as every pruned knock-in field is. The native ADI route replaces ``ki_ever`` with its own
-        monitor; nothing else reads it."""
-        ki_unit = self.layout.ki_unit
-        if self.already_knocked_in:
-            df_T = self.env.get_discount_factor(float(self.tau))
-            kis = float(at(ki_unit) / df_T) if (self.want_ki and df_T > 0.0) else 0.0
-            return (kis, 1.0, np.array([0.0]), np.array([1.0]), np.array([0.0]))
-        if not self.want_ki:
-            return (0.0, 0.0, np.array([]), np.array([]), np.array([]))
-        df_T = self.env.get_discount_factor(float(self.tau))
-        return (float(at(ki_unit) / df_T) if df_T > 0.0 else 0.0, 0.0,
-                np.array([]), np.array([]), np.array([]))
 
     # --- the EventStatistics readout (unified event statistics T12) -------------------------------
 
