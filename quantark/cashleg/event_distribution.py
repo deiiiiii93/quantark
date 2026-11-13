@@ -54,6 +54,17 @@ _REBASED_SOURCES = {
 }
 
 
+def knock_in_was_carried(product, lifecycle_state=None) -> bool:
+    """Whether ``product`` was already knocked in at the valuation (the carried state the engines read): the OTC
+    lifecycle flag of the autocallables (``_otc_lifecycle_knocked_in``), a DCN's ``knocked_in_at_valuation``, or a
+    lifecycle state's ``knocked_in``. Feeds ``EventDistribution.from_statistics(..., knock_in_carried=...)``."""
+    return bool(
+        getattr(product, "_otc_lifecycle_knocked_in", False)
+        or getattr(product, "knocked_in_at_valuation", False)
+        or getattr(lifecycle_state, "knocked_in", False)
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class EventDistribution:
     """Probability distribution over termination and auxiliary payment events, one time axis per stream.
@@ -80,6 +91,10 @@ class EventDistribution:
         terminated: the note ended before the valuation (receivables only, spec §4.9c): no event is left, every
             reader of events refuses (a leg riding an ended note settles with it; its value is not derivable
             from events).
+        knock_in_carried: the note was already knocked in at the valuation. The knock-in is a past event (DESIGN
+            §4.9c): the KI stream is empty -- nothing of the remaining life triggers a knock-in leg; cash a past
+            knock-in decided is paid, or a receivable where the producer emits one. The statistics keep DESIGN
+            §4.5's carried row (t = 0, P = 1) for readers.
     """
 
     probabilities: Dict[EventType, Union[np.ndarray, float]]
@@ -98,6 +113,7 @@ class EventDistribution:
     rebased: bool = False
     flagged_streams: Dict[EventType, str] = field(default_factory=dict)
     terminated: bool = False
+    knock_in_carried: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "survival_times", np.asarray(self.survival_times, dtype=float))
@@ -157,6 +173,7 @@ class EventDistribution:
         object.__setattr__(self, "path_dependent_payment_events", frozenset(self.path_dependent_payment_events))
         object.__setattr__(self, "flagged_streams", dict(self.flagged_streams))
         object.__setattr__(self, "terminated", bool(self.terminated))
+        object.__setattr__(self, "knock_in_carried", bool(self.knock_in_carried))
         self._validate_invariants()
 
     # --- construction ---------------------------------------------------------------------------------
@@ -188,8 +205,12 @@ class EventDistribution:
                    provenance=provenance, probability_residual=0.0, terminated=True)
 
     @classmethod
-    def from_statistics(cls, stats) -> "EventDistribution":
+    def from_statistics(cls, stats, *, knock_in_carried: bool = False) -> "EventDistribution":
         """The distribution of an :class:`EventStatistics` (DESIGN §4.11; spec D13, D16).
+
+        ``knock_in_carried``: the note was already knocked in at the valuation (``knock_in_was_carried``). Its
+        statistics hold DESIGN §4.5's single carried KI row (t = 0, P = 1); the knock-in is past (DESIGN §4.9c), so
+        the KI stream is empty (a pruned table stays no stream) and the distribution is marked ``knock_in_carried``.
 
         * KO: every observation row (coupon-only rows carry KO probability 0), paid at its payment time.
         * COUPON: the coupon table's probabilities on the same grid; path-dependent payment where flagged.
@@ -209,8 +230,10 @@ class EventDistribution:
         """
         if stats.terminated:
             return cls.ended(provenance=stats.provenance)
+        if knock_in_carried:
+            cls._require_carried_row(stats)
         if stats.termination is not None:
-            return cls._from_rebased(stats)
+            return cls._from_rebased(stats, knock_in_carried=knock_in_carried)
         obs = stats.observations
         probabilities: Dict[EventType, Union[np.ndarray, float]] = {EventType.KO: obs.probability}
         stream_times: Dict[EventType, np.ndarray] = {EventType.KO: obs.times}
@@ -241,7 +264,8 @@ class EventDistribution:
                 if coupons.payment_dates is not None:
                     payment_dates[EventType.COUPON] = coupons.payment_dates
 
-        cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates)
+        cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates,
+                           knock_in_carried=knock_in_carried)
         cls._add_outcome(EventType.MATURITY_NO_KO, stats.maturity, stats.maturity.probability + stats.probability_residual,
                          probabilities, payment_times, payment_dates)
         cls._add_outcome(EventType.MATURITY_WITH_KI, stats.ki_settlement, stats.ki_settlement.probability,
@@ -261,6 +285,7 @@ class EventDistribution:
             provenance=stats.provenance,
             probability_residual=stats.probability_residual,
             flagged_streams=cls._flags(stats, probabilities, _STREAM_SOURCES),
+            knock_in_carried=knock_in_carried,
         )
 
     @staticmethod
@@ -274,8 +299,24 @@ class EventDistribution:
                     flags[event_type] = reason
         return flags
 
+    @staticmethod
+    def _require_carried_row(stats) -> None:
+        """A carried knock-in's statistics hold DESIGN §4.5's single row (t = 0, P = 1); no table (pruned) or an empty
+        one (a note without a KI barrier, whose carried flag means nothing) carries nothing either way."""
+        table = stats.ki_table
+        if table is None or np.asarray(table.times).size == 0:
+            return
+        times = np.asarray(table.times, dtype=float)
+        probability = np.asarray(table.probability, dtype=float)
+        if times.size != 1 or not is_zero(float(times[0])) or not almost_equal(
+                float(probability[0]), 1.0, tol=Tolerance.PROBABILITY):
+            raise ValidationError(
+                "a carried knock-in's KI table is the single row at t = 0 with probability 1 (DESIGN §4.5); got "
+                f"times {times.tolist()}, probabilities {probability.tolist()}"
+            )
+
     @classmethod
-    def _from_rebased(cls, stats) -> "EventDistribution":
+    def _from_rebased(cls, stats, *, knock_in_carried: bool = False) -> "EventDistribution":
         term = stats.termination
         events = np.asarray(term.event, dtype=object)
 
@@ -310,7 +351,8 @@ class EventDistribution:
         payment_times[EventType.MATURITY_NO_KO] = float(term.payment_times[idx[0]])
         if pay_dates is not None:
             payment_dates[EventType.MATURITY_NO_KO] = pay_dates[0]
-        cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates)
+        cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates,
+                           knock_in_carried=knock_in_carried)
         survival_times, survival = cls._survival_axis(term.survival_times, term.survival, maturity_time)
         return cls(
             probabilities=probabilities,
@@ -325,12 +367,25 @@ class EventDistribution:
             probability_residual=stats.probability_residual,
             rebased=True,
             flagged_streams=cls._flags(stats, probabilities, _REBASED_SOURCES),
+            knock_in_carried=knock_in_carried,
         )
 
     @staticmethod
-    def _add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates) -> None:
+    def _add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates, *,
+                       knock_in_carried: bool = False) -> None:
         table = stats.ki_table
         if table is None:
+            return
+        if knock_in_carried:
+            # the knock-in happened before the valuation: no knock-in event is left in the remaining life
+            empty = np.zeros(0, dtype=float)
+            probabilities[EventType.KI] = empty
+            stream_times[EventType.KI] = empty
+            payment_times[EventType.KI] = empty
+            if table.dates is not None:
+                stream_dates[EventType.KI] = ()
+            if table.payment_dates is not None:
+                payment_dates[EventType.KI] = ()
             return
         probabilities[EventType.KI] = table.probability
         stream_times[EventType.KI] = table.times
@@ -461,6 +516,7 @@ class EventDistribution:
             probability_residual=self.probability_residual,
             rebased=self.rebased,
             flagged_streams=self.flagged_streams,
+            knock_in_carried=self.knock_in_carried,
         )
 
     # --- invariants -------------------------------------------------------------------------------------

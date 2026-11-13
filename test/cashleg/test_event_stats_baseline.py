@@ -75,10 +75,14 @@ D9_CAUSES: Dict[str, str] = {
 @dataclass(frozen=True)
 class MovedBy:
     """A record that moves on purpose: ``cause`` is a ``D9_CAUSES`` key; ``check(live, banked, record)``
-    asserts the live outcome against that cause (it must fail if the move has any other source)."""
+    asserts the live outcome against that cause (it must fail if the move has any other source).
+
+    ``within_tolerance``: the move is pinned by its check but smaller than the bank tolerance (the record would also
+    reproduce), so the AC19 census does not require it to break reproduction; every other listed record must."""
 
     cause: str
     check: Callable[[dict, dict, dict], None]
+    within_tolerance: bool = False
 
 
 def _bank():
@@ -104,12 +108,16 @@ def _leg(record: dict):
     return next(spec.leg for spec in _case(record["case"]).legs() if spec.name == record["leg"])
 
 
-def _carried_knock_in_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
-    """Cause (e), pinned to the definition. At base the distribution dropped the KI stream of a note already
-    knocked in (one row against the KO grid), so the AT_KI leg raised. The carried knock-in is the KI table's
-    single row at t = 0 with probability 1 (DESIGN §4.5), on its own axis, paid at the KI time (D8): the stream
-    must be exactly [(0, 1)], unflagged, and the leg exactly ``amount · DF(offset)``. Any other probabilities
-    fail (a KI-ever table is never carried; those records reproduce their banked raise)."""
+def _carried_knock_in_is_past(live: dict, banked: dict, record: dict) -> None:
+    """Cause (e), "stop raising", pinned to the definition. At base the distribution dropped the KI stream of a note
+    already knocked in (one row against the KO grid), so the AT_KI leg raised. The knock-in is a past event (T23
+    ruling R1, DESIGN §4.9c): cash it decided is paid or a receivable, never a flow of the remaining life. Pinned
+    without the conversion under test:
+
+    * the product carries the knock-in (``_otc_lifecycle_knocked_in``, the flag the engines read);
+    * the statistics keep DESIGN §4.5's carried row: KI table exactly [(0, 1)], P(knock in) = 1, unflagged;
+    * the distribution holds the KI stream on its own axis, empty, marked ``knock_in_carried``, and the leg is
+      exactly 0 (a stand-in ``amount · DF(offset)`` -- the knock-in counted as a future event -- fails it)."""
     from quantark.cashleg import EventType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
@@ -117,15 +125,19 @@ def _carried_knock_in_on_its_own_axis(live: dict, banked: dict, record: dict) ->
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     assert "value" in live, f"{record['id']}: still raises {live}"
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    assert getattr(product, "_otc_lifecycle_knocked_in", False) is True
+    stats = engine.calculate_event_stats(product, env)
+    np.testing.assert_array_equal(np.asarray(stats.ki_table.times, dtype=float), [0.0])
+    np.testing.assert_array_equal(np.asarray(stats.ki_table.probability, dtype=float), [1.0])
+    assert stats.knock_in.probability == 1.0 and stats.flag("ki_table") is None
     dist, env = _live_distribution(record)
-    np.testing.assert_array_equal(np.asarray(dist.stream_times[EventType.KI], dtype=float), [0.0])
-    np.testing.assert_array_equal(np.asarray(dist.probabilities[EventType.KI], dtype=float), [1.0])
-    np.testing.assert_array_equal(np.asarray(dist.payment_times_for(EventType.KI), dtype=float), [0.0])   # D8
+    assert dist.knock_in_carried
+    assert np.asarray(dist.stream_times[EventType.KI]).size == 0
+    assert np.asarray(dist.probabilities[EventType.KI]).size == 0
     assert EventType.KI not in dist.flagged_streams, dist.flagged_streams
-    leg = _leg(record)
-    expected = float(leg.amount) * env.get_discount_factor(float(leg.payment_offset_days) / 365.0)
-    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
-        f"{record['id']}: live {live['value']!r} != amount · DF(offset) {expected!r}")
+    assert float(live["value"]) == 0.0, f"{record['id']}: live {live['value']!r} != 0 (the knock-in is past)"
 
 
 def _maturity_moves_by_the_residual(live: dict, banked: dict, record: dict) -> None:
@@ -179,6 +191,9 @@ _RESIDUAL_MOVES = tuple(
     for leg in ("fixed_at_maturity_no_ko", "fixed_at_maturity_any", "autocallable_margin_nmp_both",
                 "autocallable_backend_premium_no_ko")
 )
+#: T23 census: the two residual moves beyond the bank tolerance (measured); the other ten are pinned within it
+_RESIDUAL_MOVES_BEYOND_TOLERANCE = ("pde_ko_reset__ko_reset_absolute_cki__fixed_at_maturity_no_ko__event",
+                                    "pde_ko_reset__ko_reset_absolute_cki__fixed_at_maturity_any__event")
 
 # --- moves (T9: MC Snowball / KO-reset produce EventStatistics) ------------------------------------------
 #
@@ -1100,8 +1115,9 @@ _T17_KO_RESET_MATURITY = tuple(
 
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
-    **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
-    **{rid: MovedBy("d", _maturity_moves_by_the_residual) for rid in _RESIDUAL_MOVES},
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_is_past) for case in _KI_AXIS_MOVES},
+    **{rid: MovedBy("d", _maturity_moves_by_the_residual, within_tolerance=rid not in _RESIDUAL_MOVES_BEYOND_TOLERANCE)
+       for rid in _RESIDUAL_MOVES},
     # T9: MC Snowball / KO-reset statistics
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T9_KI_AXIS},
     **{f"{case}__fixed_at_ki__event": MovedBy("a", _knock_in_after_ko_removed) for case in _T9_KI_AFTER_KO},
@@ -1132,7 +1148,7 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{rid: MovedBy("h", _dcn_terminated_state_has_no_event) for rid in _T15_TERMINATED},
     # T16: QUAD V2 statistics (the forward adjoint of its recursion; terminated lifecycle states, AC17)
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T16_KI_AXIS},
-    **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _T16_CARRIED},
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_is_past) for case in _T16_CARRIED},
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knocked_out_at_valuation_has_no_knock_in_row)
        for case in _T16_KO_AT_VALUATION},
     **{rid: MovedBy("h", _v2_terminated_state_has_no_event) for rid in _T16_TERMINATED},
@@ -1327,6 +1343,20 @@ def test_record_reproduces_or_moves_by_its_cause(record_id):
     live = live_outcome(record)
     move = EXPECTED_MOVES.get(record_id)
     if move is not None:
+        # AC19 census: a listed record really moved (it no longer reproduces its banked outcome), so the moved set
+        # is exactly EXPECTED_MOVES -- a stale entry whose check passed on an unmoved record fails here
+        if not move.within_tolerance:
+            with pytest.raises(AssertionError):
+                assert_reproduced(live, record["outcome"], record)
         move.check(live, record["outcome"], record)
         return
     assert_reproduced(live, record["outcome"], record)
+
+
+def test_rebanks_absorbed_no_move_without_a_cause_check():
+    """AC19: a re-bank (``generate.py --rebank``) that absorbed a moved record in place would leave the move with no
+    cause check (the guard checks only price / event_npv). Every record a re-bank lists as moved must therefore be
+    pinned by an ``EXPECTED_MOVES`` check against the old outcome; the only re-bank (T3, cause f) moved none."""
+    assert BANKED is not None, "baseline.json is not banked"
+    absorbed = [move["id"] for rebank in BANKED["header"].get("rebanks", []) for move in rebank.get("moved", [])]
+    assert absorbed == [], f"re-banked moves with no cause check: {absorbed}"

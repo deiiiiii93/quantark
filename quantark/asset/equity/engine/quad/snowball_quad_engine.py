@@ -801,7 +801,7 @@ class SnowballQuadEngine(BaseEngine):
         """Base behaviour with ``streams`` forwarded to the event-stats pass
         [§11.1] — the base implementation drops it, which forfeits the QUAD
         pruning above."""
-        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult, knock_in_was_carried
         from quantark.asset.equity.engine.settlement_support import (
             validate_settlement_capability,
         )
@@ -813,7 +813,8 @@ class SnowballQuadEngine(BaseEngine):
             if stats is not None:
                 return PricingResult(
                     npv=float(stats.pv),
-                    event_distribution=EventDistribution.from_statistics(stats),
+                    event_distribution=EventDistribution.from_statistics(
+                        stats, knock_in_carried=knock_in_was_carried(product, lifecycle_state)),
                 )
 
         if lifecycle_state is None:

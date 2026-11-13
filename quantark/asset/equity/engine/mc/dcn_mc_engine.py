@@ -486,7 +486,7 @@ class DCNMCEngine(BaseEngine):
         matured lifecycle state has no event left (``EventDistribution.ended``: an event-dependent leg refuses it,
         spec AC17). ``emit_distribution=False`` gets the maturity-only distribution without recording statistics.
         """
-        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult, knock_in_was_carried
 
         result = self._price_run(
             product, pricing_env, lifecycle_state=lifecycle_state, statistics=bool(emit_distribution)
@@ -494,7 +494,8 @@ class DCNMCEngine(BaseEngine):
         if not emit_distribution:
             dist = EventDistribution.trivial(max(float(product.get_maturity(pricing_env)), 0.0))
         elif result.event_stats is not None:
-            dist = EventDistribution.from_statistics(result.event_stats)
+            dist = EventDistribution.from_statistics(
+                result.event_stats, knock_in_carried=knock_in_was_carried(product, lifecycle_state))
         else:
             # a terminated, fully settled note: no statistics (AC17) and no event
             dist = EventDistribution.ended()

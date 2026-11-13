@@ -618,7 +618,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         """NPV (``price()``) and the event distribution (``EventDistribution.from_statistics``); a terminated
         lifecycle state has no event left (``EventDistribution.ended``, spec AC17). ``emit_distribution=False``
         gets the maturity-only distribution without statistics."""
-        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult, knock_in_was_carried
 
         if emit_distribution:
             stats = self.calculate_event_stats(
@@ -633,7 +633,8 @@ class AutocallableQuadEngineV2(BaseEngine):
                     npv=self.price(product, pricing_env, lifecycle_state=lifecycle_state, event_phase=event_phase),
                     event_distribution=EventDistribution.ended(provenance=self._provenance()),
                 )
-            return PricingResult(npv=stats.pv, event_distribution=EventDistribution.from_statistics(stats))
+            return PricingResult(npv=stats.pv, event_distribution=EventDistribution.from_statistics(
+                stats, knock_in_carried=knock_in_was_carried(product, lifecycle_state)))
         return PricingResult(
             npv=self.price(
                 product,

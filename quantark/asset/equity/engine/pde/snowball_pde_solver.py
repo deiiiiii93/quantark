@@ -696,7 +696,7 @@ class SnowballPDESolver(BasePDESolver):
         are not a PDE group (KO-reset) runs the value march, then its own
         ``calculate_event_stats`` with the npv supplied.
         """
-        from quantark.cashleg.event_distribution import EventDistribution
+        from quantark.cashleg.event_distribution import EventDistribution, knock_in_was_carried
 
         in_march = want_events and self.adapter.supports_statistics_group
         value = self._run(product, pricing_env,
@@ -707,7 +707,8 @@ class SnowballPDESolver(BasePDESolver):
             stats = self.calculate_event_stats(
                 product, pricing_env, npv=float(npv), streams=streams
             )
-        dist = None if stats is None else EventDistribution.from_statistics(stats)
+        dist = None if stats is None else EventDistribution.from_statistics(
+            stats, knock_in_carried=knock_in_was_carried(product))
         return PDESessionOutputs(
             npv=float(npv),
             solution=solution if want_grid else None,

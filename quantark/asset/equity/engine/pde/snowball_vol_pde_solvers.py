@@ -609,7 +609,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         distribution to maturity 0.0 (matching 1D semantics) where the old
         2D override passed the negative tau through.
         """
-        from quantark.cashleg.event_distribution import EventDistribution
+        from quantark.cashleg.event_distribution import EventDistribution, knock_in_was_carried
 
         from quantark.asset.equity.engine.pde.base_pde_solver import (
             PDESessionOutputs,
@@ -619,7 +619,8 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             stats = self.calculate_event_stats(product, pricing_env, streams=streams)
             if stats is not None:
                 return PDESessionOutputs(npv=float(stats.pv), solution=None,
-                    event_stats=stats, event_distribution=EventDistribution.from_statistics(stats))
+                    event_stats=stats, event_distribution=EventDistribution.from_statistics(
+                        stats, knock_in_carried=knock_in_was_carried(product)))
 
         npv = float(self.price(product, pricing_env))
         stats = None
@@ -629,7 +630,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
                 product, pricing_env, npv=npv, streams=streams
             )
             if stats is not None:
-                dist = EventDistribution.from_statistics(stats)
+                dist = EventDistribution.from_statistics(stats, knock_in_carried=knock_in_was_carried(product))
         return PDESessionOutputs(
             npv=npv, solution=None, event_stats=stats, event_distribution=dist
         )

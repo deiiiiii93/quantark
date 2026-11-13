@@ -222,7 +222,7 @@ class HestonDCNPDESolver(BaseEngine):
         or matured lifecycle state has no event left (``EventDistribution.ended``, AC17)."""
         from quantark.asset.equity.engine.pde.dcn_statistics import dcn_adi_statistics
         from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
-        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult, knock_in_was_carried
 
         validate_settlement_capability(self, product, lifecycle_state)
         if not emit_distribution:
@@ -230,7 +230,8 @@ class HestonDCNPDESolver(BaseEngine):
             return PricingResult(npv=npv, event_distribution=EventDistribution.trivial(
                 max(float(product.get_maturity(pricing_env)), 0.0)))
         pv, stats = dcn_adi_statistics(self, product, pricing_env, lifecycle_state=lifecycle_state)
-        dist = EventDistribution.ended() if stats is None else EventDistribution.from_statistics(stats)
+        dist = EventDistribution.ended() if stats is None else EventDistribution.from_statistics(
+            stats, knock_in_carried=knock_in_was_carried(product, lifecycle_state))
         return PricingResult(npv=pv, event_distribution=dist)
 
     def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:

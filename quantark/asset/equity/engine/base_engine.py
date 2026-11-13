@@ -213,7 +213,7 @@ class BaseEngine(ABC):
         engines ignore it and return the full distribution.
         """
         from quantark.asset.equity.engine.event_stats import checked_event_statistics
-        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult, knock_in_was_carried
         from quantark.asset.equity.engine.settlement_support import (
             validate_settlement_capability,
         )
@@ -226,7 +226,8 @@ class BaseEngine(ABC):
                 stats = checked_event_statistics(produced)
                 return PricingResult(
                     npv=float(stats.pv),
-                    event_distribution=EventDistribution.from_statistics(stats),
+                    event_distribution=EventDistribution.from_statistics(
+                        stats, knock_in_carried=knock_in_was_carried(product, lifecycle_state)),
                 )
 
         if lifecycle_state is None:

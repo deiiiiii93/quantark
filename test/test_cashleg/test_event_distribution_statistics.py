@@ -166,6 +166,43 @@ def test_an_empty_ki_table_is_an_empty_ki_stream_and_an_unavailable_one_is_no_st
         leg.value(pruned, _env(), 0.0)
 
 
+def _knocked_in(*, ki_table="carried") -> EventStatistics:
+    """A note already knocked in: DESIGN §4.5's single carried row (t = 0, P = 1) in the statistics."""
+    table = _ki_table([0.0], [1.0]) if ki_table == "carried" else ki_table
+    unavailable = {"ki_table": "not requested"} if table is None else None
+    return _stats(observations=_observations(KO_TIMES, KO_P), maturity=_row(1.0, 0.0),
+                  ki_settlement=_row(1.0, 0.5), ki_table=table, unavailable=unavailable, knock_in_probability=1.0)
+
+
+def test_a_carried_knock_in_is_past_so_the_ki_stream_is_empty():
+    """T23 ruling R1 (DESIGN §4.9c): a knock-in in force at the valuation happened before it; cash it decided is
+    paid or a receivable, never an event of the remaining life. The statistics keep §4.5's carried row, the
+    distribution holds no knock-in event, and the AT_KI leg takes nothing from it."""
+    stats = _knocked_in()
+    dist = EventDistribution.from_statistics(stats, knock_in_carried=True)
+    assert dist.knock_in_carried
+    assert dist.stream_times[EventType.KI].size == 0 and dist.probabilities[EventType.KI].size == 0
+    leg = FixedPayoffLeg(direction=LegDirection.BUYER_RECEIVES, amount=6_000.0, trigger=PaymentTrigger.AT_KI,
+                         payment_offset_days=2)
+    assert leg.value(dist, _env(), 0.0) == 0.0
+    # every other stream is the uncarried conversion's
+    plain = EventDistribution.from_statistics(stats)
+    assert not plain.knock_in_carried
+    np.testing.assert_array_equal(plain.probabilities[EventType.KI], [1.0])
+    for event_type in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):
+        np.testing.assert_array_equal(dist.probabilities[event_type], plain.probabilities[event_type])
+    np.testing.assert_array_equal(dist.survival_probability, plain.survival_probability)
+
+
+def test_a_carried_knock_in_needs_the_carried_row_and_a_pruned_table_stays_no_stream():
+    """A carried knock-in whose KI table is anything but the single row (0, 1) is inconsistent: refused, never
+    re-read. A pruned KI table is no KI stream, carried or not."""
+    with pytest.raises(ValidationError, match="carried knock-in"):
+        EventDistribution.from_statistics(_snowball(), knock_in_carried=True)
+    pruned = EventDistribution.from_statistics(_knocked_in(ki_table=None), knock_in_carried=True)
+    assert EventType.KI not in pruned.probabilities and pruned.knock_in_carried
+
+
 def test_ko_stream_and_scalar_outcomes():
     stats = _snowball()
     dist = EventDistribution.from_statistics(stats)
