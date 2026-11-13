@@ -4590,6 +4590,20 @@ def test_cluster_bootstrap_equals_a_replicate_loop_and_a_two_cluster_case_worked
     assert p2 == expected and abs(p2 - 0.25) < 0.02
 
 
+def test_cluster_bootstrap_counts_a_difference_of_rounding_noise_as_no_gain():
+    """A technique that never acts on the events equals the baseline to rounding (its rows are summed in another
+    order): every replicate is a tie, so p is 1, not the share of replicates on which the noise happens to be positive."""
+    from gpin.measures import cluster_bootstrap
+
+    rng = np.random.default_rng(3)
+    base = {f"e{i}": float(v) for i, v in enumerate(rng.normal(0.0, 50.0, 40))}
+    weeks = {e: f"2025-W{30 + i % 13:02d}" for i, e in enumerate(base)}
+    noisy = {e: v * (1.0 + 1.0e-13 * (-1.0) ** i) for i, (e, v) in enumerate(base.items())}
+    assert noisy != base
+    assert cluster_bootstrap(noisy, base, weeks, n=500) == 1.0
+    assert cluster_bootstrap(base, noisy, weeks, n=500) == 1.0
+
+
 def test_cluster_bootstrap_fails_closed_on_unpaired_arms_or_a_missing_week():
     from gpin.measures import cluster_bootstrap
 
@@ -4688,8 +4702,9 @@ def test_event_windows_sum_exactly_the_d10_rows_for_a_survived_ko_a_fired_ko_and
     longer = _t6_run(_t6_rows(34), mode="next_open")
     assert event_windows(longer, [fired], T6_CAL, 10)[fired.id] == pytest.approx(
         _bp(sum(1000.0 * (i + 1) for i in range(23, 35))), rel=1e-12)
-    # the pre-registered 10 days are the default
+    # the pre-registered 10 days are the default, and so is the SSE calendar (no holiday falls in this window)
     assert event_windows(run, [survived], T6_CAL) == {survived.id: got[survived.id]}
+    assert event_windows(run, [survived]) == {survived.id: got[survived.id]}
 
 
 def test_event_windows_leave_out_the_day_0_row_count_missing_rows_as_zero_and_refuse_another_notes_event():
@@ -4884,11 +4899,13 @@ def test_verdict_fails_on_the_tail():
 
     base, weeks = _t6_arms()
     good_life = (_t6_life(10.0, 0.0), _t6_life(10.0, 0.0))
-    # ES10 higher (-130, -60, -50 against -100, -90, -80) but the worst event is lower
-    tech = {e: v + 30.0 for e, v in base.items()}
-    tech["e00"] = -130.0
+    # ES10 higher (-101, -30, -20 against -100, -90, -80) and p below 0.10 (the technique is only behind on resamples
+    # that draw week 30 three times or more, 7% of them), but the worst event is 1 bp lower: that alone fails the tail
+    tech = {e: v + 60.0 for e, v in base.items()}
+    tech["e00"] = -101.0
     v = verdict(tech, base, weeks, *good_life, _t6_rules())
-    assert v["es10"] == pytest.approx(-80.0) and (v["es_higher"], v["worst_not_lower"]) == (True, False)
+    assert v["es10"] == pytest.approx(-151.0 / 3.0) and (v["es_higher"], v["worst_not_lower"]) == (True, False)
+    assert 0.04 < v["p"] < 0.10 and (v["worst"], v["worst_base"]) == (-101.0, -100.0)
     assert (v["tail_pass"], v["life_pass"], v["win"]) == (False, True, False)
     # ES10 not higher: the same events
     same = verdict(dict(base), base, weeks, *good_life, _t6_rules())
@@ -5204,6 +5221,23 @@ def test_run_note_on_the_training_slice_stops_at_the_last_day_before_the_split(t
         with pytest.raises(ValidationError):
             run_note(states, [reg["base"]], boards, chains, note_events(_t6_sample(), nid), plan=_t6_plan(),
                      until=T6_UNTIL)
+
+
+def test_gap_observations_belong_to_the_slice_of_the_observation_date():
+    """An observation whose KO window opens before the split and which is dated after it is a test-slice observation:
+    a training file does not hold it (nor any other date after the last training day)."""
+    from gpin.measures import gap_observations
+
+    def rec(day, obs, gap, ko_dir=-1):
+        return {"date": day, "next_ko": obs, "gap_ko": gap, "ko_dir": ko_dir}
+
+    states = {"days": [rec("2025-06-02", "2025-06-17", None, None), rec("2025-06-03", "2025-06-17", 2.5e5),
+                       rec("2025-06-04", "2025-06-17", -1.0e5, -1), rec("2025-06-26", "2025-07-08", -3.0e4, 1),
+                       rec("2025-06-27", "2025-07-08", 5.0e4, 1), rec("2025-07-09", "2025-08-08", 0.0, 0)]}
+    first = {"obs": "2025-06-17", "date": "2025-06-03", "gap_ko_bp": 250.0, "ko_dir": -1}
+    assert gap_observations(states, T6_UNTIL) == [first]
+    assert gap_observations(states, None) == [first, {"obs": "2025-07-08", "date": "2025-06-26", "gap_ko_bp": -30.0, "ko_dir": 1},
+                                              {"obs": "2025-08-08", "date": "2025-07-09", "gap_ko_bp": 0.0, "ko_dir": 0}]
 
 
 def test_run_note_refuses_an_event_dated_after_the_notes_last_recorded_day(t6_market):
@@ -5863,6 +5897,30 @@ def test_a_partial_set_of_states_needs_the_flag_marks_the_selection_and_is_refus
     assert manifest["events_not_measurable"] == {"ki75:2025-06-02": 1}
 
 
+def test_the_train_slice_runs_only_the_notes_booked_before_the_split(stage4, t6_files, t6_market, tmp_path):
+    """A note booked in the test slice has no training-dated row: the training slice does not run it."""
+    ko_states, _, _, _ = t6_market
+    states = tmp_path / "states"
+    shutil.copytree(t6_files.states, states)
+    late = json.loads(json.dumps(ko_states))
+    late["days"] = [dict(r, next_ko=None, days_to_ko=None, gap_ko=None, ko_dir=None) for r in late["days"][21:31]]
+    late["inception"] = late["days"][0]["date"]
+    assert late["inception"] == "2025-07-01"
+    (states / "ki75__2025-07-01.json").write_text(json.dumps(late))
+    sample = _t6_sample()
+    sample["books"]["ki75"]["notes"]["2025-07-01"] = dict(sample["books"]["ki75"]["notes"]["2025-06-02"])
+    events = tmp_path / "events.json"
+    events.write_text(json.dumps(sample))
+    out = tmp_path / "out"
+    with _LedgerSpy() as spy:
+        assert stage4.main(_t6_argv(t6_files, "train", out, "--mode", "close", states=states, events=events)) == 0
+    manifest = json.loads((out / "runs" / "train" / "manifest.json").read_text())
+    assert manifest["notes"] == T6_NOTE_IDS and manifest["partial"] is False
+    assert not (out / "runs" / "train" / "ki75__2025-07-01.json").exists()
+    assert len(spy.calls) == 2 * 33 and max(c[3] for c in spy.calls) == "2025-06-30"
+    assert json.loads((out / "selection.json").read_text())["notes"] == T6_NOTE_IDS
+
+
 def test_the_driver_resolves_its_paths_and_never_sends_a_partial_run_to_the_tracked_results(stage4, tmp_path):
     from gpin import OUTPUT_DIR, RESULTS_DIR, STATES_DIR
 
@@ -5882,3 +5940,13 @@ def test_the_driver_resolves_its_paths_and_never_sends_a_partial_run_to_the_trac
     with pytest.raises(StudyDataError):
         stage4.resolve(stage4.parse_args(["--slice", "test", "--partial", "--out-dir", str(tmp_path),
                                           "--backtest", str(RESULTS_DIR / "backtest.json")]))
+
+
+def test_the_bootstrap_defaults_are_the_pre_registered_replicates_and_seed():
+    import inspect
+    from gpin.measures import cluster_bootstrap, default_rules
+
+    params = inspect.signature(cluster_bootstrap).parameters
+    stats = load_prereg()["statistics"]
+    assert (params["n"].default, params["seed"].default) == (stats["bootstrap_n"], stats["seed"]) == (10_000, 20261112)
+    assert (default_rules().bootstrap_n, default_rules().seed, default_rules().es_alpha) == (10_000, 20261112, 0.10)

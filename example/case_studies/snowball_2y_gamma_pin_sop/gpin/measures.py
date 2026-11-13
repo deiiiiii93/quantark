@@ -1,6 +1,20 @@
 """Measures, training selection and the verdict (spec C8, D10, D11). Seller view: every P&L is the seller's, in bp
 of notional, net of costs.
 
+On one ledger run (``gpin.ledger.Run``): ``event_windows`` (the D10 window P&L per event), ``gamma_carry`` (what is
+carried into a KO fixing), ``life_stats`` (the whole-life sufficient statistics) and ``summarise_run``, the stored form
+of a run. On event P&L: ``es``, ``cluster_bootstrap``, ``tail_test``, ``life_test`` / ``whole_life`` and ``verdict``.
+``select_on_train`` is the training rule of the registry. ``run_note`` runs every technique on one note and keeps the
+summaries (one file of the runs directory, written by ``04_ledger.py``); ``training_selection`` and ``tables`` aggregate
+such files into the selection and into everything the report prints, so the report can render from any subset of
+files without running the ledger. ``stamp`` / ``check_selection`` are the three hashes and the guard of the test slice.
+
+Conventions fixed here (each is in a test): a trading day is a day of the chain (the SSE calendar when none is
+given); the note's day-0 row is in no event window and not in the whole-life standard deviation, and is in the
+terminal P&L; the standard deviation is the sample one (ddof 1) of the concatenated daily rows; an event is left out
+of a clock's tables when a row of its window carries ``last_day_fixing``; an event or a KO observation belongs to the
+slice of its date.
+
 Ledger-side code: no engine, no market data of its own. Every threshold is read from the pre-registration.
 """
 
@@ -20,7 +34,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close, is_valid_number, is_zero, safe_divide, safe_sqrt
+from quantark.util.numerical import Tolerance, is_close, is_valid_number, is_zero, safe_divide, safe_sqrt
 
 from s2ts import MO_MULT, NOTIONAL
 from s2ts.chain import sse_trading_days
@@ -140,7 +154,9 @@ def cluster_bootstrap(tech_by_event: Mapping[str, float], base_by_event: Mapping
                       alpha: Optional[float] = None) -> float:
     """The pre-registered p of the tail test: the share of ``n`` week-clustered resamples on which ``ES(technique) -
     ES(base) <= 0``, both arms on the same resampled events (``bootstrap_weights``). ``n`` and ``seed`` default to the
-    pre-registered 10,000 and 20261112. Fails closed when the arms are not on the same events."""
+    pre-registered 10,000 and 20261112. Two ES equal to the repo's relative tolerance are a tie and count as no gain
+    (a technique that never acts on the events differs from the baseline by rounding only). Fails closed when the
+    arms are not on the same events."""
     if set(tech_by_event) != set(base_by_event):
         raise ValidationError("the technique and the baseline must be measured on the same events")
     alpha_frac = _alpha_fraction(default_rules().es_alpha if alpha is None else alpha)
@@ -150,8 +166,9 @@ def cluster_bootstrap(tech_by_event: Mapping[str, float], base_by_event: Mapping
     base = np.asarray([float(base_by_event[e]) for e in events])
     if not (np.isfinite(tech).all() and np.isfinite(base).all()):
         raise ValidationError("the bootstrap needs finite event P&L")
-    diff = _es_weighted(tech, weights, alpha_frac) - _es_weighted(base, weights, alpha_frac)
-    return float(np.mean(diff <= 0.0))
+    es_tech, es_base = _es_weighted(tech, weights, alpha_frac), _es_weighted(base, weights, alpha_frac)
+    tie = np.isclose(es_tech, es_base, rtol=Tolerance.RELATIVE, atol=Tolerance.ABSOLUTE)
+    return float(np.mean((es_tech - es_base <= 0.0) | tie))
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +323,7 @@ def life_stats(run: Run, completed: bool) -> Dict[str, Any]:
         "leg_days": sum(1 for r in run.rows if r["legs"]), "overlay_days": len(overlay),
         "phi_sum": float(sum(r["phi"] for r in overlay)),
         "phi_min": min((float(r["phi"]) for r in overlay), default=None),
-        "phi_lt1_days": sum(1 for r in overlay if r["phi"] < 1.0),
+        "phi_lt1_days": sum(1 for r in overlay if r["phi"] < 1.0 and not is_close(r["phi"], 1.0)),
         "flags": dict(flags),
     }
 
@@ -685,15 +702,16 @@ def note_completed(states: Mapping[str, Any], until: Optional[date]) -> bool:
 
 
 def gap_observations(states: Mapping[str, Any], until: Optional[date]) -> List[Dict[str, Any]]:
-    """Per KO observation the note entered a KO window for (records dated on or before ``until``): the first day
-    with a recorded ``gap_ko``, that gap in bp of notional (positive = the seller loses on redemption) and the
-    observation's ``ko_dir``."""
+    """Per KO observation the note entered a KO window for: the first day with a recorded ``gap_ko``, that gap in bp
+    of notional (positive = the seller loses on redemption) and the observation's ``ko_dir``. With ``until`` (the
+    training slice) only the observations dated on or before it: like an event, an observation belongs to the slice
+    of its date."""
     out: Dict[str, Dict[str, Any]] = {}
     for rec in states["days"]:
         if until is not None and date.fromisoformat(rec["date"]) > until:
             break
         obs, gap = rec.get("next_ko"), rec.get("gap_ko")
-        if obs is None or gap is None or obs in out:
+        if obs is None or gap is None or obs in out or (until is not None and date.fromisoformat(obs) > until):
             continue
         out[obs] = {"obs": obs, "date": rec["date"], "gap_ko_bp": float(gap) * BP, "ko_dir": rec.get("ko_dir")}
     return list(out.values())
@@ -1024,9 +1042,10 @@ def tables(notes: Sequence[Mapping[str, Any]], prereg: Mapping[str, Any], sample
     selection; seller side throughout. Works on any set of files that hold the same runs (a partial set too).
 
     ``order``: the technique ids in the pre-registration's order (the files are written with sorted keys; every
-    table has its own ``order``). ``tables[clock]``: ``ko`` (the KO book's KO pin events, whole life on its headline notes), ``ki`` (the KI book's
-    approaches, whole life on every booking) and ``ki_transfer`` (the same techniques on the KO book's own
-    approaches: measures, no verdict), on the events of ``slice_`` under the primary configuration. A table has
+    table has its own ``order``). ``tables[clock]``: ``ko`` (the KO book's KO pin events, whole life on its headline
+    notes), ``ki`` (the KI book's approaches, whole life on every booking) and ``ki_transfer`` (the same techniques
+    on the KO book's own approaches: measures, no verdict), on the events of ``slice_`` under the primary
+    configuration. A table has
     ``n_events`` / ``n_weeks`` / ``decidable`` / ``left_out`` (events with a fixing on the last day, left out under
     ``next_open``) and one row per technique acting on that barrier: the ``verdict`` fields, ``eligible`` (reported
     rows are never eligible and have no ``win``), ``p_holm`` (Holm across the eligible rows), ``clips`` and

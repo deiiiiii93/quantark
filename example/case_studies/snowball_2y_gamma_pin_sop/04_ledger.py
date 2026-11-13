@@ -45,10 +45,10 @@ the composites), ``split_date``, ``data`` and ``partial``.
 A spawn pool started from this file runs the notes (``--workers``, at most 4; 1 runs in-process), with the group-RSS
 guard and a lock on the runs directory. Any failed note fails the run: nothing is selected on an incomplete pass.
 
-Run (from a script file, never stdin):
-    python example/case_studies/snowball_2y_gamma_pin_sop/04_ledger.py --slice train
-    python example/case_studies/snowball_2y_gamma_pin_sop/04_ledger.py --slice test --desk-notional 5e8 1e8 --mo-cost-pt 0.2 1.0
-    python example/case_studies/snowball_2y_gamma_pin_sop/04_ledger.py --slice train --partial --states-dir .../states_quick --out-dir /scratch/t6
+Run (from a script file, never stdin), with ``L`` = ``example/case_studies/snowball_2y_gamma_pin_sop/04_ledger.py``:
+    python L --slice train
+    python L --slice test --desk-notional 5e8 1e8 --mo-cost-pt 0.2 1.0
+    python L --slice train --partial --states-dir <OUTPUT_DIR>/states_quick --out-dir <scratch>
 """
 
 from __future__ import annotations
@@ -270,7 +270,8 @@ def _plan(prereg: Dict[str, Any], job: Job) -> List[Tuple[float, float, Tuple[st
 
 
 def _manifest(job: Job, stamp: Dict[str, str], notes: Dict[str, Dict[str, Any]], technique_ids: Sequence[str],
-              plan: Sequence[Tuple[float, float, Sequence[str]]], until: Optional[date], seconds: float) -> Dict[str, Any]:
+              plan: Sequence[Tuple[float, float, Sequence[str]]], until: Optional[date],
+              seconds: float) -> Dict[str, Any]:
     return {"view": "seller", "slice": job.slice, "stamp": stamp, "split_date": SPLIT_DATE.isoformat(),
             "until": None if until is None else until.isoformat(), "notes": list(notes),
             "techniques": list(technique_ids), "partial": job.partial,
