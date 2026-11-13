@@ -819,6 +819,131 @@ def _annualized_ki_edge_row(live: dict, banked: dict, record: dict) -> None:
         f"{banked['value']!r}")
 
 
+# --- moves (T15: DCN PDE statistics from the forward adjoint of the price's own march) ---------------------------
+#
+# At base no DCN PDE engine produced statistics: ``price_with_events`` handed every leg the maturity-only trivial
+# distribution (KO-paying legs valued the note as if it ran to maturity; KI / KO / coupon-stream legs raised). Each
+# check pins the live value to a number the forward pass never computed: the folded solve banked at base (the fold
+# route marches each leg's cash inside the price on the same grid and never read statistics), or the backward march
+# of unit claims with the engine's own step and event primitives (``backward_claims_1d`` / ``backward_claims_adi``).
+
+
+def _dcn_pde_base_was_trivial(banked: dict, record: dict, *, raised: bool) -> None:
+    base = BANKED["cases"][record["case"]]["event_distribution"]
+    assert base["streams"] == ["MATURITY_NO_KO"] and base["probability_totals"] == {"MATURITY_NO_KO": 1.0}, base
+    if raised:
+        assert banked.get("raises") == "ValidationError", banked
+        return
+    from quantark.cashleg import EventDistribution
+
+    case = _case(record["case"])
+    _, product, env = case.fresh()
+    trivial = EventDistribution.trivial(max(float(product.get_maturity(env)), 0.0))
+    tol = GOLDEN_REL_TOL * max(abs(float(banked["value"])), 1.0)
+    assert close(_leg(record).value(trivial, env, cases.UNIT), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: the banked value is not the leg on the trivial distribution")
+
+
+def _dcn_pde_event_is_the_folded_leg(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h). The event route now values the leg on the native statistics; on the same grid the folded solve
+    (``fold_drilldown`` per leg, banked at base and unmoved) marches the same cash inside the price, so the two are
+    equal (measured <= 4e-10 absolute on scales 2e3..1e6, the ADI's far-edge rows included)."""
+    _dcn_pde_base_was_trivial(banked, record, raised="raises" in banked)
+    folded = RECORDS[f"{record['case']}__{record['leg']}__fold_drilldown"]["outcome"]
+    assert "value" in folded and "value" in live, (folded, live)
+    abs_tol = max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * float(record["scale"]))
+    assert close(float(live["value"]), float(folded["value"]), rel_tol=GOLDEN_REL_TOL, abs_tol=abs_tol), (
+        f"{record['id']}: live {live['value']!r} != the folded leg {folded['value']!r} banked at base")
+    assert not close(float(live["value"]), float(banked.get("value", np.nan)), rel_tol=GOLDEN_REL_TOL,
+                     abs_tol=abs_tol), f"{record['id']}: did not move"
+
+
+@lru_cache(maxsize=None)
+def _dcn_pde_claims(case_id: str) -> dict:
+    """The backward unit claims of a DCN PDE case (``pde/dcn_statistics.py``: the engine's own step and events)."""
+    from quantark.asset.equity.engine.pde.dcn_statistics import backward_claims_1d, backward_claims_adi
+
+    case = _case(case_id)
+    engine, product, env = case.fresh()
+    if BANKED["cases"][case_id]["engine_kind"] == "dcn_pde_adi":
+        n_obs = len(product.schedule.monthly)
+        names = ["ko_total", "maturity", "ki_settlement", "ki_total", "ki_time"] + [f"coupon_{j}" for j in range(n_obs)]
+        return backward_claims_adi(engine, product, env, names=names)
+    return backward_claims_1d(engine, product, env, **case.kwargs())
+
+
+def _dcn_pde_knock_in_by_backward_claims(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h). The AT_KI leg raised at base (no KI stream); it now values on the per-date knock-in table: its axis
+    is the DCN's daily KI dates (exact, on the price's ACT/365F axis), its total and its time-weighted total equal
+    the backward knock-in claims (a first knock-in before any knock-out, KO winning a same-date tie) to 1e-10, and the
+    leg is ``sign x amount x Σ P DF(t + offset)`` on those rows."""
+    from quantark.cashleg import EventType
+    from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
+
+    _dcn_pde_base_was_trivial(banked, record, raised=True)
+    assert "requires knock_in" in banked.get("message", ""), banked
+    assert "value" in live, live
+    dist, env = _live_distribution(record)
+    _, product, _ = _case(record["case"]).fresh()
+    ctx = build_dcn_grid_context(product)
+    first = 0 if ctx.valuation_monitored else 1
+    times = np.asarray(dist.stream_times[EventType.KI], dtype=float)
+    probability = np.asarray(dist.probabilities[EventType.KI], dtype=float)
+    np.testing.assert_array_equal(times, ctx.times[first:])
+    claims = _dcn_pde_claims(record["case"])
+    assert abs(float(np.sum(probability)) - claims["ki_total"]) <= 1e-10
+    assert abs(float(np.sum(times * probability)) - claims["ki_time"]) <= 1e-10
+    assert close(float(live["value"]), _leg_on_rows(_leg(record), env, times, probability), rel_tol=1e-12,
+                 abs_tol=1e-12 * float(record["scale"]))
+
+
+def _dcn_pde_coupon_stream_by_backward_claims(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h). The COUPON-basis leg raised at base (no coupon stream); it now values on the coupon table. The leg
+    is recomputed by its own formula from the backward unit claims of each row's fixed coupon and the two survivor
+    branches (never the statistics), to round-off -- the never-knocked-in branch carrying the claims' own probability
+    residual, as ``from_statistics`` absorbs it (spec D16)."""
+    from quantark.cashleg import EventType
+    from quantark.cashleg.autocallable_leg import PvFormula
+
+    _dcn_pde_base_was_trivial(banked, record, raised=True)
+    assert "coupon stream" in banked.get("message", ""), banked
+    assert "value" in live, live
+    case = _case(record["case"])
+    _, product, env = case.fresh()
+    claims = _dcn_pde_claims(record["case"])
+    leg = _leg(record)
+    assert leg.accrual_basis.value == "coupon" and leg.pv_formula is PvFormula.NORMAL
+    n_obs = len(product.schedule.monthly)
+    coupon = np.array([claims[f"coupon_{j}"] for j in range(n_obs)])
+    contingent = float(np.sum(np.asarray(leg.accrual_factors) * coupon
+                              * np.array([env.get_discount_factor(float(t)) for t in leg.settlement_schedule])))
+    # D16: the residual 1 - (ΣKO + maturity + KI settlement) rides on MATURITY_NO_KO
+    terminal = {EventType.MATURITY_NO_KO: 1.0 - claims["ko_total"] - claims["ki_settlement"],
+                EventType.MATURITY_WITH_KI: claims["ki_settlement"]}
+    contingent += float(leg.terminal_accrual_factor) * sum(terminal[e] for e in leg.terminal_events) * float(
+        env.get_discount_factor(float(leg.terminal_settlement_time)))
+    expected = leg.sign() * float(leg.notional) * float(leg.rate) * contingent
+    assert close(float(live["value"]), expected, rel_tol=1e-12, abs_tol=1e-12 * float(record["scale"])), (
+        f"{record['id']}: live {live['value']!r} != backward-claim coupon-basis value {expected!r}")
+
+
+_T15_DCN_CASES = ("pde_dcn__dcn", "pde_dcn__dcn_seller", "pde_lv_dcn__dcn", "pde_dcn__dcn_receivable_alive",
+                  "adi_heston_dcn__dcn")
+_T15_FOLDED = tuple(
+    f"{case}__{leg}__event"
+    for case in _T15_DCN_CASES
+    for leg in ("accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity", "fixed_at_ko",
+                "fixed_at_maturity_no_ko", "fixed_at_maturity_with_ki", "fixed_at_maturity_any",
+                "autocallable_margin_nmp_both", "autocallable_backend_premium_no_ko", "autocallable_rebate_with_ki")
+)
+_T15_TERMINATED = tuple(
+    f"pde_dcn__{case}__{leg}__event"
+    for case in ("dcn_ko_unpaid", "dcn_ko_settled")
+    for leg in ("accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
+                "fixed_at_maturity_no_ko", "fixed_at_maturity_any")
+)
+
+
 _FOLD_LEGS = ("deterministic", "accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
               "accrual_full_schedule", "fixed_at_ko", "fixed_at_maturity_no_ko", "fixed_at_maturity_with_ki",
               "fixed_at_maturity_any")
@@ -873,6 +998,12 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T14_KI_AXIS},
     # T14b: the knocked-in edge row honours the annualized-KI leg (D26)
     **{rid: MovedBy("k", _annualized_ki_edge_row) for rid in _T14B_EDGE_ROW},
+    # T15: DCN PDE statistics (the forward adjoint of the price's own march)
+    **{rid: MovedBy("h", _dcn_pde_event_is_the_folded_leg) for rid in _T15_FOLDED},
+    **{f"{case}__fixed_at_ki__event": MovedBy("h", _dcn_pde_knock_in_by_backward_claims) for case in _T15_DCN_CASES},
+    **{f"{case}__autocallable_backend_interest_coupon__event": MovedBy("h", _dcn_pde_coupon_stream_by_backward_claims)
+       for case in _T15_DCN_CASES},
+    **{rid: MovedBy("h", _dcn_terminated_state_has_no_event) for rid in _T15_TERMINATED},
 }
 
 
