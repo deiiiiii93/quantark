@@ -35,7 +35,7 @@ from quantark.asset.equity.engine.event_stats import (  # noqa: E402
 from quantark.asset.equity.param import EngineParams  # noqa: E402
 from quantark.backtest.replay.single import AutocallableBacktestEngine  # noqa: E402
 
-REASON = "transition: legacy producer"
+REASON = "not computed on this route"
 DATE = pd.Timestamp("2024-01-02")
 
 

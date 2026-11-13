@@ -80,7 +80,7 @@ grid-dependent and shrinking under refinement on the PDE and QUAD V1 (see
 | `total_discounted_cash`, `total_cash_to_pay` | the cash sums of the identity (computed) |
 | `reconciliation_error`, `probability_residual` | the identities (computed) |
 | `provenance` | `StatisticsProvenance(statistics_model, price_model)`; required |
-| `unavailable` | field path → reason, for every value that is `None` |
+| `unavailable` | field path → reason; required for each of `ki_table`, `knock_in.probability`, `knock_in.expected_time`, `knock_in.expected_loss`, `ledger.cash_to_pay` and (when present) `coupons.probability` that is `None`. Other `None` values (dates, MC `standard_errors` on a grid engine) need no entry |
 | `standard_errors` | MC only: field path → standard error |
 
 Properties: `rebased` (REBASED KO-reset), `terminated` (receivables only).
@@ -300,7 +300,7 @@ for speed.
   both residuals. Coupon cash stays in the ledger when the coupon table is pruned.
 - **Prunable:** `coupons.probability` (without `EventType.COUPON`); `knock_in.probability`,
   `knock_in.expected_time` and `ki_table` (without `EventType.KI`). Pruned values are `None` with
-  reason `"not requested"`. A pruned request never runs a grid engine's forward pass.
+  reason `"not requested"`. A pruned request never runs the KI forward pass on PDE 1D, ADI or QUAD; the DCN PDE engines are the exception and always run their single forward pass.
 - The type also allows `knock_in.expected_loss` and `ledger.cash_to_pay` to be pruned; no engine
   in this release prunes them.
 - MC engines and the DCN PDE engines accept `streams` and prune nothing: every number comes from

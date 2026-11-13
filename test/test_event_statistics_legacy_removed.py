@@ -111,3 +111,39 @@ def test_price_with_events_refuses_a_producer_that_does_not_return_event_statist
 def test_checked_event_statistics_passes_the_new_type_and_refuses_anything_else():
     with pytest.raises(ValidationError, match="EventStatistics"):
         event_stats.checked_event_statistics(object())
+    s = _minimal_statistics()
+    assert event_stats.checked_event_statistics(s) is s
+
+
+def _minimal_statistics() -> event_stats.EventStatistics:
+    import numpy as np
+
+    from quantark.asset.equity.engine.event_stats import (
+        KnockInStatistics, KnockInTable, ObservationTable, OutcomeRow, ReceivablesTable, StatisticsProvenance,
+        build_cash_ledger,
+    )
+
+    times = np.array([0.5, 1.0])
+    p = np.array([0.3, 0.2])
+    n = times.size
+    observations = ObservationTable(
+        times=times, payment_times=times + 0.01, is_ko_obs=np.ones(n, dtype=bool),
+        is_coupon_obs=np.zeros(n, dtype=bool), probability=p, survival=1.0 - np.cumsum(p),
+        discounted_cash=p * 99.0, cash_to_pay=p * 100.0, payment_is_path_dependent=np.zeros(n, dtype=bool),
+    )
+    maturity = OutcomeRow(time=1.0, payment_time=1.02, probability=0.4, discounted_cash=38.8, cash_to_pay=40.0)
+    ki_settlement = OutcomeRow(time=1.0, payment_time=1.02, probability=0.1, discounted_cash=9.7, cash_to_pay=10.0)
+    ki_table = KnockInTable(times=times, payment_times=times, probability=np.array([0.05, 0.05]),
+                            survival=np.array([0.95, 0.9]), interpolated=np.zeros(n, dtype=bool))
+    receivables = ReceivablesTable.empty()
+    return event_stats.EventStatistics(
+        product_family="snowball", pv=100.0, observations=observations, coupons=None, maturity=maturity,
+        ki_settlement=ki_settlement,
+        knock_in=KnockInStatistics(probability=0.1, probability_no_ko=0.1, expected_time=0.7, expected_loss=1.0),
+        ki_table=ki_table, receivables=receivables,
+        ledger=build_cash_ledger(observations=observations, coupons=None, maturity=maturity,
+                                 ki_settlement=ki_settlement, receivables=receivables),
+        expected_lifetime=0.6,
+        provenance=StatisticsProvenance(statistics_model="hand_built", price_model="hand_built"),
+        unavailable={},
+    )

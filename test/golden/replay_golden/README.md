@@ -65,6 +65,8 @@ The MC engine emits two dated KI rows per scalar_bsm/localvol case (`0.004`
 at 2024-01-03 and `0.0646` at 2024-01-05, summing to `0.0686`); the PDE
 emits one row (`0.065123` at 2024-01-08).
 
+*Historical (pre-0.11.0): the paragraphs below describe the removed legacy KI fields; 0.11.0 replaced them with `EventStatistics`.*
+
 `ki_probability` is documented in `event_stats.py` as a **legacy** field
 whose definition differs by engine, kept only for backward compatibility:
 MC reports `P(KI ever)` — every path that ever breaches the KI barrier,
@@ -282,7 +284,7 @@ including PVs and cashflows, is byte-identical.
 
 Re-banked: `book_daily_event_summary.csv` and `book_event_probabilities.csv` only, statistics columns only
 (spec D5/D22). Both frames failed at the branch base (79938a1c) already, on `ki_probability_to_maturity` and
-on the KI rows, because `book` prices on QUAD V1, whose statistics moved to `EventStatistics` (T17). `pv` and
+on the KI rows: pre-existing golden drift, not caused by T17 (T17 moved `book`'s QUAD V1 statistics to `EventStatistics`, which is why they are re-banked here). `pv` and
 every `book_*` price/greek/state frame are byte-identical to before.
 
 | file | moved | cause (spec) |

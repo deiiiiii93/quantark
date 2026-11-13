@@ -217,4 +217,4 @@ refresh them.
 | `example/case_studies/snowball_2y_carry_curve/README.md` | "P(KI) 62.9% vs 61.6%" is KI-ever; `results/pricing.json` was regenerated (P(KI before KO) 0.354) |
 | `example/case_studies/gaussian_quad_comparison/results/events_*.json`, `REPORT.md` | maturity numbers on the old `expected_discounted_maturity_cashflow` split |
 | `example/case_studies/quad_v2_validation/README.md` | says continuous KI-ever is unavailable on V2; V2 now reports P(KI before any KO) and a continuous KI table |
-| `docs/research/continuous-ki-consistency/`, `docs/research/vol-model-ki-consistency/` | measure the old KI-ever field; pricing results stand |
+| `docs/research/continuous-ki-consistency/`, `docs/research/vol-model-ki-consistency/` | measure the old KI-ever field; pricing results stand. Their scripts read the removed `ki_ever_probability` / `ki_survive_knocked_in_probability` fields and now raise `AttributeError` on 0.11.0 |

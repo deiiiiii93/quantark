@@ -66,7 +66,7 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the airbag. Contracts with PARTIAL protection and an airbag that changes the knocked-in payoff on
   the edge cell now use the payoff-read row; NONE and FULL protection, and partial contracts where
   the airbag does not change the edge, are bitwise unchanged. The width-3 vs width-16 gap falls
-  from 2.9e-2–9.2e-2 to ≤ 9.3e-4 (flat), 1.65–1.76 to ≤ 1.4e-2 (local vol), up to 0.63 to
+  from 2.9e-2–9.2e-2 to ≤ 9.3e-4 (flat), 1.65–1.76 to ≤ 1.4e-2 (local vol; 3.7e-2 on annualized KO-reset, identical with protection NONE), up to 0.63 to
   ≤ 2.3e-3 (Heston ADI) and up to 1.07 to ≤ 4.7e-3 (SLV ADI). Against MC these contracts sat 24 to
   127 SE low; now within 2.9 SE. No certified anchor moved.
 

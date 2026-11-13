@@ -44,8 +44,8 @@ class StatisticsRefused(PricingError):
 class StatisticUnavailable(ValidationError, ValueError):
     """A statistic listed in ``EventStatistics.unavailable`` was read through ``EventStatistics.require``.
 
-    The value may be present (a legacy producer's flagged number, kept so the type's identities hold) but is
-    not the field's definition; the message carries the ``unavailable`` reason.
+    The value may be present (a flagged number kept so the type's identities hold) but is not the field's
+    definition; the message carries the ``unavailable`` reason.
     """
 
 
@@ -67,7 +67,7 @@ RECEIVABLE_SOURCES = ("ko", "coupon", "maturity", "ki_settlement", "dcn_loss")
 # Probabilities and survival may undershoot 0 / overshoot monotonicity by this much (grid
 # round-off); the same slack ``EventDistribution`` applies to the distributions built from them.
 _PROBABILITY_SLACK = Tolerance.PROBABILITY
-# A payment may precede its determination by this much (time round-off), as in the legacy ledger.
+# A payment may precede its determination by this much (time round-off).
 _TIME_SLACK = Tolerance.ZERO
 
 

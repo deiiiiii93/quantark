@@ -99,8 +99,10 @@ def _assert_lifecycle_ki_event_stats(stats) -> None:
     np.testing.assert_array_equal(stats.ki_table.times, [0.0])
     np.testing.assert_array_equal(stats.ki_table.probability, [1.0])
     np.testing.assert_array_equal(stats.ki_table.survival, [0.0])
-    assert stats.ki_settlement.probability == pytest.approx(1.0 - float(np.sum(stats.observations.probability)),
-                                                            abs=7e-9)
+    ko_mass = float(np.sum(stats.observations.probability))
+    assert stats.ki_settlement.probability == pytest.approx(1.0 - ko_mass, abs=7e-9), (
+        stats.ki_settlement.probability, ko_mass)
+    assert stats.maturity.probability == pytest.approx(0.0, abs=1e-12), stats.maturity.probability
     assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), abs=1e-8)
 
 
