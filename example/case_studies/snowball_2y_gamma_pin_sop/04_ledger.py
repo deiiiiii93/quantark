@@ -3,7 +3,8 @@ a time, and keeps the two slices apart (spec C9, D11). Seller view throughout.
 
 ``--slice train`` (blind half). Every ledger run stops at the last trading day before the pre-registered split
 (``until``), so no row dated on or after the split is ever produced; only notes booked before the split are run and
-only their training-dated events are measured. Every grid point of the pre-registration runs under the clocks asked
+only their training-dated events are measured. Those three rules are ``gpin.measures.training_scope``'s, inside the
+code hash; this file only follows them. Every grid point of the pre-registration runs under the clocks asked
 for; the training selection is made (``gpin.measures.training_selection``: per row the grid point with the highest
 training ES10 under the primary clock); the two composites it names run too. Written: the run files, the training
 tables and, last, the selection file with the picks, the ``composites`` block the registry reads and three hashes
@@ -72,7 +73,7 @@ from quantark.util.exceptions import QuantArkException  # noqa: E402
 from gpin import BOARD_PATH, CHAIN_PATH, OUTPUT_DIR, RESULTS_DIR, STATES_DIR, StudyDataError, load_prereg  # noqa: E402
 from gpin import measures  # noqa: E402
 from gpin.board import load_boards  # noqa: E402
-from gpin.events import BOOKS, SPLIT_DATE, note_id, parse_note_id  # noqa: E402
+from gpin.events import BOOKS, note_id, parse_note_id  # noqa: E402
 from gpin.ledger import CLOCKS  # noqa: E402
 from gpin.techniques import build_registry  # noqa: E402
 from s2ts.chain import load_chain  # noqa: E402
@@ -272,7 +273,7 @@ def _plan(prereg: Dict[str, Any], job: Job) -> List[Tuple[float, float, Tuple[st
 def _manifest(job: Job, stamp: Dict[str, str], notes: Dict[str, Dict[str, Any]], technique_ids: Sequence[str],
               plan: Sequence[Tuple[float, float, Sequence[str]]], until: Optional[date],
               seconds: float) -> Dict[str, Any]:
-    return {"view": "seller", "slice": job.slice, "stamp": stamp, "split_date": SPLIT_DATE.isoformat(),
+    return {"view": "seller", "slice": job.slice, "stamp": stamp, "split_date": str(load_prereg()["split_date"]),
             "until": None if until is None else until.isoformat(), "notes": list(notes),
             "techniques": list(technique_ids), "partial": job.partial,
             "events_not_measurable": {nid: n["events_not_measurable"] for nid, n in notes.items()
@@ -286,24 +287,20 @@ def run_train(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: D
     """The blind half: the training-slice runs, the selection, the composites, the files."""
     started = time.perf_counter()
     files = state_files(job.states_dir, sample, job.partial)
-    chains = load_chain(job.chain)
-    before = [c.day for c in chains if c.day < SPLIT_DATE]
-    if not before:
-        raise StudyDataError(f"the chain has no day before the split {SPLIT_DATE}")
-    until = before[-1]
-    train = {nid: path for nid, path in files.items() if parse_note_id(nid)[1] <= until}
-    if not train:
-        raise StudyDataError(f"no note of {job.states_dir} is booked before the split {SPLIT_DATE}")
+    # the cut-off day, the notes and the event slice are measures.training_scope's (inside the code hash), not ours
+    scope = measures.training_scope(load_chain(job.chain), list(files), prereg)
+    until = scope.until
+    train = {nid: files[nid] for nid in scope.notes}
     plan = _plan(prereg, job)
     grid_ids = list(build_registry(prereg))
     log(f"train slice: {len(train)} of {len(files)} notes booked on or before {until}; every run stops at {until}; "
         f"{len(grid_ids)} grid points; clocks {list(job.modes)}; {job.workers} worker(s)")
-    notes = run_notes(job, train, grid_ids, None, plan, until, "train", log=log)
+    notes = run_notes(job, train, grid_ids, None, plan, until, scope.event_slice, log=log)
     selection = measures.training_selection(list(notes.values()), prereg, allow_empty=job.partial)
     composites = measures.selection_composites(selection)       # None: a barrier has no pick, so no composite exists
     composite_ids = [tid for tid in build_registry(prereg, composites) if tid not in grid_ids]
     if composite_ids:
-        second = run_notes(job, train, composite_ids, composites, plan, until, "train", log=log)
+        second = run_notes(job, train, composite_ids, composites, plan, until, scope.event_slice, log=log)
         notes = {nid: measures.merge_notes(notes[nid], second[nid]) for nid in notes}
     seconds = time.perf_counter() - started
     for barrier, rows in selection["picks"].items():
@@ -313,16 +310,18 @@ def run_train(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: D
             log(f"    {row:<10} -> {pick['id'] or 'no pick':<20} ES10 {pick['es10']}")
     log(f"  composites: {composites if composites is not None else 'none (a barrier has no training event)'}")
     technique_ids = grid_ids + composite_ids
-    tables = measures.tables(list(notes.values()), prereg, sample, selection, slice_="train")
+    tables = measures.tables(list(notes.values()), prereg, sample, selection, slice_=scope.event_slice)
     lock = _acquire_lock(_ensure(job.runs_dir))
     try:
         write_runs(job, notes, stamp, _manifest(job, stamp, notes, technique_ids, plan, until, seconds))
         write_json_atomic(job.runs_dir / "tables.json", {**tables, "stamp": stamp, "until": until.isoformat(),
-                                                         "split_date": SPLIT_DATE.isoformat(), "partial": job.partial})
+                                                         "split_date": scope.split_date.isoformat(),
+                                                         "partial": job.partial})
     finally:
         _release_lock(lock)
     write_json_atomic(job.selection, {
-        "view": "seller", "slice": "train", "split_date": SPLIT_DATE.isoformat(), "until": until.isoformat(),
+        "view": "seller", "slice": scope.event_slice, "split_date": scope.split_date.isoformat(),
+        "until": until.isoformat(),
         "clock": str(prereg["selection"]["clock"]), "config": measures.primary_config(prereg).key,
         "partial": job.partial, "notes": list(notes), **selection, **stamp})
     log(f"wrote {len(notes)} run files to {job.runs_dir} and the selection to {job.selection} in {seconds:.1f} s")
@@ -345,7 +344,7 @@ def run_test(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: Di
     notes = run_notes(job, files, technique_ids, composites, plan, None, None, log=log)
     seconds = time.perf_counter() - started
     tables = measures.tables(list(notes.values()), prereg, sample, selection, slice_="test")
-    payload = {**tables, "stamp": stamp, "split_date": SPLIT_DATE.isoformat(), "partial": job.partial,
+    payload = {**tables, "stamp": stamp, "split_date": str(prereg["split_date"]), "partial": job.partial,
                "data": {"first": chains[0].day.isoformat(), "last": chains[-1].day.isoformat()},
                "selection": {"picks": {b: {row: p["id"] for row, p in rows.items()}
                                        for b, rows in selection["picks"].items()},

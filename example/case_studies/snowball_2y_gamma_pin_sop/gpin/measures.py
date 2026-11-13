@@ -29,7 +29,7 @@ from datetime import date
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -902,6 +902,34 @@ def _common_ids(notes: Sequence[Mapping[str, Any]], cfg: str, clock: str) -> Lis
 
 def _mean(values: Sequence[float]) -> Optional[float]:
     return float(sum(values) / len(values)) if values else None
+
+
+class TrainingScope(NamedTuple):
+    """What the training slice may read (D6, D11): every ledger run stops at ``until``, only ``notes`` are run, and
+    only their events of ``event_slice`` are measured."""
+
+    until: date
+    notes: Tuple[str, ...]
+    event_slice: str
+    split_date: date
+
+
+def training_scope(chains: Sequence[Any], notes: Iterable[str], prereg: Mapping[str, Any]) -> TrainingScope:
+    """The scope of the training slice, from the chain's days, the note ids that have a state file and the
+    pre-registration: ``until`` = the last chain day before the pre-registered split date (so no row dated on or
+    after the split is produced); ``notes`` = the notes booked on or before it (the ones with a training-dated row),
+    in the order given; ``event_slice`` = the pre-registered selection slice. The driver takes all three from here,
+    so the rules that decide which data enters the selection are inside the code hash. Fails closed when the chain
+    has no day before the split or no note is booked by then."""
+    split = date.fromisoformat(str(prereg["split_date"]))
+    before = [c.day for c in chains if c.day < split]
+    if not before:
+        raise StudyDataError(f"the chain has no day before the split {split}")
+    until = max(before)
+    booked = tuple(nid for nid in notes if parse_note_id(nid)[1] <= until)
+    if not booked:
+        raise StudyDataError(f"no note is booked on or before {until}, the last day before the split {split}")
+    return TrainingScope(until, booked, str(prereg["selection"]["slice"]), split)
 
 
 def training_selection(notes: Sequence[Mapping[str, Any]], prereg: Mapping[str, Any], *,

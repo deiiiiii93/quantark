@@ -6220,3 +6220,71 @@ def test_the_train_slice_on_the_quick_states_records_no_ko_pick_and_no_composite
     tables = json.loads((out / "runs" / "train" / "tables.json").read_text())
     assert tables["tables"]["close"]["ko"]["n_eligible"] == 0 and tables["tables"]["close"]["ki"]["n_eligible"] == 4
     assert max(re.findall(r"\d{4}-\d{2}-\d{2}", (out / "runs" / "train" / "ki75__2024-02-29.json").read_text())) < "2025-07-01"
+
+
+# ---- finding 1: what enters the training selection is decided in the hashed code, not in the driver ----
+
+
+def test_training_scope_is_the_last_chain_day_before_the_split_the_notes_booked_by_then_and_the_training_slice(t6_market):
+    from gpin.measures import TrainingScope, training_scope
+
+    _, _, _, chains = t6_market                                           # 2025-06-02 .. 2025-07-25, weekdays
+    prereg = load_prereg()
+    notes = ["ki75:2025-06-02", "seas6:2025-06-30", "ki75:2025-07-01", "seas6:2025-07-07", "ki75:2025-06-16"]
+    scope = training_scope(chains, notes, prereg)
+    assert scope == TrainingScope(until=date(2025, 6, 30), notes=("ki75:2025-06-02", "seas6:2025-06-30", "ki75:2025-06-16"),
+                                  event_slice="train", split_date=date(2025, 7, 1))
+    # the cut-off is a day of the chain: without 06-30 and 06-27 on it, the last day before the split is 06-26
+    thin = [c for c in chains if c.day not in (date(2025, 6, 30), date(2025, 6, 27))]
+    assert training_scope(thin, notes, prereg).until == date(2025, 6, 26)
+    assert training_scope(thin, notes, prereg).notes == ("ki75:2025-06-02", "ki75:2025-06-16")
+    # the split and the slice are the pre-registration's
+    moved = dict(prereg, split_date="2025-06-18", selection=dict(prereg["selection"], slice="blind"))
+    assert training_scope(chains, notes, moved) == TrainingScope(date(2025, 6, 17), ("ki75:2025-06-02", "ki75:2025-06-16"),
+                                                                 "blind", date(2025, 6, 18))
+    with pytest.raises(StudyDataError, match="no day before the split"):
+        training_scope([c for c in chains if c.day >= date(2025, 7, 1)], notes, prereg)
+    with pytest.raises(StudyDataError, match="booked"):
+        training_scope(chains, ["ki75:2025-07-01"], prereg)
+
+
+def test_the_train_driver_takes_its_cut_off_its_notes_and_its_event_slice_from_training_scope(
+        stage4, t6_files, tmp_path, monkeypatch, capsys):
+    from gpin import measures
+
+    real = measures.training_scope
+    seen = []
+
+    def scoped(**changes):
+        def fake(chains, notes, prereg):
+            seen.append(list(notes))
+            return measures.TrainingScope(**{**real(chains, notes, prereg)._asdict(), **changes})
+        return fake
+
+    # an earlier cut-off: every run stops there and the files say so
+    monkeypatch.setattr(measures, "training_scope", scoped(until=date(2025, 6, 23)))
+    out = tmp_path / "a"
+    with _LedgerSpy() as spy:
+        assert stage4.main(_t6_argv(t6_files, "train", out, "--mode", "close")) == 0
+    assert seen[-1] == T6_NOTE_IDS                                         # it was asked about every state file found
+    assert {c[2] for c in spy.calls} == {date(2025, 6, 23)} and max(c[3] for c in spy.calls) == "2025-06-23"
+    sel = json.loads((out / "selection.json").read_text())
+    manifest = json.loads((out / "runs" / "train" / "manifest.json").read_text())
+    assert (sel["until"], manifest["until"], sel["slice"], sel["split_date"]) == ("2025-06-23", "2025-06-23", "train",
+                                                                              "2025-07-01")
+    # fewer notes: only those it names are run, though both state files are there
+    monkeypatch.setattr(measures, "training_scope", scoped(notes=("seas6:2025-06-02",)))
+    out = tmp_path / "b"
+    with _LedgerSpy() as spy:
+        assert stage4.main(_t6_argv(t6_files, "train", out, "--mode", "close", "--partial")) == 0
+    assert json.loads((out / "runs" / "train" / "manifest.json").read_text())["notes"] == ["seas6:2025-06-02"]
+    assert len(spy.calls) == 31 and not (out / "runs" / "train" / "ki75__2025-06-02.json").exists()
+    # another event slice: the driver hands those events to the run, which refuses anything dated after its cut-off
+    monkeypatch.setattr(measures, "training_scope", scoped(event_slice="test"))
+    out = tmp_path / "c"
+    capsys.readouterr()
+    assert stage4.main(_t6_argv(t6_files, "train", out, "--mode", "close")) != 0
+    assert "cannot be measured on a run that stops there" in capsys.readouterr().err and not out.exists()
+    # and the driver has no split-date logic of its own left
+    src = (STUDY_DIR / "04_ledger.py").read_text()
+    assert "SPLIT_DATE" not in src and "slice_of" not in src and ".day <" not in src and "training_scope(" in src
