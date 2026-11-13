@@ -19,7 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict
@@ -64,6 +64,8 @@ D9_CAUSES: Dict[str, str] = {
     "h": "engine or state newly producing native statistics (DCN PDE, terminated DCN/V2 states, "
          "QUAD V1 Phoenix KO-at-valuation coupon stream)",
     "i": "npv := price() where the marched stats pv differed by round-off (Heston ADI ~2 ULP)",
+    "k": "PDE knocked-in edge row honours the annualized-KI leg (D26): edge-reaching annualized-KI PDE / ADI "
+         "price, event_npv and folded records",
 }
 
 
@@ -665,6 +667,178 @@ _T14_KI_AXIS = ("adi_heston_snowball__snowball_cki", "adi_heston_snowball__snowb
                 "adi_heston_phoenix__phoenix_mem_instant", "adi_heston_phoenix__phoenix_nomem_expiry",
                 "adi_heston_ko_reset__ko_reset_absolute", "adi_slv_snowball__snowball_cki")
 
+# --- moves (T14b: the knocked-in edge row honours the annualized-KI leg, spec D26) -----------------------------------
+#
+# Base's knocked-in Dirichlet row on the knock-in edge omitted the annualized knock-in leg's tenor (KO-reset: the
+# post-KI tenor, 2y here), and the not-knocked-in surface copies that row, so every price-carrying record of a PDE / ADI
+# KO-reset whose paths reach the edge moved. Event-route leg values (probabilities and the legs' own cash) do not.
+
+#: the wide-domain reference: num_std 16 (1D; the ADI default is 8) on 4x the points, the same spacing as the bank's
+#: grid, so the edge lies out of the paths' reach
+_WIDE_NUM_STD, _WIDE_FACTOR = 16.0, 4
+#: on the wide domain the base row and the D26 row agree to this (relative to the record's scale): the edge is out of
+#: reach (measured <= 6.1e-8 absolute on a 100 notional, T14b report)
+_WIDE_ROW_INDEPENDENCE = 1e-8
+
+
+class _BaseKnockInRow:
+    """Within the block, the PDE solvers write base's knocked-in edge row (the D26 branch off: the knock-in leg reads
+    as not annualized to ``SnowballPDESolver._boundary_rows_v1``; the product and every other leg are untouched)."""
+
+    def __enter__(self):
+        from quantark.asset.equity.engine.pde import snowball_pde_solver as sps
+
+        self._module, self._real = sps, sps.leg_annualized
+        sps.leg_annualized = lambda product, leg: False if leg == "knock_in" else self._real(product, leg)
+        return self
+
+    def __exit__(self, *exc):
+        self._module.leg_annualized = self._real
+        return False
+
+
+class _WideCase:
+    """A bank case whose engine prices on the wide domain (everything else is the case's own)."""
+
+    def __init__(self, case):
+        self._case = case
+
+    def __getattr__(self, name):
+        return getattr(self._case, name)
+
+    def fresh(self):
+        from quantark.asset.equity.engine.pde import GridConfig
+        from quantark.asset.equity.engine.pde.grid import GridBinder
+
+        engine, product, env = self._case.fresh()
+        if hasattr(engine, "n_x"):                                   # Heston / SLV ADI: the S axis binder
+            engine.n_x = _WIDE_FACTOR * engine.n_x
+            engine._layer_binder_2d = GridBinder("standard", GridConfig(points=engine.n_x, num_std=_WIDE_NUM_STD),
+                                                 cache_enabled=engine._is_cache_enabled())
+            return engine, product, env
+        points = {"fast": 200, "standard": 400, "high": 800}[engine.params.accuracy]
+        wide = type(engine)(params=replace(engine.params, grid=GridConfig(num_std=_WIDE_NUM_STD,
+                                                                          points=_WIDE_FACTOR * points)))
+        return wide, product, env
+
+
+def _route_on(case, record: dict) -> dict:
+    """``record``'s route recomputed on ``case`` (uncached: ``live_outcome`` without its per-case caches)."""
+    route = record["route"]
+    if route in ("price", "event_npv"):
+        return cases.event_route(case)[route]
+    if route == "fold_total":
+        return cases.fold_total(case, record["leg"])
+    if route in ("fold_drilldown_total", "fold_drilldown_npv"):
+        drilldown = cases.fold_drilldown(case, list(BANKED["cases"][record["case"]]["drilldown_set"]))
+        return drilldown["total" if route == "fold_drilldown_total" else "npv"]
+    raise AssertionError(f"{record['id']}: route {route!r} carries no price")
+
+
+class _ContractTermsKnockInRow:
+    """Within the block, the knocked-in lower row is written from the contract terms alone, independently of the
+    payoff-read row under test: principal x DF + participation x multiplier x tenor x (S x DF_q - K x DF), the tenor
+    the knock-in leg is annualized over (KO-reset: the post-KI tenor). Only for the bank's KO-reset (standard, no
+    protection, no airbag, nothing folded)."""
+
+    def __enter__(self):
+        from quantark.asset.equity.engine.pde.core.statistics.rows import EdgeRow, RowTerm
+        from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+
+        own = SnowballPDESolver._boundary_rows_v1
+
+        def rows(solver, t_idx, tau, product, env, s_vec):
+            lower, upper = own(solver, t_idx, tau, product, env, s_vec)
+            assert lower.branch == "v1_lower_none_slope" and solver._fold is None, lower.branch
+            assert product.airbag_config.airbag_barrier is None
+            df, df_div = solver._get_asymptotic_discount_factors(env, tau)
+            principal = product.initial_price * product.contract_multiplier
+            k = (product.payoff_config.participation_rate * product.contract_multiplier
+                 * product._resolve_post_contract_tenor(env))
+            v = principal * df + k * (float(s_vec[0]) * df_div - product.strike * df)
+            return EdgeRow(v, lower.branch, (RowTerm("M", v),), lower.copy_from_ki), upper
+
+        self._cls, self._own = SnowballPDESolver, own
+        SnowballPDESolver._boundary_rows_v1 = rows
+        return self
+
+    def __exit__(self, *exc):
+        self._cls._boundary_rows_v1 = self._own
+        return False
+
+
+#: the price under the contract-terms row (``_ContractTermsKnockInRow``) vs live: the two rows differ by round-off
+#: only; measured <= 8.9e-16 relative to the record's scale (T14b report)
+_ROW_REIMPLEMENTED = 1e-12
+#: a non-price record moves by exactly its case's price move: the PDE is linear in its edge rows and folded cash
+#: enters base's row and the D26 row alike; measured <= 2.4e-15 relative to the record's scale (T14b report)
+_MOVE_IS_THE_PRICE_MOVE = 1e-12
+
+
+def _annualized_ki_edge_row(live: dict, banked: dict, record: dict) -> None:
+    """Cause (k), D26. Pinned without the statistics or the row under test:
+
+    * the product's knock-in leg is annualized and the engine is a PDE 1D / ADI route;
+    * the move is the row alone: with base's row written back the record reproduces its banked value (bank
+      tolerance), and the move itself exceeds that tolerance;
+    * the price record: (i) a reprice whose knocked-in edge row is written from the contract terms
+      (``_ContractTermsKnockInRow``) gives the live value; (ii) a wide-domain reprice (``_WideCase``), where base's row
+      and the D26 row agree (the edge is out of reach), is nearer the live value than the banked one;
+    * any other record (event npv, folded) moves by its case's price move (the PDE is linear in its edge rows)."""
+    from quantark.asset.equity.product.option.accrual import leg_annualized
+
+    assert "value" in banked and "value" in live, (live, banked)
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "pde_adi", "pde_adi_slv"), record["engine_kind"]
+    case = _case(record["case"])
+    assert leg_annualized(case.fresh()[1], "knock_in"), f"{record['id']}: the knock-in leg is not annualized"
+    scale = float(record["scale"])
+    tol = max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * scale)
+    move = float(live["value"]) - float(banked["value"])
+    with _BaseKnockInRow():
+        base_row = _route_on(case, record)
+    assert close(float(base_row["value"]), float(banked["value"]), rel_tol=GOLDEN_REL_TOL, abs_tol=tol), (
+        f"{record['id']}: base's row gives {base_row['value']!r}, not the banked {banked['value']!r}")
+    assert abs(move) > tol, f"{record['id']}: the move is round-off"
+    if record["route"] != "price":
+        price = RECORDS[f"{record['case']}__-__price"]
+        price_move = float(_event(record["case"])["price"]["value"]) - float(price["outcome"]["value"])
+        assert abs(move - price_move) <= _MOVE_IS_THE_PRICE_MOVE * scale, (
+            f"{record['id']}: moved {move!r}, its case's price moved {price_move!r}")
+        return
+    with _ContractTermsKnockInRow():
+        terms = float(_route_on(case, record)["value"])
+    assert abs(float(live["value"]) - terms) <= _ROW_REIMPLEMENTED * scale, (
+        f"{record['id']}: live {live['value']!r} != the contract-terms row's price {terms!r}")
+    with _BaseKnockInRow():
+        wide_base_row = float(_route_on(_WideCase(case), record)["value"])
+    wide = float(_route_on(_WideCase(case), record)["value"])
+    assert abs(wide - wide_base_row) <= _WIDE_ROW_INDEPENDENCE * scale, (
+        f"{record['id']}: the wide reference still reaches the edge ({wide!r} vs {wide_base_row!r})")
+    assert abs(float(live["value"]) - wide) < abs(float(banked["value"]) - wide), (
+        f"{record['id']}: live {live['value']!r} is not nearer the wide reference {wide!r} than the banked "
+        f"{banked['value']!r}")
+
+
+_FOLD_LEGS = ("deterministic", "accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
+              "accrual_full_schedule", "fixed_at_ko", "fixed_at_maturity_no_ko", "fixed_at_maturity_with_ki",
+              "fixed_at_maturity_any")
+_FOLD_AUTOCALLABLE = ("autocallable_margin_nmp_both", "autocallable_backend_premium_no_ko",
+                      "autocallable_rebate_with_ki")
+#: measured: every price-carrying record of the three PDE 1D KO-reset cases; on the ADI (default width 8, the edge
+#: barely reached: price moves 6.7e-4) its drilldown total and three autocallable fold totals stay within tolerance
+_T14B_EDGE_ROW = (
+    *(f"{case}__-__{route}"
+      for case in ("pde_ko_reset__ko_reset_absolute", "pde_ko_reset__ko_reset_absolute_cki",
+                   "pde_lv_ko_reset__ko_reset_absolute")
+      for route in ("price", "event_npv", "fold_drilldown_total", "fold_drilldown_npv")),
+    *(f"{case}__{leg}__fold_total"
+      for case in ("pde_ko_reset__ko_reset_absolute", "pde_ko_reset__ko_reset_absolute_cki",
+                   "pde_lv_ko_reset__ko_reset_absolute")
+      for leg in _FOLD_LEGS + _FOLD_AUTOCALLABLE),
+    *(f"adi_heston_ko_reset__ko_reset_absolute__-__{route}" for route in ("price", "event_npv", "fold_drilldown_npv")),
+    *(f"adi_heston_ko_reset__ko_reset_absolute__{leg}__fold_total" for leg in _FOLD_LEGS),
+)
+
 _T12_KO_AT_VALUATION = ("pde_snowball__snowball_cki_ko_at_valuation", "pde_phoenix__phoenix_mem_instant_ko_at_valuation")
 _T12_KNOCKED_IN_SETTLEMENT = tuple(
     f"{case}__{leg}__event"
@@ -697,6 +871,8 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T13_KI_AXIS},
     # T14: the native ADI forward adjoint pass
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T14_KI_AXIS},
+    # T14b: the knocked-in edge row honours the annualized-KI leg (D26)
+    **{rid: MovedBy("k", _annualized_ki_edge_row) for rid in _T14B_EDGE_ROW},
 }
 
 
