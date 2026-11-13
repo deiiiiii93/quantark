@@ -77,28 +77,36 @@ def print_event_stats(engine_name: str, stats) -> None:
     fmt = "| {:>3} | {:>8} | {:>10} | {:>10} | {:>14} |"
     print(fmt.format(*headers))
     print("|" + "-" * (len(fmt.format(*headers)) - 2) + "|")
-    for i in range(len(stats.ko_times)):
+    obs = stats.observations
+    for i in range(obs.size):
         print(
             fmt.format(
                 i,
-                _fmt(float(stats.ko_times[i])),
-                _fmt(float(stats.ko_probability[i])),
-                _fmt(float(stats.survival_probability[i])),
-                _fmt(float(stats.expected_discounted_ko_cashflow[i])),
+                _fmt(float(obs.times[i])),
+                _fmt(float(obs.probability[i])),
+                _fmt(float(obs.survival[i])),
+                _fmt(float(obs.discounted_cash[i])),
             )
         )
 
-    pv_ko = float(np.sum(stats.expected_discounted_ko_cashflow))
-    pv_mat = float(stats.expected_discounted_maturity_cashflow)
-    pv_parts = pv_ko + pv_mat
+    pv_ko = float(np.sum(obs.discounted_cash))
+    pv_mat = float(stats.maturity.discounted_cash)
+    pv_ki_settle = float(stats.ki_settlement.discounted_cash)
+    pv_parts = float(stats.total_discounted_cash)
 
     print("\nSummary")
-    print(f"- PV:                     {_fmt(float(stats.pv))}")
-    print(f"- PV(KO cashflows):       {_fmt(pv_ko)}")
-    print(f"- PV(maturity cashflow):  {_fmt(pv_mat)}")
-    print(f"- PV(decomp total):       {_fmt(pv_parts)}")
-    print(f"- KI probability:         {_fmt(float(stats.ki_probability))}")
-    print(f"- Recon error:            {_fmt(float(stats.reconciliation_error))}")
+    print(f"- PV:                          {_fmt(float(stats.pv))}")
+    print(f"- PV(KO cashflows):            {_fmt(pv_ko)}")
+    print(f"- PV(maturity, never KO/KI):   {_fmt(pv_mat)}")
+    print(f"- PV(maturity, knocked in):    {_fmt(pv_ki_settle)}")
+    print(f"- PV(decomp total):            {_fmt(pv_parts)}")
+    # P(KI before any KO): a path that knocks in after its KO is not counted.
+    # ``ki_probability`` of the legacy type had an engine-dependent definition.
+    if stats.knock_in.probability is not None:
+        print(f"- P(KI before any KO):         {_fmt(float(stats.knock_in.probability))}")
+    print(f"- P(KI, no KO; settles in KI): {_fmt(float(stats.knock_in.probability_no_ko))}")
+    print(f"- Expected lifetime (years):   {_fmt(float(stats.expected_lifetime))}")
+    print(f"- Recon error (pv - total):    {_fmt(float(stats.reconciliation_error))}")
 
 
 def main() -> None:

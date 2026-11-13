@@ -441,7 +441,7 @@ def chart_ki_probe(data_dir: Path) -> Optional[str]:
     ax_q.set_xticklabels([pd.Timestamp(d).strftime("%m-%d") for d in days], fontsize=8)
     ax_q.set_xlabel(f"trading day ({pd.Timestamp(days[0]).year})")
     ax_p.set_ylim(-0.02, 1.02)
-    ax_p.set_ylabel("P(KI ever), pricing measure")
+    ax_p.set_ylabel("P(KI before KO), pricing measure")
     ax_p.set_title("Same product, same spot, same vol: only the carry input changes day by day")
     ax_p.legend(fontsize=7.5, loc="upper left")
     ax_q.set_ylabel("q(T) handed to the pricer, % p.a.")
@@ -681,7 +681,7 @@ def _appendix(agg: Dict[str, Any]) -> str:
          "The model's zero yield to the product's maturity: the single number a flat pricer would have to use to "
          "agree with this model on the terminal forward."),
         ("P(KI) mean, P(KO) mean",
-         "Probability under the pricing measure that the knock-in barrier is ever breached, and that any monthly "
+         "Probability under the pricing measure that the knock-in barrier is breached before any knock-out, and that any monthly "
          "observation knocks out, from the QUAD event recursion on the same contract. Pricing-measure numbers: "
          "they move one-for-one with the forward the carry model implies, and are not a real-world forecast."),
         ("P(KI) gap vs ref, P(KI) gap range", f"This model's P(KI) minus <code>{ref}</code>'s on the same day: mean, then min .. max over the grid."),
@@ -792,7 +792,7 @@ def _ki_section(s: Dict[str, Any], data_dir: Path) -> str:
         "<p>Under the pricing measure P(KI) is fixed by the forward curve, not by a yield as a number. A flat q "
         "extrapolates one contract's forward to the whole life, so its error scales with 1/tenor of that "
         "contract; the term curve pins every listed forward and extrapolates only past the last tenor. "
-        "P(KI) is the probability that the 75% barrier is ever breached, P(KO) that any monthly observation "
+        "P(KI) is the probability that the 75% barrier is breached before any knock-out, P(KO) that any monthly observation "
         "knocks out, both read from the QUAD recursion on the same contract and the same day.</p>"
         + _table(["model", "P(KI) mean", "P(KO) mean", "P(KI) gap vs ref, mean", "P(KI) gap range", "corr(gap, q(T) gap)"],
                  ki_rows, f"Knock-in and knock-out probabilities on the monthly grid ({s['grid_dates']} dates), "

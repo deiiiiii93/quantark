@@ -504,7 +504,7 @@ the curve; a flat-q desk would solve a coupon {num(100 * abs(h["coupon_equiv"]),
 """)
 
 
-EVENT_KEYS = (("p_ko_total", "P(KO)"), ("p_ko_first_year", "P(KO ≤ 1Y)"), ("p_ki_ever", "P(KI ever)"),
+EVENT_KEYS = (("p_ko_total", "P(KO)"), ("p_ko_first_year", "P(KO ≤ 1Y)"), ("p_ki_before_ko", "P(KI before KO)"),
               ("p_ki_survive", "P(KI & survive)"))
 
 
@@ -696,7 +696,7 @@ def findings(d: Dict[str, Any]) -> List[str]:
         f"{esc(short_label(peak['label']))} and falls back to {pct(nodes[-1]['q'], 1)} at the last pillar. At "
         f"{above} of the {len(ko_year1)} first-year KO dates the curve's q is above the flat {pct(h['q_flat'], 2)}, so "
         f"its forwards are lower there: P(KO ≤ 1Y) {pct(ev_c['p_ko_first_year'], 1)} vs {pct(ev_f['p_ko_first_year'], 1)}, "
-        f"P(KI) {pct(ev_c['p_ki_ever'], 1)} vs {pct(ev_f['p_ki_ever'], 1)}, expected life "
+        f"P(KI before KO) {pct(ev_c['p_ki_before_ko'], 1)} vs {pct(ev_f['p_ki_before_ko'], 1)}, expected life "
         f"{num(ev_c['expected_life_years'], 3)}Y vs {num(ev_f['expected_life_years'], 3)}Y (curve vs flat). "
         f"The note is worth {'less' if h['gap_bp'] > 0 else 'more'} on the curve.")
     dd = [100 * abs(gk["tails"][t]["curve"]["spot_delta"] / gk["tails"][t]["flat"]["spot_delta"] - 1) for t in TAIL_ORDER]

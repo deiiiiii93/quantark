@@ -182,7 +182,7 @@ def test_pricing_results_meet_acceptance(common):
             assert abs(cell["pv_bp_fine_grid"] - cell["pv_bp"]) <= 1.0               # AC9
             assert abs(cell["pv_bp_pde"] - cell["pv_bp"]) <= 5.0
             ev = cell["events"]
-            assert 0.0 <= ev["p_ko_total"] <= 1.0 and 0.0 <= ev["p_ki_ever"] <= 1.0
+            assert 0.0 <= ev["p_ko_total"] <= 1.0 and 0.0 <= ev["p_ki_before_ko"] <= 1.0
             assert 0.0 < ev["expected_life_years"] <= res["terms"]["maturity_years"]
         assert abs(tail["gap_bp_pde"] - tail["gap_bp"]) <= 2.0
     assert set(res["marks"]) == {"mo_close", "all_settle"}

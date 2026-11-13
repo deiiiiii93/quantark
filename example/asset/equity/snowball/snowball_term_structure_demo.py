@@ -61,10 +61,13 @@ def main() -> None:
         print("Event stats unavailable.")
         return
 
-    print(f"KI probability: {stats.ki_probability:.6f}")
+    # P(KI before any KO) (a KI after a KO is not counted) and P(KI, no KO) = P(settles knocked in)
+    print(f"P(KI before any KO): {stats.knock_in.probability:.6f}")
+    print(f"P(KI, no KO):        {stats.knock_in.probability_no_ko:.6f}")
     print(f"PV reconciliation error: {stats.reconciliation_error:.6g}")
     print("\nPer-observation KO stats:")
-    for t, p_ko, p_surv in zip(stats.ko_times, stats.ko_probability, stats.survival_probability):
+    obs = stats.observations
+    for t, p_ko, p_surv in zip(obs.times, obs.probability, obs.survival):
         print(f"  t={t:.3f}y  p_ko={p_ko:.6f}  p_survive={p_surv:.6f}")
 
 

@@ -80,11 +80,12 @@ def events(c):
         p,e=product(c),environment(c)
         pv=eng.price(p,e)
         s=eng.calculate_event_stats(p,e)
-        out[mode]=dict(price=pv,event_pv=s.pv,ko_pv=float(np.sum(s.expected_discounted_ko_cashflow)),
-            maturity_pv=s.expected_discounted_maturity_cashflow,reconciliation=s.reconciliation_error,
-            ko_probability_sum=float(np.sum(s.ko_probability)),
-            min_ko_probability=float(np.min(s.ko_probability)),
-            cashflow_sum=float(np.sum(s.expected_discounted_cashflows)))
+        out[mode]=dict(price=pv,event_pv=s.pv,ko_pv=float(np.sum(s.observations.discounted_cash)),
+            # old "maturity" total: pv residual = never-KO/KI maturity + knocked-in settlement
+            maturity_pv=s.maturity.discounted_cash+s.ki_settlement.discounted_cash,reconciliation=s.reconciliation_error,
+            ko_probability_sum=float(np.sum(s.observations.probability)),
+            min_ko_probability=float(np.min(s.observations.probability)),
+            cashflow_sum=float(np.sum(s.ledger.discounted_cash)))
     return dict(name=c.name,results=out)
 
 

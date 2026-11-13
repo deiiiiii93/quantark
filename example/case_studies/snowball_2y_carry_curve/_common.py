@@ -493,16 +493,21 @@ def solve_coupon(pv_at: Callable[[float], float], notional: float = NOTIONAL) ->
 
 
 def event_summary(stats, maturity: float) -> Dict[str, Any]:
-    """P(KO), P(KI ever), P(KI and survive), expected life from QUAD event stats."""
-    ko_p = np.asarray(stats.ko_probability, dtype=float)
-    ko_t = np.asarray(stats.ko_times, dtype=float)
+    """P(KO), P(KI before any KO), P(KI and no KO), expected life from QUAD ``EventStatistics``.
+
+    ``p_ki_before_ko`` counts a path only if it knocks in before any knock-out (the old
+    "P(KI ever)" also counted knock-ins after a KO; that statistic no longer exists).
+    """
+    obs = stats.observations
+    ko_p = np.asarray(obs.probability, dtype=float)[obs.is_ko_obs]
+    ko_t = np.asarray(obs.times, dtype=float)[obs.is_ko_obs]
     p_ko = float(ko_p.sum())
     return {
         "p_ko_total": p_ko,
         "p_ko_first_year": float(ko_p[ko_t <= 1.0].sum()),
-        "p_ki_ever": float(stats.ki_ever_probability),
-        "p_ki_survive": float(stats.ki_survive_knocked_in_probability),
-        "expected_life_years": float((ko_p * ko_t).sum() + (1.0 - p_ko) * maturity),
+        "p_ki_before_ko": float(stats.knock_in.probability),
+        "p_ki_survive": float(stats.knock_in.probability_no_ko),
+        "expected_life_years": float(stats.expected_lifetime),
         "ko_probability_by_obs": [float(x) for x in ko_p],
         "ko_times": [float(x) for x in ko_t],
     }

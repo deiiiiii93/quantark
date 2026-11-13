@@ -31,7 +31,7 @@ Part B - static risk (first trading day of each month)
     not sum to it, and nothing in this study hedges them.
 
     Each grid row also carries the pricing-measure knock-in and knock-out
-    probabilities (``p_ki`` = P(the 75% barrier is ever breached), ``p_ko`` =
+    probabilities (``p_ki`` = P(the 75% barrier is breached before any knock-out), ``p_ko`` =
     P(any monthly observation knocks out)) from the QUAD event recursion, so
     the summary can report how far each carry model's P(KI) sits from the
     reference and how tightly that gap tracks the q(T) gap.
@@ -279,12 +279,12 @@ PROBE_AFTER_DAYS = 3   # trading days shown after it
 
 
 def _event_probabilities(engine: SnowballQuadEngine, product, env: PricingEnvironment) -> Dict[str, float]:
-    """PV, P(KO ever) and P(KI ever) under the pricing measure from the QUAD recursion."""
+    """PV, P(KO) and P(KI before any KO) under the pricing measure from the QUAD recursion."""
     st = engine.calculate_event_stats(product, env)
-    p_ki = st.ki_ever_probability if st.ki_ever_probability is not None else st.ki_probability
+    p_ki = st.knock_in.probability  # P(KI before any KO): a KI after a KO is not counted
     return {
         "pv_bp": float(st.pv) / C.NOTIONAL * 1e4,
-        "p_ko": float(np.sum(st.ko_probability)),
+        "p_ko": float(np.sum(st.observations.probability)),
         "p_ki": float(p_ki),
     }
 
