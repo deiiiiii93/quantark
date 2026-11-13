@@ -43,7 +43,7 @@ from s2ts import MO_MULT, NOTIONAL
 from s2ts.chain import sse_trading_days
 from s2ts.measures import holm
 
-from . import PREREG_PATH, StudyDataError, load_prereg, prereg_hash
+from . import PREREG_PATH, S2TS_DIR, STUDY_DIR, StudyDataError, load_prereg, prereg_hash
 from . import black
 from .board import DayBoard
 from .events import BOOKS, note_id, parse_note_id
@@ -825,16 +825,44 @@ def merge_notes(first: Mapping[str, Any], second: Mapping[str, Any]) -> Dict[str
 # The four hashes and the guards of the test slice (D11, amended)
 # ---------------------------------------------------------------------------
 
-#: The ledger-side code: an edit to any of these files stales a training selection.
-CODE_FILES: Tuple[str, ...] = ("black.py", "ledger.py", "techniques.py", "measures.py")
+#: The ledger-side code, with everything it imports from this package: an edit to any of these files stales a
+#: training selection.
+CODE_FILES: Tuple[str, ...] = ("__init__.py", "black.py", "board.py", "events.py", "ledger.py", "measures.py",
+                               "techniques.py")
+#: The ledger driver (it decides what a test-slice run covers), beside the package directory.
+DRIVER_FILE: str = "04_ledger.py"
+#: The sibling study's package files the ledger side imports, directly or through one another.
+S2TS_CODE_FILES: Tuple[str, ...] = ("__init__.py", "books.py", "chain.py", "measures.py", "note.py", "runner.py",
+                                    "tails.py")
 
 
-def code_hash(directory: Optional[Path] = None) -> str:
-    """sha256 over the ledger-side files (``CODE_FILES`` of the package directory): name and bytes of each."""
+def code_versions() -> Dict[str, str]:
+    """The numpy / scipy / quantark versions, part of the code hash (Black-76, the implied vol, the bootstrap)."""
+    import quantark
+    import scipy
+
+    return {"numpy": np.__version__, "scipy": scipy.__version__, "quantark": quantark.__version__}
+
+
+def code_hash(directory: Optional[Path] = None, *, driver: Optional[Path] = None, s2ts_dir: Optional[Path] = None,
+              versions: Optional[Mapping[str, str]] = None) -> str:
+    """sha256 over everything the ledger numbers depend on in code: ``CODE_FILES`` of the package directory, the
+    driver ``DRIVER_FILE``, ``S2TS_CODE_FILES`` of the sibling package and the library versions (name and bytes of
+    each file). The pricing pass and the report are not in it: the first is covered by the recorded inputs
+    (``inputs_hash``), the second only displays."""
     directory = Path(__file__).resolve().parent if directory is None else Path(directory)
+    driver = STUDY_DIR / DRIVER_FILE if driver is None else Path(driver)
+    s2ts_dir = S2TS_DIR / "s2ts" if s2ts_dir is None else Path(s2ts_dir)
     h = hashlib.sha256()
-    for name in CODE_FILES:
-        h.update(name.encode("utf-8") + b"\0" + (directory / name).read_bytes() + b"\0")
+    for group, paths in (("gpin", [directory / name for name in CODE_FILES]), ("driver", [driver]),
+                         ("s2ts", [s2ts_dir / name for name in S2TS_CODE_FILES])):
+        for path in paths:
+            if not path.exists():
+                raise StudyDataError(f"{path} missing: the code hash cannot be taken")
+            h.update(f"{group}/{path.name}".encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    canonical = json.dumps(dict(code_versions() if versions is None else versions), sort_keys=True,
+                           separators=(",", ":"))
+    h.update(b"versions\0" + canonical.encode("utf-8"))
     return h.hexdigest()
 
 

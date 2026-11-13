@@ -493,8 +493,8 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
             # an alive note is flattened at once; a dead note's flat target is executed (cuts apply) and only what
             # that leaves is flattened
             if not alive:
-                _execute(acc, pos, Target(0.0, {}), dc.spot, far.code, float(far.close), False, "close", dc, board,
-                         rules, used, bounds, im_rate)
+                _execute(acc, pos, Target(0.0, {}), dc.spot, far.code, float(far.close), technique.clip, "close", dc,
+                         board, rules, used, bounds, im_rate)
             if alive or not pos.flat():
                 _flatten(acc, pos, board, dc, rules)
                 acc.flag("until" if cut_by_until else "data_end")
@@ -512,7 +512,7 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
                 prev_ctx = ctx
             else:
                 target = Target(0.0, {})
-            clip = technique.clip and alive
+            clip = technique.clip                    # D9 binds every IM target, a dead note's residual legs included
             if mode == "next_open" and is_fixing:
                 pending = _Pending(target, dc.spot, far.code, float(far.close), clip)
                 acc.flag("fixing_deferred")

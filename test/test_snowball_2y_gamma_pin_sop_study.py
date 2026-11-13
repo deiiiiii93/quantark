@@ -2971,6 +2971,26 @@ def test_a_cut_close_leaves_the_leg_on_the_book_keeps_its_delta_in_the_im_target
     _check_identity(run)
 
 
+def test_the_d9_clip_also_binds_the_hedge_of_residual_legs_of_a_dead_note():
+    (states, boards, chains), d = _cut_close_world()
+    last = d[0] + timedelta(days=60)
+    want = lambda ctx: {KEY_C5000: 20.0} if ctx.day_index >= 1 else {}        # noqa: E731
+    rows = _run(states, _Scripted(want), boards, chains).rows
+    # day 2: the note is dead (KO), the target is flat; one lot closes (a tenth of 500 lots at the desk's 50 x), 19 stay.
+    # Hedging them needs a short of about half the notional; the D9 limit is on EVERY IM target: h = -0.25, counted
+    assert rows[1]["legs"] == {STR_C5000: 20.0} and rows[2]["legs"] == {STR_C5000: pytest.approx(19.0)}
+    leg = _leg_delta(d[2], last, "C", 5000.0, 0.2, 19.0)
+    assert -leg * 5000.0 / NOTIONAL_ < -0.4                                       # what the legs alone would ask for
+    assert rows[2]["clipped"] and rows[2]["hedge_ratio"] == pytest.approx(-0.25)
+    assert rows[2]["im_lots"] == pytest.approx(-2.5)
+    # the control without the clip hedges the residual in full
+    free = _Scripted(want)
+    free.clip = False
+    loose = _run(states, free, boards, chains).rows
+    assert not loose[2]["clipped"] and loose[2]["im_lots"] == pytest.approx(-leg / 200.0)
+    _check_identity(_run(states, _Scripted(want), boards, chains))
+
+
 @pytest.mark.parametrize("traded", [True, False])
 def test_on_its_last_trading_day_a_leg_exits_at_the_close_if_it_traded_else_at_the_settlement(traded):
     d = _weekdays(4)
@@ -5297,26 +5317,37 @@ def test_merge_notes_adds_the_composites_runs_and_refuses_anything_else(t6_marke
 # ---- the three hashes and the guard of the test slice (D11, AC12) ----
 
 
-def test_the_code_hash_covers_exactly_the_ledger_side_files(tmp_path):
-    import hashlib
+def test_the_code_hash_covers_everything_the_ledger_numbers_depend_on(tmp_path):
+    import shutil
     from gpin import measures
 
-    assert measures.CODE_FILES == ("black.py", "ledger.py", "techniques.py", "measures.py")
-    h = hashlib.sha256()
-    for name in measures.CODE_FILES:
-        h.update(name.encode("utf-8") + b"\0" + (STUDY_DIR / "gpin" / name).read_bytes() + b"\0")
-    assert measures.code_hash() == h.hexdigest()
-    # a copy with one ledger-side file changed hashes differently; a pricing-side file is not in it
-    for name in measures.CODE_FILES + ("pricing.py",):
-        (tmp_path / name).write_bytes((STUDY_DIR / "gpin" / name).read_bytes())
-    assert measures.code_hash(tmp_path) == measures.code_hash()
-    (tmp_path / "pricing.py").write_text("# changed\n")
-    assert measures.code_hash(tmp_path) == measures.code_hash()
-    (tmp_path / "black.py").write_bytes((tmp_path / "black.py").read_bytes() + b"\n")
-    assert measures.code_hash(tmp_path) != measures.code_hash()
-    f = tmp_path / "events.json"
-    f.write_text("{}")
-    assert measures.file_hash(f) == hashlib.sha256(b"{}").hexdigest()
+    # the package files of the ledger side and what they import, the driver, the sibling package files, the libraries
+    assert measures.CODE_FILES == ("__init__.py", "black.py", "board.py", "events.py", "ledger.py", "measures.py",
+                                   "techniques.py")
+    assert measures.DRIVER_FILE == "04_ledger.py"
+    assert measures.S2TS_CODE_FILES == ("__init__.py", "books.py", "chain.py", "measures.py", "note.py", "runner.py",
+                                        "tails.py")
+    assert set(measures.code_versions()) == {"numpy", "scipy", "quantark"}
+    s2ts = STUDY_DIR.parent / "snowball_2y_tail_stability" / "s2ts"
+    pkg, sib, driver = tmp_path / "gpin", tmp_path / "s2ts", tmp_path / "04_ledger.py"
+    shutil.copytree(STUDY_DIR / "gpin", pkg, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(s2ts, sib, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(STUDY_DIR / "04_ledger.py", driver)
+    copy = lambda: measures.code_hash(pkg, driver=driver, s2ts_dir=sib)                      # noqa: E731
+    base = measures.code_hash()
+    assert copy() == base and len(base) == 64
+    # files outside the ledger side do not move it: the pricing pass, the report, the sibling's drawing code
+    for other in (pkg / "pricing.py", pkg / "models.py", pkg / "report.py", sib / "html.py"):
+        other.write_text("# changed\n")
+    assert copy() == base
+    # an edit to any file inside it does, and so does a library version
+    for inside in ([pkg / n for n in measures.CODE_FILES] + [driver] + [sib / n for n in measures.S2TS_CODE_FILES]):
+        kept = inside.read_bytes()
+        inside.write_bytes(kept + b"\n")
+        assert copy() != base, inside.name
+        inside.write_bytes(kept)
+    assert copy() == base
+    assert measures.code_hash(pkg, driver=driver, s2ts_dir=sib, versions={"numpy": "0", "scipy": "0", "quantark": "0"}) != base
 
 
 def test_check_selection_refuses_a_missing_file_each_wrong_hash_and_a_partial_selection(tmp_path):
@@ -6402,7 +6433,6 @@ def test_the_stamp_is_four_hashes(t6_files):
     assert got == {"prereg_hash": prereg_hash(), "events_hash": measures.file_hash(t6_files.events),
                    "code_hash": measures.code_hash(),
                    "inputs_hash": measures.inputs_hash(t6_files.board, t6_files.chain, dict.fromkeys(T6_NOTE_IDS, T6_FP))}
-    assert measures.CODE_FILES == ("black.py", "ledger.py", "techniques.py", "measures.py")    # the code hash is unchanged
 
 
 def _t6_copy_inputs(t6_files, tmp_path, *, board=None, chain=None, fingerprint=None):
