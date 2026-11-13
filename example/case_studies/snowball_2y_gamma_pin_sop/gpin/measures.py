@@ -558,11 +558,9 @@ def _row_ids(row: Mapping[str, Any]) -> List[str]:
     return [grid_id(row["id"], point) for point in row["grid"]]
 
 
-def _better(es_a: Optional[float], cost_a: float, es_b: Optional[float], cost_b: float) -> bool:
+def _better(es_a: float, cost_a: float, es_b: float, cost_b: float) -> bool:
     """Whether candidate ``a`` displaces ``b`` (registered earlier): a higher ES10; on a tie the lower cost; on a tie
-    of both, or with no ES10 at all, the earlier one stays."""
-    if es_a is None or es_b is None:
-        return False
+    of both the earlier one stays."""
     if not is_close(es_a, es_b):
         return es_a > es_b
     return cost_a < cost_b and not is_close(cost_a, cost_b)
@@ -582,12 +580,14 @@ def select_on_train(prereg: Mapping[str, Any], windows: Mapping[str, Mapping[str
     training ES10 per barrier. ``rows``: per barrier the picked rows in the pre-registration's order.
 
     Fails closed when a grid point or the baseline has no run, when arms are on different events and when a barrier
-    has no training event; ``allow_empty`` (a smoke run on a partial set of states) lets such a barrier through with
-    the first grid point of every row and no ES10, and lists it in ``empty``."""
+    has no training event. ``allow_empty`` (a smoke run on a partial set of states) lets such a barrier through and
+    lists it in ``empty``: its rows have no pick (``id``, ``es10`` and ``cost_bp`` are null: no grid point stands in
+    for a pick that was not made), and a composite, which needs a member for every barrier, is then not in
+    ``composites`` at all."""
     rules = Rules.from_prereg(prereg)
     rows = {str(r["id"]): r for r in prereg["techniques"]}
     out: Dict[str, Any] = {"picks": {}, "base": {}, "composites": {}, "empty": [], "rows": {}}
-    table: Dict[str, Dict[str, Tuple[Optional[float], float]]] = {}
+    table: Dict[str, Dict[str, Tuple[Optional[float], Optional[float]]]] = {}
     for barrier in BARRIERS:
         runs = windows[barrier]
         if "base" not in runs:
@@ -598,12 +598,14 @@ def select_on_train(prereg: Mapping[str, Any], windows: Mapping[str, Mapping[str
                 raise StudyDataError(f"no training {barrier.upper()} event: the selection cannot be made")
             out["empty"].append(barrier)
 
-        def measure(tid: str) -> Tuple[Optional[float], float]:
+        def measure(tid: str) -> Tuple[Optional[float], Optional[float]]:
             if tid not in runs or tid not in costs[barrier]:
                 raise ValidationError(f"{barrier}: no training run of {tid}")
             if set(runs[tid]) != events:
                 raise ValidationError(f"{barrier}: {tid} and the baseline are not measured on the same events")
-            return (es(list(runs[tid].values()), rules.es_alpha) if events else None), float(costs[barrier][tid])
+            if not events:
+                return None, None
+            return es(list(runs[tid].values()), rules.es_alpha), float(costs[barrier][tid])
 
         base_es, _ = measure("base")
         out["base"][barrier] = {"es10": base_es, "n_events": len(events)}
@@ -614,18 +616,18 @@ def select_on_train(prereg: Mapping[str, Any], windows: Mapping[str, Mapping[str
                 continue
             grid = {tid: measure(tid) for tid in _row_ids(row)}
             table[barrier].update(grid)
-            best = next(iter(grid))
-            for tid in grid:
-                if _better(*grid[tid], *grid[best]):
+            best: Optional[str] = None
+            for tid in grid if events else ():
+                if best is None or _better(*grid[tid], *grid[best]):
                     best = tid
-            best_es, best_cost = grid[best]
+            best_es, best_cost = (None, None) if best is None else grid[best]
             out["picks"][barrier][rid] = {
                 "id": best, "es10": best_es, "cost_bp": best_cost, "n_events": len(events),
                 "beats_base": None if best_es is None else bool(best_es > base_es and not is_close(best_es, base_es)),
                 "grid": {tid: {"es10": v[0], "cost_bp": v[1]} for tid, v in grid.items()}}
         out["rows"][barrier] = list(out["picks"][barrier])
     for rid, slots in COMPOSITE_SLOTS.items():
-        if rid not in rows:
+        if rid not in rows or any(barrier in out["empty"] for barrier in slots):
             continue
         out["composites"][rid] = {}
         for barrier in slots:
@@ -642,20 +644,40 @@ def select_on_train(prereg: Mapping[str, Any], windows: Mapping[str, Mapping[str
     return out
 
 
+def selection_composites(selection: Mapping[str, Any]) -> Optional[Dict[str, Dict[str, str]]]:
+    """The selection's ``composites`` block in the shape ``gpin.techniques.build_registry`` takes, or ``None`` when it
+    does not name every composite with a member for every slot (a partial selection with an empty barrier): the
+    registry is then built without the composites, never with an invented member."""
+    block = selection.get("composites") or {}
+    for rid, slots in COMPOSITE_SLOTS.items():
+        members = block.get(rid)
+        if not isinstance(members, Mapping) or set(members) != set(slots) or any(members[s] is None for s in slots):
+            return None
+    return {rid: {slot: str(block[rid][slot]) for slot in COMPOSITE_SLOTS[rid]} for rid in COMPOSITE_SLOTS}
+
+
 def evaluated_ids(prereg: Mapping[str, Any], selection: Mapping[str, Any]) -> List[str]:
     """The techniques of the test slice, in the pre-registration's order: the baseline, the controls and the cost
     rows (every grid point), the training pick of every candidate row (both picks of a row picked per barrier) and
-    the composites."""
+    the composites. A barrier the selection lists as ``empty`` (a partial selection) has no pick: its rows are left
+    out, and so are the composites, which need a member for it. Anywhere else a row without a pick, or a missing
+    composite, fails closed."""
+    empty = set(selection.get("empty", ()))
+    composites = selection_composites(selection)
     out: List[str] = []
     for row in prereg["techniques"]:
         rid = str(row["id"])
         if row["role"] == "composite":
-            ids = [rid]
+            if composites is None and not empty:
+                raise ValidationError(f"the selection names no members for the composite {rid}")
+            ids = [rid] if composites is not None else []
         elif row["role"] == "candidate":
-            picked = {selection["picks"][b][rid]["id"] for b in BARRIERS if rid in selection["picks"][b]}
-            ids = [tid for tid in _row_ids(row) if tid in picked]
-            if not ids:
+            barriers = [b for b in BARRIERS if rid in selection["picks"][b]]
+            picked = {b: selection["picks"][b][rid]["id"] for b in barriers}
+            unpicked = [b for b, tid in picked.items() if tid is None and b not in empty]
+            if not barriers or unpicked:
                 raise ValidationError(f"the selection has no pick for row {rid}")
+            ids = [tid for tid in _row_ids(row) if tid in set(picked.values())]
         else:
             ids = _row_ids(row)
         out.extend(ids)

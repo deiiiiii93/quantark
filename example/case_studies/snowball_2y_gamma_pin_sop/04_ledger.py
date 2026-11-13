@@ -300,17 +300,18 @@ def run_train(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: D
         f"{len(grid_ids)} grid points; clocks {list(job.modes)}; {job.workers} worker(s)")
     notes = run_notes(job, train, grid_ids, None, plan, until, "train", log=log)
     selection = measures.training_selection(list(notes.values()), prereg, allow_empty=job.partial)
-    composites = selection["composites"]
+    composites = measures.selection_composites(selection)       # None: a barrier has no pick, so no composite exists
     composite_ids = [tid for tid in build_registry(prereg, composites) if tid not in grid_ids]
-    second = run_notes(job, train, composite_ids, composites, plan, until, "train", log=log)
-    notes = {nid: measures.merge_notes(notes[nid], second[nid]) for nid in notes}
+    if composite_ids:
+        second = run_notes(job, train, composite_ids, composites, plan, until, "train", log=log)
+        notes = {nid: measures.merge_notes(notes[nid], second[nid]) for nid in notes}
     seconds = time.perf_counter() - started
     for barrier, rows in selection["picks"].items():
         base = selection["base"][barrier]
         log(f"  {barrier.upper()}: {base['n_events']} training events, baseline ES10 {base['es10']}")
         for row, pick in rows.items():
-            log(f"    {row:<10} -> {pick['id']:<20} ES10 {pick['es10']}")
-    log(f"  composites: {composites}")
+            log(f"    {row:<10} -> {pick['id'] or 'no pick':<20} ES10 {pick['es10']}")
+    log(f"  composites: {composites if composites is not None else 'none (a barrier has no training event)'}")
     technique_ids = grid_ids + composite_ids
     tables = measures.tables(list(notes.values()), prereg, sample, selection, slice_="train")
     lock = _acquire_lock(_ensure(job.runs_dir))
@@ -335,7 +336,7 @@ def run_test(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: Di
     started = time.perf_counter()
     files = state_files(job.states_dir, sample, job.partial)
     chains = load_chain(job.chain)
-    composites = selection["composites"]
+    composites = measures.selection_composites(selection)       # None only for a partial selection without them
     build_registry(prereg, composites)                        # fails closed on a selection the registry cannot read
     technique_ids = measures.evaluated_ids(prereg, selection)
     plan = _plan(prereg, job)
@@ -348,7 +349,7 @@ def run_test(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: Di
                "data": {"first": chains[0].day.isoformat(), "last": chains[-1].day.isoformat()},
                "selection": {"picks": {b: {row: p["id"] for row, p in rows.items()}
                                        for b, rows in selection["picks"].items()},
-                             "composites": composites}}
+                             "composites": selection["composites"]}}
     lock = _acquire_lock(_ensure(job.runs_dir))
     try:
         write_runs(job, notes, stamp, _manifest(job, stamp, notes, technique_ids, plan, None, seconds))

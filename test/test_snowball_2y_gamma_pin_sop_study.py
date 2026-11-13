@@ -5065,14 +5065,17 @@ def test_select_on_train_fails_closed_on_missing_runs_unpaired_events_and_an_emp
     empty = {"ko": {tid: {} for tid in T6_KO_ES}, "ki": windows["ki"]}
     with pytest.raises(StudyDataError):
         select_on_train(load_prereg(), empty, _t6_costs())
-    # a partial set of states (a smoke run) may have no event of a barrier type: said so, and the first grid point of
-    # each row stands in; such a selection is marked and the test slice refuses it
+    # a partial set of states (a smoke run) may have no event of a barrier type: said so, and its rows have NO pick (no
+    # grid point stands in for one); such a selection is marked and the test slice refuses it
     partial = select_on_train(load_prereg(), empty, _t6_costs(), allow_empty=True)
     assert partial["empty"] == ["ko"]
     assert partial["picks"]["ko"]["ko_shift"] == {
-        "id": "ko_shift@0.01", "es10": None, "cost_bp": 1.0, "n_events": 0, "beats_base": None,
-        "grid": {tid: {"es10": None, "cost_bp": 1.0} for tid in ("ko_shift@0.01", "ko_shift@0.02", "ko_shift@0.03")}}
-    assert partial["composites"]["sop_futures"] == {"ko": "ko_shift@0.01", "ki": "secant@0.03"}
+        "id": None, "es10": None, "cost_bp": None, "n_events": 0, "beats_base": None,
+        "grid": {tid: {"es10": None, "cost_bp": None} for tid in ("ko_shift@0.01", "ko_shift@0.02", "ko_shift@0.03")}}
+    assert all(p["id"] is None for p in partial["picks"]["ko"].values()) and partial["rows"]["ko"][0] == "ko_shift"
+    assert partial["picks"]["ki"]["ki_cap"]["id"] == "ki_cap@1.0" and partial["base"]["ko"] == {"es10": None, "n_events": 0}
+    # a composite needs a member for both barriers: with one barrier empty there is none, and none is written
+    assert partial["composites"] == {}
     assert select_on_train(load_prereg(), windows, _t6_costs())["empty"] == []
 
 
@@ -5891,7 +5894,10 @@ def test_a_partial_set_of_states_needs_the_flag_marks_the_selection_and_is_refus
     sel = json.loads((out / "selection.json").read_text())
     assert (sel["partial"], sel["empty"], sel["notes"]) == (True, ["ko"], ["seas6:2025-06-02"])
     assert sel["picks"]["ko"]["ko_shift"]["es10"] is None and sel["picks"]["ki"]["ki_cap"]["es10"] is not None
-    assert json.loads((out / "runs" / "train" / "manifest.json").read_text())["configs"] == {"desk500_cost0.2": ["close"]}
+    assert sel["picks"]["ko"]["ko_shift"]["id"] is None and sel["composites"] == {}       # no pick, no composite
+    train_manifest = json.loads((out / "runs" / "train" / "manifest.json").read_text())
+    assert train_manifest["configs"] == {"desk500_cost0.2": ["close"]}
+    assert len(train_manifest["techniques"]) == 31 and "sop_futures" not in train_manifest["techniques"]
     capsys.readouterr()
     assert stage4.main(_t6_argv(t6_files, "test", out, "--mode", "close", states=states)) != 0
     assert "partial" in capsys.readouterr().err and not (out / "backtest.json").exists()
@@ -5899,6 +5905,16 @@ def test_a_partial_set_of_states_needs_the_flag_marks_the_selection_and_is_refus
     back = json.loads((out / "backtest.json").read_text())
     assert (back["partial"], back["clocks"], back["notes"]["n"]) == (True, ["close"], 1)
     assert back["tables"]["close"]["ko"]["n_events"] == 0 and back["tables"]["close"]["ko"]["rows"]["base"]["es10"] is None
+    # the test slice of a partial selection runs what was picked: no KO row's grid point, no composite
+    ran = json.loads((out / "runs" / "test" / "manifest.json").read_text())["techniques"]
+    ki = sel["picks"]["ki"]
+    assert ran == ["base", "base_noclip", ki["ki_shift"]["id"], "ko_wrong", "ki_wrong", ki["secant"]["id"],
+                   ki["ki_cap"]["id"], ki["mo_ki"]["id"], "band@0.02", "band@0.05"]
+    assert back["selection"]["composites"] == {} and back["selection"]["picks"]["ko"]["ko_shift"] is None
+    ko_table = back["tables"]["close"]["ko"]
+    assert ko_table["n_eligible"] == 0 and sorted(ko_table["rows"]) == sorted(
+        ["base", "base_noclip", "ko_wrong", sel["picks"]["ki"]["secant"]["id"], "band@0.02", "band@0.05"])
+    assert back["tables"]["close"]["ki"]["n_eligible"] == 4                                  # four KI rows, no composite
     # every note is there but one state file is a short diagnostic one (as --quick writes): its later events cannot be
     # measured. A full run refuses; a smoke run leaves those events out and says how many
     short = json.loads((t6_files.states / "ki75__2025-06-02.json").read_text())
@@ -6144,3 +6160,63 @@ def test_cluster_bootstrap_ties_with_the_symmetric_form():
     assert cluster_bootstrap({"e": a}, {"e": b}, weeks, n=50) == 1.0
     assert cluster_bootstrap({"e": b}, {"e": a}, weeks, n=50) == 1.0
     assert cluster_bootstrap({"e": a * (1.0 + 1.1e-9)}, {"e": a}, weeks, n=50) == 0.0            # beyond the tolerance: a gain
+
+
+# ---- finding 5: a barrier without a training event has no pick and no composite ----
+
+
+def test_a_selection_with_an_empty_barrier_has_no_pick_for_it_and_is_evaluated_without_it():
+    from gpin.measures import evaluated_ids, select_on_train, selection_composites
+    from gpin.techniques import build_registry
+
+    prereg = load_prereg()
+    windows = {"ko": {tid: {} for tid in T6_KO_ES}, "ki": _t6_windows(T6_KI_ES)}
+    partial = select_on_train(prereg, windows, _t6_costs(), allow_empty=True)
+    # no composite can be built, so the registry is built without them rather than with an invented member
+    assert selection_composites(partial) is None
+    assert not {"sop_futures", "sop_overlay"} & set(build_registry(prereg, selection_composites(partial)))
+    assert evaluated_ids(prereg, partial) == [
+        "base", "base_noclip", "ki_shift@-0.02", "ko_wrong", "ki_wrong", "secant@0.03", "ki_cap@1.0", "mo_ki@2,payoff",
+        "band@0.02", "band@0.05"]
+    full = _t6_selection()
+    assert selection_composites(full) == full["composites"] and len(evaluated_ids(prereg, full)) == 20
+    # a block that names only one of the two composites is not usable either (the registry wants both or none)
+    assert selection_composites({"composites": {"sop_futures": full["composites"]["sop_futures"]}}) is None
+    # a selection that is not partial never has a row without a pick
+    broken = json.loads(json.dumps(full))
+    broken["picks"]["ko"]["freeze"]["id"] = None
+    with pytest.raises(ValidationError):
+        evaluated_ids(prereg, broken)
+
+
+QUICK_STATES = gpin.OUTPUT_DIR / "states_quick"
+
+
+@pytest.mark.skipif(not (QUICK_STATES.is_dir() and gpin.BOARD_PATH.exists() and gpin.CHAIN_PATH.exists()),
+                    reason="the quick states, the board or the chain are absent")
+def test_the_train_slice_on_the_quick_states_records_no_ko_pick_and_no_composite(stage4, tmp_path):
+    """``states_quick`` holds three 31-day notes: one seasoned approach, no KO event. The training slice of such a
+    smoke run must not record a KO grid point as if it had been picked, nor composites built on one."""
+    from gpin.measures import evaluated_ids, selection_composites
+    from gpin.techniques import build_registry, composite_selection
+
+    out = tmp_path / "out"
+    rc = stage4.main(["--slice", "train", "--partial", "--mode", "close", "--workers", "1",
+                      "--states-dir", str(QUICK_STATES), "--out-dir", str(out)])
+    assert rc == 0
+    sel = json.loads((out / "selection.json").read_text())
+    assert (sel["partial"], sel["empty"], sel["until"]) == (True, ["ko"], "2025-06-30")
+    assert sel["events"]["ko"]["n"] == 0 and sel["events"]["ki"]["n"] == 1
+    assert {row: p["id"] for row, p in sel["picks"]["ko"].items()} == dict.fromkeys(sel["rows"]["ko"])
+    assert all(p["id"] in p["grid"] and p["es10"] is not None for p in sel["picks"]["ki"].values())
+    assert sel["composites"] == {} and composite_selection(out / "selection.json") == {}
+    assert selection_composites(sel) is None
+    prereg = load_prereg()
+    manifest = json.loads((out / "runs" / "train" / "manifest.json").read_text())
+    assert manifest["techniques"] == list(build_registry(prereg)) and len(manifest["techniques"]) == 31
+    ids = evaluated_ids(prereg, sel)
+    assert not [tid for tid in ids if tid.split("@")[0] in sel["rows"]["ko"] and tid.split("@")[0] != "secant"]
+    assert "sop_futures" not in ids and "sop_overlay" not in ids and {"base", "ki_wrong", "band@0.05"} <= set(ids)
+    tables = json.loads((out / "runs" / "train" / "tables.json").read_text())
+    assert tables["tables"]["close"]["ko"]["n_eligible"] == 0 and tables["tables"]["close"]["ki"]["n_eligible"] == 4
+    assert max(re.findall(r"\d{4}-\d{2}-\d{2}", (out / "runs" / "train" / "ki75__2024-02-29.json").read_text())) < "2025-07-01"
