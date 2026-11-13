@@ -138,3 +138,66 @@ def test_one_path_set_is_one_batch_without_standard_errors():
     stats = _analyze(_discrete_ki_snowball())
     assert stats.standard_errors is None
     assert stats.unavailable["standard_errors"] == "undefined: single batch"
+
+
+def _tie_at_valuation_snowball():
+    """A knock-out observed at valuation (first barrier 60) while the spot (70) is already through the continuous
+    KI barrier (75): both decided at the valuation instant."""
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0,
+        barrier_config=BarrierConfig(ko_barrier=[60.0, 103.0, 103.0, 103.0, 103.0], ko_rate=0.15,
+                                     ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_dates=[0.0, 0.25, 0.5, 0.75, 1.0], ki_barrier=75.0,
+                                     ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=True),
+    )
+
+
+def _spot(env: PricingEnvironment, spot: float) -> PricingEnvironment:
+    return PricingEnvironment(spot_quote=SpotQuote(spot=spot), vol_surface=env.vol_surface,
+                              rate_curve=env.rate_curve, div_yield=env.div_yield,
+                              valuation_date=env.valuation_date)
+
+
+def test_a_knock_out_at_valuation_wins_over_a_continuous_breach_there():
+    """At the valuation instant the knock-out wins, as in the MC engine (``_knock_out_first``): no step precedes
+    it, so the breach is not a knock-in before the knock-out (T22; the analyzer had the knock-in win there)."""
+    env = _spot(_env(), 70.0)
+    stats = _analyze(_tie_at_valuation_snowball(), env)
+    mc = SnowballMCEngine(params=PARAMS).calculate_event_stats(_tie_at_valuation_snowball(), env)
+    assert stats.observations.probability[0] == 1.0 == mc.observations.probability[0]
+    assert stats.require("knock_in.probability") == 0.0 == mc.knock_in.probability
+    assert stats.require("knock_in.expected_loss") == 0.0
+
+
+def test_a_knock_out_at_valuation_alone_is_reported():
+    """A KO record at t = 0 (it was raising on KO profile times <= 0 before T9/T22) knocks out every path now."""
+    from test_asset.equity.engine_mc import mc_price_path_routes as routes
+
+    stats = _analyze(routes.snowball("discrete", ko_dates=(0.0, *routes.KO_DATES)), _spot(_env(), 110.0))
+    assert stats.observations.times[0] == 0.0 and stats.observations.probability[0] == 1.0
+    assert stats.require("knock_in.probability") == 0.0 and stats.expected_lifetime == 0.0
+
+
+@pytest.mark.parametrize("make", [_discrete_ki_snowball, _continuous_ki_snowball])
+def test_a_carried_knock_in_is_a_knock_in_at_zero(make):
+    """A note already knocked in (``_otc_lifecycle_knocked_in``) is knocked in on every path at time 0 (DESIGN §4.5),
+    as the MC engine reports it; the analyzer used to re-simulate the knock-in from today."""
+    product = make()
+    product._otc_lifecycle_knocked_in = True
+    stats = _analyze(product)
+    mc_product = make()
+    mc_product._otc_lifecycle_knocked_in = True
+    mc = SnowballMCEngine(params=PARAMS).calculate_event_stats(mc_product, _env())
+    assert stats.require("knock_in.probability") == 1.0 == mc.knock_in.probability
+    assert stats.require("knock_in.expected_time") == 0.0
+    table = stats.require("ki_table")
+    np.testing.assert_array_equal(table.times, [0.0])
+    np.testing.assert_array_equal(table.probability, [1.0])
+    assert stats.maturity.probability == 0.0
+    assert stats.ki_settlement.probability == pytest.approx(1.0 - float(np.sum(stats.observations.probability)),
+                                                            abs=1e-15)
+    assert stats.ki_settlement.probability == pytest.approx(mc.ki_settlement.probability, abs=0.05)

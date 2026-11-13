@@ -148,3 +148,65 @@ def test_an_engine_without_statistics_falls_back_to_the_path_analyzer(tmp_path, 
     content = _report_text(tmp_path, monkeypatch, _NoStatsEngine())
     assert "statistics: hand_built" in content
     assert "P(KI before any KO): 0.050000" in content
+
+
+def _with_errors(stats, errors=None, reason=None):
+    from dataclasses import replace
+
+    unavailable = dict(stats.unavailable)
+    if reason is not None:
+        unavailable["standard_errors"] = reason
+    return replace(stats, standard_errors=errors, unavailable=unavailable)
+
+
+def test_report_shows_the_mc_pv_standard_error(tmp_path, monkeypatch):
+    """An MC producer's batch-mean standard error of the PV is reported (the base report's "MC PV ± SE" line, lost
+    in T8, restored from ``standard_errors``; T22)."""
+    stats = _with_errors(_stats(), errors={"total_discounted_cash": 0.012345, "knock_in.probability": 0.001})
+    content = _report_text(tmp_path, monkeypatch, _StatsEngine(stats))
+    assert "PV standard error (MC, independent batch means): 0.012345" in content
+
+
+def test_report_states_why_an_mc_standard_error_is_missing(tmp_path, monkeypatch):
+    stats = _with_errors(_stats(), reason="undefined: single batch")
+    content = _report_text(tmp_path, monkeypatch, _StatsEngine(stats))
+    assert "PV standard error: unavailable (undefined: single batch)" in content
+
+
+def test_a_deterministic_engine_reports_no_standard_error_line(tmp_path, monkeypatch):
+    content = _report_text(tmp_path, monkeypatch, _StatsEngine(_stats()))
+    assert "PV standard error" not in content
+
+
+def _migrated(name):
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+    from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+    from quantark.asset.equity.engine.quad import SnowballQuadEngineV2
+    from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+    from quantark.util.enum.engine_enums import MonteCarloMethod
+
+    from test_asset.equity.engine_mc import mc_price_path_routes as routes
+
+    return {
+        "pde_1d": SnowballPDESolver, "quad_v1": SnowballQuadEngine, "quad_v2": SnowballQuadEngineV2,
+        "mc_rqmc": lambda: SnowballMCEngine(params=routes.rqmc_fixed(), method=MonteCarloMethod.RANDOMIZED_QUASI),
+    }[name]()
+
+
+@pytest.mark.parametrize("name", ["pde_1d", "quad_v1", "quad_v2", "mc_rqmc"])
+def test_a_migrated_engine_shows_every_statistic(name):
+    """Final state (T8 note): a migrated producer's statistics reach the report's event block with nothing
+    unavailable and no NaN -- every reported statistic, the reconciliation and the KO table with its cash; an MC
+    producer with independent batches adds its PV standard error."""
+    stats = _migrated(name).calculate_event_stats(_product(), _env())
+    assert report._unavailable_text(stats) == ""
+    for path in ("knock_in.probability", "ki_settlement.probability"):
+        assert "unavailable" not in report._statistic_text(stats, path)
+    assert "unavailable" not in report._reconciliation_text(stats)
+    table = report._render_event_stats_table(stats)
+    assert not table.isna().any().any(), table
+    error_line = report._standard_error_text(stats)
+    if name.startswith("mc"):
+        assert error_line.startswith("- PV standard error (MC, independent batch means): ")
+    else:
+        assert error_line == ""

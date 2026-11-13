@@ -88,8 +88,10 @@ class AutocallablePathAnalyzer:
 
         Every path ends in exactly one outcome: a knock-out at its first valid KO observation, the maturity
         row (never knocked out, never knocked in) or the knock-in settlement row (knocked in, never knocked
-        out). A knock-in counts only before a knock-out (DESIGN §4.5); on one grid node the knock-out wins
-        unless ``disable_ko_after_ki`` invalidated that knock-out.
+        out). A knock-in counts only before a knock-out (DESIGN §4.5): a discrete knock-in on the knock-out's
+        node loses to it; a continuous crossing inside the step that a knock-out observation closes precedes it,
+        except at valuation, where the knock-out decided there wins (as in the MC engine). A carried knock-in
+        (``_otc_lifecycle_knocked_in``) is a knock-in at time 0 on every path.
 
         Notes:
         - Uses the SnowballMCEngine's time grid builder and barrier checks.
@@ -127,7 +129,11 @@ class AutocallablePathAnalyzer:
         ki_continuous = False
         ki_triggered = np.zeros(len(paths), dtype=bool)
         first_ki_idx = np.full(len(paths), -1, dtype=int)
-        if product.has_ki_barrier:
+        # a note already knocked in (carried lifecycle state): knocked in on every path at time 0 (DESIGN §4.5)
+        carried = bool(product.has_ki_barrier and getattr(product, "_otc_lifecycle_knocked_in", False))
+        if carried:
+            ki_triggered[:] = True
+        elif product.has_ki_barrier:
             ki_continuous = (
                 product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
                 or product.barrier_config.ki_continuous
@@ -153,7 +159,9 @@ class AutocallablePathAnalyzer:
                     paths, ki_indices, ki_barriers, product.is_reverse
                 )
 
-        if product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
+        if carried and product.barrier_config.disable_ko_after_ki:
+            ko_valid = np.zeros_like(ko_triggered)
+        elif product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
             ko_trigger_times = np.where(first_ko_idx >= 0, ko_times[first_ko_idx], np.inf)
             if len(ki_indices) > 0:
                 ki_obs_times = all_times[ki_indices]
@@ -174,11 +182,16 @@ class AutocallablePathAnalyzer:
         n_paths = len(paths)
         never = len(all_times)
         ko_node = np.where(is_ko, ko_indices[np.maximum(first_ko_idx, 0)], never)
-        if ki_continuous:
-            # a crossing inside step k (or a breach at its end) lies in (t_{k-1}, t_k]: node k; at valuation: -1
+        if carried:
+            ki_node = np.full(n_paths, -1, dtype=int)
+            ki_first = np.ones(n_paths, dtype=bool)
+        elif ki_continuous:
+            # a crossing inside step k (or a breach at its end) lies in (t_{k-1}, t_k]: node k, before a knock-out
+            # observed at that step's end; at valuation (-1) no step precedes and the knock-out decided there wins,
+            # as in the MC engine's ``_knock_out_first``
             ki_node = np.where(ki_triggered, first_ki_idx, never)
             ki_node[ki_triggered & _ki_level_breached(paths[:, 0], ki_barrier, product.is_reverse)] = -1
-            ki_first = ki_triggered & (ki_node <= ko_node)
+            ki_first = ki_triggered & ((ki_node < ko_node) | ((ki_node == ko_node) & (ki_node >= 0)))
         elif len(ki_indices) > 0:
             ki_node = np.where(ki_triggered, ki_indices[np.maximum(first_ki_idx, 0)], never)
             ki_first = ki_triggered & (ki_node < ko_node)        # a knock-out on the same node wins
@@ -235,6 +248,10 @@ class AutocallablePathAnalyzer:
         expected_time: Optional[float] = None
         if not product.has_ki_barrier:
             ki_table = KnockInTable.empty()
+        elif carried:
+            ki_table = KnockInTable(times=[0.0], payment_times=[0.0], probability=[1.0], survival=[0.0],
+                                    interpolated=[False])
+            expected_time = 0.0
         elif ki_continuous:
             ki_table = None
             unavailable["ki_table"] = CONTINUOUS_KI_REASON

@@ -408,6 +408,16 @@ def _unavailable_text(stats: EventStatistics) -> str:
     return f"- Unavailable statistics: {'; '.join(flagged)}\n" if flagged else ""
 
 
+def _standard_error_text(stats: EventStatistics) -> str:
+    """The PV's MC standard error from independent batch means (the ``total_discounted_cash`` estimate, which is the
+    MC ``pv`` to round-off), the reason when an MC producer has none, "" for a deterministic engine."""
+    errors = stats.standard_errors
+    if errors is not None and "total_discounted_cash" in errors:
+        return f"- PV standard error (MC, independent batch means): {float(errors['total_discounted_cash']):.6f}\n"
+    reason = stats.unavailable.get("standard_errors")
+    return f"- PV standard error: unavailable ({reason})\n" if reason is not None else ""
+
+
 def _ko_cash(stats: EventStatistics) -> np.ndarray:
     """Expected discounted KO cash per observation row; NaN where the producer flags it unavailable."""
     cash, _reason = _statistic(stats, "observations.discounted_cash")
@@ -1979,6 +1989,7 @@ def generate_snowball_risk_report(
     # pv is read directly: it is the engine's price() (never listed in unavailable)
     event_block = (
         f"- PV (event statistics; statistics: {event_stats.provenance.statistics_model}): {event_stats.pv:.6f}\n"
+        f"{_standard_error_text(event_stats)}"
         f"- P(KI before any KO): {prob_ki_text}\n"
         f"- P(matured knocked in): {prob_ki_settle_text}\n"
         f"- PV reconciliation error (PV - sum(expected discounted cashflows)): {_reconciliation_text(event_stats)}\n"
