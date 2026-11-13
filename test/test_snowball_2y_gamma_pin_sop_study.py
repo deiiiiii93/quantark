@@ -7085,3 +7085,165 @@ def test_cp4_the_limit_days_table_states_what_each_clock_books(t6_files, t6_trai
     body = re.search(r'<table data-table="limit-days".*?</table>', html, flags=re.S).group(0)
     row = re.search(r"<tr><td>2025-07-08</td>.*?</tr>", body).group(0)
     assert row.endswith("<td>–</td><td>–</td></tr>")                        # no event count on a day outside the slice
+
+
+# ---------------------------------------------------------------------------
+# T10 — the README's headline numbers are the payload's (AC16)
+# ---------------------------------------------------------------------------
+
+README_MD = STUDY_DIR / "README.md"
+BACKTEST_JSON = STUDY_DIR / "results" / "backtest.json"
+SELECTION_JSON = STUDY_DIR / "results" / "selection.json"
+
+
+def _readme_table(marker):
+    """Header and body cells of the markdown table that follows ``<!-- table: marker -->`` in the README."""
+    lines = README_MD.read_text(encoding="utf-8").splitlines()
+    i = lines.index(f"<!-- table: {marker} -->")
+    rows = []
+    for line in lines[i + 1:]:
+        if line.startswith("|"):
+            rows.append([c.strip().strip("`") for c in line.strip().strip("|").split("|")])
+        elif rows:
+            break
+    assert len(rows) >= 3 and set(rows[1][0]) <= set("-: "), marker
+    return rows[0], rows[2:]
+
+
+def _fmt(v, d=1, sign=False):
+    return "n/a" if v is None else (f"{v:+.{d}f}" if sign else f"{v:.{d}f}")
+
+
+def _passfail(v):
+    return "n/a" if v is None else ("pass" if v else "fail")
+
+
+@pytest.fixture(scope="module")
+def backtest_payload():
+    if not BACKTEST_JSON.exists():
+        pytest.skip("results/backtest.json is written by the test-slice run")
+    return json.loads(BACKTEST_JSON.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("kind", ["ko", "ki"])
+def test_readme_verdict_tables_are_the_payload_rows_under_the_close_clock(backtest_payload, kind):
+    table = backtest_payload["tables"]["close"][kind]
+    header, body = _readme_table(f"verdict close {kind}")
+    assert header[:3] == ["Technique", "Role", "ES10"] and header[-1] == "Verdict"
+    expected = []
+    for tid in table["order"]:
+        r = table["rows"].get(tid)
+        if r is None:
+            continue
+        verdict = ("not eligible" if not r["eligible"] else "WIN, robust" if r["win"] and r["robust"]
+                   else "WIN, not robust" if r["win"] else "no win")
+        expected.append([tid, "eligible" if r["eligible"] else r["role"], _fmt(r["es10"]),
+                         _fmt(r["es10"] - r["es10_base"], sign=True), _fmt(r["worst"]), _fmt(r["mean"]), _fmt(r["p"], 3),
+                         _fmt(r["p_holm"], 3), _fmt(r["std_ratio"], 2), _fmt(r["terminal_diff_bp"], sign=True),
+                         _passfail(r["tail_pass"]), _passfail(r["life_pass"]), verdict])
+    assert body == expected
+    # the section heading states the sample of the table
+    text = README_MD.read_text(encoding="utf-8")
+    book, unit = ("`ki75`", "events") if kind == "ko" else ("`seas6`", "approaches")
+    assert f"{book}, {table['n_events']} {unit} in {table['n_weeks']} weeks" in text
+
+
+def test_readme_clock_sensitivity_gamma_and_overlay_tables_are_the_payload(backtest_payload):
+    p = backtest_payload
+    shown = ("base", "base_noclip", "ko_wrong", "ki_wrong")
+    expected = []
+    for kind, label in (("ko", "KO"), ("ki", "KI")):
+        first = p["tables"]["close"][kind]
+        for tid in first["order"]:
+            r0 = first["rows"].get(tid)
+            if r0 is None or not (r0["eligible"] or tid in shown):
+                continue
+            cells = [label, tid]
+            for clock in ("close", "twap", "next_open"):
+                r = p["tables"][clock][kind]["rows"][tid]
+                cells += [_fmt(r["es10"]), _fmt(r["es10"] - r["es10_base"], sign=True)]
+            expected.append(cells)
+    assert _readme_table("clocks")[1] == expected
+
+    expected = []
+    for kind, label in (("ko", "KO"), ("ki", "KI")):
+        first = p["tables"]["close"][kind]
+        for tid in first["order"]:
+            r0 = first["rows"].get(tid)
+            if r0 is None or not (r0["eligible"] or tid == "base"):
+                continue
+            expected.append([label, tid, _fmt(r0["es10"])] + [
+                _fmt(p["sensitivities"][cfg]["close"][kind]["rows"][tid]["es10"]) for cfg in ("desk100_cost0.2", "desk500_cost1")])
+    assert _readme_table("sensitivities")[1] == expected
+
+    ko, carry = p["tables"]["close"]["ko"], p["gamma_carry"]["close"]
+    expected = [[tid, _fmt(carry[tid]["mean_net_gamma_1pct_bp"]), _fmt(carry[tid]["mean_hedge_into_fixing"], 2),
+                 _fmt(carry[tid]["mean_hedge_max"], 2), _fmt(carry[tid]["max_hedge_max"], 2)]
+                for tid in ko["order"] if tid in carry and (ko["rows"][tid]["eligible"] or tid == "base")]
+    assert _readme_table("gamma")[1] == expected
+
+    expected = []
+    for tid, r in p["extras"]["overlay"]["close"].items():
+        f = r["flags"]
+        expected.append([tid, str(r["overlay_days"]), _fmt(r["phi_mean"], 3), str(r["phi_lt1_days"]), _fmt(r["phi_min"], 3),
+                         str(f.get("volume_cut", 0)), str(f.get("series_limit", 0)), str(f.get("overlay_no_strike", 0)),
+                         str(f.get("overlay_not_openable", 0))])
+    assert _readme_table("overlay")[1] == expected
+
+
+def test_readme_training_table_is_the_committed_selection_and_the_prose_follows_the_payload(backtest_payload):
+    if not SELECTION_JSON.exists():
+        pytest.skip("results/selection.json is written by the training-slice run")
+    sel = json.loads(SELECTION_JSON.read_text(encoding="utf-8"))
+    expected = []
+    for kind, label in (("ko", "KO"), ("ki", "KI")):
+        base = sel["base"][kind]["es10"]
+        for row in sel["rows"][kind]:
+            pick = sel["picks"][kind][row]
+            expected.append([label, row, pick["id"], _fmt(pick["es10"]), _fmt(pick["es10"] - base, sign=True),
+                             "yes" if pick["beats_base"] else "no"])
+    assert _readme_table("training")[1] == expected
+    text = README_MD.read_text(encoding="utf-8")
+    assert backtest_payload["selection"]["composites"] == sel["composites"]
+    for member in [m for block in sel["composites"].values() for m in block.values()]:
+        assert f"`{member}`" in text
+    # the answer paragraph is the payload's verdict: who passes under the deciding clock, and whether it is robust
+    close = backtest_payload["tables"]["close"]
+    wins = {kind: close[kind]["wins"] for kind in ("ko", "ki")}
+    robust = [t for kind in ("ko", "ki") for t in wins[kind] if close[kind]["rows"][t]["robust"]]
+    assert wins == {"ko": ["mo_ko@2,payoff"], "ki": []} and robust == []
+    assert "**No technique robustly beats the plain delta hedge.**" in text
+    eligible = close["ko"]["n_eligible"] + close["ki"]["n_eligible"]
+    assert eligible == 16 and "one row out of sixteen" in text
+    for kind, tid in (("ko", "base"), ("ko", "ko_shift@0.02"), ("ko", "mo_ko@2,payoff"), ("ki", "base"),
+                      ("ki", "ki_shift@-0.01"), ("ki", "ki_cap@1.25"), ("ki", "secant@0.05"), ("ki", "base_noclip")):
+        row = close[kind]["rows"][tid]
+        assert f"{row['es10']:,.1f}" in text, (kind, tid)          # each ES10 the answer quotes
+    # the other figures the answer quotes: worst events, p values, the other clocks, the mean of the directional row
+    tables = backtest_payload["tables"]
+    ko, ki = close["ko"]["rows"], close["ki"]["rows"]
+    shift, overlay = ko["ko_shift@0.02"], ko["mo_ko@2,payoff"]
+    late, late_base = tables["next_open"]["ko"]["rows"]["mo_ko@2,payoff"], tables["next_open"]["ko"]["rows"]["base"]
+    avg = tables["twap"]["ko"]["rows"]["mo_ko@2,payoff"]
+    quoted = [
+        f"worst event {ko['base']['worst']:,.1f} bp",
+        f"ES10 {shift['es10']:,.1f} bp ({shift['es10'] - shift['es10_base']:+.1f}), worst {shift['worst']:,.1f} bp",
+        f"p = {shift['p']:.3f}",
+        f"ES10 {overlay['es10']:,.1f} bp\n    ({overlay['es10'] - overlay['es10_base']:+.1f}), p = {overlay['p']:.3f} "
+        f"(Holm {overlay['p_holm']:.3f}), whole-life std ratio {overlay['std_ratio']:.2f}",
+        f"`twap` ({avg['es10'] - avg['es10_base']:+.1f},\n    p = {avg['p']:.3f})",
+        f"(ES10 {late['es10']:,.1f} against\n    {late_base['es10']:,.1f}, worst {late['worst']:,.1f} against {late_base['worst']:,.1f})",
+        f"({ki['ki_shift@-0.01']['es10']:,.1f}, a loss of\n    {ki['base']['es10'] - ki['ki_shift@-0.01']['es10']:.1f} bp)",
+        f"({ki['ki_cap@1.25']['mean']:+.1f} against {ki['base']['mean']:+.1f})",
+        f"Its whole-life std ratio is {ki['ki_cap@1.25']['std_ratio']:.2f}",
+        f"ES10 {ki['secant@0.05']['es10']:,.1f} ({ki['secant@0.05']['es10'] - ki['base']['es10']:+.1f}, "
+        f"p = {ki['secant@0.05']['p']:.3f})",
+        f"`ki_wrong` is at {ki['ki_wrong']['es10']:,.1f}",
+        f"ES10 is {ki['base_noclip']['es10']:,.1f} bp and its worst event {ki['base_noclip']['worst']:,.1f} bp",
+        f"binds on {ki['base']['clips']} days",
+    ]
+    for phrase in quoted:
+        assert phrase in text, phrase
+    # seller view (D13) and the deviation statement
+    assert "holder" not in text.lower() and "seller" in text
+    assert "None after unblinding" in text

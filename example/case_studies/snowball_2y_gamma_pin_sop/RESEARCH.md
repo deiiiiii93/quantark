@@ -348,7 +348,79 @@ Corrections to sections 1-8 after the pre-registration commit:
   lifted to 85% and 90% were built and measured before this probe; they are removed. Nothing in
   the technique grid, windows or thresholds changed.
 
-Results per hypothesis are added here when the backtest has run.
+- 2026-11-13 and 2026-11-14, before any test-slice number existed. Changes that came out of
+  code review of the ledger and the techniques, and of the training figures:
+  - an overlay is refused when the barrier is more than one listed strike step beyond the
+    listing (on 2024-09-30 and 2024-10-08 the highest listed MO strike was 121 to 403 points
+    below the KO barriers; a spread built there pays out about 6% early and hedges nothing);
+  - on a day an overlay is refused while legs are held, the coverage of the last sized day
+    is carried, and a closed overlay resets it to zero;
+  - the flatten at the data end and at the training cut-off costs nothing (it is a mark,
+    not a trade);
+  - the hedge-ratio limit [-0.25, 3.0] binds every futures target, including the hedge of
+    option legs left after a note has ended. The code had skipped it there, which was worth
+    25 bp of training ES10 to the KO overlay. The training selection was re-run after this
+    fix; the picks did not change;
+  - the guard that lets the test slice run checks four hashes (pre-registration, events,
+    ledger-side code, recorded inputs) instead of three.
+  The pre-registration's grid, windows, thresholds and verdict rule were not touched.
+
+- 2026-11-14, from the training figures, before unblinding. Section 3.1 and the technique
+  registry call a lowered KI barrier the "over-hedge direction". That is right for
+  reserving: the lowered barrier shows a reserve (on the first day of a seasoned note's KI
+  window, 307 windows: mean +266 bp at -1% and +545 bp at -2%; report section 9). As hedging
+  advice against a gap down it is the wrong way. The hedge of the lowered-barrier model is
+  larger near the barrier (on the seasoned note booked 2025-03-10, at the close of
+  2025-03-24: 326% of notional against 315% for the true note and 304% for the raised-barrier
+  control), so the seller carries more long futures into the knock-in and sells them after
+  the gap. The
+  raised-barrier control `ki_wrong` had the better training tail (ES10 -821 bp against
+  -1,001 bp). The technique list was left as registered; the reading is corrected here.
+
+What the backtest confirmed or rejected. Test slice (events from 2025-07-01), close clock,
+seller's P&L in bp of notional; KO on the 2Y product (43 fixings in 24 weeks), KI on the
+seasoned book (79 approaches in 24 weeks). The tables are in `README.md` and
+`results/report.html`.
+
+- **Verdict.** One of sixteen eligible rows passes the pre-registered rule: the MO call
+  spread `mo_ko@2,payoff` at KO (ES10 -401.0 against -424.7, p = 0.056, Holm p = 0.557). It
+  does not pass under `twap` or `next_open` and not at 1.0 index point of option cost. No KI
+  row passes. About one pass in ten rows is expected by chance, so the study reports no
+  established technique.
+- **H1 rejected.** `surv_hold@1` is 16.8 bp worse than the baseline on ES10 and
+  `ko_shift@0.02` is 34.2 bp better. Holding the survived-branch delta is an intraday rule:
+  at a close-only clock the seller who cuts the hedge on the eve of the fixing gives up the
+  futures gain that pays for a redemption.
+- **H2 supported for the futures rules.** The shift, spread and bend improve the tail in
+  point estimate and raise the whole-life daily std by 13%, 7% and 7%. That is why none of
+  them passes. The overlay leaves it unchanged (0.99).
+- **H3 not supported on the point estimate.** The overlay gains 23.7 bp of ES10, the 2%
+  shift 34.2 bp. It is partly unfilled at a 500 mio desk, as expected: mean fill 75%. The
+  split by the gap between series expiry and observation was not computed.
+- **H4 not supported.** On training `ki_cap@1.25` and `ki_shift@-0.01` moved the tail in
+  opposite directions (+82.4 and -98.2 bp). On test both are worse (-343.9 and -89.6).
+  `ki_cap` is a bet on a knock-in: mean event P&L +1,009 bp on the 43 approaches that knocked
+  in and -451 bp on the 36 that did not.
+- **H5 supported at KO, rejected at KI.** `ko_wrong` is 65.3 bp worse. `ki_wrong` is 65.0 bp
+  better, for the reason given in the correction above.
+- **H6 rejected for the overlays.** The shift family leads the futures rules under all three
+  clocks (+34.2, +25.6 and +62.1 bp for `ko_shift@0.02`). The KO overlay goes from +23.7
+  (`close`) to +3.3 (`twap`) to -31.0 (`next_open`), where its worst event is -912.9 bp
+  against -633.1 for the baseline. The KI order changes with the clock.
+- **H7 supported for the 2Y product.** `gap_KO` is positive on all 508 KO-window
+  observations of `ki75`. On the seasoned book 107 of 194 are positive: a knocked-in note
+  recovering to its KO level gains for the seller on survival, not on redemption.
+- **H8 broadly supported, with tiny effects.** On the 2Y product's own 26 test approaches
+  (5 weeks) the rows keep the seasoned book's order, every one within 10 bp of the baseline,
+  and `ki_cap` does nothing because the knocked-in delta is not a binding cap there.
+- **Not hypothesised, and the largest KI effect.** The futures position limit: without the
+  cap at 3.0 x notional the baseline's KI ES10 is -587.0 bp against -390.7, and its worst
+  event -1,357.0 against -468.8.
+
+The draft SOP of section 5 is superseded by the SOP in `README.md`. Rows that changed: the
+T-1 rule ("hold `delta_surv`") is withdrawn for a desk that trades at the close; the KO
+window default is the baseline, with the 2% barrier shift as an option; the KI zone rule is
+the limited baseline, with a lowered barrier kept for the reserve only.
 
 ## References
 
