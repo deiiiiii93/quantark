@@ -151,3 +151,20 @@ def test_an_unavailable_ki_table_records_no_ki_rows_and_invents_none_at_maturity
 def test_a_flagged_ki_settlement_probability_is_nan():
     daily, _rows = _record(_stats(unavailable=("ki_settlement.probability",)))
     assert math.isnan(daily["ki_probability_to_maturity"])
+
+
+@pytest.mark.parametrize("run", ["scalar_bsm", "localvol", "book"])
+def test_banked_replay_frames_carry_every_statistic(run):
+    """Final state (T8 note, T22): the replay goldens -- reproduced live by ``test/golden/replay`` -- record every
+    statistic of their migrated engines: no NaN in the daily summary, none on a KO row; a KI row leaves blank only the
+    two columns a KI row never has (conditional probability, cash)."""
+    data = Path(__file__).parents[1] / "golden" / "replay_golden" / "data"
+    summary = pd.read_csv(data / f"{run}_daily_event_summary.csv")
+    assert len(summary) > 0 and not summary.isna().any().any(), summary[summary.isna().any(axis=1)]
+    events = pd.read_csv(data / f"{run}_event_probabilities.csv")
+    ko = events[events["event_type"] != "KI"]
+    ki = events[events["event_type"] == "KI"]
+    assert len(ko) > 0 and len(ki) > 0
+    assert not ko.isna().any().any(), ko[ko.isna().any(axis=1)]
+    assert not ki.drop(columns=["conditional_probability", "expected_discounted_cashflow"]).isna().any().any()
+    assert ki["conditional_probability"].isna().all() and ki["expected_discounted_cashflow"].isna().all()
