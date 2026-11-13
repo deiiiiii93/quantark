@@ -18,49 +18,68 @@ def first_hit(spot, barrier, maturity, rate=.025, div=.03, vol=.22, reverse=Fals
     return float(ndtr((-d-m)/sd) + np.exp(-2*m*d/variance)*ndtr((m-d)/sd))
 
 
+def _unreachable_ko(family, spec):
+    """The contract with every knock-out out of reach: P(KI before any KO) is the barrier's first-passage probability."""
+    spec = dict(spec)
+    if family == 'ko_reset':
+        spec.update(pre_ko_barrier=1e9, post_ko_barrier=1e9)
+    else:
+        spec['ko_barrier'] = 1e9
+    return spec
+
+
+#: the forward pass carries the not-knocked-in density through the recursion's own grid between observations; its
+#: first-passage total against the closed form (measured <= 3e-12 here)
+FIRST_PASSAGE_TOL = 1e-10
+
+
 @pytest.mark.parametrize('family', CASES)
 @pytest.mark.parametrize('carried', [False, True])
-def test_v2_continuous_ki_ever_matches_independent_first_passage(family, carried):
+def test_v2_continuous_knock_in_matches_independent_first_passage(family, carried):
+    """Unified event statistics (T16, DESIGN 4.5): P(KI before any KO) from the forward adjoint pass; with every
+    knock-out out of reach it is the closed-form first-passage probability over the monitoring window."""
     factory, spec, _, cls = CASES[family]
     spec = dict(spec, ki_monitoring='continuous')
     if family == 'ko_reset':
         spec['ki_continuous'] = True
-    product = factory(spec)
+    product = factory(_unreachable_ko(family, spec))
     product._otc_lifecycle_knocked_in = carried
     engine, market = cls(), env()
     stats = engine.calculate_event_stats(product, market)
     horizon = spec['maturity_pre'] if family == 'ko_reset' else spec['maturity']
     expected = 1. if carried else first_hit(100., spec['ki_barrier'], horizon)
-    assert stats.ki_ever_probability == pytest.approx(expected, abs=5e-13)
-    assert engine._prepared.diagnostics['ki_monitoring_method'] == 'analytic_time_change'
-    assert stats.ki_ever_probability >= stats.ki_survive_knocked_in_probability
+    assert stats.knock_in.probability == pytest.approx(expected, abs=FIRST_PASSAGE_TOL)
+    assert float(stats.ki_table.probability.sum()) == pytest.approx(stats.knock_in.probability, abs=1e-14)
+    assert stats.knock_in.probability >= stats.ki_settlement.probability - 1e-12
 
 
 @pytest.mark.parametrize('family', CASES)
-def test_v2_continuous_monitoring_is_ko_independent_in_spot_batch(family):
+def test_v2_continuous_knock_in_at_spots_is_the_per_spot_first_passage(family):
+    """``calculate_event_stats_at_spots`` runs the forward pass from each spot of the one context."""
     factory, spec, _, cls = CASES[family]
     spec = dict(spec, ki_monitoring='continuous')
     if family == 'ko_reset':
-        spec.update(ki_continuous=True, pre_ko_barrier=80., post_ko_barrier=80.)
-    else:
-        spec['ko_barrier'] = 80.
-    product, market = factory(spec), env()
+        spec['ki_continuous'] = True
+    product, market = factory(_unreachable_ko(family, spec)), env()
     spots = [90., 100., 110.]
     stats = cls().calculate_event_stats_at_spots(product, market, spots)
     horizon = spec['maturity_pre'] if family == 'ko_reset' else spec['maturity']
     for spot, s in zip(spots, stats):
-        assert s.ki_ever_probability == pytest.approx(first_hit(spot, spec['ki_barrier'], horizon), abs=5e-13)
-        assert s.ki_survive_knocked_in_probability <= s.ki_ever_probability + 1e-12
+        assert s.knock_in.probability == pytest.approx(first_hit(spot, spec['ki_barrier'], horizon),
+                                                       abs=FIRST_PASSAGE_TOL)
+        assert s.ki_settlement.probability <= s.knock_in.probability + 1e-12
 
 
-def test_price_context_has_no_monitoring_companion():
+def test_price_context_has_no_statistics_companion():
+    """The price context keeps no recursion log and no extra state; the statistics context adds channels only."""
     factory, spec, _, cls = CASES['phoenix_memory']
     p = factory(dict(spec, ki_monitoring='continuous'))
     engine = cls()
     engine.price(p, env())
-    assert engine._prepared._ki_monitor is None
+    assert engine._prepared._march is None
     price_states = engine._prepared.diagnostics['states']
     engine.calculate_event_stats(p, env())
+    assert engine._prepared._march is not None
     assert engine._prepared.diagnostics['states'] == price_states
 
 
@@ -81,15 +100,14 @@ def test_v2_piecewise_coefficients_support_continuous_monitoring(family):
         spec['ki_continuous'] = True
     engine, market = cls(), term_market()
     stats = engine.calculate_event_stats(factory(spec), market)
-    assert stats.ki_ever_probability is not None
-    assert stats.ki_survive_knocked_in_probability <= stats.ki_ever_probability <= 1.
-    assert engine._prepared.diagnostics['ki_monitoring_method'] == 'native_survival_recursion'
+    assert stats.knock_in.probability is not None and not stats.unavailable
+    assert stats.ki_settlement.probability <= stats.knock_in.probability <= 1.
     assert engine._prepared.diagnostics['continuous_model'] == 'piecewise_constant_exact'
     for time in (.12, .29):
         assert time in [pair[1] for pair in engine._prepared.diagnostics['canonical_times']]
     fine = cls(QuadV2Params(order=10, cells_per_sd=3.))
     reference = fine.calculate_event_stats(factory(spec), market)
-    assert stats.ki_ever_probability == pytest.approx(reference.ki_ever_probability, abs=2e-5)
+    assert stats.knock_in.probability == pytest.approx(reference.knock_in.probability, abs=2e-5)
 
 
 @pytest.mark.parametrize('params_cls_name', ['MCParams', 'PDEParams', 'QuadParams', 'QuadV2Params'])
@@ -149,18 +167,18 @@ def test_continuous_ki_monitoring_continues_after_valuation_ko(family):
     market = flat_env(date, spot=110.)
     _, _, v1, v2 = CASES[family]
     pde = {'snowball': SnowballPDESolver, 'phoenix': PhoenixPDESolver, 'ko_reset': KOResetSnowballPDESolver}[family]
-    stats = [cls().calculate_event_stats(product, market) for cls in (v1, v2)]
-    # PDE 1D (unified event statistics T12, DESIGN §4.5): a knock-out at valuation without a carried knock-in is
-    # no knock-in, so the PDE reports P(KI) = 0 and an empty knock-in table; the QUAD engines keep their legacy
-    # KO-independent monitor until they migrate (T16 / T17)
-    unified = pde().calculate_event_stats(product, market)
-    assert unified.knock_in.probability == 0. and unified.ki_table.size == 0
-    assert unified.ki_settlement.probability == 0. and unified.maturity.probability == 0.
-    assert float(unified.observations.probability.sum()) == 1.
-    expected = stats[-1].ki_ever_probability
-    assert 0 < expected < 1
+    stats = [cls().calculate_event_stats(product, market) for cls in (v1,)]
+    # PDE 1D (T12) and QUAD V2 (T16), DESIGN §4.5: a knock-out at valuation without a carried knock-in is no
+    # knock-in -- P(KI) = 0 and an empty knock-in table; QUAD V1 keeps its legacy KO-independent monitor until it
+    # migrates (T17)
+    for unified in (pde().calculate_event_stats(product, market), v2().calculate_event_stats(product, market)):
+        assert unified.knock_in.probability == 0. and unified.ki_table.size == 0
+        assert unified.ki_settlement.probability == 0. and unified.maturity.probability == 0.
+        assert float(unified.observations.probability.sum()) == 1.
+        assert unified.knock_in.expected_loss == 0.
     for result in stats:
-        assert result.ki_ever_probability == pytest.approx(expected, abs=1e-12)
+        expected = result.ki_ever_probability
+        assert 0 < expected < 1
         assert result.ki_survive_knocked_in_probability == 0.
         ko = result.pre_ko_probability_total + result.post_ko_probability_total if family == 'ko_reset' else result.ko_probability.sum()
         assert ko == 1.

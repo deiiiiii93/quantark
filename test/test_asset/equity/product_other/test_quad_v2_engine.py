@@ -323,15 +323,16 @@ def test_event_probabilities_and_independent_terminal_cashflow():
     stats = SnowballQuadEngineV2().calculate_event_stats(p, env)
     ko_prob = norm.cdf(-math.log(103 / 100) / 0.2)
     ki_prob = norm.cdf(math.log(75 / 100) / 0.2)
-    assert stats.ko_probability[0] == pytest.approx(ko_prob, abs=1e-13)
-    assert stats.ki_probability == pytest.approx(ki_prob, abs=1e-13)
-    assert stats.ki_ever_probability == pytest.approx(ki_prob, abs=1e-13)
-    assert stats.expected_discounted_ko_cashflow[0] == pytest.approx(
+    assert stats.observations.probability[0] == pytest.approx(ko_prob, abs=1e-13)
+    assert stats.ki_settlement.probability == pytest.approx(ki_prob, abs=1e-13)
+    # the knock-in at maturity is the only one (no knock-out can precede it): P(KI before KO) = KI settlement
+    assert stats.knock_in.probability == pytest.approx(ki_prob, abs=1e-13)
+    assert stats.observations.discounted_cash[0] == pytest.approx(
         12 * math.exp(-0.03) * ko_prob, abs=1e-12
     )
     assert abs(stats.reconciliation_error) < 1e-12
     assert stats.pv == pytest.approx(
-        sum(stats.expected_discounted_cashflows), abs=1e-12
+        sum(stats.ledger.discounted_cash), abs=1e-12
     )
 
 

@@ -125,7 +125,7 @@ def _v1(grid_points: int = GRID_POINTS) -> PhoenixQuadEngine:
 
 
 def _coupon_cash(stats, n_rows: int = len(OBS)) -> np.ndarray:
-    # the MC reference reports EventStatistics (T10); QUAD V1/V2 the legacy object until T16/T17
+    # MC (T10) and QUAD V2 (T16) report EventStatistics; QUAD V1 the legacy object until T17
     coupons = getattr(stats, "coupons", None)
     legacy = coupons is None
     cash = np.asarray(stats.expected_discounted_coupon_cashflow if legacy else coupons.discounted_cash,
@@ -240,7 +240,7 @@ def test_valuation_instant_observation_matches_quad_v2(first_barrier, pay_type):
     gap = _coupon_cash(v1, 5) - _coupon_cash(v2, 5)
     assert np.max(np.abs(gap)) <= V2_ALLOWANCE, f"V1 - V2 per row: {gap}"
     # the coupon decided now is paid with certainty (its amount is zero here: an empty period)
-    assert v1.coupon_probability[0] == v2.coupon_probability[0] == (1.0 if first_barrier == 85.0 else 0.0)
+    assert v1.coupon_probability[0] == v2.coupons.probability[0] == (1.0 if first_barrier == 85.0 else 0.0)
 
 
 @pytest.mark.parametrize("pay_type", [CouponPayType.INSTANT, CouponPayType.EXPIRY], ids=["instant", "expiry"])

@@ -81,17 +81,22 @@ def test_v1_overlapping_ko_reset_events_equal_price(projection):
 
 
 @pytest.mark.parametrize('family', CASES)
-def test_v2_ki_ever_is_independent_of_autocall(family):
+def test_v2_knock_in_stops_at_the_knock_out(family):
+    """Unified event statistics (T16, DESIGN 4.5): KI is not monitored after a KO. P(KI before any KO) is the KI
+    settlement of the ``disable_ko_after_ki`` twin (paths that knock in first never knock out there) and falls short
+    of the KO-free contract's first-hit probability (the legacy KO-independent monitor read both the same)."""
     factory, spec, _, cls = CASES[family]
     market = env()
     stats = cls().calculate_event_stats(factory(spec), market)
+    twin = cls().calculate_event_stats(factory(dict(spec, disable_ko_after_ki=True)), market)
+    assert stats.knock_in.probability == pytest.approx(twin.ki_settlement.probability, abs=1e-10)
     no_ko = dict(spec)
     if family == 'ko_reset':
         no_ko.update(pre_ko_barrier=1e9, post_ko_barrier=1e9)
     else:
         no_ko['ko_barrier'] = 1e9
     reference = cls().calculate_event_stats(factory(no_ko), market)
-    assert stats.ki_ever_probability == pytest.approx(reference.ki_ever_probability, abs=2e-8)
+    assert stats.knock_in.probability < reference.knock_in.probability - 1e-3
 
 
 @pytest.mark.parametrize('family', CASES)

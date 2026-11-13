@@ -1,6 +1,6 @@
 """Prepared, snapshot-based valuation contexts and vector spot queries."""
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 import numpy as np
 
@@ -29,7 +29,8 @@ class PreparedQuad:
     diagnostics: object
     pending_pv: float = 0.0
     _continuous: object = field(default=None, repr=False)
-    _ki_monitor: object = field(default=None, repr=False)
+    #: the backward recursion's log (``adjoint.MarchLog``), kept on a statistics context for the forward pass
+    _march: object = field(default=None, repr=False)
 
     def evaluate(self, spots):
         spots = np.asarray(spots, dtype=float).reshape(-1)
@@ -81,9 +82,35 @@ class PreparedQuad:
                 name: r[0, i].copy() for i, name in enumerate(self.channels) if i
             }
             result["components"]["pending"] = np.full(len(spots), self.pending_pv)
-            if self._ki_monitor is not None:
-                result["components"]["ki_ever"] = self._ki_monitor.probability(spots)
         return result
+
+
+def _first_channel(function):
+    """``function`` restricted to its first (price) channel: the pieces and grids a one-channel recursion holds."""
+    from .contract import Function, Grid, Piece, Source
+
+    grids = {}
+
+    def piece(p):
+        sources = []
+        for s in p.sources:
+            if id(s.grid) not in grids:
+                grids[id(s.grid)] = Grid(s.grid.mesh, s.grid.values[:1])
+            sources.append(Source(grids[id(s.grid)], s.weight, s.shift))
+        return Piece(p.lo, p.hi, p.cash[:1], p.asset[:1], tuple(sources))
+
+    return Function(tuple(piece(p) for p in function.pieces),
+                    tuple((b, piece(p)) for b, p in function.boundaries))
+
+
+def price_channel(context):
+    """A statistics context restricted to its price channel (spec D23): its readout runs the arithmetic of the price
+    context's one-channel readout on the same values, so it reads ``price()`` bitwise."""
+    continuous = context._continuous
+    if continuous is not None:
+        continuous = (_first_channel(continuous[0]),) + tuple(continuous[1:])
+    return replace(context, _function=_first_channel(context._function), channels=context.channels[:1],
+                   _continuous=continuous, _march=None)
 
 
 def interval_moments(env, strike, times):
@@ -139,9 +166,7 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
         np.log(spots), means, variances, params, align=contract.continuous_barrier
     )
     n_states, n_channels = len(contract.state_names), len(contract.channels)
-    workspace_columns = n_states * n_channels + int(
-        contract.metadata.get("ki_monitoring_end") is not None
-    )
+    workspace_columns = n_states * n_channels
     if (
         mesh
         and workspace_columns * mesh.cells * mesh.order * 8 * 4
@@ -193,11 +218,11 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
                         op, rolled_hit=rolled[hit],
                     )
             states = tuple(grid_function(mesh, values) for values in rolled)
-    from .continuous import prepare_continuous_ki_monitor
+    march = None
+    if contract.metadata.get("statistics"):
+        from .adjoint import MarchLog
 
-    ki_monitor = prepare_continuous_ki_monitor(
-        contract, means, variances, discounts, mesh, params, op,
-    )
+        march = MarchLog(contract, mesh, op, means, variances, discounts, params)
     diagnostics = MappingProxyType(
         {
             "nodes": 0 if mesh is None else mesh.cells * mesh.order,
@@ -209,7 +234,6 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
             "kernel_cache_bytes": 0 if op is None else op.cache.bytes,
             "backends": () if op is None else tuple(sorted(op.backends_used)),
             "model": "deterministic Gaussian log increments",
-            "ki_monitoring_method": None if ki_monitor is None else ki_monitor.method,
             "qualification": "requires independent accuracy/refinement evidence",
             **contract.metadata,
         }
@@ -225,5 +249,5 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
         diagnostics,
         float(pending_pv),
         continuous_pair,
-        ki_monitor,
+        march,
     )

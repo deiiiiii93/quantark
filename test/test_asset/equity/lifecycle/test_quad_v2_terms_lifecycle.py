@@ -173,9 +173,11 @@ def test_event_cashflow_ledger_includes_realized_pending_receivables():
     )
     engine = SnowballQuadEngineV2()
     stats = engine.calculate_event_stats(p, e, lifecycle_state=state)
-    assert sum(stats.expected_discounted_cashflows) == pytest.approx(
+    assert sum(stats.ledger.discounted_cash) == pytest.approx(
         stats.pv, abs=1e-11
     )
+    assert stats.receivables.source == ("coupon",)
+    assert stats.receivables.cash_to_pay[0] == 2.0
     assert stats.pv - engine.price(p, e) == pytest.approx(
         2 * math.exp(-0.03 * 10 / 365), abs=1e-11
     )
@@ -193,7 +195,7 @@ def test_explicit_before_after_phase_at_valuation_ko():
         engine.price(p, e, event_phase="after"), abs=1e-12
     )
     stats = engine.calculate_event_stats(p, e, event_phase="after")
-    assert np.all(stats.ko_times > 0)
+    assert np.all(stats.observations.times > 0)
     assert stats.pv == pytest.approx(engine.price(p, e, event_phase="after"), abs=1e-12)
 
 
@@ -257,7 +259,7 @@ def test_framework_price_and_event_stats_preserve_lifecycle():
         ),
         context,
     )
-    assert stats.value.ki_probability == pytest.approx(1.0, abs=1e-12)
+    assert stats.value.ki_settlement.probability == pytest.approx(1.0, abs=1e-12)
     assert stats.value.pv == pytest.approx(price.value, abs=1e-12)
 
 

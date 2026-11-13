@@ -8,7 +8,7 @@ import pytest
 from scipy.stats import norm, qmc, t as student_t
 
 from test_asset.equity.product_other.test_quad_v2_engine import environment
-from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.quad import PhoenixQuadEngineV2
 from quantark.asset.equity.param import QuadV2Params
 from quantark.asset.equity.lifecycle import AutocallableLifecycleState
@@ -71,14 +71,14 @@ def test_coupon_memory_and_early_termination_payment_ledger(memory, pay_type):
     env = environment(vol=0.0, r=0.1, q=0.1)
     engine = PhoenixQuadEngineV2()
     stats = engine.calculate_event_stats(p, env)
-    assert isinstance(stats, PhoenixEventStats)
-    np.testing.assert_allclose(stats.coupon_probability, [0, 1, 1, 0], atol=1e-13)
-    np.testing.assert_allclose(stats.ko_probability, [0, 0, 1, 0], atol=1e-13)
+    assert isinstance(stats, EventStatistics) and stats.product_family == "phoenix"
+    np.testing.assert_allclose(stats.coupons.probability, [0, 1, 1, 0], atol=1e-13)
+    np.testing.assert_allclose(stats.observations.probability, [0, 0, 1, 0], atol=1e-13)
     first = 6.0 if memory else 3.0
     first_payment = 0.4 if pay_type is CouponPayType.INSTANT else 0.6
     coupons = np.array([0, first * np.exp(-0.1 * first_payment), 3 * np.exp(-0.06), 0])
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow, coupons, atol=1e-12
+        stats.coupons.discounted_cash, coupons, atol=1e-12
     )
     expected = 100 * np.exp(-0.06) + coupons.sum()
     assert stats.pv == pytest.approx(expected, abs=1e-12)
@@ -86,14 +86,14 @@ def test_coupon_memory_and_early_termination_payment_ledger(memory, pay_type):
     assert engine.price_components(p, env)["coupon"] == pytest.approx(
         coupons.sum(), abs=1e-12
     )
-    assert stats.expected_discounted_cashflows.sum() == pytest.approx(
+    assert stats.ledger.discounted_cash.sum() == pytest.approx(
         expected, abs=1e-12
     )
     assert abs(stats.reconciliation_error) < 1e-12
     # In deferred mode both earned coupons settle with the actual early KO.
     expected_at_ko = 103.0 + (first if pay_type is CouponPayType.EXPIRY else 0.0)
-    assert stats.expected_undiscounted_cashflows[
-        np.isclose(stats.payment_times, 0.6)
+    assert stats.ledger.cash_to_pay[
+        np.isclose(stats.ledger.payment_times, 0.6)
     ].sum() == pytest.approx(expected_at_ko, abs=1e-12)
 
 
@@ -125,15 +125,15 @@ def test_single_coupon_matches_lognormal_probability_and_payment_time(
         if pay_type is CouponPayType.INSTANT
         else p_ko * np.exp(-0.04) + (p_coupon - p_ko) * np.exp(-0.08)
     )
-    np.testing.assert_allclose(stats.coupon_probability, [p_coupon], atol=1e-13)
+    np.testing.assert_allclose(stats.coupons.probability, [p_coupon], atol=1e-13)
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow, [expected_coupon], atol=1e-11
+        stats.coupons.discounted_cash, [expected_coupon], atol=1e-11
     )
     assert stats.pv == pytest.approx(
         100 * (p_ko * np.exp(-0.04) + (1 - p_ko) * np.exp(-0.08)) + expected_coupon,
         abs=1e-10,
     )
-    assert stats.expected_discounted_cashflows.sum() == pytest.approx(
+    assert stats.ledger.discounted_cash.sum() == pytest.approx(
         stats.pv, abs=1e-10
     )
 
@@ -172,19 +172,22 @@ def test_framework_distribution_and_lifecycle_preserve_coupon_ownership(pay_type
         lifecycle_state=state,
     )
     stats = engine.execute(request, default_context(environ={})).value
-    np.testing.assert_array_equal(stats.ko_times, [0.25, 0.5])
-    np.testing.assert_allclose(stats.coupon_probability, [1.0, 0.0], atol=1e-13)
+    np.testing.assert_array_equal(stats.observations.times, [0.25, 0.5])
+    np.testing.assert_allclose(stats.coupons.probability, [1.0, 0.0], atol=1e-13)
     pay_time = 0.25 if pay_type is CouponPayType.INSTANT else 1.0
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow,
+        stats.coupons.discounted_cash,
         [9 * np.exp(-0.1 * pay_time), 0],
         atol=1e-12,
     )
+    # the known coupon is a receivable (DESIGN 4.9c): inside the cash identity, never an event
+    assert stats.receivables.source == ("coupon",)
+    assert stats.receivables.discounted_cash[0] == pytest.approx(2 * np.exp(-0.1 * 10 / 365), abs=1e-12)
     expected = (
         100 * np.exp(-0.1) + 9 * np.exp(-0.1 * pay_time) + 2 * np.exp(-0.1 * 10 / 365)
     )
     assert stats.pv == pytest.approx(expected, abs=1e-12)
-    assert stats.expected_discounted_cashflows.sum() == pytest.approx(
+    assert stats.ledger.discounted_cash.sum() == pytest.approx(
         expected, abs=1e-12
     )
     result = engine.price_with_events(
@@ -195,7 +198,7 @@ def test_framework_distribution_and_lifecycle_preserve_coupon_ownership(pay_type
     np.testing.assert_allclose(dist.probabilities[EventType.COUPON], [1, 0], atol=1e-13)
     assert dist.payment_times_for(EventType.MATURITY_NO_KO) == 1.0
     if pay_type is CouponPayType.EXPIRY:
-        assert stats.coupon_payment_is_path_dependent
+        assert stats.coupons.payment_is_path_dependent.all()
         assert EventType.COUPON not in dist.payment_times
         with pytest.raises(NotImplementedError, match="path-dependent"):
             dist.payment_times_for(EventType.COUPON)
@@ -226,18 +229,22 @@ def test_delayed_coupon_cashflows_use_nonflat_payment_discounts(pay_type):
     engine = PhoenixQuadEngineV2()
     stats = engine.calculate_event_stats(p, env)
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow, [expected_coupon], atol=1e-11
+        stats.coupons.discounted_cash, [expected_coupon], atol=1e-11
     )
     expected = 100 * (p_ko * df(0.6) + (1 - p_ko) * df(1.1)) + expected_coupon
     assert stats.pv == pytest.approx(expected, abs=1e-10)
     assert engine.price(p, env) == pytest.approx(expected, abs=1e-10)
+    ledger = stats.ledger
+    # every ledger row here settles at a deterministic time: cash to pay = discounted / DF(payment)
     np.testing.assert_allclose(
-        stats.expected_discounted_cashflows,
-        stats.expected_undiscounted_cashflows
-        * np.array([df(t) for t in stats.payment_times]),
+        ledger.discounted_cash,
+        ledger.cash_to_pay * np.array([df(t) for t in ledger.payment_times]),
         atol=1e-12,
     )
-    np.testing.assert_allclose(stats.payment_times, [0.6, 0.6, 1.1, 1.1], atol=1e-13)
+    # KO row, then the coupon (INSTANT: with its record; EXPIRY: at the KO and at maturity), maturity, KI settlement
+    expected_payments = ([0.6, 0.6, 1.1, 1.1] if pay_type is CouponPayType.INSTANT
+                         else [0.6, 0.6, 1.1, 1.1, 1.1, 1.1])
+    np.testing.assert_allclose(ledger.payment_times, expected_payments, atol=1e-13)
 
 
 def test_zero_coupon_rate_still_reports_triggers_and_initial_ki_disables_ko():
@@ -253,12 +260,15 @@ def test_zero_coupon_rate_still_reports_triggers_and_initial_ki_disables_ko():
     stats = PhoenixQuadEngineV2().calculate_event_stats(
         p, environment(vol=0, r=0, q=0), lifecycle_state=state
     )
-    np.testing.assert_allclose(stats.coupon_probability, [1, 1], atol=1e-13)
+    np.testing.assert_allclose(stats.coupons.probability, [1, 1], atol=1e-13)
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow, [0, 0], atol=1e-13
+        stats.coupons.discounted_cash, [0, 0], atol=1e-13
     )
-    np.testing.assert_allclose(stats.ko_probability, [0, 0], atol=1e-13)
-    assert stats.ki_survive_knocked_in_probability == pytest.approx(1, abs=1e-13)
+    np.testing.assert_allclose(stats.observations.probability, [0, 0], atol=1e-13)
+    assert stats.ki_settlement.probability == pytest.approx(1, abs=1e-13)
+    # carried knock-in (DESIGN 4.5): P = 1, expected time 0, one row at t = 0
+    assert stats.knock_in.probability == 1.0 and stats.knock_in.expected_time == 0.0
+    np.testing.assert_array_equal(stats.ki_table.times, [0.0])
 
 
 @pytest.mark.parametrize("pay_type", [CouponPayType.INSTANT, CouponPayType.EXPIRY])
@@ -273,10 +283,12 @@ def test_ko_releases_missed_memory_even_when_current_coupon_does_not_trigger(pay
     engine = PhoenixQuadEngineV2()
     env = environment(vol=0, r=0, q=0)
     stats = engine.calculate_event_stats(p, env)
-    np.testing.assert_allclose(stats.coupon_probability, [0, 0], atol=1e-13)
+    np.testing.assert_allclose(stats.coupons.probability, [0, 0], atol=1e-13)
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow, [0, 3], atol=1e-13
+        stats.coupons.discounted_cash, [0, 3], atol=1e-13
     )
+    # the released arrears are coupon cash, never KO cash (AC11)
+    np.testing.assert_allclose(stats.observations.discounted_cash, [0, 100], atol=1e-12)
     assert stats.pv == pytest.approx(103, abs=1e-12)
     assert engine.price_components(p, env)["coupon"] == pytest.approx(3, abs=1e-12)
 
@@ -287,18 +299,18 @@ def test_coupon_threshold_equality_at_valuation_and_maturity(pay_type):
     env = environment(vol=0, r=0.1, q=0.1)
     engine = PhoenixQuadEngineV2()
     stats = engine.calculate_event_stats(p, env)
-    np.testing.assert_allclose(stats.coupon_probability, [1, 1], atol=1e-13)
+    np.testing.assert_allclose(stats.coupons.probability, [1, 1], atol=1e-13)
     expected = [
         3 * (1 if pay_type is CouponPayType.INSTANT else np.exp(-0.1)),
         3 * np.exp(-0.1),
     ]
     np.testing.assert_allclose(
-        stats.expected_discounted_coupon_cashflow, expected, atol=1e-12
+        stats.coupons.discounted_cash, expected, atol=1e-12
     )
     assert stats.pv == pytest.approx(100 * np.exp(-0.1) + sum(expected), abs=1e-12)
     after = engine.calculate_event_stats(p, env, event_phase="after")
     np.testing.assert_allclose(
-        after.expected_discounted_coupon_cashflow, expected[1:], atol=1e-12
+        after.coupons.discounted_cash, expected[1:], atol=1e-12
     )
 
 
@@ -319,9 +331,9 @@ def test_deferred_coupon_channels_agree_across_direct_and_fft_backends():
         results.append(
             np.r_[
                 stats.pv,
-                stats.coupon_probability,
-                stats.expected_discounted_coupon_cashflow,
-                stats.expected_discounted_cashflows,
+                stats.coupons.probability,
+                stats.coupons.discounted_cash,
+                stats.ledger.discounted_cash,
             ]
         )
     np.testing.assert_allclose(results[0], results[1], atol=1e-10, rtol=0)
@@ -337,15 +349,15 @@ def test_batched_coupon_stats_preserve_each_spots_probabilities_and_cashflows():
     p_coupon = norm.cdf((np.log(spots / 95) + mean) / np.sqrt(0.02))
     expected_coupon = 3 * (p_ko * np.exp(-0.04) + (p_coupon - p_ko) * np.exp(-0.08))
     np.testing.assert_allclose(
-        [s.coupon_probability[0] for s in stats], p_coupon, atol=1e-13
+        [s.coupons.probability[0] for s in stats], p_coupon, atol=1e-13
     )
     np.testing.assert_allclose(
-        [s.expected_discounted_coupon_cashflow[0] for s in stats],
+        [s.coupons.discounted_cash[0] for s in stats],
         expected_coupon,
         atol=1e-11,
     )
     for s in stats:
-        assert s.expected_discounted_cashflows.sum() == pytest.approx(s.pv, abs=1e-10)
+        assert s.ledger.discounted_cash.sum() == pytest.approx(s.pv, abs=1e-10)
 
 
 def _independent_qmc(memory, pay_type, reverse, continuous, seed):
@@ -466,23 +478,25 @@ def test_multi_event_coupon_stats_against_independent_qmc(
         terminal_coupon = float(
             values["terminal_alive_coupon"][0] + values["terminal_ki_coupon"][0]
         )
+        # the coupon paid at each record's payment event (INSTANT: its own settlement; EXPIRY: with the KO there)
+        coupon_ledger = [float(values[f"coupon_payment:pre:{t!r}"][0]) for t in (0.25, 0.5, 0.75)]
         levels.append(
             np.r_[
-                stats.coupon_probability,
-                stats.ko_probability,
-                stats.expected_discounted_coupon_cashflow,
-                stats.expected_discounted_cashflows[3:6],
+                stats.coupons.probability,
+                stats.observations.probability,
+                stats.coupons.discounted_cash,
+                coupon_ledger,
                 terminal_coupon,
-                stats.expected_discounted_maturity_cashflow,
-                stats.ki_survive_knocked_in_probability,
+                stats.maturity.discounted_cash + stats.ki_settlement.discounted_cash,
+                stats.ki_settlement.probability,
                 stats.pv,
             ]
         )
-        assert stats.expected_discounted_cashflows.sum() == pytest.approx(
+        assert stats.ledger.discounted_cash.sum() == pytest.approx(
             stats.pv, abs=1e-10
         )
-        assert stats.expected_discounted_coupon_cashflow.sum() == pytest.approx(
-            float(values["coupon"][0]), abs=1e-10
+        assert stats.coupons.discounted_cash.sum() == pytest.approx(
+            engine.price_components(p, env)["coupon"], abs=1e-10
         )
     np.testing.assert_allclose(levels[-1], levels[-2], atol=2e-5, rtol=0)
     # Simultaneous checks use 99.9% intervals across the many correlated rows.

@@ -104,6 +104,21 @@ def _reset_records(product, env, config):
     return result
 
 
+def _reset_record_dates(product, env, config):
+    """Raw observation time -> (observation date, payment date) of a KO-reset schedule's records (the payment
+    date the terminal one under EXPIRY pay, as ``_reset_records`` pays it)."""
+    records = product._resolve_ko_schedule(config, env)[0]
+    terminal = resolve_terminal_timing(product, env)
+    expiry = product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY
+    return {
+        float(record.observation_time): (
+            record.observation_date,
+            terminal.payment_date if expiry else record.settlement_date,
+        )
+        for record in records
+    }
+
+
 def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity):
     """Add a fold overlay's KO cash to the records; return the per-branch terminal cash.
 
@@ -259,6 +274,11 @@ def compile_contract(
         pre = _reset_records(product, env, product.barrier_config)
         post = _reset_records(product, env, product.post_barrier_config)
         pre_maturity = float(product.get_pre_maturity_time(env))
+        record_dates = (
+            {"pre": _reset_record_dates(product, env, product.barrier_config),
+             "post": _reset_record_dates(product, env, product.post_barrier_config)}
+            if components == "events" else None
+        )
     else:
         records = product.resolve_ko_observations(env)
         pre = [
@@ -271,6 +291,10 @@ def compile_contract(
             for r in records
         ]
         post, pre_maturity = pre, maturity
+        record_dates = (
+            {"pre": {float(r.observation_time): (r.observation_date, r.settlement_date) for r in records}}
+            if components == "events" else None
+        )
 
     def is_future(t):
         return 0 <= t <= maturity and (event_phase == "before" or t > 0)
@@ -334,8 +358,15 @@ def compile_contract(
         )
     pre_by, post_by, ki_by = keyed(pre), keyed(post), keyed(ki)
     maturity, pre_maturity = mapping[maturity], mapping[pre_maturity]
-    channels = ("total", "ko", "coupon", "terminal") if components else ("total",)
     statistics = components == "events"
+    # the price components' aggregate channels (``price_components``); a statistics context reads every outcome from
+    # its own per-row channels instead
+    aggregates = ("ko", "coupon", "terminal") if components and not statistics else ()
+    channels = ("total",) + aggregates
+    expiry = phoenix and product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+    # memory EXPIRY coupons: the coupon earned at a row (released arrears included) undiscounted, its own channel
+    # (without memory it is the row's coupon amount x its coupon probability)
+    earned_channels = statistics and expiry and product.has_memory_coupon
     ko_metadata = []
     if statistics:
         for regime, rows in (
@@ -343,7 +374,8 @@ def compile_contract(
         ):
             for r in rows:
                 key = f"{regime}:{mapping[r[0]]!r}"
-                ko_metadata.append((key, mapping[r[0]], r[3], regime))
+                dates = record_dates[regime].get(r[0], (None, None))
+                ko_metadata.append((key, mapping[r[0]], r[3], regime, r[0], dates[0], dates[1]))
                 channels += (f"ko_cash:{key}", f"ko_probability:{key}")
                 if phoenix:
                     channels += (
@@ -351,12 +383,14 @@ def compile_contract(
                         f"coupon_probability:{key}",
                         f"coupon_payment:{key}",
                     )
+                    if earned_channels:
+                        # the coupon earned at the row, undiscounted (its payment time is path-dependent)
+                        channels += (f"coupon_earned:{key}",)
         channels += (
             "terminal_alive_cash",
             "terminal_ki_cash",
             "terminal_alive_probability",
             "terminal_ki_probability",
-            "ki_ever",
         )
         if phoenix:
             channels += ("terminal_alive_coupon", "terminal_ki_coupon")
@@ -375,7 +409,7 @@ def compile_contract(
     def cash_vector(value, channel):
         out = [0.0] * n_channels
         out[0] = value
-        if components:
+        if channel in aggregates:
             out[channels.index(channel)] = value
         return tuple(out)
 
@@ -392,11 +426,7 @@ def compile_contract(
     n_memory = (
         len(pre) + initial_memory + 1 if phoenix and product.has_memory_coupon else 1
     )
-    expiry = phoenix and product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-    # One independent first-hit state keeps underlying KI monitoring alive
-    # after the note autocalls. Continuous first passage remains unavailable.
-    monitor_ki = statistics and not continuous
-    n_states = 2 * n_memory + (2 if expiry else 0) + int(monitor_ki)
+    n_states = 2 * n_memory + (2 if expiry else 0)
     if n_states > params.max_states:
         raise NumericalError(
             f"QUAD V2 requires {n_states} states; max_states={params.max_states}"
@@ -420,9 +450,6 @@ def compile_contract(
         # Unit-at-termination values carry accrued coupons without another
         # earned-amount state dimension. Dedicated coupon channels stay independent.
         names += ["termination_alive", "termination_ki"]
-    monitor_state = len(names)
-    if monitor_ki:
-        names += ["underlying_ki_monitor"]
     coupon_amounts, coupon_prefix, coupon_barriers = [], np.zeros(1), []
     # arrears owed at the pricing date and carried by the contract's amount (not a lifecycle count)
     initial_arrears = 0.0
@@ -597,14 +624,17 @@ def compile_contract(
                     c[channels.index(f"ko_probability:{key}")] = (
                         1 / env.get_discount_factor(t)
                     )
-                    if not hit and ki_hit and (regime == "post" or phoenix):
-                        c[channels.index("ki_ever")] = 1 / env.get_discount_factor(t)
                 if phoenix:
+                    paid_at_ko = missed + (coupon_amounts[index] if coupon_hit else 0.0)
                     c += coupon_cash(
-                        (missed + (coupon_amounts[index] if coupon_hit else 0.0))
+                        paid_at_ko
                         * unit_df,
                         f"coupon_payment:{coupon_key}",
                     )
+                    if earned_channels and paid_at_ko:
+                        c[channels.index(f"coupon_earned:{coupon_key}")] = (
+                            paid_at_ko / env.get_discount_factor(t)
+                        )
                     if statistics and coupon_hit:
                         c[channels.index(f"coupon_probability:{coupon_key}")] = (
                             1 / env.get_discount_factor(t)
@@ -650,18 +680,17 @@ def compile_contract(
                     )
             elif t < end:
                 terms.append((int(new_hit) * n_memory + next_mem, 1.0))
-            if statistics and not hit and ki_hit:
-                c[channels.index("ki_ever")] = 1 / env.get_discount_factor(t)
             if statistics and coupon_hit:
                 c[channels.index(f"coupon_probability:{coupon_key}")] = (
                     1 / env.get_discount_factor(t)
                 )
+            if earned_channels and earned:
+                c[channels.index(f"coupon_earned:{coupon_key}")] = earned / env.get_discount_factor(t)
             if earned:
                 if expiry and t < end:
                     if statistics:
                         selected = (
                             0,
-                            channels.index("coupon"),
                             channels.index(f"coupon_cash:{coupon_key}"),
                             *coupon_payment_channels,
                         )
@@ -684,41 +713,7 @@ def compile_contract(
                     c += coupon_cash(earned * coupon_df, payment_channel)
             return Action(tuple(terms), tuple(c), tuple(a), tuple(channel_terms))
 
-        def action(state, x, lo, hi, point=False):
-            if not monitor_ki:
-                return note_action(state, x, lo, hi, point)
-            ki_channel = channels.index("ki_ever")
-            # KO-reset monitors KI only on the pre schedule; an underlying
-            # path continues monitoring there even if the note autocalls.
-            monitor_end = pre_maturity if reset else maturity
-            touch = t <= monitor_end and kr is not None and (
-                x >= np.log(kr[1]) if product.is_reverse else x <= np.log(kr[1])
-            )
-            monitor_cash = 1 / env.get_discount_factor(t) if touch else 0.0
-            monitor_terms = (
-                ((monitor_state, 1.0, (ki_channel,)),)
-                if not touch and t < monitor_end else ()
-            )
-            if state == monitor_state:
-                c = np.zeros(n_channels)
-                c[ki_channel] = monitor_cash
-                return Action(cash=tuple(c), asset=zeros, channel_terms=monitor_terms)
-            base = note_action(state, x, lo, hi, point)
-            if state >= w_offset:
-                return base
-            # Note continuation carries contractual channels only. The
-            # underlying first-hit channel follows its own state at every
-            # event, including KO and maturity actions that terminate the note.
-            selected = tuple(i for i in range(n_channels) if i != ki_channel)
-            c = list(base.cash)
-            c[ki_channel] = monitor_cash
-            a = list(base.asset)
-            a[ki_channel] = 0.0
-            terms = tuple((i, weight, selected) for i, weight in base.terms)
-            return Action(
-                cash=tuple(c), asset=tuple(a),
-                channel_terms=terms + base.channel_terms + monitor_terms,
-            )
+        action = note_action
 
         rows, boundaries = [], []
         for state in range(len(names)):
@@ -761,6 +756,15 @@ def compile_contract(
             "terminal_delay": terminal.payment_time - terminal.determination_time,
             "initial_ki": initial_hit,
             "expiry_coupons": expiry,
-            "ki_monitoring_end": (pre_maturity if reset else maturity) if statistics and continuous else None,
+            "statistics": statistics,
+            "n_memory": n_memory,
+            "coupon_amounts": tuple(float(a) for a in coupon_amounts) if statistics else (),
+            "ko_reset": reset,
+            "ki_horizon": pre_maturity if reset else maturity,
+            "ki_records": tuple(
+                (mapping[float(r.observation_time)], float(r.observation_time), r.observation_date)
+                for r in (product.resolve_ki_observations(env) if statistics and ki else ())
+                if is_future(float(r.observation_time))
+            ),
         },
     )

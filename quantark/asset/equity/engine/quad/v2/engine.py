@@ -484,16 +484,16 @@ class AutocallableQuadEngineV2(BaseEngine):
         streams=None,
         event_phase="before",
     ):
-        """Independently propagated event probabilities and cashflow ledger.
+        """``EventStatistics`` of the contract (unified event statistics spec §Contracts; ``quad/v2/statistics.py``).
 
-        Phoenix coupon PVs are attributed to the earning observation, including
-        memory released on KO. Deferred coupons are discounted to the actual
-        termination settlement; the ledger groups them by payment event.
+        Every termination outcome is its own backward channel of the price's recursion, read at the spot; the
+        knock-in path statistics come from the forward adjoint pass of the same recursion (``quad/v2/adjoint.py``),
+        run only when ``streams`` asks for the knock-in stream (``None``: everything). ``pv`` is ``price()``'s value
+        (pending receivables included). A terminated lifecycle state returns its receivables alone, or ``None``
+        when nothing is left unpaid (spec AC17).
         """
         if terminal_lifecycle_pv(lifecycle_state, pricing_env) is not None:
-            raise NotImplementedError(
-                "terminated V2 contracts use the realized lifecycle ledger, not a prospective event distribution"
-            )
+            return self._terminated_statistics(product, pricing_env, lifecycle_state, event_phase)
         context = self._context(
             product,
             pricing_env,
@@ -501,9 +501,13 @@ class AutocallableQuadEngineV2(BaseEngine):
             lifecycle_state=lifecycle_state,
             event_phase=event_phase,
         )
-        result = context.evaluate([pricing_env.spot])
-        return self._event_stats_from_result(
-            product, pricing_env, context, result, 0, lifecycle_state
+        price = None
+        if context._march.pointwise_recursion:
+            price = type(self)(self.params).price(
+                product, pricing_env, lifecycle_state=lifecycle_state, event_phase=event_phase
+            )
+        return self._statistics_at(
+            product, pricing_env, context, pricing_env.spot, lifecycle_state, streams, price=price
         )
 
     def calculate_event_stats_at_spots(
@@ -516,21 +520,20 @@ class AutocallableQuadEngineV2(BaseEngine):
         streams=None,
         event_phase="before",
     ):
-        """Per-spot event stats from ONE prepared context.
+        """Per-spot event statistics from ONE prepared context.
 
-        Same discretization and diagnostics as ``calculate_event_stats``; the
-        event surfaces are evaluated at every requested spot without
-        re-solving, so finite-difference spot greeks of distribution-derived
-        quantities (cash-leg PVs) cost one prepare instead of one per bump.
-        Returns one stats object per requested spot, in order.
+        Same discretization and diagnostics as ``calculate_event_stats``; each requested spot is read from the one
+        context without re-solving (its own forward pass for the knock-in fields), so finite-difference spot greeks of
+        distribution-derived quantities (cash-leg PVs) cost one prepare instead of one per bump. A context prepared
+        over a wider spot range than the default is a different mesh, so its ``pv`` is that context's price there.
+        Returns one statistics object per requested spot, in order.
         """
         spots = [float(s) for s in np.asarray(spot_levels, dtype=float).reshape(-1)]
         if not spots:
             return []
         if terminal_lifecycle_pv(lifecycle_state, pricing_env) is not None:
-            raise NotImplementedError(
-                "terminated V2 contracts use the realized lifecycle ledger, not a prospective event distribution"
-            )
+            stats = self._terminated_statistics(product, pricing_env, lifecycle_state, event_phase)
+            return [stats for _ in spots]
         cached = self._prepared
         width = self.spot_width()
         outside_default = min(spots) < pricing_env.spot * (1-width) or max(spots) > pricing_env.spot * (1+width)
@@ -552,140 +555,46 @@ class AutocallableQuadEngineV2(BaseEngine):
                 product, pricing_env, [min(spots), max(spots)], components="events",
                 lifecycle_state=lifecycle_state, event_phase=event_phase,
             )
-        result = context.evaluate(spots)
         return [
-            self._event_stats_from_result(
-                product, pricing_env, context, result, i, lifecycle_state
-            )
-            for i in range(len(spots))
+            self._statistics_at(product, pricing_env, context, spot, lifecycle_state, streams)
+            for spot in spots
         ]
 
-    def _event_stats_from_result(
-        self, product, pricing_env, context, result, index, lifecycle_state
-    ):
-        from quantark.asset.equity.engine.event_stats import (
-            AutocallableEventStats,
-            KOResetEventStats,
-            PhoenixEventStats,
-            payment_aware_cashflow_fields,
+    def _provenance(self):
+        from quantark.asset.equity.engine.event_stats import StatisticsProvenance
+
+        name = type(self).__name__
+        return StatisticsProvenance(statistics_model=name, price_model=name)
+
+    def _statistics_at(self, product, pricing_env, context, spot, lifecycle_state, streams, price=None):
+        """The statistics of ``context`` read at ``spot``; ``price``: the price path's value there, or ``None`` to
+        read it from the context's price channel."""
+        from .context import price_channel
+        from .statistics import v2_event_statistics
+
+        result = context.evaluate([spot])
+        values = {name: float(value[0]) for name, value in result["components"].items()}
+        # D23: the price channel read alone -- the one-channel arithmetic of price()'s own readout on the recursion's
+        # own channel 0 (every grid operation of the recursion is per channel); the caller passes price() itself
+        # where the recursion read a grid function pointwise (``MarchLog.pointwise_recursion``)
+        pv = float(price_channel(context).evaluate([spot])["price"][0]) if price is None else float(price)
+        return v2_event_statistics(
+            product, pricing_env, context, values, pv=pv, spot=float(spot),
+            lifecycle_state=lifecycle_state, streams=streams, provenance=self._provenance(),
         )
 
-        values = {k: float(v[index]) for k, v in result["components"].items()}
-        metadata = context.diagnostics
-        records = metadata["ko_metadata"]
-        times = np.array(sorted({r[1] for r in records}))
-        probability = np.array(
-            [
-                sum(values[f"ko_probability:{r[0]}"] for r in records if r[1] == t)
-                for t in times
-            ]
-        )
-        cash = np.array(
-            [
-                sum(values[f"ko_cash:{r[0]}"] for r in records if r[1] == t)
-                for t in times
-            ]
-        )
-        term = values["terminal_alive_cash"] + values["terminal_ki_cash"]
-        determination = [r[1] for r in records]
-        payment = [r[2] for r in records]
-        flows = [values[f"ko_cash:{r[0]}"] for r in records]
-        phoenix = isinstance(product, PhoenixOption)
-        if phoenix:
-            determination.extend(r[1] for r in records)
-            payment.extend(r[2] for r in records)
-            flows.extend(values[f"coupon_payment:{r[0]}"] for r in records)
-        if lifecycle_state is not None and lifecycle_state.valuation_point is not None:
-            from quantark.asset.equity.settlement import SettlementResolver
+    def _terminated_statistics(self, product, pricing_env, lifecycle_state, event_phase):
+        """A knocked-out or matured lifecycle state: receivables only, or ``None`` when settled (spec AC17)."""
+        from .statistics import terminated_statistics
 
-            point = lifecycle_state.valuation_point
-            for cashflow in lifecycle_state.ledger.pending(point):
-                timing = SettlementResolver.resolve_pending(
-                    cashflow, pricing_env, valuation_point=point
-                )
-                determination.append(timing.determination_time)
-                payment.append(timing.payment_time)
-                flows.append(cashflow.amount * timing.payment_df)
-        # Terminal entries remain last, after pending receivables, for the
-        # EventDistribution conversion's terminal settlement readout.
-        determination.extend([metadata["pre_maturity"], metadata["maturity"]])
-        payment.extend(
-            [
-                metadata["pre_maturity"] + metadata["terminal_delay"],
-                metadata["maturity"] + metadata["terminal_delay"],
-            ]
-        )
-        flows.extend(
-            values[f"terminal_{suffix}_cash"]
-            + (values[f"terminal_{suffix}_coupon"] if phoenix else 0.0)
-            for suffix in ("alive", "ki")
-        )
-        fields = dict(
-            pv=float(result["price"][index]),
-            ko_times=times,
-            ko_probability=probability,
-            survival_probability=1 - np.cumsum(probability),
-            expected_discounted_ko_cashflow=cash,
-            ki_probability=values["terminal_ki_probability"],
-            expected_discounted_maturity_cashflow=term,
-            reconciliation_error=float(result["price"][index]) - sum(flows),
-            ki_ever_probability=(
-                1.0 if metadata["initial_ki"] else values["ki_ever"]
-            ),
-            ki_survive_knocked_in_probability=values["terminal_ki_probability"],
-            **payment_aware_cashflow_fields(
-                pricing_env,
-                determination_times=determination,
-                payment_times=payment,
-                expected_discounted_cashflows=flows,
-            ),
-        )
-        if phoenix:
-            return PhoenixEventStats(
-                **fields,
-                coupon_probability=np.array(
-                    [values[f"coupon_probability:{r[0]}"] for r in records]
-                ),
-                expected_discounted_coupon_cashflow=np.array(
-                    [values[f"coupon_cash:{r[0]}"] for r in records]
-                ),
-                coupon_payment_is_path_dependent=metadata["expiry_coupons"],
-            )
-        if isinstance(product, KnockOutResetSnowballOption):
-            pre = [r for r in records if r[3] == "pre"]
-            post = [r for r in records if r[3] == "post"]
-            fields.update(
-                pre_ko_times=np.array([r[1] for r in pre]),
-                post_ko_times=np.array([r[1] for r in post]),
-                pre_ko_probability=np.array(
-                    [values[f"ko_probability:{r[0]}"] for r in pre]
-                ),
-                post_ko_probability=np.array(
-                    [values[f"ko_probability:{r[0]}"] for r in post]
-                ),
-                pre_ko_probability_total=sum(
-                    values[f"ko_probability:{r[0]}"] for r in pre
-                ),
-                post_ko_probability_total=sum(
-                    values[f"ko_probability:{r[0]}"] for r in post
-                ),
-                expected_discounted_post_ko_cashflow=sum(
-                    values[f"ko_cash:{r[0]}"] for r in post
-                ),
-                # each knock-out's settlement and the two maturity outcomes (spec 3B §5.4, F6)
-                pre_ko_payment_times=np.array([r[2] for r in pre], dtype=float),
-                post_ko_payment_times=np.array([r[2] for r in post], dtype=float),
-                expected_discounted_pre_maturity_cashflow=values["terminal_alive_cash"],
-                expected_discounted_post_maturity_cashflow=values["terminal_ki_cash"],
-                pre_maturity_probability=values["terminal_alive_probability"],
-                post_maturity_probability=values["terminal_ki_probability"],
-                pre_maturity_time=metadata["pre_maturity"],
-                post_maturity_time=metadata["maturity"],
-                pre_maturity_payment_time=metadata["pre_maturity"] + metadata["terminal_delay"],
-                post_maturity_payment_time=metadata["maturity"] + metadata["terminal_delay"],
-            )
-            return KOResetEventStats(**fields)
-        return AutocallableEventStats(**fields)
+        validate_settlement_capability(self, product, lifecycle_state)
+        if self.product_type is not None and type(product) is not self.product_type:
+            raise ValidationError(f"{type(self).__name__} requires {self.product_type.__name__}")
+        knocked_in = bool(getattr(lifecycle_state, "knocked_in",
+                                  getattr(product, "_otc_lifecycle_knocked_in", False)))
+        pv = self.price(product, pricing_env, lifecycle_state=lifecycle_state, event_phase=event_phase)
+        return terminated_statistics(product, pricing_env, lifecycle_state, pv=pv, provenance=self._provenance(),
+                                     knocked_in=knocked_in)
 
     def price_with_events(
         self,
@@ -697,6 +606,9 @@ class AutocallableQuadEngineV2(BaseEngine):
         lifecycle_state=None,
         event_phase="before",
     ):
+        """NPV (``price()``) and the event distribution (``EventDistribution.from_statistics``); a terminated
+        lifecycle state has no event left (``EventDistribution.ended``, spec AC17). ``emit_distribution=False``
+        gets the maturity-only distribution without statistics."""
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
 
         if emit_distribution:
@@ -707,10 +619,12 @@ class AutocallableQuadEngineV2(BaseEngine):
                 streams=streams,
                 event_phase=event_phase,
             )
-            return PricingResult(
-                npv=stats.pv,
-                event_distribution=EventDistribution.from_autocallable_stats(stats),
-            )
+            if stats is None:
+                return PricingResult(
+                    npv=self.price(product, pricing_env, lifecycle_state=lifecycle_state, event_phase=event_phase),
+                    event_distribution=EventDistribution.ended(provenance=self._provenance()),
+                )
+            return PricingResult(npv=stats.pv, event_distribution=EventDistribution.from_statistics(stats))
         return PricingResult(
             npv=self.price(
                 product,

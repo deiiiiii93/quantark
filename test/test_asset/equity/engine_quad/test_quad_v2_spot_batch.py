@@ -120,8 +120,9 @@ def test_event_stats_and_events_contract_match_scalar():
         got = [engine.calculate_event_stats(product, _env(s)) for s in (100.0, 90.0)]
     for g, w in zip(got, want):
         assert _rel(g.pv, w.pv) <= 1e-12
-        np.testing.assert_allclose(g.ko_probability, w.ko_probability, rtol=1e-10, atol=1e-13)
-        np.testing.assert_array_equal(g.ko_times, w.ko_times)
+        np.testing.assert_allclose(g.observations.probability, w.observations.probability, rtol=1e-10, atol=1e-13)
+        np.testing.assert_array_equal(g.observations.times, w.observations.times)
+        assert _rel(g.knock_in.probability, w.knock_in.probability) <= 1e-10
 
 
 def test_folded_and_unfolded_keys_are_separate():

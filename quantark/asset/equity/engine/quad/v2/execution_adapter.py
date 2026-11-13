@@ -67,10 +67,16 @@ class QuadV2ExecutionAdapter(LegacyPriceAdapter):
         )
 
     def _call_event_stats(self, engine, request):
-        # V2's statistics object as produced (no field is read here); the base adapter reads only ``pv``
-        return engine.calculate_event_stats(
+        # V2's EventStatistics as produced (no field is read here); the base adapter reads only ``pv``
+        stats = engine.calculate_event_stats(
             request.product,
             request.pricing_env,
             lifecycle_state=request.lifecycle_state,
             **dict(request.operation_options),
         )
+        if stats is None:
+            # a terminated lifecycle state with nothing left unpaid has no statistics (spec AC17)
+            raise CapabilityError(
+                "a terminated, fully settled QUAD V2 contract has no event statistics"
+            )
+        return stats

@@ -61,11 +61,11 @@ def test_legacy_quad_keeps_one_maturity_outcome_but_both_schedules():
 
 
 def test_rebased_offsets_are_refused():
-    """The transition refuses a legacy REBASED object (offsets): built from QUAD V2's legacy statistics, the PDE
-    returning ``EventStatistics`` since T12."""
+    """The transition refuses a legacy REBASED object (offsets): built from QUAD V1's legacy statistics, the PDE
+    (T12) and QUAD V2 (T16) returning ``EventStatistics``."""
     import dataclasses
-    from quantark.asset.equity.engine.quad.v2.engine import KOResetSnowballQuadEngineV2
-    stats = KOResetSnowballQuadEngineV2().calculate_event_stats(make_ko_reset(KO_RESET), env())
+    from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
+    stats = KOResetSnowballQuadEngine().calculate_event_stats(make_ko_reset(KO_RESET), env())
     with pytest.raises(NotImplementedError, match="offsets"):
         EventDistribution.from_autocallable_stats(dataclasses.replace(stats, post_ko_times_are_offsets=True))
 

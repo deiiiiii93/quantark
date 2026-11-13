@@ -23,6 +23,8 @@ def test_knocked_in_paths_do_not_knock_out_at_maturity(extra):
     product = make_snowball(dict(SNOWBALL, disable_ko_after_ki=True, **extra))
     pde = SnowballPDESolver(PDEParams()).calculate_event_stats(product, env())
     v2 = SnowballQuadEngineV2().calculate_event_stats(product, env())
-    assert np.max(np.abs(pde.observations.probability - v2.ko_probability)) <= KO_BOUND
-    assert abs(pde.ki_settlement.probability - v2.ki_survive_knocked_in_probability) <= KI_SURVIVE_BOUND
+    assert np.max(np.abs(pde.observations.probability - v2.observations.probability)) <= KO_BOUND
+    assert abs(pde.ki_settlement.probability - v2.ki_settlement.probability) <= KI_SURVIVE_BOUND
+    # under disable_ko_after_ki every path that knocks in first settles knocked in: P(KI before KO) = KI settlement
+    assert v2.knock_in.probability == pytest.approx(v2.ki_settlement.probability, abs=1e-10)
     assert abs(pde.reconciliation_error) <= 1e-10
