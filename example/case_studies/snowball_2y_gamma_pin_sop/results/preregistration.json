@@ -9,7 +9,7 @@
         "seas6": {"ki_pct": 0.75, "first_ko_month": 1, "maturity_months": 6, "elapsed_months": 18, "ki_below_spot": 0.07,
                   "booking": "weekly"}
     },
-    "book_notes": "ki75 is the product, sampled by the headline and pin sets; seas6 is the same 75% product in its last 6 months (18 months elapsed, coupon accrued over the full 24, not knocked in), booked on the first anchored chain day of each ISO week with its KI barrier 7% below the booking-day spot, because the knock-in pin is a property of a short remaining life; KO pin events are measured on ki75 only",
+    "book_notes": "ki75 is the product, sampled by the headline and pin sets; seas6 is the same 75% product in its last 6 months (18 months elapsed, coupon accrued over the full 24, not knocked in), booked on the first anchored chain day of each ISO week with its KI barrier 7% below the booking-day spot, because the knock-in pin is a property of a short remaining life; KO pin events are measured on ki75 only; seas6 is not given a coupon of its own: it carries the ki75 coupon of its booking day (the coupon a fresh note would have been sold with that day is not solved again); its cash is seasoned: a KO at an observation t years after booking pays coupon x (1.5 + t) x notional, a maturity without knock-in pays coupon x (1.5 + T) x notional with T the rolled maturity in years (about 2 years of coupon, not exactly 2.0), and a knocked-in maturity is the standard put loss on the strike",
     "data": {"start": "2023-05-04", "end": "2026-11-06", "anchor_window": 63},
     "note": {
         "underlying": "000852.SH",
