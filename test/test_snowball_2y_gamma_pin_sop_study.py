@@ -5317,25 +5317,28 @@ def test_the_code_hash_covers_exactly_the_ledger_side_files(tmp_path):
     f = tmp_path / "events.json"
     f.write_text("{}")
     assert measures.file_hash(f) == hashlib.sha256(b"{}").hexdigest()
-    assert measures.stamp(f) == {"prereg_hash": prereg_hash(), "events_hash": measures.file_hash(f),
-                                 "code_hash": measures.code_hash()}
 
 
 def test_check_selection_refuses_a_missing_file_each_wrong_hash_and_a_partial_selection(tmp_path):
     from gpin.measures import SelectionRefused, check_selection
 
-    current = {"prereg_hash": "p" * 64, "events_hash": "e" * 64, "code_hash": "c" * 64}
+    current = {"prereg_hash": "p" * 64, "events_hash": "e" * 64, "code_hash": "c" * 64, "inputs_hash": "i" * 64}
     path = tmp_path / "selection.json"
     with pytest.raises(SelectionRefused, match="does not exist"):
         check_selection(path, current)
     good = {**current, "partial": False, "picks": {}, "composites": {}}
     path.write_text(json.dumps(good))
     assert check_selection(path, current) == good
-    for key, word in (("prereg_hash", "pre-registration"), ("events_hash", "events"), ("code_hash", "ledger-side code")):
+    names = ("pre-registration", "events file", "ledger-side code", "recorded inputs")
+    for key, word in zip(("prereg_hash", "events_hash", "code_hash", "inputs_hash"), names):
         path.write_text(json.dumps({**good, key: "0" * 64}))
         with pytest.raises(SelectionRefused, match=word) as err:
             check_selection(path, current)
-        assert sum(w in str(err.value) for w in ("pre-registration", "events file", "ledger-side code")) == 1
+        assert sum(w in str(err.value) for w in names) == 1 and key in str(err.value)
+    # a selection made before the fourth hash existed carries none: refused
+    path.write_text(json.dumps({k: v for k, v in good.items() if k != "inputs_hash"}))
+    with pytest.raises(SelectionRefused, match="recorded inputs"):
+        check_selection(path, current)
     path.write_text(json.dumps({k: v for k, v in good.items() if k != "code_hash"}))
     with pytest.raises(SelectionRefused, match="ledger-side code"):
         check_selection(path, current)
@@ -5649,6 +5652,16 @@ import shutil  # noqa: E402
 import subprocess  # noqa: E402
 
 T6_NOTE_IDS = ["ki75:2025-06-02", "seas6:2025-06-02"]
+T6_FP = "f" * 64                                   # the pricing fingerprint of the hand-made state files
+
+
+def _t6_stamp(files, states=None):
+    """The current four hashes of the hand-made driver inputs."""
+    from gpin import measures
+
+    states = states or files.states
+    return measures.stamp(files.events, files.board, files.chain,
+                          {nid: states / (nid.replace(":", "__") + ".json") for nid in T6_NOTE_IDS})
 
 
 @pytest.fixture(scope="module")
@@ -5664,8 +5677,9 @@ def t6_files(tmp_path_factory, t6_market):
     ko_states, ki_states, boards, chains = t6_market
     states = root / "states"
     states.mkdir()
-    (states / "ki75__2025-06-02.json").write_text(json.dumps(ko_states))
-    (states / "seas6__2025-06-02.json").write_text(json.dumps(ki_states))
+    # as the pricing pass writes them: each state file names its note and carries the pricing fingerprint
+    (states / "ki75__2025-06-02.json").write_text(json.dumps(dict(ko_states, note="ki75:2025-06-02", fingerprint=T6_FP)))
+    (states / "seas6__2025-06-02.json").write_text(json.dumps(dict(ki_states, note="seas6:2025-06-02", fingerprint=T6_FP)))
     (states / ".lock").write_text("1")
     (states / "ki75__2025-06-03.error.json").write_text("{}")
     events = root / "events.json"
@@ -5715,14 +5729,15 @@ def t6_train(stage4, t6_files):
     return SimpleNamespace(out=out, rc=rc, calls=spy.calls)
 
 
-def test_the_train_slice_writes_the_selection_with_the_picks_and_the_three_hashes(t6_train, t6_files):
+def test_the_train_slice_writes_the_selection_with_the_picks_and_the_four_hashes(t6_train, t6_files):
     from gpin import measures
     from gpin.techniques import build_registry, composite_selection
 
     assert t6_train.rc == 0
     path = t6_train.out / "selection.json"                               # the selection follows --out-dir
     sel = json.loads(path.read_text())
-    current = measures.stamp(t6_files.events)
+    current = _t6_stamp(t6_files)
+    assert sorted(current) == ["code_hash", "events_hash", "inputs_hash", "prereg_hash"]
     assert {k: sel[k] for k in current} == current
     assert current["prereg_hash"] == prereg_hash() and current["code_hash"] == measures.code_hash()
     assert (sel["view"], sel["slice"], sel["split_date"], sel["until"], sel["clock"], sel["config"]) == (
@@ -5799,11 +5814,11 @@ def test_the_test_slice_refuses_without_a_selection_and_with_each_hash_wrong(sta
         return err
 
     refused(_t6_argv(t6_files, "test", tmp_path / "a"), "does not exist")
-    for key, word in (("prereg_hash", "the pre-registration"), ("events_hash", "the events file"),
-                      ("code_hash", "the ledger-side code")):
+    names = ("the pre-registration", "the events file", "the ledger-side code", "the recorded inputs")
+    for key, word in zip(("prereg_hash", "events_hash", "code_hash", "inputs_hash"), names):
         sel = _t6_tampered(t6_train, tmp_path, **{key: "0" * 64})
         err = refused(_t6_argv(t6_files, "test", tmp_path / "b", "--selection", str(sel)), word)
-        assert sum(w in err for w in ("the pre-registration", "the events file", "the ledger-side code")) == 1
+        assert sum(w in err for w in names) == 1
     # the files themselves changed after the selection was made: the events file ...
     good = str(t6_train.out / "selection.json")
     events = tmp_path / "events.json"
@@ -5853,7 +5868,7 @@ def test_the_test_slice_runs_the_selected_techniques_over_the_full_data_and_writ
     back = json.loads((t6_test.out / "backtest.json").read_text())       # the payload follows --out-dir too
     assert (back["view"], back["slice"], back["clocks"], back["partial"]) == ("seller", "test",
                                                                              ["close", "twap", "next_open"], False)
-    assert back["stamp"] == {k: sel[k] for k in ("prereg_hash", "events_hash", "code_hash")}
+    assert back["stamp"] == {k: sel[k] for k in ("prereg_hash", "events_hash", "code_hash", "inputs_hash")}
     assert back["selection"]["composites"] == sel["composites"]
     assert back["selection"]["picks"] == {b: {row: p["id"] for row, p in rows.items()} for b, rows in sel["picks"].items()}
     assert set(back["sensitivities"]) == {"desk100_cost0.2", "desk500_cost1"}
@@ -5936,7 +5951,7 @@ def test_the_train_slice_runs_only_the_notes_booked_before_the_split(stage4, t6_
     ko_states, _, _, _ = t6_market
     states = tmp_path / "states"
     shutil.copytree(t6_files.states, states)
-    late = json.loads(json.dumps(ko_states))
+    late = dict(json.loads(json.dumps(ko_states)), fingerprint=T6_FP)
     late["days"] = [dict(r, next_ko=None, days_to_ko=None, gap_ko=None, ko_dir=None) for r in late["days"][21:31]]
     late["inception"] = late["days"][0]["date"]
     assert late["inception"] == "2025-07-01"
@@ -6288,3 +6303,118 @@ def test_the_train_driver_takes_its_cut_off_its_notes_and_its_event_slice_from_t
     # and the driver has no split-date logic of its own left
     src = (STUDY_DIR / "04_ledger.py").read_text()
     assert "SPLIT_DATE" not in src and "slice_of" not in src and ".day <" not in src and "training_scope(" in src
+
+
+# ---- finding 2: the fourth hash, over the recorded inputs (board, chain, the state files' pricing fingerprints) ----
+
+
+def test_inputs_hash_is_over_the_board_and_chain_digests_and_the_sorted_state_fingerprints(tmp_path):
+    import hashlib
+    from gpin import measures
+
+    board, chain = tmp_path / "board.pkl", tmp_path / "chain.pkl"
+    board.write_bytes(b"board bytes")
+    chain.write_bytes(b"chain bytes")
+    fps = {"seas6:2024-01-08": "b" * 64, "ki75:2024-02-29": "a" * 64}
+    canonical = json.dumps({"board": hashlib.sha256(b"board bytes").hexdigest(),
+                            "chain": hashlib.sha256(b"chain bytes").hexdigest(),
+                            "states": [["ki75:2024-02-29", "a" * 64], ["seas6:2024-01-08", "b" * 64]]},
+                           sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    want = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert measures.inputs_hash(board, chain, fps) == want
+    assert measures.inputs_hash(board, chain, dict(reversed(list(fps.items())))) == want       # the order does not matter
+    assert measures.inputs_hash(board, chain, {**fps, "ki75:2024-02-29": "c" * 64}) != want    # a re-priced note
+    assert measures.inputs_hash(board, chain, {"ki75:2024-02-29": "a" * 64}) != want           # another set of notes
+    chain.write_bytes(b"chain bytes.")
+    assert measures.inputs_hash(board, chain, fps) != want
+    chain.write_bytes(b"chain bytes")
+    board.write_bytes(b"board bytes.")
+    assert measures.inputs_hash(board, chain, fps) != want
+    with pytest.raises(StudyDataError):
+        measures.inputs_hash(tmp_path / "absent.pkl", chain, fps)
+
+
+def test_state_fingerprints_are_read_from_the_state_files_and_fail_closed(tmp_path):
+    from gpin import measures
+
+    a, b = tmp_path / "ki75__2024-02-29.json", tmp_path / "seas6__2024-01-08.json"
+    a.write_text(json.dumps({"note": "ki75:2024-02-29", "fingerprint": "a" * 64, "days": []}))
+    b.write_text(json.dumps({"note": "seas6:2024-01-08", "fingerprint": "b" * 64, "days": []}))
+    files = {"ki75:2024-02-29": a, "seas6:2024-01-08": b}
+    assert measures.state_fingerprints(files) == {"ki75:2024-02-29": "a" * 64, "seas6:2024-01-08": "b" * 64}
+    b.write_text(json.dumps({"note": "seas6:2024-01-08", "days": []}))                         # not stamped
+    with pytest.raises(StudyDataError, match="fingerprint"):
+        measures.state_fingerprints(files)
+    b.write_text(json.dumps({"note": "seas6:2024-01-15", "fingerprint": "b" * 64, "days": []}))  # another note's file
+    with pytest.raises(StudyDataError, match="seas6:2024-01-15"):
+        measures.state_fingerprints(files)
+
+
+def test_the_stamp_is_four_hashes(t6_files):
+    from gpin import measures
+
+    files = {nid: t6_files.states / (nid.replace(":", "__") + ".json") for nid in T6_NOTE_IDS}
+    got = measures.stamp(t6_files.events, t6_files.board, t6_files.chain, files)
+    assert got == {"prereg_hash": prereg_hash(), "events_hash": measures.file_hash(t6_files.events),
+                   "code_hash": measures.code_hash(),
+                   "inputs_hash": measures.inputs_hash(t6_files.board, t6_files.chain, dict.fromkeys(T6_NOTE_IDS, T6_FP))}
+    assert measures.CODE_FILES == ("black.py", "ledger.py", "techniques.py", "measures.py")    # the code hash is unchanged
+
+
+def _t6_copy_inputs(t6_files, tmp_path, *, board=None, chain=None, fingerprint=None):
+    """The driver's inputs with one of them changed: a byte appended to the board or the chain file, or another
+    pricing fingerprint in one state file."""
+    states = tmp_path / "states"
+    shutil.copytree(t6_files.states, states)
+    files = SimpleNamespace(root=tmp_path, states=states, events=t6_files.events, board=t6_files.board, chain=t6_files.chain)
+    for name, change in (("board", board), ("chain", chain)):
+        if change:
+            path = tmp_path / f"{name}.pkl"
+            path.write_bytes(getattr(t6_files, name).read_bytes() + b"\n")
+            setattr(files, name, path)
+    if fingerprint:
+        path = states / "seas6__2025-06-02.json"
+        path.write_text(json.dumps(dict(json.loads(path.read_text()), fingerprint=fingerprint)))
+    return files
+
+
+@pytest.mark.parametrize("change", [dict(board=True), dict(chain=True), dict(fingerprint="e" * 64)],
+                         ids=["board", "chain", "state fingerprint"])
+def test_the_test_slice_refuses_when_a_recorded_input_changed_after_the_selection(stage4, t6_files, t6_train, tmp_path,
+                                                                                  capsys, change):
+    """01_data.py or 03_pricing.py re-run after the selection was made: the selection must be made again."""
+    files = _t6_copy_inputs(t6_files, tmp_path, **change)
+    out = tmp_path / "out"
+    capsys.readouterr()
+    with _LedgerSpy() as spy:
+        rc = stage4.main(_t6_argv(files, "test", out, "--selection", str(t6_train.out / "selection.json")))
+    err = capsys.readouterr().err
+    assert rc != 0 and "REFUSED" in err and "the recorded inputs" in err and "inputs_hash" in err, err
+    assert sum(w in err for w in ("the pre-registration", "the events file", "the ledger-side code")) == 0
+    assert spy.calls == [] and not out.exists()                             # no ledger run, nothing created
+    # the same copy with nothing changed is accepted (the guard reads content, not paths)
+    same = _t6_copy_inputs(t6_files, tmp_path / "same")
+    assert _t6_stamp(same) == _t6_stamp(t6_files) and _t6_stamp(files) != _t6_stamp(t6_files)
+    assert {k for k in _t6_stamp(files) if _t6_stamp(files)[k] != _t6_stamp(t6_files)[k]} == {"inputs_hash"}
+
+
+def test_the_fourth_hash_is_in_every_file_and_the_inputs_are_hashed_once_per_run(stage4, t6_files, t6_train, t6_test,
+                                                                                 tmp_path, monkeypatch):
+    from gpin import measures
+
+    current = _t6_stamp(t6_files)
+    sel = json.loads((t6_train.out / "selection.json").read_text())
+    assert sel["inputs_hash"] == current["inputs_hash"]
+    for run in (t6_train.out / "runs" / "train", t6_test.out / "runs" / "test"):
+        for name in ("manifest.json", "ki75__2025-06-02.json", "seas6__2025-06-02.json"):
+            assert json.loads((run / name).read_text())["stamp"] == current, (run.name, name)
+    assert json.loads((t6_train.out / "runs" / "train" / "tables.json").read_text())["stamp"] == current
+    assert json.loads((t6_test.out / "backtest.json").read_text())["stamp"] == current
+    # one run: the board, the chain and the events file are each hashed once and every state fingerprint read once,
+    # however many notes and techniques run (the per-note jobs do not hash anything)
+    hashed, read = [], []
+    real_hash, real_fps = measures.file_hash, measures.state_fingerprints
+    monkeypatch.setattr(measures, "file_hash", lambda path: hashed.append(Path(path).name) or real_hash(path))
+    monkeypatch.setattr(measures, "state_fingerprints", lambda files: read.append(sorted(files)) or real_fps(files))
+    assert stage4.main(_t6_argv(t6_files, "train", tmp_path / "out", "--mode", "close")) == 0
+    assert sorted(hashed) == ["board.pkl", "chain.pkl", "events.json"] and read == [T6_NOTE_IDS]

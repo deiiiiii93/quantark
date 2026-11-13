@@ -282,11 +282,10 @@ def _manifest(job: Job, stamp: Dict[str, str], notes: Dict[str, Dict[str, Any]],
             "workers": job.workers, "seconds": seconds}
 
 
-def run_train(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: Dict[str, str],
-              log: Callable[[str], None] = print) -> int:
+def run_train(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], files: Dict[str, Path],
+              stamp: Dict[str, str], log: Callable[[str], None] = print) -> int:
     """The blind half: the training-slice runs, the selection, the composites, the files."""
     started = time.perf_counter()
-    files = state_files(job.states_dir, sample, job.partial)
     # the cut-off day, the notes and the event slice are measures.training_scope's (inside the code hash), not ours
     scope = measures.training_scope(load_chain(job.chain), list(files), prereg)
     until = scope.until
@@ -328,12 +327,11 @@ def run_train(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: D
     return 0
 
 
-def run_test(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], stamp: Dict[str, str],
-             log: Callable[[str], None] = print) -> int:
+def run_test(job: Job, prereg: Dict[str, Any], sample: Dict[str, Any], files: Dict[str, Path],
+             stamp: Dict[str, str], log: Callable[[str], None] = print) -> int:
     """The unblinding: refused unless the selection stands; then the selected techniques over the full data."""
     selection = measures.check_selection(job.selection, stamp, allow_partial=job.partial)
     started = time.perf_counter()
-    files = state_files(job.states_dir, sample, job.partial)
     chains = load_chain(job.chain)
     composites = measures.selection_composites(selection)       # None only for a partial selection without them
     build_registry(prereg, composites)                        # fails closed on a selection the registry cannot read
@@ -376,9 +374,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         prereg = load_prereg()
         if not job.events.exists():
             raise StudyDataError(f"{job.events} missing: run 02_events.py first")
-        stamp = measures.stamp(job.events)
         sample = json.loads(job.events.read_text(encoding="utf-8"))
-        return (run_train if job.slice == "train" else run_test)(job, prereg, sample, stamp)
+        files = state_files(job.states_dir, sample, job.partial)
+        # the four hashes, once per run: the per-note jobs hash nothing
+        stamp = measures.stamp(job.events, job.board, job.chain, files)
+        return (run_train if job.slice == "train" else run_test)(job, prereg, sample, files, stamp)
     except RssLimitExceeded as err:
         print(f"ABORTED: {err}", file=sys.stderr)
         return 3

@@ -7,7 +7,9 @@ of a run. On event P&L: ``es``, ``cluster_bootstrap``, ``tail_test``, ``life_tes
 ``select_on_train`` is the training rule of the registry. ``run_note`` runs every technique on one note and keeps the
 summaries (one file of the runs directory, written by ``04_ledger.py``); ``training_selection`` and ``tables`` aggregate
 such files into the selection and into everything the report prints, so the report can render from any subset of
-files without running the ledger. ``stamp`` / ``check_selection`` are the three hashes and the guard of the test slice.
+files without running the ledger. ``training_scope`` says what the training slice may read. ``stamp`` /
+``check_selection`` are the four hashes (pre-registration, events file, ledger-side code, recorded inputs) and the
+guard of the test slice.
 
 Conventions fixed here (each is in a test): a trading day is a day of the chain (the SSE calendar when none is
 given); the note's day-0 row is in no event window and not in the whole-life standard deviation, and is in the
@@ -843,31 +845,64 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def stamp(events_path: Path, prereg_path: Optional[Path] = None) -> Dict[str, str]:
-    """The three hashes a training selection is made under: the pre-registration (``prereg_hash``), the events
-    file and the ledger-side code."""
+def state_fingerprints(files: Mapping[str, Path]) -> Dict[str, str]:
+    """``{note id: pricing fingerprint}`` of the state files (``{note id: path}``), as the pricing pass stamped
+    them. Fails closed on a file without a fingerprint and on a file that is another note's."""
+    out: Dict[str, str] = {}
+    for nid, path in files.items():
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if data.get("note") not in (None, nid):
+            raise StudyDataError(f"{path} is the state file of {data.get('note')}, not of {nid}")
+        fingerprint = data.get("fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint:
+            raise StudyDataError(f"{path} carries no pricing fingerprint: it is not a state file of the pricing pass")
+        out[nid] = fingerprint
+    return out
+
+
+def inputs_hash(board_path: Path, chain_path: Path, fingerprints: Mapping[str, str]) -> str:
+    """sha256 of the canonical JSON of the recorded inputs of a ledger run: ``{"board": digest of the board file,
+    "chain": digest of the chain file, "states": [[note id, pricing fingerprint], ...] sorted}``. It changes when
+    ``01_data.py`` rewrites the board or the chain, when ``03_pricing.py`` re-prices a note under another
+    fingerprint and when the set of state files changes."""
+    payload = {"board": file_hash(board_path), "chain": file_hash(chain_path),
+               "states": sorted([str(nid), str(fp)] for nid, fp in fingerprints.items())}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def stamp(events_path: Path, board_path: Path, chain_path: Path, state_files: Mapping[str, Path],
+          prereg_path: Optional[Path] = None) -> Dict[str, str]:
+    """The four hashes a training selection is made under (D11, amended): the pre-registration (``prereg_hash``), the
+    events file (``events_hash``), the ledger-side code (``code_hash``, ``CODE_FILES``) and the recorded inputs
+    (``inputs_hash``: the board, the chain and the pricing fingerprint of every state file of ``state_files``, the
+    sample's notes found in the states directory, the same set for both slices). Computed once per run by the driver,
+    never per note."""
     return {"prereg_hash": prereg_hash(PREREG_PATH if prereg_path is None else prereg_path),
-            "events_hash": file_hash(events_path), "code_hash": code_hash()}
+            "events_hash": file_hash(events_path), "code_hash": code_hash(),
+            "inputs_hash": inputs_hash(board_path, chain_path, state_fingerprints(state_files))}
 
 
 class SelectionRefused(StudyDataError):
     """The training selection is missing, stale or partial: no test number may be computed or printed."""
 
 
+#: The four hashes of a stamp and what each one covers (the words of a refusal).
 _HASH_NAMES = {"prereg_hash": "the pre-registration", "events_hash": "the events file",
-               "code_hash": "the ledger-side code"}
+               "code_hash": "the ledger-side code",
+               "inputs_hash": "the recorded inputs (the board, the chain or a state file's pricing fingerprint)"}
 
 
 def check_selection(path: Path, current: Mapping[str, str], *, allow_partial: bool = False) -> Dict[str, Any]:
-    """The training selection at ``path`` when it may be used: it exists, each of its three hashes equals
+    """The training selection at ``path`` when it may be used: it exists, each of its four hashes equals
     ``current`` (``stamp``) and it was not made on a partial set of states (unless ``allow_partial``: a smoke run).
-    Otherwise ``SelectionRefused`` naming every reason. The test slice and the report call this before any test
-    number."""
+    Otherwise ``SelectionRefused`` naming every reason (which hash differs). The test slice and the report call this
+    before any test number."""
     path = Path(path)
     if not path.exists():
         raise SelectionRefused(f"{path} does not exist: run the training slice first (04_ledger.py --slice train)")
     selection = json.loads(path.read_text(encoding="utf-8"))
-    reasons = [f"{what} has changed since the training selection was made ({key})"
+    reasons = [f"{what} changed since the training selection was made ({key})"
                for key, what in _HASH_NAMES.items() if selection.get(key) != current[key]]
     if selection.get("partial", True) and not allow_partial:
         reasons.append("it was made on a partial set of states (a smoke run)")
