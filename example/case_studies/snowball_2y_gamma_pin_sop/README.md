@@ -26,7 +26,7 @@ What the test slice does show, under the close clock:
   - Booking the KO barrier 2% on the losing side (`ko_shift@0.02`) has the best futures-only
     tail: ES10 -390.5 bp (+34.2), worst -457.5 bp. The gain has the same sign under all
     three clocks and on the training slice (+130.6 bp there). It does not pass: p = 0.290,
-    and the daily P&L of the unselected notes is 13% more volatile (limit 5%).
+    and the daily P&L of the 13 quarterly headline notes is 13% more volatile (limit 5%).
   - The MO call-spread overlay (`mo_ko@2,payoff`) is the one row that passes: ES10 -401.0 bp
     (+23.7), p = 0.056 (Holm 0.557), whole-life std ratio 0.99. It fails under `twap` (+3.3,
     p = 0.396) and under `next_open` it is worse than the baseline (ES10 -487.7 against
@@ -46,8 +46,12 @@ What the test slice does show, under the close clock:
     paid for when the index rebounds. Its whole-life std ratio is 1.21.
   - A 5% bump delta (`secant@0.05`) has ES10 -331.2 (+59.5, p = 0.168) with no whole-life
     cost; the raised-barrier control `ki_wrong` is at -325.7. Not significant.
-  - **The futures position limit is the largest KI tail effect measured.** Without the cap
-    at 3.0 x notional the baseline's ES10 is -587.0 bp and its worst event -1,357.0 bp.
+  - **Under the close clock the desk's futures position limit is the largest KI tail
+    improvement measured.** Without the cap at 3.0 x notional the baseline's
+    ES10 is -587.0 bp and its worst event -1,357.0 bp, so the cap is worth 196.3 bp. This is
+    not a general result: under `next_open` the cap is worth 78.4 bp, under `twap` the tail
+    is better without it (-139.8 against -254.5), and over the whole life of the seasoned
+    book the cap costs (see Limits).
 - **The KI pin is a short-remaining-life problem.** A fresh 75% note 3% above its barrier
   has a knock-in gap of 9 bp with 24 months left, 223 bp with 6 and 768 bp with 1
   (`results/ki_gap_probe.json`). Lifting the barrier removes the pin; a short life creates it.
@@ -77,13 +81,17 @@ the pre-registration, the event file, the ledger-side code and the recorded inpu
 
 ## Headline numbers
 
-Every number in this section is checked against `results/backtest.json` or
-`results/selection.json` by `test/test_snowball_2y_gamma_pin_sop_study.py`.
+Every table in this section, and the figures quoted in "The answer", are checked against
+`results/backtest.json` or `results/selection.json` by
+`test/test_snowball_2y_gamma_pin_sop_study.py`. The other figures in the text were checked
+by hand against the same files.
 
 ### KO verdict: test slice, close clock, `ki75`, 43 events in 24 weeks
 
-ES10, worst and mean are event-window P&L in bp of notional. "Terminal - base" is the mean
-terminal P&L of completed unselected notes minus the baseline's.
+ES10, worst and mean are event-window P&L in bp of notional. "Std ratio" and "Terminal -
+base" are the whole-life test: the daily std and the mean terminal P&L of the 13 quarterly
+headline notes of `ki75` (11 completed), over all their dates including those before the
+split, against the baseline's.
 
 <!-- table: verdict close ko -->
 | Technique | Role | ES10 | ES10 - base | Worst | Mean | p | Holm p | Std ratio | Terminal - base | Tail | Life | Verdict |
@@ -108,7 +116,8 @@ terminal P&L of completed unselected notes minus the baseline's.
 ### KI verdict: test slice, close clock, `seas6`, 79 approaches in 24 weeks
 
 The baseline here is limit-constrained: the hedge-ratio cap at 3.0 binds on 284 days inside
-these windows. `base_noclip` is the same hedge without the cap.
+these windows. `base_noclip` is the same hedge without the cap. The whole-life test is on
+all 168 `seas6` bookings (142 completed), over all their dates.
 
 <!-- table: verdict close ki -->
 | Technique | Role | ES10 | ES10 - base | Worst | Mean | p | Holm p | Std ratio | Terminal - base | Tail | Life | Verdict |
@@ -246,7 +255,7 @@ Composites: `sop_futures` = `ko_shift@0.02` in a KO window and `secant@0.05` in 
 | H2 | Techniques that improve the tail do not lower the whole-life std, and may raise it | **Supported for the futures rules.** The shift, spread and bend raise it by 7% to 13%. The overlay does not (0.99) |
 | H3 | `mo_ko` beats every futures-only rule when the series expires close to the observation; partly unfilled at desk scale | **Not supported on the point estimate** (+23.7 against +34.2 for the shift). Partly unfilled: yes, mean fill 75%. The split by expiry gap was not computed |
 | H4 | At KI, `ki_cap` and `ki_shift` move the tail in opposite directions | **Not supported.** Both are worse than the baseline on test (-343.9 and -89.6). On training they were opposite (+82.4 and -98.2) |
-| H5 | The wrong-way controls are worse than the baseline | **Supported at KO** (`ko_wrong` -65.3). **Rejected at KI** (`ki_wrong` +65.0): raising the booked barrier carries less long futures into a gap down |
+| H5 | The wrong-way controls are worse than the baseline | **Supported at KO** (`ko_wrong` -65.3). **Rejected at KI** (`ki_wrong` +64.9): raising the booked barrier carries less long futures into a gap down |
 | H6 | Same ranking under `close` and `twap`; `next_open` widens the gaps without changing the order | **Rejected for the overlays.** The shift family leads the futures rules under all three clocks, but `mo_ko` goes from +23.7 (`close`) to -31.0 (`next_open`), and the KI order changes with the clock |
 | H7 | `gap_KO` is positive on the large majority of KO-window observations | **Supported for the 2Y product** (508 of 508). On the seasoned book 107 of 194 are positive |
 | H8 | The KI ranking on `seas6` is the same as on the 2Y product's own approaches | **Broadly the same order, tiny effects.** On 26 `ki75` approaches in 5 weeks every row is within 10 bp of the baseline, and `ki_cap` does nothing there |
@@ -257,14 +266,14 @@ Each line says what the evidence is. "Tested" means this backtest, daily closes.
 
 | When | Action | Evidence |
 | --- | --- | --- |
-| Every close | Delta-hedge in the far IM on the true note's 1% bump delta. Keep a hard limit on the hedge ratio (here -0.25 to 3.0 x notional) | Tested. The limit improved the KI tail on both slices (ES10 +196 bp on test, +115 bp on training) |
+| Every close | Delta-hedge in the far IM on the true note's 1% bump delta, inside the desk's position limit (here a hedge ratio of -0.25 to 3.0 x notional) | The baseline. The limit is the desk's, not a tested technique. On the seasoned book it improves the KI tail under `close` (ES10 +196.3 bp on test, +114.7 on training) and `next_open` (+78.4 on test) and worsens it under `twap` (-114.7); over the whole life it raises the daily std by 16% and lowers the mean terminal P&L by 431.2 bp |
 | T-10, within 10% of the KO barrier | Watch list: record the redemption gap and its sign, the days left, and the hedge of the true note against the survived branch | Descriptive |
 | KO window | Default: stay on the baseline. Option for a desk that weights the tail: book the KO barrier 2% on the losing side from T-10. Do not switch to the survived-branch delta at the T-1 close | Tested. The shift improved ES10 under all three clocks and both slices and raised daily std by 13%; not significant (p = 0.290). `surv_hold`, `derisk` and `secant` were worse than the baseline |
 | KO overlay | Not established. If a call spread across the barrier is used, size it to the redemption gap over two strike steps, expect partial fills, and unwind it at the fixing close, not the next morning | Tested. Passes under `close` only; under `next_open` its worst event is -912.9 bp against -633.1 |
-| KI watch | Flag every note with less than 12 months left that is within 10% of its KI barrier. With more life left the knock-in gap is small | Probe table by remaining life |
+| KI watch | Flag every note with less than 12 months left that is within 10% of its KI barrier. With more life left the knock-in gap is small | Probe table by remaining life, measured 3% above the barrier. The 12-month and 10% thresholds are not tested |
 | KI zone, last 6 months, within 5% of the barrier | Stay on the limited baseline. Do not lower the booked barrier for hedging. Do not cap the hedge at the knocked-in delta. A wider bump (5%) is a candidate, not a rule | Tested. `ki_shift` -89.6 bp, `ki_cap` -343.9 bp, `secant@0.05` +59.5 bp (p = 0.168) |
 | KI overlay | Not established. Put spreads across the barrier did not help under `close`, and a fuller fill was worse | Tested |
-| Limit days | On a day the far IM closes at its price limit the hedge cannot trade at the close. Treat the position as unhedged for the gap to the next open | Four such closes in the data (2024-02-06, 2024-09-27, 2024-09-30, 2025-04-07), all before the split |
+| Limit days | On a day the far IM is locked at its price limit the hedge cannot trade at the close. Treat the position as unhedged for the gap to the next open | **Not tested**: daily data cannot say what was tradable. Four limit closes in the data, all before the split: 2024-09-30 (up) and 2025-04-07 (down) locked, 2024-02-06 and 2024-09-27 (up) at the limit at the close only |
 | Fixing day before 15:00, T+1 open | Rules from the two intraday studies (cut to the decided branch before the close; move to the realised branch at the open) | **Intraday, not re-tested here** |
 | Reserve | A lowered KI barrier or a shifted KO barrier is still the conservative booking for the reserve. Keep it separate from the hedge | Reserve table in the report |
 
@@ -336,6 +345,12 @@ read-only from the sibling study `snowball_2y_tail_stability`.
 - The whole-life effect of the position limit on the seasoned book, by cause (KI zone
   against KO digital).
 - A desk's own execution on limit days; the daily data cannot say what was tradable.
+- A `quantark`, numpy or scipy version change alters the code hash, so `05_report.py` then
+  renders without test numbers until the selection and the test slice are re-run. A re-run
+  after unblinding is a deviation and has to be reported as one.
+- The docstring of `04_ledger.py` still describes the code hash as four files; the file is
+  inside the hash, so it was not edited after the selection was committed. The current
+  definition is `gpin.measures.code_hash`.
 - `quantark`: `BarrierConfig.time_shift` leaves a per-observation KO barrier list at full
   length after ageing; this study trims it itself (`gpin.pricing._trim_ko_levels`).
 - This study imports four private helpers of the sibling package (`s2ts.note._is_trading`,

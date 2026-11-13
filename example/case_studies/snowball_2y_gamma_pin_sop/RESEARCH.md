@@ -401,7 +401,7 @@ seasoned book (79 approaches in 24 weeks). The tables are in `README.md` and
   opposite directions (+82.4 and -98.2 bp). On test both are worse (-343.9 and -89.6).
   `ki_cap` is a bet on a knock-in: mean event P&L +1,009 bp on the 43 approaches that knocked
   in and -451 bp on the 36 that did not.
-- **H5 supported at KO, rejected at KI.** `ko_wrong` is 65.3 bp worse. `ki_wrong` is 65.0 bp
+- **H5 supported at KO, rejected at KI.** `ko_wrong` is 65.3 bp worse. `ki_wrong` is 64.9 bp
   better, for the reason given in the correction above.
 - **H6 rejected for the overlays.** The shift family leads the futures rules under all three
   clocks (+34.2, +25.6 and +62.1 bp for `ko_shift@0.02`). The KO overlay goes from +23.7
@@ -413,9 +413,13 @@ seasoned book (79 approaches in 24 weeks). The tables are in `README.md` and
 - **H8 broadly supported, with tiny effects.** On the 2Y product's own 26 test approaches
   (5 weeks) the rows keep the seasoned book's order, every one within 10 bp of the baseline,
   and `ki_cap` does nothing because the knocked-in delta is not a binding cap there.
-- **Not hypothesised, and the largest KI effect.** The futures position limit: without the
-  cap at 3.0 x notional the baseline's KI ES10 is -587.0 bp against -390.7, and its worst
-  event -1,357.0 against -468.8.
+- **Not hypothesised: the desk's futures position limit.** Under the close clock it is the
+  largest KI tail improvement measured: without the cap at 3.0 x notional the baseline's KI
+  ES10 is -587.0 bp against -390.7 (196.3 bp), and its worst event -1,357.0 against -468.8.
+  It is not a general result. Under `next_open` the cap is worth 78.4 bp; under `twap` the
+  tail is better without it (-139.8 against -254.5); and over the whole life of the 168
+  seasoned bookings the cap raises the daily std by 16% and lowers the mean terminal P&L by
+  431.2 bp, which was not decomposed (the seasoned book also holds large KO digitals).
 
 The draft SOP of section 5 is superseded by the SOP in `README.md`. Rows that changed: the
 T-1 rule ("hold `delta_surv`") is withdrawn for a desk that trades at the close; the KO

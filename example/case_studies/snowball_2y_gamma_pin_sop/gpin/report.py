@@ -975,7 +975,8 @@ def _outcomes(model: Mapping[str, Any], t: Optional[Mapping[str, Any]]) -> str:
         w = rows_t["ki_wrong"]
         better = w["es10"] > w["es10_base"] and not is_close(w["es10"], w["es10_base"])
         where = "on the test slice" if model["test_tables"] is not None else "on the training slice"
-        out += ("<p>Lowering the booked KI barrier is the conservative direction for reserving (it shows a reserve, "
+        out += ("<p>Lowering the booked KI barrier (<code>ki_shift</code>) is the conservative direction for reserving "
+                "(it shows a reserve, "
                 "section 09) but the wrong direction for hedging a gap down: the lower barrier keeps more long "
                 "futures into the knock-in, which the seller then sells after the gap. Hypothesis H5 (the wrong-way "
                 "controls are worse than the baseline) "
