@@ -63,6 +63,9 @@ class EventStep:
     ``(log_barrier, vol, dt, is_reverse)`` when the ``out`` state rolls back with the knock-in bridge;
     ``out_diffused``: whether the ``out`` state rolls back at all (KO-reset: not after its first schedule ends);
     ``seed_out``: the ``out`` state is seeded with its terminal value at this step, before its event (KO-reset).
+    ``source_units``: per source key, the unit the event puts on the breach (the backward knock-out column's
+    ``DF(settle)/DF(obs)``); the clean knock-out mass is the source's mass over its unit -- a probability mass
+    discounted to the step (``DF(obs) P``), never ``DF(settle) P`` (CP6).
     """
 
     time: float
@@ -72,6 +75,7 @@ class EventStep:
     bridge: Optional[Tuple] = None
     out_diffused: bool = True
     seed_out: bool = False
+    source_units: Dict = field(default_factory=dict)
 
 
 @dataclass(eq=False)
@@ -93,8 +97,9 @@ class MarchLog:
 @dataclass(frozen=True)
 class ForwardResult:
     """Per step in forward time (``times``): the first knock-in mass at the event (``first_knock_in``), the bridge
-    mass of the interval ending there (``interval_knock_in``), the clean knock-out mass (``clean_knock_out``); per
-    source key its mass; the ``out`` dual at each interval start (``interval_law``, the first-passage split's
+    mass of the interval ending there (``interval_knock_in``), the clean knock-out mass (``clean_knock_out``: the
+    not-knocked-in probability mass knocked out there, discounted to the step, ``DF(t) P``); per source key its mass
+    on the backward column's unit (``DF(t) P DF(settle)/DF(t)``); the ``out`` dual at each interval start (``interval_law``, the first-passage split's
     weights); the terminal masses per name."""
 
     times: np.ndarray
@@ -308,7 +313,8 @@ def forward_pass(log: MarchLog) -> ForwardResult:
                 s_out, s_in = _source_vectors(step.event, n, key)
                 out_mass = float(alpha_out @ s_out)
                 sources[key] = out_mass + float(alpha_in @ s_in)
-                clean_ko[k] += out_mass
+                # the source carries the record's unit DF(settle)/DF(obs): the clean mass is its probability mass
+                clean_ko[k] += out_mass / step.source_units[key]
             # blocks are (input state, output state): the knocked-in continuation feeds the not-knocked-in value
             # (in -> out), so its transpose moves the out dual onto the in state
             moved = banded.transpose("in", "out", alpha_out)

@@ -388,6 +388,95 @@ def test_knock_in_table_identities(name):
         assert not table.interpolated.any() and table.interpolation_scheme is None
 
 
+#: a settlement lag on every knock-out record, at a 10% rate: DF(settle)/DF(obs) = e^{-0.01} -- a factor ~1e-2 off
+#: the knock-out probability if the survival read the discounted unit instead of the probability
+LAG = 0.1
+
+
+def _lagged(times, level, lag=LAG):
+    return ObservationSchedule(records=[ObservationRecord(observation_time=float(t), barrier=level,
+                                                          settlement_time=float(t) + lag) for t in times])
+
+
+def lagged_snowball(ki_barrier=1.0, ki="dki"):
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_schedule=_lagged(OBS, 103.0), **ki_kw(ki, barrier=ki_barrier)),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=True),
+    )
+
+
+def lagged_phoenix(ki_barrier=1.0):
+    return PhoenixOption(
+        initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=1.0,
+        barrier_config=BarrierConfig(ko_barrier=105.0, ko_rate=0.0, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_schedule=_lagged(OBS, 105.0), **ki_kw("dki", barrier=ki_barrier)),
+        coupon_config=CouponBarrierConfig(coupon_barrier=[80.0, 108.0, 80.0, 80.0], coupon_rate=0.02,
+                                          coupon_pay_type=CouponPayType.INSTANT,
+                                          day_count_convention=DayCountConvention.ACT_365, memory_coupon=True),
+        payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True),
+    )
+
+
+def lagged_ko_reset(ki_barrier=1.0):
+    return KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0, maturity=2.0, contract_multiplier=1.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_schedule=_lagged(OBS, 103.0), ki_barrier=ki_barrier,
+                                     ki_observation_type=ObservationType.DISCRETE,
+                                     ki_observation_schedule=_schedule(OBS, ki_barrier)),
+        post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.03, ko_observation_type=ObservationType.DISCRETE,
+                                          ko_observation_schedule=_lagged((0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75,
+                                                                           2.0), 95.0)),
+        accrual_config=AccrualConfig(is_annualized=True, is_annualized_ki=True, is_annualized_rebate=True),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=True),
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+    )
+
+
+LAGGED = {
+    "snowball": (sb(), lagged_snowball),
+    "phoenix": (ph(), lagged_phoenix),
+    "ko_reset": (kr(), lagged_ko_reset),
+}
+
+
+@pytest.mark.parametrize("family", list(LAGGED))
+def test_lagged_settlement_survival_is_the_knock_out_survival_when_knock_in_is_unreachable(family):
+    """The forward pass's knock-out source is the backward unit DF(settle)/DF(obs); the KI table's survival must
+    subtract the knock-out PROBABILITY (CP6). With the knock-in out of reach, the KI table's survival on each row is
+    the observation table's survival (both schedules of the KO-reset are lagged)."""
+    engine, factory = LAGGED[family]
+    stats = engine().calculate_event_stats(factory(), env(r=0.10, q=0.0))
+    obs, table = stats.observations, stats.ki_table
+    assert abs(stats.knock_in.probability) <= 1e-15                              # out of reach (round-off)
+    assert float(np.sum(obs.probability)) > 0.1                                   # the KO mass is material
+    np.testing.assert_allclose(obs.payment_times - obs.times, LAG, atol=1e-12)
+    # P(no knock-out by the row): the observation table's survival on a snowball / Phoenix; the KO-reset's also ends
+    # the first schedule's maturity at its last row, which is not a knock-out, so read the knock-out mass itself
+    ko_by_row = np.array([np.sum(obs.probability[obs.times <= t + 1e-12]) for t in table.times])
+    np.testing.assert_allclose(table.survival, 1.0 - ko_by_row, rtol=0.0, atol=1e-12)
+    if family != "ko_reset":
+        rows = [int(np.flatnonzero(np.abs(obs.times - t) <= 1e-12)[0]) for t in table.times]
+        np.testing.assert_allclose(table.survival, obs.survival[rows], rtol=0.0, atol=1e-12)
+
+
+def test_lagged_settlement_survival_matches_quad_v2_with_reachable_knock_in():
+    """V1 and V2 KI-table survival agree on a lagged note whose knock-in is reachable, within the two engines'
+    discretisation gap (measured 5.3e-4 on the KI masses, 6.3e-4 on survival at 401 V1 nodes); the CP6 defect put
+    the gap at 7.1e-3 (survival over by the KO probability times 1 - e^{-r lag}, cumulated)."""
+    from quantark.asset.equity.engine.quad.v2.engine import SnowballQuadEngineV2
+
+    product, market = lagged_snowball(ki_barrier=85.0), env(r=0.10, q=0.0)
+    v1 = sb()().calculate_event_stats(product, market)
+    v2 = SnowballQuadEngineV2().calculate_event_stats(product, market)
+    assert v1.knock_in.probability > 0.05
+    np.testing.assert_allclose(v1.ki_table.times, v2.ki_table.times)
+    np.testing.assert_allclose(v1.ki_table.probability, v2.ki_table.probability, atol=1e-3)
+    np.testing.assert_allclose(v1.ki_table.survival, v2.ki_table.survival, atol=1e-3)
+
+
 def test_continuous_rows_follow_the_first_passage_law_within_an_interval():
     """One year-long bridge interval spreads its crossing mass over the days by the Brownian first-passage law: the
     mass up to each day matches the closed form when no knock-out can intervene (to the lattice's resolution)."""

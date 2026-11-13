@@ -1196,6 +1196,7 @@ class SnowballQuadEngine(BaseEngine):
             log.steps.append(EventStep(
                 time=float(obs_time), event=event,
                 sources=(("ko", int(ko_index)),) if ko_is_reachable else (),
+                source_units={("ko", int(ko_index)): float(discount_delay)} if ko_is_reachable else {},
                 diffusion=(tau_step, alpha, beta, prefactor, omega_array),
                 bridge=(log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
                 if ki_continuous else None,

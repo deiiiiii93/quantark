@@ -796,16 +796,19 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             pre_value = np.zeros_like(v_out)
             post_value = np.zeros_like(v_in)
             sources = []
+            units = {}
             pre_unit = post_unit = 0.0
             if pre_record is not None:
                 pre_unit = self._ko_discount(rate, obs_time, pre_record.settlement_time, df_fn=df_local)
                 pre_value[pre_ko_records.index(pre_record)] = pre_unit
                 sources.append(("ko", pre_ko_records.index(pre_record)))
+                units[sources[-1]] = float(pre_unit)
             if post_record is not None:
                 post_unit = self._ko_discount(rate, obs_time, post_record.settlement_time, df_fn=df_local)
                 post_value[post_offset + post_ko_records.index(post_record)] = post_unit
                 if not product.barrier_config.disable_ko_after_ki:
                     sources.append(("ko", post_offset + post_ko_records.index(post_record)))
+                    units[sources[-1]] = float(post_unit)
             v_out, v_in = self._apply_reset_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
@@ -829,6 +832,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     pre_key=sources[0] if pre_record is not None else None,
                 ),
                 sources=tuple(sources),
+                source_units=units,
                 diffusion=(tau_step, alpha, beta, prefactor, omega_array),
                 bridge=((log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
                         if ki_continuous and log_ki_barrier is not None else None),

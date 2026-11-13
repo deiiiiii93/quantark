@@ -555,8 +555,17 @@ class AutocallableQuadEngineV2(BaseEngine):
                 product, pricing_env, [min(spots), max(spots)], components="events",
                 lifecycle_state=lifecycle_state, event_phase=event_phase,
             )
+        # D23 at the env spot, as ``calculate_event_stats``: where the recursion read a grid function pointwise its
+        # price channel need not be price()'s bitwise, so pv there is price() itself (other spots: the context's own
+        # price channel, as documented above)
+        price = None
+        if context._march.pointwise_recursion and any(spot == float(pricing_env.spot) for spot in spots):
+            price = type(self)(self.params).price(
+                product, pricing_env, lifecycle_state=lifecycle_state, event_phase=event_phase
+            )
         return [
-            self._statistics_at(product, pricing_env, context, spot, lifecycle_state, streams)
+            self._statistics_at(product, pricing_env, context, spot, lifecycle_state, streams,
+                                price=price if spot == float(pricing_env.spot) else None)
             for spot in spots
         ]
 

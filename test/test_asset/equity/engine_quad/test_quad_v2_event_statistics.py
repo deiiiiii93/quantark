@@ -596,6 +596,25 @@ def test_pointwise_continuous_backend_refuses_the_knock_in_fields(market):
     assert abs(stats.probability_residual) <= RESIDUAL_BOUND
 
 
+@pytest.mark.parametrize("cls,factory,market", [
+    (SnowballQuadEngineV2, lambda: snowball("cki"), env(vol=0.25, r=0.01)),
+    (SnowballQuadEngineV2, lambda: snowball("cki"), env(spot=90.0, vol=0.25, r=0.01)),
+    (PhoenixQuadEngineV2, lambda: phoenix(), env(vol=0.2, r=0.05)),
+    (PhoenixQuadEngineV2, lambda: phoenix(), env(spot=110.0, vol=0.25, r=0.01)),
+], ids=["sb_vol25_r1", "sb_spot90", "ph_vol20_r5", "ph_spot110"])
+def test_pointwise_route_at_spots_pv_is_price_at_the_env_spot(cls, factory, market):
+    """D23 holds for ``calculate_event_stats_at_spots`` too: on a pointwise route its pv at the env spot is price()'s
+    value bitwise, as ``calculate_event_stats``'s is (each case measured 1 ULP off price() before the rule)."""
+    product = factory()
+    engine = cls(QuadV2Params(continuous_grid_backend="pointwise"))
+    spots = [market.spot - 1.0, market.spot, market.spot + 1.0]
+    stats = engine.calculate_event_stats_at_spots(product, market, spots)
+    assert engine._prepared._march.pointwise_recursion
+    price = cls(QuadV2Params(continuous_grid_backend="pointwise")).price(product, market)
+    assert stats[1].pv == price
+    assert stats[1].pv == engine.calculate_event_stats(product, market).pv
+
+
 # --- the KO-reset layout --------------------------------------------------------------------------------------------
 
 
