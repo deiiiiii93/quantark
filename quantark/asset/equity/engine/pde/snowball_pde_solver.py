@@ -12,6 +12,7 @@ The surfaces interact at barrier observation times:
 For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 """
 
+import copy
 from collections import OrderedDict
 from dataclasses import dataclass
 from time import perf_counter
@@ -51,6 +52,7 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.accrual import leg_annualized
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.snowball_config import AirbagConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
@@ -1828,11 +1830,12 @@ class SnowballPDESolver(BasePDESolver):
             # Put is worthless at high S
             v = principal * df_to_maturity
             upper = EdgeRow(v, "v1_upper_principal", (RowTerm("M", v),))
-        if leg_annualized(product, "knock_in"):
+        if leg_annualized(product, "knock_in") or self._airbag_moves_knock_in_edge(product, pricing_env, s_vec):
             # D26: an annualized knock-in leg scales the knocked-in downside by a tenor only the payoff resolves
-            # (Snowball: the contract tenor; KO-reset: the post-KI tenor). The closed forms above omit it, so the
-            # knock-in edge's row is read off the payoff itself. Every other contract keeps the closed forms: D26
-            # moves the annualized-KI class only, every other price stays bit for bit.
+            # (Snowball: the contract tenor; KO-reset: the post-KI tenor). D27: under partial protection the
+            # closed forms ignore an airbag that changes the payoff on the knock-in edge cell. In both cases the
+            # knock-in edge's row is read off the payoff itself. Every other contract keeps the closed forms: D26 /
+            # D27 move those classes only, every other price stays bit for bit.
             if product.is_reverse:
                 upper = self._payoff_v1_edge_row("upper", tau, product, pricing_env, s_vec, upper.branch)
             else:
@@ -1848,6 +1851,29 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 lower, upper = _with_cash(lower, cash), _with_cash(upper, at_ko_edge)
         return lower, upper
+
+    @staticmethod
+    def _airbag_moves_knock_in_edge(product, pricing_env, s_vec) -> bool:
+        """Whether the airbag makes the closed-form knock-in-edge row wrong (D27).
+
+        Only under partial protection: the unprotected rows (``v1_lower_none_slope`` / ``v1_upper_reverse_none``)
+        already read the airbag's participation and strike, and under full protection the floor at principal binds
+        everywhere, so the airbag cannot change the payoff. The partial rows (the standard max loss at S = 0, the
+        reverse floor) are written from the contract's plain terms; they are wrong exactly when the airbag changes the
+        knocked-in payoff on the knock-in edge cell -- the edge node or its neighbour lies under the airbag and the
+        floor does not bind there both with and without it. Otherwise the row is what the same contract without an
+        airbag gets, and it stays bit for bit."""
+        airbag = product.airbag_config
+        if airbag.airbag_barrier is None or product.payoff_config.protection_type != ProtectionType.PARTIAL:
+            return False
+        plain = copy.copy(product)
+        plain.airbag_config = AirbagConfig()
+        cell = (s_vec[-1], s_vec[-2]) if product.is_reverse else (s_vec[0], s_vec[1])
+        return any(
+            not is_close(float(product.get_maturity_payoff_v1(float(s), pricing_env)),
+                         float(plain.get_maturity_payoff_v1(float(s), pricing_env)))
+            for s in cell
+        )
 
     def _payoff_v1_edge_row(self, edge, tau, product, pricing_env, s_vec, branch):
         """The knocked-in row at ``edge`` ("lower" or "upper") read off ``get_maturity_payoff_v1`` (D26): the
