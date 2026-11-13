@@ -45,8 +45,8 @@
     0.0028953404625141387,
     0.002699024077003134
    ],
-   "ki_ever_probability": 0.3535293141046297,
-   "ki_survive_knocked_in_probability": 0.1476986310167158,
+   "p_ki_ever": 0.3535293141046297,
+   "ki_settlement_probability": 0.1476986310167158,
    "pv": 96.67147153146807
   },
   "kr_cont_spot90": {
@@ -90,8 +90,8 @@
     0.0063727663873794395,
     0.005967343325121001
    ],
-   "ki_ever_probability": 0.6341250897222998,
-   "ki_survive_knocked_in_probability": 0.353987356225011,
+   "p_ki_ever": 0.6341250897222998,
+   "ki_settlement_probability": 0.353987356225011,
    "pv": 88.65883589376037
   },
   "kr_cont_spot101": {
@@ -135,8 +135,8 @@
     0.002556716877228023,
     0.00238277648703151
    ],
-   "ki_ever_probability": 0.33146517408993126,
-   "ki_survive_knocked_in_probability": 0.12981722022520226,
+   "p_ki_ever": 0.33146517408993126,
+   "ki_settlement_probability": 0.12981722022520226,
    "pv": 97.26067589097592
   }
  }

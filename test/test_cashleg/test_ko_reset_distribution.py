@@ -45,7 +45,7 @@ def test_coincident_pre_and_post_dates_validate():
     cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
     product = dated_ko_reset(cal, datetime(2026, 3, 16))
     stats = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, flat_env(datetime(2026, 4, 1)))
-    d = EventDistribution.from_autocallable_stats(stats)
+    d = EventDistribution.from_statistics(stats)
     total = d.probabilities[EventType.KO].sum() + d.probabilities[EventType.MATURITY_NO_KO] \
         + d.probabilities[EventType.MATURITY_WITH_KI]
     assert abs(total - 1.0) <= Tolerance.PROBABILITY
@@ -61,20 +61,6 @@ def test_quad_v1_absolute_converts_with_both_schedules():
     assert d.determination_times == {EventType.MATURITY_NO_KO: stats.maturity.time,
                                      EventType.MATURITY_WITH_KI: stats.ki_settlement.time}
     assert stats.maturity.time < stats.ki_settlement.time
-
-
-def test_rebased_offsets_are_refused():
-    """The transition refuses a legacy REBASED object (offsets). Every producer returns ``EventStatistics`` since
-    T17, so the legacy object is built by hand."""
-    from quantark.asset.equity.engine.event_stats import KOResetEventStats
-
-    legacy = KOResetEventStats(
-        pv=100.0, ko_times=np.array([0.5, 1.0]), ko_probability=np.array([0.3, 0.2]),
-        survival_probability=np.array([0.7, 0.5]), expected_discounted_ko_cashflow=np.array([31.0, 21.0]),
-        ki_probability=0.1, expected_discounted_maturity_cashflow=48.0, post_ko_times_are_offsets=True,
-    )
-    with pytest.raises(NotImplementedError, match="offsets"):
-        EventDistribution.from_autocallable_stats(legacy)
 
 
 def _mc_stats(post_ko_mode):
@@ -122,12 +108,16 @@ def test_mc_rebased_converts_on_the_absolute_candidate_axis():
 
 
 def test_quad_v2_reports_both_maturity_outcomes():
+    """QUAD V2 (unified statistics since T16): both schedules' knock-out rows, each maturity outcome on its own
+    determination (the first schedule's end; the knocked-in settlement at maturity, F5)."""
     from quantark.asset.equity.engine.quad.v2.engine import KOResetSnowballQuadEngineV2
     stats = v2_event_stats(
         "ko_reset_kr_cont",
         lambda: KOResetSnowballQuadEngineV2().calculate_event_stats(make_ko_reset(KO_RESET), env()))
-    d = EventDistribution.from_autocallable_stats(stats)
-    assert d.stream_times[EventType.KO].size == stats.pre_ko_times.size + stats.post_ko_times.size
-    assert d.determination_times == {EventType.MATURITY_NO_KO: stats.pre_maturity_time,
-                                     EventType.MATURITY_WITH_KI: stats.post_maturity_time}
-    assert d.probabilities[EventType.MATURITY_WITH_KI] == pytest.approx(stats.post_maturity_probability, abs=1e-12)
+    d = EventDistribution.from_statistics(stats)
+    assert {"pre", "post"} <= set(stats.observations.schedule)
+    assert d.stream_times[EventType.KO].size == stats.observations.size
+    assert d.determination_times == {EventType.MATURITY_NO_KO: stats.maturity.time,
+                                     EventType.MATURITY_WITH_KI: stats.ki_settlement.time}
+    assert stats.maturity.time < stats.ki_settlement.time
+    assert d.probabilities[EventType.MATURITY_WITH_KI] == pytest.approx(stats.ki_settlement.probability, abs=1e-12)

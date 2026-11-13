@@ -16,7 +16,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from pde_statistics.v2_frozen import freeze  # noqa: E402
+from pde_statistics.v2_frozen import _encode, freeze, v2_event_stats  # noqa: E402
 
 
 def _ph_memory():
@@ -74,6 +74,8 @@ def main(keys):
         stats = BUILDERS[key]()
         path = freeze(key, stats, {"git_head": head, "machine": platform.machine(),
                                    "seconds": round(time.time() - start, 1)})
+        # the frozen file must decode to the same statistics (every init field, round-trip exact)
+        assert _encode(v2_event_stats(key, lambda: None)) == _encode(stats), key
         print(f"{key}: {time.time() - start:.0f}s -> {path.name}", flush=True)
 
 

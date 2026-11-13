@@ -277,3 +277,15 @@ Two of 28 frames moved, both in the QUADRATURE `book` case and only the KI colum
 On the knocked-in day the new value equals the row's own `survival_probability` (0.998885715559329) to
 rounding, which is what "settles knocked in" means once the note is knocked in. Every other column and frame,
 including PVs and cashflows, is byte-identical.
+
+## Unified event statistics: the `book` event frames (T18, 2026-11-14)
+
+Re-banked: `book_daily_event_summary.csv` and `book_event_probabilities.csv` only, statistics columns only
+(spec D5/D22). Both frames failed at the branch base (79938a1c) already, on `ki_probability_to_maturity` and
+on the KI rows, because `book` prices on QUAD V1, whose statistics moved to `EventStatistics` (T17). `pv` and
+every `book_*` price/greek/state frame are byte-identical to before.
+
+| file | moved | cause (spec) |
+|---|---|---|
+| `book_daily_event_summary.csv` | `ki_probability_to_maturity` 2024-01-02 0.0648687190 -> 0.0652884675 (direct knocked-in settlement probability, no longer `1 - sum(KO) - P(maturity)`); 2024-01-03 (knocked in) 1.0 -> 0.9988857156 (= 1 - P(KO): a knocked-in note that knocks out does not settle knocked in); `expected_discounted_maturity_cashflow` round-off (1.8e-12) | D21 `ki_settlement.probability`; D9 (d) |
+| `book_event_probabilities.csv` | 12 -> 14 rows: the single invented KI row at maturity (2024-01-08, P(KI) under the old definition, no survival) is replaced by the per-date KI table, P(KI before any KO) 0.0041066 (2024-01-03) and 0.0611966 (2024-01-05) with survival; KO rows unchanged | D9 (e) KI on its own axis; DESIGN 4.5 |

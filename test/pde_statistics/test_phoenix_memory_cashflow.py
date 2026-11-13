@@ -17,8 +17,8 @@ def test_study_product_memory_coupon_cash_against_v2():
     product, env = CASES["ph_memory"][0](), CASES["ph_memory"][1]()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
     v2 = v2_event_stats("phoenix_ph_memory", lambda: PhoenixQuadEngineV2().calculate_event_stats(product, env))
-    assert np.max(np.abs(pde.coupons.discounted_cash - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
-    assert abs(pde.coupons.discounted_cash.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert np.max(np.abs(pde.coupons.discounted_cash - v2.coupons.discounted_cash)) <= PER_DATE
+    assert abs(pde.coupons.discounted_cash.sum() - v2.coupons.discounted_cash.sum()) <= TOTAL
     assert abs(pde.reconciliation_error) <= 1e-10
 
 
@@ -67,26 +67,25 @@ def test_nodal_termination_units_are_the_knock_out_columns():
 
 @pytest.mark.parametrize("memory", [False, True])
 def test_expiry_buckets_match_v2(memory):
-    """V2's ledger (quad/v2/engine.py ``_event_stats_from_result``): n knock-out rows, n coupon rows at
-    the knock-out settlements, then the terminal rows with the terminal coupon merged into the maturity
-    cash -- so the knock-out buckets compare per payment time before maturity, and the coupon cash per
-    earning date in total. At the terminal payment time the two split one date differently: V2 books the
-    coupon earned at the maturity observation on that record's row, this ledger books it in the terminal
-    bucket unless a knock-out pays it (measured: 0.0016 vs V2's 0.017 on that row, plain)."""
+    """Both ledgers (``EventStatistics.ledger``, row order KO, path-dependent coupon cash, terminal rows): n
+    knock-out rows, then n coupon rows at the knock-out settlements, then the terminal rows -- so the coupon
+    buckets compare per payment time before maturity, and the coupon cash per earning date in total. At the
+    terminal payment time the two split one date differently (V2 books the coupon earned at the maturity
+    observation on that record's row: 0.017 vs this ledger's 0.0016, plain), so it is left out."""
     from pde_3a.products import env
     product, e = _expiry(memory), env()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, e)
     v2 = v2_event_stats(f"phoenix_expiry_memory_{str(memory).lower()}",
                         lambda: PhoenixQuadEngineV2().calculate_event_stats(product, e))
-    n, n2 = pde.observations.size, v2.ko_times.size
+    n, n2 = pde.observations.size, v2.observations.size
     mine_t, mine = pde.ledger.payment_times[n:2 * n], pde.ledger.discounted_cash[n:2 * n]
-    theirs_t, theirs = v2.payment_times[n2:2 * n2], v2.expected_discounted_cashflows[n2:2 * n2]
+    theirs_t, theirs = v2.ledger.payment_times[n2:2 * n2], v2.ledger.discounted_cash[n2:2 * n2]
     terminal_payment = float(pde.ledger.payment_times[2 * n])
     for t in np.unique(mine_t[~np.isclose(mine_t, terminal_payment)]):
         got = mine[np.isclose(mine_t, t)].sum()
         want = theirs[np.isclose(theirs_t, t)].sum()
         assert abs(got - want) <= TOTAL, t
-    assert abs(pde.coupons.discounted_cash.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert abs(pde.coupons.discounted_cash.sum() - v2.coupons.discounted_cash.sum()) <= TOTAL
 
 
 def _c105_at_start():
@@ -104,8 +103,8 @@ def test_release_rule_product_against_v2():
     product, env = _c105_at_start()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
     v2 = v2_event_stats("phoenix_release_rule", lambda: PhoenixQuadEngineV2().calculate_event_stats(product, env))
-    assert np.max(np.abs(pde.coupons.discounted_cash - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
-    assert abs(pde.coupons.discounted_cash.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert np.max(np.abs(pde.coupons.discounted_cash - v2.coupons.discounted_cash)) <= PER_DATE
+    assert abs(pde.coupons.discounted_cash.sum() - v2.coupons.discounted_cash.sum()) <= TOTAL
     assert abs(pde.reconciliation_error) <= 1e-10
 
 

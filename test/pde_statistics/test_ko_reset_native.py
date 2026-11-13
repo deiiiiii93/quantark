@@ -29,7 +29,7 @@ def test_against_the_converged_quad(name):
     assert np.max(np.abs(_rows(s, "pre") - ref["pre_ko_probability"])) <= 5e-5
     assert np.max(np.abs(_rows(s, "post") - ref["post_ko_probability"])) <= 5e-5
     # T12: no knock-in-ever (a knock-in after a knock-out is no knock-in); P(KI before KO) is the forward pass's
-    assert abs(s.ki_settlement.probability - ref["ki_survive_knocked_in_probability"]) <= 5e-4
+    assert abs(s.ki_settlement.probability - ref["ki_settlement_probability"]) <= 5e-4
     assert abs(s.reconciliation_error) <= 1e-10
 
 
@@ -49,7 +49,7 @@ def test_maturity_buckets_against_v2(name):
     v2 = v2_event_stats(f"ko_reset_{name}",
                         lambda: KOResetSnowballQuadEngineV2().calculate_event_stats(product, e))
     assert abs(v2.pv - REF[name]["pv"]) <= V2_QUALIFIED              # F17: V2 is qualified here
-    v2_alive, v2_ki = v2.expected_discounted_cashflows[-2], v2.expected_discounted_cashflows[-1]
+    v2_alive, v2_ki = v2.maturity.discounted_cash, v2.ki_settlement.discounted_cash
     assert abs(s.maturity.discounted_cash - v2_alive) <= M_PRE          # the first schedule's end, not knocked in
     assert abs(s.ki_settlement.discounted_cash - v2_ki) <= M_POST        # the second schedule's end, knocked in
     assert s.maturity.time < s.ki_settlement.time
