@@ -28,7 +28,12 @@ _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 from quantark.asset.equity.engine.pde.core.adapters.base import continuous_knock_in
 from quantark.asset.equity.engine.pde.core.adapters.snowball import SnowballAdapter
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
-from quantark.asset.equity.engine.pde.core.statistics.rows import EdgeRow, RowTerm
+from quantark.asset.equity.engine.pde.core.statistics.rows import (
+    CERTAIN_KI_LOWER,
+    CERTAIN_KI_UPPER,
+    EdgeRow,
+    RowTerm,
+)
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     GRID_CACHE_MAX_ENTRIES,
     _CACHE_KEYING,
@@ -1711,10 +1716,10 @@ class SnowballPDESolver(BasePDESolver):
         levels = [float(b) for b in barrier] if isinstance(barrier, (list, tuple)) else [float(barrier)]
         if not product.is_reverse and float(s_vec[0]) < min(levels):
             v1_lower, _ = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
-            lower = EdgeRow(v1_lower.value, "v0_lower_certain_ki", v1_lower.terms)
+            lower = EdgeRow(v1_lower.value, CERTAIN_KI_LOWER, v1_lower.terms)
         elif product.is_reverse and float(s_vec[-1]) > max(levels):
             _, v1_upper = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
-            upper = EdgeRow(v1_upper.value, "v0_upper_certain_ki", v1_upper.terms)
+            upper = EdgeRow(v1_upper.value, CERTAIN_KI_UPPER, v1_upper.terms)
         return lower, upper
 
     def _set_boundary_conditions_v1(

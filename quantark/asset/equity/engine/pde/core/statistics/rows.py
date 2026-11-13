@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from typing import NamedTuple, Optional
 
-__all__ = ["RowTerm", "EdgeRow", "CERTAIN_KI_BRANCHES", "knocks_in", "knocks_out"]
+__all__ = ["RowTerm", "EdgeRow", "CERTAIN_KI_BRANCHES", "CERTAIN_KI_LOWER", "CERTAIN_KI_UPPER", "knocks_in", "knocks_out"]
 
 #: the not-knocked-in rows a discretely observed knock-in makes certain (``_knock_in_side_row``): the knocked-in
-#: surface's row, while a KI observation remains and the edge lies beyond every KI level
-CERTAIN_KI_BRANCHES = frozenset({"v0_lower_certain_ki", "v0_upper_certain_ki"})
+#: surface's row, while a KI observation remains and the edge lies beyond every KI level; the solver labels them with
+#: these constants (one spelling)
+CERTAIN_KI_LOWER = "v0_lower_certain_ki"
+CERTAIN_KI_UPPER = "v0_upper_certain_ki"
+CERTAIN_KI_BRANCHES = frozenset({CERTAIN_KI_LOWER, CERTAIN_KI_UPPER})
 
 
 # NamedTuples, not frozen dataclasses: the value builds four of each per step on every route, and a

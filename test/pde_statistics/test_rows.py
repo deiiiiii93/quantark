@@ -199,3 +199,17 @@ def test_phoenix_rows():
             assert np.count_nonzero(up0[L.trigger_cols]) == 1, j
             seen_trigger = True
     assert seen_trigger
+
+
+def test_certain_knock_in_branches_are_named_once():
+    """The solver labels its certain-knock-in rows with the constants the statistics test against (CP4 minor, T22):
+    renaming a branch in the solver cannot silently turn the statistics' knock-in predicate off."""
+    import inspect
+
+    from quantark.asset.equity.engine.pde import snowball_pde_solver
+    from quantark.asset.equity.engine.pde.core.statistics import rows
+
+    assert rows.CERTAIN_KI_BRANCHES == frozenset({rows.CERTAIN_KI_LOWER, rows.CERTAIN_KI_UPPER})
+    source = inspect.getsource(snowball_pde_solver)
+    assert "_certain_ki\"" not in source and "_certain_ki'" not in source
+    assert "CERTAIN_KI_LOWER" in source and "CERTAIN_KI_UPPER" in source
