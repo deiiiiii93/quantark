@@ -1828,6 +1828,15 @@ class SnowballPDESolver(BasePDESolver):
             # Put is worthless at high S
             v = principal * df_to_maturity
             upper = EdgeRow(v, "v1_upper_principal", (RowTerm("M", v),))
+        if leg_annualized(product, "knock_in"):
+            # D26: an annualized knock-in leg scales the knocked-in downside by a tenor only the payoff resolves
+            # (Snowball: the contract tenor; KO-reset: the post-KI tenor). The closed forms above omit it, so the
+            # knock-in edge's row is read off the payoff itself. Every other contract keeps the closed forms: D26
+            # moves the annualized-KI class only, every other price stays bit for bit.
+            if product.is_reverse:
+                upper = self._payoff_v1_edge_row("upper", tau, product, pricing_env, s_vec, upper.branch)
+            else:
+                lower = self._payoff_v1_edge_row("lower", tau, product, pricing_env, s_vec, lower.branch)
         if self._fold is not None:
             # The knocked-in branch's folded cash on the rows the event statistics' knock-in column
             # carries it: settled knocked in at the knock-in edge, and at the knock-out edge only when
@@ -1839,6 +1848,22 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 lower, upper = _with_cash(lower, cash), _with_cash(upper, at_ko_edge)
         return lower, upper
+
+    def _payoff_v1_edge_row(self, edge, tau, product, pricing_env, s_vec, branch):
+        """The knocked-in row at ``edge`` ("lower" or "upper") read off ``get_maturity_payoff_v1`` (D26): the
+        discounted forward value of the payoff's affine piece through the edge cell. Its slope and intercept are the
+        chord of the payoff between the edge node and its neighbour, so the row carries whatever the payoff applies
+        there (participation, multiplier, airbag, protection floor, an annualized leg's tenor) and, as ``tau`` falls
+        to 0, tends to the terminal condition at the edge node."""
+        i, j = (0, 1) if edge == "lower" else (-1, -2)
+        s_edge, s_next = float(s_vec[i]), float(s_vec[j])
+        p_edge = float(product.get_maturity_payoff_v1(s_edge, pricing_env))
+        p_next = float(product.get_maturity_payoff_v1(s_next, pricing_env))
+        slope = (p_next - p_edge) / (s_next - s_edge)
+        intercept = p_edge - slope * s_edge
+        df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
+        v = intercept * df + slope * s_edge * df_div
+        return EdgeRow(v, branch, (RowTerm("M", v),))
 
     def _apply_step_modifications_two_surface(
         self,
