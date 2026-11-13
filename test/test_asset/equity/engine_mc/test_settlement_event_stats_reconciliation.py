@@ -39,36 +39,14 @@ from test_asset.equity.product_other.test_structured_numerical_settlement import
 )
 
 
-class _LedgerView:
-    """An ``EventStatistics`` (MC Snowball since T9, PDE 1D since T12, QUAD V1 since T17) read through this module's legacy-named attributes: its
-    ledger as the payment-aware cashflow fields, its observation table as the KO grid."""
-
-    def __init__(self, stats):
-        self.pv = stats.pv
-        self.determination_times = stats.ledger.determination_times
-        self.payment_times = stats.ledger.payment_times
-        self.expected_undiscounted_cashflows = stats.ledger.cash_to_pay
-        self.expected_discounted_cashflows = stats.ledger.discounted_cash
-        self.ko_times = stats.observations.times
-        self.ko_probability = stats.observations.probability
-
-
-def _view(stats):
-    return _LedgerView(stats) if isinstance(stats, EventStatistics) else stats
-
-
 def _assert_aligned_cashflow_ledger(stats, env, *, abs_tolerance=1.0e-8):
-    stats = _view(stats)
-    determination_times = np.asarray(stats.determination_times, dtype=float)
-    payment_times = np.asarray(stats.payment_times, dtype=float)
-    undiscounted = np.asarray(
-        stats.expected_undiscounted_cashflows,
-        dtype=float,
-    )
-    discounted = np.asarray(
-        stats.expected_discounted_cashflows,
-        dtype=float,
-    )
+    """The ledger (DESIGN 4.6) is the payment-aware view: cash to pay discounted at its own payment time sums
+    to ``pv``."""
+    assert isinstance(stats, EventStatistics)
+    determination_times = np.asarray(stats.ledger.determination_times, dtype=float)
+    payment_times = np.asarray(stats.ledger.payment_times, dtype=float)
+    undiscounted = np.asarray(stats.ledger.cash_to_pay, dtype=float)
+    discounted = np.asarray(stats.ledger.discounted_cash, dtype=float)
 
     assert determination_times.ndim == 1
     assert len(determination_times) == len(payment_times)
@@ -93,13 +71,13 @@ def _assert_aligned_cashflow_ledger(stats, env, *, abs_tolerance=1.0e-8):
 
 
 def _expected_life_from_determination_grid(stats) -> float:
-    stats = _view(stats)
-    ko_probability = np.asarray(stats.ko_probability, dtype=float)
-    ko_times = np.asarray(stats.ko_times, dtype=float)
-    maturity_probability = max(0.0, 1.0 - float(ko_probability.sum()))
+    """Each outcome's probability times its determination time. Unified statistics: the maturity outcomes are
+    their own rows (``maturity``, ``ki_settlement``), no longer ``1 - sum(KO)`` at the last KO time."""
+    obs = stats.observations
     return float(
-        np.dot(ko_probability, ko_times)
-        + maturity_probability * ko_times[-1]
+        np.dot(obs.probability, obs.times)
+        + stats.maturity.probability * stats.maturity.time
+        + stats.ki_settlement.probability * stats.ki_settlement.time
     )
 
 
@@ -135,21 +113,21 @@ def test_autocallable_probabilities_stay_on_determination_grid(
     )
 
     _assert_aligned_cashflow_ledger(delayed, env)
-    delayed_view, immediate_view = _view(delayed), _view(immediate)
     np.testing.assert_array_equal(
-        delayed_view.ko_times,
-        immediate_view.ko_times,
+        delayed.observations.times,
+        immediate.observations.times,
     )
     np.testing.assert_array_equal(
-        delayed_view.ko_probability,
-        immediate_view.ko_probability,
+        delayed.observations.probability,
+        immediate.observations.probability,
     )
     assert _expected_life_from_determination_grid(delayed) == pytest.approx(
         _expected_life_from_determination_grid(immediate)
     )
+    assert delayed.expected_lifetime == pytest.approx(immediate.expected_lifetime)
     assert np.any(
-        np.asarray(delayed_view.payment_times)
-        > np.asarray(delayed_view.determination_times)
+        np.asarray(delayed.ledger.payment_times)
+        > np.asarray(delayed.ledger.determination_times)
     )
 
 
@@ -163,16 +141,15 @@ def test_event_distribution_keeps_determination_and_payment_times_separate():
     )
 
     distribution = EventDistribution.from_statistics(stats)
-    stats = _view(stats)
     ko_payment_times = np.asarray(
         distribution.payment_times[EventType.KO],
         dtype=float,
     )
 
-    np.testing.assert_array_equal(distribution.stream_times[EventType.KO], stats.ko_times)
+    np.testing.assert_array_equal(distribution.stream_times[EventType.KO], stats.observations.times)
     np.testing.assert_allclose(
         ko_payment_times,
-        np.asarray(stats.ko_times) + LAG,
+        np.asarray(stats.observations.times) + LAG,
     )
 
     leg = FixedPayoffLeg(
@@ -182,7 +159,7 @@ def test_event_distribution_keeps_determination_and_payment_times_separate():
     )
     expected = float(
         np.sum(
-            np.asarray(stats.ko_probability)
+            np.asarray(stats.observations.probability)
             * np.asarray(
                 [
                     env.get_discount_factor(float(t))
@@ -230,10 +207,9 @@ def test_native_structured_stats_reconcile_on_payment_grid(
     )
 
     _assert_aligned_cashflow_ledger(stats, env)
-    stats = _view(stats)   # PDE 1D: EventStatistics since T12
     assert np.any(
-        np.asarray(stats.payment_times)
-        > np.asarray(stats.determination_times)
+        np.asarray(stats.ledger.payment_times)
+        > np.asarray(stats.ledger.determination_times)
     )
 
 
@@ -255,9 +231,8 @@ def test_ko_reset_stats_align_pre_post_and_terminal_cashflows():
     _assert_aligned_cashflow_ledger(stats, env)
     # QUAD V1 since T17: both schedules' knock-out rows, the maturity (the first schedule's end) and the knocked-in
     # settlement (maturity), every one settling LAG after its determination
-    view = _view(stats)
-    assert len(view.determination_times) == stats.observations.size + 2
-    np.testing.assert_allclose(view.payment_times, view.determination_times + LAG)
+    assert len(stats.ledger.determination_times) == stats.observations.size + 2
+    np.testing.assert_allclose(stats.ledger.payment_times, stats.ledger.determination_times + LAG)
 
 
 def test_dcn_stats_use_observation_life_and_explicit_payment_dates():

@@ -638,14 +638,6 @@ def test_result_to_dict_is_json():
     assert '"product_family": "dcn"' in text and payload["event_stats"]["pv"] == payload["pv"]
 
 
-def test_the_legacy_converter_reads_the_new_type():
-    stats = _stats("dcn_sobol")
-    a, b = EventDistribution.from_dcn_stats(stats), EventDistribution.from_statistics(stats)
-    np.testing.assert_array_equal(a.probabilities[EventType.KO], b.probabilities[EventType.KO])
-    np.testing.assert_array_equal(a.stream_times[EventType.KI], b.stream_times[EventType.KI])
-    assert not a.flagged_streams
-
-
 @pytest.mark.parametrize("name", ["dcn_sobol", "ko_lock_after_lock"])
 def test_price_with_events_carries_coupon_and_knock_in_streams(name):
     engine, product, env = _fresh(name)

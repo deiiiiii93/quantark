@@ -52,10 +52,9 @@ NUM_PATHS = 200_000
 
 
 def _p_ki(stats) -> float:
-    """P(knock in): ``EventStatistics.knock_in.probability`` (Snowball MC since T9: before any knock-out, which
-    with the knock-out out of reach is P(ever touch B)), or the legacy object's ``ki_probability``."""
-    knock_in = getattr(stats, "knock_in", None)
-    return float(knock_in.probability if knock_in is not None else stats.ki_probability)
+    """P(knock in): ``EventStatistics.knock_in.probability`` (before any knock-out, which with the knock-out out
+    of reach is P(ever touch B))."""
+    return float(stats.knock_in.probability)
 
 def _env(vol=IMPLIED_VOL):
     strikes = list(S0 * np.exp(np.linspace(-0.5, 0.5, 9)))

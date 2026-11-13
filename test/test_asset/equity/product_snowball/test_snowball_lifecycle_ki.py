@@ -83,43 +83,25 @@ def _engine_factories():
 
 
 def _ki_view(stats):
-    """``(P(KI), KI table times, KI table probability, KI table survival)``: the MC producers report
-    ``EventStatistics`` (spec T9, P(KI before any KO)), PDE 1D since T12 (its P(KI) from the forward pass, T13);
-    QUAD still its legacy object."""
-    if isinstance(stats, EventStatistics):
-        table = stats.ki_table
-        return stats.knock_in.probability, table.times, table.probability, table.survival
-    return stats.ki_probability, stats.ki_times, stats.ki_event_probability, stats.ki_survival_probability
+    """``(P(KI before any KO), KI table times, KI table probability, KI table survival)`` off ``EventStatistics``
+    (every producer since T17)."""
+    assert isinstance(stats, EventStatistics)
+    table = stats.ki_table
+    return stats.knock_in.probability, table.times, table.probability, table.survival
 
 
-def _assert_lifecycle_ki_event_stats(stats, engine="quad") -> None:
-    if isinstance(stats, EventStatistics):
-        assert stats.knock_in.probability == 1.0 and stats.knock_in.expected_time == 0.0
-        np.testing.assert_array_equal(stats.ki_table.times, [0.0])
-        np.testing.assert_array_equal(stats.ki_table.probability, [1.0])
-        np.testing.assert_array_equal(stats.ki_table.survival, [0.0])
-        assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), abs=1e-8)
-        return
-    if engine in ("pde", "quad"):
-        # spec 3B §5.5: ki_ever is 1; ki_probability (= ki_survive, knocked in AND reaching maturity
-        # without a knock-out) is the marched no-knock-out survival, up to the march's discounting.
-        # QUAD joined this definition in 79938a1c (autocallable_event_stats_api.md); MC stays "ever".
-        assert stats.ki_ever_probability == 1.0
-        assert stats.ki_survive_knocked_in_probability == pytest.approx(
-            1.0 - stats.ko_probability.sum(), abs=7e-9)
-    else:
-        assert stats.ki_probability == pytest.approx(1.0)
-    assert stats.ki_times.shape == (1,)
-    assert stats.ki_times[0] == pytest.approx(0.0)
-    assert stats.ki_event_probability.shape == (1,)
-    assert stats.ki_event_probability[0] == pytest.approx(1.0)
-    assert stats.ki_survival_probability.shape == (1,)
-    assert stats.ki_survival_probability[0] == pytest.approx(0.0)
-    pv_parts = (
-        float(np.sum(stats.expected_discounted_ko_cashflow))
-        + stats.expected_discounted_maturity_cashflow
-    )
-    assert stats.pv == pytest.approx(pv_parts, abs=1e-8)
+def _assert_lifecycle_ki_event_stats(stats) -> None:
+    """A note knocked in before valuation: KI is certain and happened at valuation (one KI row at t=0, nothing left
+    alive in the KI table), every path still alive at maturity settles knocked in (``ki_settlement`` is the
+    no-knock-out survival -- also on a contract whose KI barrier was dropped), and the ledger reconciles to ``pv``."""
+    assert isinstance(stats, EventStatistics)
+    assert stats.knock_in.probability == 1.0 and stats.knock_in.expected_time == 0.0
+    np.testing.assert_array_equal(stats.ki_table.times, [0.0])
+    np.testing.assert_array_equal(stats.ki_table.probability, [1.0])
+    np.testing.assert_array_equal(stats.ki_table.survival, [0.0])
+    assert stats.ki_settlement.probability == pytest.approx(1.0 - float(np.sum(stats.observations.probability)),
+                                                            abs=7e-9)
+    assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), abs=1e-8)
 
 
 def test_normal_ki_products_do_not_report_forced_lifecycle_state():
@@ -180,7 +162,7 @@ def test_lifecycle_ki_event_stats_known_state_without_ki_barrier():
         stats = engine.calculate_event_stats(product, env)
 
         assert stats is not None
-        _assert_lifecycle_ki_event_stats(stats, name)
+        _assert_lifecycle_ki_event_stats(stats)
         if name == "mc":
             result = engine.get_last_result()
             assert result.v0_probability == pytest.approx(0.0)

@@ -237,7 +237,7 @@ def exact_event_stats(product, env, *, width=0.006, kie_width=0.01, order=12):
     out = dict(ko_times=terms["ko_times"].tolist(), ko_probability=ko_p.tolist(),
                expected_discounted_ko_cashflow=ko_cf.tolist(),
                survival_probability=np.maximum(0.0, 1.0 - np.cumsum(ko_p)).tolist(),
-               ki_survive_knocked_in_probability=float(v[col["KIS"]]), ki_ever_probability=kie,
+               ki_settlement_probability=float(v[col["KIS"]]), p_ki_ever=kie,
                expected_discounted_maturity_cashflow=float(df(terms["T_pay"]) * v[col["M"]]),
                mass_lost=mass_lost, kie_mass_lost=kie_mass_lost)
     pv = float(ko_cf.sum() + out["expected_discounted_maturity_cashflow"])

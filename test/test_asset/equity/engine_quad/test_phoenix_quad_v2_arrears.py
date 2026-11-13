@@ -130,11 +130,8 @@ def _v1(grid_points=GRID_POINTS):
 
 
 def _coupon_cash(stats, n_rows):
-    # the MC reference reports EventStatistics (T10); QUAD V1/V2 the legacy object until T16/T17
-    coupons = getattr(stats, "coupons", None)
-    legacy = coupons is None
-    cash = np.asarray(stats.expected_discounted_coupon_cashflow if legacy else coupons.discounted_cash,
-                      dtype=float)
+    # every producer (MC, QUAD V1, QUAD V2) reports EventStatistics: per-row coupon cash is its coupon table
+    cash = np.asarray(stats.coupons.discounted_cash, dtype=float)
     assert cash.shape == (n_rows,), "no per-row coupon cash"
     return cash
 

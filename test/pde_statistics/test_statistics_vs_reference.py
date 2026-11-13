@@ -28,7 +28,7 @@ def test_statistics_within_measured_bounds(name):
     # unified event statistics T12: the knock-in-ever column is gone (a knock-in after a knock-out is no knock-in);
     # P(knock in before any knock-out) comes from the forward adjoint pass (T13), not from this reference
     assert np.max(np.abs(got.observations.probability - ref["ko_probability"])) <= b["ko"]
-    assert abs(got.ki_settlement.probability - ref["ki_survive_knocked_in_probability"]) <= b["ki_survive"]
+    assert abs(got.ki_settlement.probability - ref["ki_settlement_probability"]) <= b["ki_survive"]
     assert np.max(np.abs(got.observations.discounted_cash - ref["expected_discounted_ko_cashflow"])) <= CASH
     assert abs(got.pv - ref["pv"]) <= PV
     if "coupon_probability" in ref:

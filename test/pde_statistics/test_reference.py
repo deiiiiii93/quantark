@@ -20,8 +20,8 @@ def test_reference_reproduces_its_bank(name):
     product, env = CASES[name][0](), CASES[name][1]()
     got = exact_with_error(product, env, **REFERENCE_KWARGS.get(name, {}))
     want = BANK[name]["values"]
-    for key in ("ko_probability", "expected_discounted_ko_cashflow", "ki_ever_probability",
-                "ki_survive_knocked_in_probability", "expected_discounted_maturity_cashflow", "pv"):
+    for key in ("ko_probability", "expected_discounted_ko_cashflow", "p_ki_ever",
+                "ki_settlement_probability", "expected_discounted_maturity_cashflow", "pv"):
         if key in want:
             assert_close(np.asarray(got[key], float).tolist() if np.ndim(got[key]) else float(got[key]),
                          want[key], msg=f"{name}.{key}")

@@ -136,7 +136,7 @@ def _snowball(*, maturity_p=0.42, ki_p=0.08, ki_table="table", receivables=None)
 
 
 def test_ki_stream_keeps_its_own_axis_when_its_length_differs_from_the_ko_grid():
-    """The base bug: ``from_autocallable_stats`` dropped the KI stream unless it had the KO grid's length."""
+    """The base bug: the legacy autocallable converter dropped the KI stream unless it had the KO grid's length."""
     stats = _snowball()
     dist = EventDistribution.from_statistics(stats)
     np.testing.assert_array_equal(dist.probabilities[EventType.KI], np.asarray(KI_P))

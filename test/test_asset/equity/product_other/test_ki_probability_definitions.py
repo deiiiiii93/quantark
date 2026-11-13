@@ -1,23 +1,17 @@
 """Cross-engine KI-probability definition tests.
 
-Background (investigation 2026-07-01): QUAD/PDE report ``ki_probability`` as
-P(KI ever AND never KO) while MC reports P(KI ever). The gap is purely
-definitional (= P(KI AND KO)), not a discretization or Brownian-bridge error —
-an independent fine-grid MC reproduces BOTH numbers by pure path counting.
+Background (investigation 2026-07-01): engines used to disagree on "the" KI probability -- one reported
+P(KI ever AND never KO), another P(KI ever). The gap was purely definitional (= P(KI AND KO)), not a
+discretization or Brownian-bridge error.
 
-To end the ambiguity, ``AutocallableEventStats`` now carries two unambiguous,
-cross-engine-consistent fields:
+Since the unified event statistics (T9 Snowball, T10 Phoenix MC; T12/T13 PDE; T16 QUAD V2; T17 QUAD V1) every
+engine reports two unambiguous fields (DESIGN §4.5):
 
-- ``ki_ever_probability``               = P(KI ever)
-- ``ki_survive_knocked_in_probability`` = P(KI ever AND never KO)
+- ``knock_in.probability``       = P(KI before any KO) (a knock-in after a knock-out is no knock-in)
+- ``knock_in.probability_no_ko`` = P(KI AND never KO) (== ``ki_settlement.probability``)
 
-These tests pin both engines to the same definitions and pin the decomposition
-identity ki_ever - ki_survive == P(KI AND KO) >= 0.
-
-Since the unified event statistics (T9 Snowball, T10 Phoenix MC; T12/T13 PDE; T17 QUAD V1) every engine reports
-``knock_in.probability`` = P(KI before any KO) (a knock-in after a knock-out is no knock-in, DESIGN §4.5) and
-``knock_in.probability_no_ko`` = P(KI AND never KO) (== the knocked-in settlement row); the legacy KI-ever field is
-gone. These tests pin the engines to the same two definitions.
+These tests pin the engines to the same two definitions and pin the ordering
+P(KI before any KO) >= P(KI AND never KO).
 """
 
 from datetime import datetime

@@ -52,15 +52,13 @@ def test_price_matches_the_frozen_fan(name):
     assert close(live, REFERENCE[name]["price"]), (live, REFERENCE[name]["price"])
 
 
-#: frozen legacy fields with no counterpart under the unified definitions (T12): the knock-in-ever probability
-#: (a knock-in after a knock-out is no knock-in) and the legacy per-date KI arrays (the forward pass, T13)
-DROPPED = {"ki_ever_probability", "ki_times", "ki_event_probability", "ki_survival_probability"}
-
-
-def legacy_view(stats) -> dict:
-    """The frozen (legacy) field names read off ``EventStatistics`` where the definition is the same (unified event
-    statistics T12; the D21 mapping for the maturity total). The legacy ledger's single maturity row is the
-    maturity row plus the knock-in settlement row of the new ledger (same determination and payment)."""
+def frozen_view(stats) -> dict:
+    """``EventStatistics`` read under the frozen file's keys. The old fan was captured in the legacy field layout;
+    its ``stats`` section is re-keyed to the unified field paths (T18, values unchanged) and the legacy fields with
+    no counterpart under the unified definitions (T12: knock-in-ever, the legacy per-date KI arrays) are dropped.
+    ``maturity.discounted_cash+ki_settlement.discounted_cash`` is the D21 maturity total. ``[terminal_merged]``:
+    the legacy ledger's single maturity row is the maturity row plus the knock-in settlement row of the new ledger
+    (same determination and payment)."""
     obs, coupons, ledger = stats.observations, stats.coupons, stats.ledger
     det, pay = list(ledger.determination_times[:-1]), list(ledger.payment_times[:-1])
     disc = list(ledger.discounted_cash[:-2]) + [float(ledger.discounted_cash[-2] + ledger.discounted_cash[-1])]
@@ -69,17 +67,19 @@ def legacy_view(stats) -> dict:
     assert ledger.payment_times[-1] == ledger.payment_times[-2]
     dates = lambda d: None if d is None else repr(tuple(d[:-1]))   # noqa: E731
     return stats_fields_view({
-        "pv": stats.pv, "ko_times": obs.times, "ko_probability": obs.probability,
-        "survival_probability": np.maximum(0.0, obs.survival), "expected_discounted_ko_cashflow": obs.discounted_cash,
-        "coupon_probability": coupons.probability, "expected_discounted_coupon_cashflow": coupons.discounted_cash,
-        "coupon_payment_is_path_dependent": bool(np.all(coupons.payment_is_path_dependent)),
-        "ki_probability": stats.ki_settlement.probability,
-        "ki_survive_knocked_in_probability": stats.ki_settlement.probability,
-        "expected_discounted_maturity_cashflow": stats.maturity.discounted_cash + stats.ki_settlement.discounted_cash,
+        "pv": stats.pv, "observations.times": obs.times, "observations.probability": obs.probability,
+        # the frozen survival was clipped at zero
+        "observations.survival": np.maximum(0.0, obs.survival), "observations.discounted_cash": obs.discounted_cash,
+        "coupons.probability": coupons.probability, "coupons.discounted_cash": coupons.discounted_cash,
+        "coupons.payment_is_path_dependent": bool(np.all(coupons.payment_is_path_dependent)),
+        "ki_settlement.probability": stats.ki_settlement.probability,
+        "maturity.discounted_cash+ki_settlement.discounted_cash":
+            stats.maturity.discounted_cash + stats.ki_settlement.discounted_cash,
         "reconciliation_error": stats.reconciliation_error,
-        "determination_times": det, "payment_times": pay, "expected_discounted_cashflows": disc,
-        "expected_undiscounted_cashflows": undisc, "determination_dates": dates(ledger.determination_dates),
-        "payment_dates": dates(ledger.payment_dates), "provenance": stats.provenance,
+        "ledger.determination_times[terminal_merged]": det, "ledger.payment_times[terminal_merged]": pay,
+        "ledger.discounted_cash[terminal_merged]": disc, "ledger.cash_to_pay[terminal_merged]": undisc,
+        "ledger.determination_dates[terminal_merged]": dates(ledger.determination_dates),
+        "ledger.payment_dates[terminal_merged]": dates(ledger.payment_dates), "provenance": stats.provenance,
     })
 
 
@@ -93,8 +93,8 @@ def test_event_stats_match_the_frozen_fan(name):
     """The frozen fan's statistics, field for field where the unified definitions keep them (T12): nothing moved but
     the dropped knock-in-ever fields (the reconciliation error is round-off on both sides)."""
     product, env, solver_cls, params = _build(name)
-    live = legacy_view(solver_cls(params).calculate_event_stats(product, env))
-    want = {k: v for k, v in REFERENCE[name]["stats"].items() if k not in DROPPED}
+    live = frozen_view(solver_cls(params).calculate_event_stats(product, env))
+    want = REFERENCE[name]["stats"]
     assert live.keys() == want.keys()
     bad = {}
     for k in want:
