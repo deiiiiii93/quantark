@@ -6564,3 +6564,345 @@ def test_measures_lists_the_samples_state_files_so_the_report_can_compute_the_cu
     assert list(measures.state_files(some, sample, True)) == ["seas6:2025-06-02"]
     with pytest.raises(StudyDataError, match="no state file"):
         measures.state_files(tmp_path / "absent", sample, True)
+
+
+# ---------------------------------------------------------------------------
+# T7 — the report: aggregation, the unblinding guard, the Bloomberg x Swiss HTML (seller view)
+# ---------------------------------------------------------------------------
+
+#: Planted into every number of a fixture test payload and of the fixture test runs: none may reach the page unless
+#: the selection and the payload are the current run's.
+T7_SENT_TABLE = -987654.321
+T7_SENT_DAY = 876543.21
+T7_SENT_MARKS = ("987,654", "987654", "876,543", "876543")
+T7_HASHES = ("prereg_hash", "events_hash", "code_hash", "inputs_hash")
+
+
+def _t7_plant(obj):
+    """Every float of a payload block replaced by the table sentinel (ints and flags kept)."""
+    if isinstance(obj, dict):
+        return {k: _t7_plant(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_t7_plant(v) for v in obj]
+    if isinstance(obj, float):
+        return T7_SENT_TABLE
+    return obj
+
+
+def _t7_world(root, t6_files, t6_train, t6_test, *, selection=True, payload=True, test_runs=True, train_runs=True,
+              states=True, probe=True):
+    """A report's inputs in ``root``: the hand-made market's training and test runs, its selection and its payload, the
+    test numbers replaced by sentinels (the stamps, picks and composites kept, so the payload stays the current
+    run's)."""
+    from gpin.report import ReportPaths
+
+    root.mkdir(parents=True, exist_ok=True)
+    runs = root / "runs"
+    runs.mkdir()
+    if train_runs:
+        shutil.copytree(t6_train.out / "runs" / "train", runs / "train")
+    if test_runs:
+        shutil.copytree(t6_test.out / "runs" / "test", runs / "test")
+        for path in (runs / "test").glob("*__*.json"):
+            note = json.loads(path.read_text())
+            for clocks in note["runs"].values():
+                for cells in clocks.values():
+                    for cell in cells.values():
+                        for eid, ev in cell["events"].items():
+                            if note["events"][eid]["slice"] == "test":
+                                ev["pnl_bp"] = T7_SENT_DAY
+                                ev["days"] = [[d, T7_SENT_DAY, h] for d, _, h in ev["days"]]
+            path.write_text(json.dumps(note))
+    sel = root / "selection.json"
+    if selection:
+        shutil.copy(t6_train.out / "selection.json", sel)
+    back = root / "backtest.json"
+    if payload:
+        data = json.loads((t6_test.out / "backtest.json").read_text())
+        for key in ("tables", "sensitivities", "gamma_carry", "whole_life_pin", "extras"):
+            data[key] = _t7_plant(data[key])
+        back.write_text(json.dumps(data))
+    probe_path = STUDY_DIR / "results" / "ki_gap_probe.json" if probe else root / "no_probe.json"
+    return ReportPaths(runs_dir=runs, selection=sel, backtest=back,
+                       states_dir=t6_files.states if states else root / "no_states", events=t6_files.events,
+                       board=t6_files.board, chain=t6_files.chain, probe=probe_path)
+
+
+def _t7_rewrite(path, fn):
+    data = json.loads(path.read_text())
+    fn(data)
+    path.write_text(json.dumps(data))
+
+
+def _t7_visible(html):
+    """The reader-facing text of a page: no script, no style, no tags."""
+    text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S)
+    return re.sub(r"<[^>]+>", " ", text)
+
+
+def test_t7_the_guard_lets_test_numbers_through_only_with_a_current_selection_and_a_current_payload(
+        t6_files, t6_train, t6_test, tmp_path):
+    from gpin import report
+
+    sample = _t6_sample()
+
+    def decide(name, **kw):
+        paths = _t7_world(tmp_path / name, t6_files, t6_train, t6_test, **kw.pop("world", {}))
+        for fn in kw.pop("edits", ()):
+            fn(paths)
+        return report.decide(paths, sample)
+
+    ok = decide("ok")
+    assert (ok.test_ok, ok.training_ok, ok.problems) == (True, True, [])
+    assert ok.current == _t6_stamp(t6_files) and ok.selection is not None and ok.payload is not None
+    g = decide("nosel", world=dict(selection=False))
+    assert (g.test_ok, g.selection, g.payload) == (False, None, None)
+    assert "no training selection" in " ".join(g.problems)
+    assert g.training_ok                                                    # the training runs are still current
+    for key in T7_HASHES:
+        g = decide(f"sel_{key}", edits=[lambda p, key=key: _t7_rewrite(p.selection, lambda d: d.update({key: "0" * 64}))])
+        assert (g.test_ok, g.selection, g.payload) == (False, None, None)
+        assert key in " ".join(g.problems)
+    g = decide("nopay", world=dict(payload=False))
+    assert (g.test_ok, g.payload) == (False, None) and g.selection is not None
+    assert "no test payload" in " ".join(g.problems)
+    for key in T7_HASHES:
+        g = decide(f"pay_{key}", edits=[lambda p, key=key: _t7_rewrite(p.backtest, lambda d: d["stamp"].update({key: "1" * 64}))])
+        assert (g.test_ok, g.payload) == (False, None) and key in " ".join(g.problems)
+    g = decide("manifest", edits=[lambda p: _t7_rewrite(p.runs_dir / "test" / "manifest.json",
+                                                         lambda d: d["stamp"].update(code_hash="2" * 64))])
+    assert (g.test_ok, g.payload) == (False, None) and "code_hash" in " ".join(g.problems)
+    g = decide("mixed", edits=[lambda p: _t7_rewrite(p.runs_dir / "test" / "seas6__2025-06-02.json",
+                                                      lambda d: d["stamp"].update(events_hash="3" * 64))])
+    assert (g.test_ok, g.payload) == (False, None) and "stamp" in " ".join(g.problems)
+    # a training run written under other files is not shown as current
+    def stale_train(p):
+        for path in (p.runs_dir / "train").glob("*.json"):
+            _t7_rewrite(path, lambda d: d["stamp"].update(code_hash="4" * 64) if "stamp" in d else None)
+    g = decide("train", edits=[stale_train])
+    assert g.training_ok is False and "code_hash" in " ".join(g.problems)
+    # no states directory: the recorded inputs cannot be hashed, so no test number, whatever the files say
+    g = decide("nostates", world=dict(states=False))
+    assert (g.test_ok, g.payload, g.current) == (False, None, None)
+    assert "recorded inputs" in " ".join(g.problems)
+    assert g.selection is not None and g.training_ok                        # three hashes match: training figures
+    # ... but a selection stale on a hash that can be computed, or made on a partial set, is not shown even then
+    g = decide("nostates_stale", world=dict(states=False),
+               edits=[lambda p: _t7_rewrite(p.selection, lambda d: d.update(code_hash="5" * 64))])
+    assert g.selection is None and "code_hash" in " ".join(g.problems)
+    g = decide("nostates_partial", world=dict(states=False),
+               edits=[lambda p: _t7_rewrite(p.selection, lambda d: d.update(partial=True))])
+    assert g.selection is None and "partial" in " ".join(g.problems)
+
+
+def test_t7_the_states_summary_reads_the_first_window_day_of_each_model_and_stops_at_the_split(t6_files):
+    from gpin import report
+    from gpin.measures import state_files
+
+    files = state_files(t6_files.states, _t6_sample())
+    split = date(2025, 7, 1)
+    s = report.summarise_states(files, split=split, cutoff=split)
+    assert s["cutoff"] == "2025-07-01" and s["n_files"] == 2
+    surv = s["windows"]["ki75"]["surv"]
+    # one KO window before the split: it opens on 06-03 (10 trading days before the 06-17 observation), spot 5080
+    assert surv["n"] == 1 and surv["first"] == ["2025-06-03"]
+    assert surv["step_pct"]["mean"] == pytest.approx((450.0 - 1000.0) * 5080.0 / 1.0e7 * 100.0, rel=1e-9)
+    assert surv["reserve_bp"]["mean"] == pytest.approx(0.0, abs=1e-9)        # every KO model has the true price here
+    kin = s["windows"]["seas6"]["kin"]
+    # the first approach opens on 06-10 at 4930: the knocked-in note's price minus the true one, seller side
+    assert kin["n"] == 1 and kin["first"] == ["2025-06-10"]
+    assert kin["reserve_bp"]["mean"] == pytest.approx((-300000.0 - (400000.0 + 2000.0 * (4930.0 - 5000.0))) * 1e-3)
+    assert kin["step_pct"]["mean"] == pytest.approx((1200.0 - 2000.0) * 4930.0 / 1.0e7 * 100.0, rel=1e-9)
+    # the illustrative days: the training-dated T-1 close nearest the KO level, the training KI-window day nearest
+    # the KI level
+    ko, ki = s["illustrative"]["ko"], s["illustrative"]["ki"]
+    assert (ko["note"], ko["date"], ko["models"]) == ("ki75:2025-06-02", "2025-06-16", ["true", "surv"])
+    assert ko["position_delta_pct"]["true"][12] == pytest.approx(-1000.0 * 5090.0 / 1.0e7 * 100.0, rel=1e-9)
+    assert ko["position_gamma_pct"]["true"][12] == pytest.approx(0.0, abs=1e-12)
+    assert (ki["note"], ki["date"], ki["models"]) == ("seas6:2025-06-02", "2025-06-12", ["true", "kin"])
+    assert ki["position_delta_pct"]["kin"][0] == pytest.approx(-1200.0 * 4830.0 * 0.88 / 1.0e7 * 100.0, rel=1e-9)
+    # with a valid test payload the summary reads every date; the illustrations stay training-dated
+    full = report.summarise_states(files, split=split, cutoff=None)
+    assert full["cutoff"] is None
+    assert full["windows"]["ki75"]["surv"]["n"] == 2 and full["windows"]["seas6"]["kin"]["n"] == 2
+    assert full["illustrative"] == s["illustrative"]
+
+
+@pytest.fixture(scope="module")
+def t7_valid(tmp_path_factory, t6_files, t6_train, t6_test):
+    from gpin import report
+
+    paths = _t7_world(tmp_path_factory.mktemp("t7_valid"), t6_files, t6_train, t6_test)
+    model = report.build_model(paths)
+    return SimpleNamespace(paths=paths, model=model, html=report.render(model))
+
+
+T7_TABLES = ("design-sample", "hypotheses", "ko-tail", "ko-life", "ki-tail", "ki-life", "ki-transfer", "ki-gap",
+             "clocks", "sensitivity", "gamma-carry", "reserve", "step", "overlay", "flags", "gap-sign", "band",
+             "training-picks", "composites")
+T7_CHARTS = ("delta-ko", "gamma-ko", "delta-ki", "gamma-ki", "dist-ko", "dist-ki", "path-ko")
+
+
+def test_t7_the_page_has_the_house_chrome_every_required_table_and_chart_and_no_external_resource(t7_valid):
+    from gpin import report
+
+    html = t7_valid.html
+    assert html.startswith("<!doctype html>") and html.count("<html") == 1
+    # the frozen navigator (function bar and numbered menu in one sticky block) and the theme switcher
+    assert '<div class="top">' in html and "position: sticky" in html and 'id="menu"' in html
+    assert 'id="theme"' in html and "localStorage" in html and "IntersectionObserver" in html
+    # both colour schemes: dark tokens at the root, light under the OS preference and under the switch
+    assert "@media (prefers-color-scheme: light)" in html and ':root[data-theme="light"]' in html
+    for sid, _ in report.SECTIONS:
+        assert f'<section id="{sid}"' in html and f'href="#{sid}"' in html
+    for name in T7_TABLES:
+        assert f'data-table="{name}"' in html, name
+    for name in T7_CHARTS:
+        assert f'data-chart="{name}"' in html and "<svg" in html, name
+    # one self-contained file: no URL of any kind is loaded
+    assert not re.search(r"https?:", html)
+    assert not re.search(r"""(?:src|href|action)\s*=\s*["']?\s*//|url\(\s*["']?\s*//|@import""", html)
+    # seller view, and no internal task labels in the reader's text
+    assert "holder" not in html.lower()
+    assert not re.search(r"<(?![a-zA-Z/!])", re.sub(r"<script.*?</script>", "", html, flags=re.S))   # every < is a tag
+    text = _t7_visible(html)
+    assert not re.search(r"\b(?:T\d{1,2}|CP\d|AC\d{1,2}|D\d{1,2}|R\d)\b", text), re.findall(
+        r"\b(?:T\d{1,2}|CP\d|AC\d{1,2}|D\d{1,2}|R\d)\b", text)
+    assert "seller" in text and "position" in text and "hedge" in text
+
+
+def test_t7_the_page_states_what_each_table_needs_the_reader_to_know(t7_valid):
+    text = " ".join(_t7_visible(t7_valid.html).split())
+    for phrase in ("about one false winner", "adjacent weeks share market days", "five weeks of one episode",
+                   "base_noclip", "capped at 3.0", "VWAP proxy", "one number changed at a time",
+                   "close clock only", "Futures cannot change gamma", "about 2 years of coupon",
+                   "not re-tested", "synthetic bookings on real paths", "about 3 x the payoff lots",
+                   "one listed strike step", "not rescaled", "bp of notional"):
+        assert phrase in text, phrase
+    assert "No test number is shown" not in text
+
+
+def test_t7_test_numbers_appear_with_a_current_selection_and_payload(t7_valid):
+    html = t7_valid.html
+    assert "987,654" in html                                                # the payload's (planted) numbers
+    assert "876,543" in html                                                # the test runs' (planted) event P&L
+    assert t7_valid.model["guard"]["test_ok"] is True
+
+
+@pytest.mark.parametrize("case", ["no_selection", *[f"selection_{k}" for k in T7_HASHES], "no_payload",
+                                  *[f"payload_{k}" for k in T7_HASHES], "stale_manifest", "mixed_stamps"])
+def test_t7_no_test_number_reaches_the_page_unless_the_guard_passes(case, t6_files, t6_train, t6_test, tmp_path):
+    from gpin import report
+
+    paths = _t7_world(tmp_path / "w", t6_files, t6_train, t6_test, selection=case != "no_selection",
+                      payload=case != "no_payload")
+    word = {"no_selection": "no training selection", "no_payload": "no test payload", "stale_manifest": "code_hash",
+            "mixed_stamps": "stamp"}.get(case)
+    if case.startswith("selection_"):
+        word = case[len("selection_"):]
+        _t7_rewrite(paths.selection, lambda d: d.update({word: "0" * 64}))
+    elif case.startswith("payload_"):
+        word = case[len("payload_"):]
+        _t7_rewrite(paths.backtest, lambda d: d["stamp"].update({word: "1" * 64}))
+    elif case == "stale_manifest":
+        _t7_rewrite(paths.runs_dir / "test" / "manifest.json", lambda d: d["stamp"].update(code_hash="2" * 64))
+    elif case == "mixed_stamps":
+        _t7_rewrite(paths.runs_dir / "test" / "seas6__2025-06-02.json", lambda d: d["stamp"].update(events_hash="3" * 64))
+    html = report.render(report.build_model(paths))
+    for mark in T7_SENT_MARKS:
+        assert mark not in html, (case, mark)
+    banner = re.search(r'<div class="banner[^"]*">(.*?)</div>', html, flags=re.S)
+    assert banner and "No test number is shown" in banner.group(1) and word in banner.group(1), case
+    # the research, the sample and the valid training figures are still there, labelled as such
+    assert 'data-table="design-sample"' in html and "Training figures" in html and 'data-table="ko-tail"' in html
+
+
+def test_t7_training_figures_are_labelled_and_never_read_as_a_verdict(t6_files, t6_train, t6_test, tmp_path):
+    from gpin import report
+
+    paths = _t7_world(tmp_path / "w", t6_files, t6_train, t6_test, payload=False, test_runs=False)
+    html = report.render(report.build_model(paths))
+    for name in ("ko-tail", "ki-tail"):
+        caption = re.search(rf'<p class="tcap">([^<]*)</p>\s*<div class="scroll"><table data-table="{name}"', html)
+        assert caption and caption.group(1).startswith("Training figures"), name
+    assert ">Win<" not in html and ">Robust<" not in html                   # no verdict column on training numbers
+    assert 'data-table="training-picks"' in html and "picked on the training events" in html
+    # rows in the pre-registered order (the run files are written with sorted keys)
+    from gpin.techniques import grid_id
+
+    prereg_order = [grid_id(r["id"], g) for r in load_prereg()["techniques"] for g in r["grid"]]
+    body = re.search(r'<table data-table="ko-tail".*?</table>', html, flags=re.S).group(0)
+    shown = re.findall(r"<tr[^>]*><td><code>([^<]+)</code>", body)
+    assert shown == [t for t in prereg_order if t in shown] and shown[:2] == ["base", "base_noclip"]
+
+
+def test_t7_the_report_renders_from_a_partial_set_of_inputs(t6_files, t6_train, t6_test, tmp_path):
+    from gpin import report
+
+    # only the training runs: no test runs, no payload, no states directory, no probe
+    paths = _t7_world(tmp_path / "a", t6_files, t6_train, t6_test, payload=False, test_runs=False, states=False,
+                      probe=False)
+    html = report.render(report.build_model(paths))
+    text = " ".join(_t7_visible(html).split())
+    assert text.count("NOT AVAILABLE") >= 4 and "No test number is shown" in text
+    assert 'data-table="ki-gap"' not in html and 'data-chart="delta-ko"' not in html and 'data-table="reserve"' not in html
+    assert 'data-table="ko-tail"' in html                                   # the training figures are still there
+    # a subset of the training note files: the KI book's file is gone
+    paths = _t7_world(tmp_path / "b", t6_files, t6_train, t6_test, payload=False, test_runs=False)
+    (paths.runs_dir / "train" / "seas6__2025-06-02.json").unlink()
+    model = report.build_model(paths)
+    html = report.render(model)
+    assert "1 of 2 note files" in " ".join(_t7_visible(html).split())
+    for mark in T7_SENT_MARKS:
+        assert mark not in html
+    # nothing at all but the committed research files
+    paths = _t7_world(tmp_path / "c", t6_files, t6_train, t6_test, selection=False, payload=False, test_runs=False,
+                      train_runs=False, states=False)
+    html = report.render(report.build_model(paths))
+    assert "No test number is shown" in html and 'data-table="design-sample"' in html and 'data-table="ki-gap"' in html
+
+
+@pytest.fixture(scope="module")
+def stage5():
+    return _load_stage("05_report.py")
+
+
+def _t7_argv(paths, out, *extra):
+    return ["--runs-dir", str(paths.runs_dir), "--selection", str(paths.selection), "--backtest", str(paths.backtest),
+            "--states-dir", str(paths.states_dir), "--events", str(paths.events), "--board", str(paths.board),
+            "--chain", str(paths.chain), "--probe", str(paths.probe), "--out", str(out), *extra]
+
+
+def test_t7_the_stage_writes_one_file_where_it_is_told_and_no_tracked_file(stage5, t6_files, t6_train, t6_test,
+                                                                           tmp_path):
+    paths = _t7_world(tmp_path / "w", t6_files, t6_train, t6_test)
+    tracked = STUDY_DIR / "results" / "report.html"
+    before = (tracked.exists(), tracked.stat().st_mtime_ns if tracked.exists() else None)
+    status = subprocess.run(["git", "status", "--porcelain", "--", str(STUDY_DIR)], capture_output=True, text=True,
+                            cwd=STUDY_DIR).stdout
+    out = tmp_path / "out" / "report.html"
+    assert stage5.main(_t7_argv(paths, out)) == 0
+    assert out.exists() and [p.name for p in out.parent.iterdir()] == ["report.html"]     # atomic: no temp file left
+    html = out.read_text(encoding="utf-8")
+    assert "987,654" in html and html.rstrip().endswith("</html>")
+    assert (tracked.exists(), tracked.stat().st_mtime_ns if tracked.exists() else None) == before
+    assert subprocess.run(["git", "status", "--porcelain", "--", str(STUDY_DIR)], capture_output=True, text=True,
+                          cwd=STUDY_DIR).stdout == status
+    assert stage5.resolve(stage5.parse_args([])).out == tracked                          # the default destination
+
+
+@pytest.mark.skipif(not (QUICK_STATES.is_dir() and gpin.BOARD_PATH.exists() and gpin.CHAIN_PATH.exists()),
+                    reason="the quick states, the board or the chain are absent")
+def test_t7_the_report_renders_on_the_quick_runs(stage4, stage5, tmp_path):
+    out = tmp_path / "quick"
+    assert stage4.main(["--slice", "train", "--partial", "--mode", "close", "--workers", "1",
+                        "--states-dir", str(QUICK_STATES), "--out-dir", str(out)]) == 0
+    page = tmp_path / "report.html"
+    assert stage5.main(["--partial", "--runs-dir", str(out / "runs"), "--selection", str(out / "selection.json"),
+                        "--backtest", str(out / "backtest.json"), "--states-dir", str(QUICK_STATES),
+                        "--out", str(page)]) == 0
+    html = page.read_text(encoding="utf-8")
+    text = " ".join(_t7_visible(html).split())
+    assert "No test number is shown" in text and "no test payload" in text and "Training figures" in text
+    assert "holder" not in html.lower() and not re.search(r"https?:", html)
+    assert 'data-chart="delta-ki"' in html                                  # the seasoned quick note has a KI-window day
