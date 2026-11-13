@@ -6803,7 +6803,7 @@ def test_t7_the_page_has_the_house_chrome_every_required_table_and_chart_and_no_
 
 def test_t7_the_page_states_what_each_table_needs_the_reader_to_know(t7_valid):
     text = " ".join(_t7_visible(t7_valid.html).split())
-    for phrase in ("about one false winner", "adjacent weeks share market days", "five weeks of one episode",
+    for phrase in ("about one false winner", "adjacent weeks share market days", "test approaches in",
                    "base_noclip", "capped at 3.0", "VWAP proxy", "one number changed at a time",
                    "close clock only", "Futures cannot change gamma", "about 2 years of coupon",
                    "not re-tested", "synthetic bookings on real paths", "about 3 x the payoff lots",
@@ -6936,3 +6936,152 @@ def test_t7_the_report_renders_on_the_quick_runs(stage4, stage5, tmp_path):
     assert "No test number is shown" in text and "no test payload" in text and "Training figures" in text
     assert "holder" not in html.lower() and not re.search(r"https?:", html)
     assert 'data-chart="delta-ki"' in html                                  # the seasoned quick note has a KI-window day
+
+
+# ---- CP4 report fix round: the statements and tables the pre-unblinding review asked for ----
+
+
+def _cp4_limit_market():
+    """Five days of one far IM contract: a normal day, a close locked at the limit down (close = settle = previous
+    settle x 0.9), a normal day, a close at the limit up within a tick whose settle is off the limit, a normal day."""
+    from gpin.board import DayBoard, ImBar
+    from s2ts.chain import ImQuote
+
+    days = _weekdays(5, date(2025, 4, 3))
+    # (open, close, settle, vwap)
+    bars = [(6000.0, 6010.0, 6000.0, 6005.0), (5420.0, 5400.0, 5400.0, 5524.2), (5401.2, 5500.0, 5480.0, 5470.0),
+            (5600.0, 6027.8, 5990.0, 5900.0), (6100.0, 6050.0, 6040.0, 6060.0)]
+    boards, chains = {}, []
+    for d, (o, c, s, v) in zip(days, bars):
+        boards[d] = DayBoard(d, c, {"IM2409": ImBar(o, c, s, v, 1000), "IM2406": ImBar(o, c - 50.0, s - 50.0, v, 10)},
+                             {}, {})
+        chains.append(SimpleNamespace(day=d, im=(ImQuote("IM2406", d, 0.1, c - 50.0, s - 50.0),
+                                                 ImQuote("IM2409", d, 0.4, c, s))))
+    return days, boards, chains
+
+
+def test_cp4_limit_days_are_the_far_contract_closes_at_the_daily_price_limit():
+    from gpin.report import limit_days
+
+    days, boards, chains = _cp4_limit_market()
+    out = limit_days(boards, chains)
+    assert [r["date"] for r in out] == [days[1].isoformat(), days[3].isoformat()]
+    down, up = out
+    assert (down["code"], down["side"], down["locked"]) == ("IM2409", "down", True)
+    assert down["limit"] == pytest.approx(5400.0) and down["prev_settle"] == 6000.0
+    assert down["vwap_vs_close"] == pytest.approx(5524.2 / 5400.0 - 1.0)          # the VWAP sat 2.3% above the close
+    assert down["next_open_vs_close"] == pytest.approx(5401.2 / 5400.0 - 1.0)
+    # 1.1 x 5480 = 6028.0; the close 6027.8 is within one tick (0.2 points): a limit close, not locked (settle 5990)
+    assert (up["side"], up["locked"], up["limit"]) == ("up", False, pytest.approx(6028.0))
+    assert out[-1]["next_open_vs_close"] == pytest.approx(6100.0 / 6027.8 - 1.0)
+
+
+def test_cp4_event_statistics_from_the_run_files(t6_train):
+    from gpin import report
+
+    notes = [json.loads(p.read_text()) for p in sorted((t6_train.out / "runs" / "train").glob("*__*.json"))]
+    kw = dict(cfg=T6_CFG, clock="close", slice_="train")
+    ki = report.event_stats(notes, kind="ki", book="seas6", ids=["base", "ki_wrong"], alpha=0.1,
+                            limit_dates=["2025-06-11", "2025-06-24"], **kw)
+    base = ki["pnl"]["base"]
+    (eid, pnl), = base.items()
+    assert ki["hits"] == {eid: False}
+    assert ki["tail"] == [{"date": "2025-06-13", "events": 1, "hits": 0}]          # the approach ends on 06-13
+    assert ki["outcomes"]["base"] == {"hit": {"n": 0, "mean": None}, "miss": {"n": 1, "mean": pytest.approx(pnl)}}
+    assert ki["touched"] == {"2025-06-11": 1, "2025-06-24": 0}                     # 06-10 .. 06-16 is the window
+    ko = report.event_stats(notes, kind="ko", book="ki75", ids=["base"], alpha=0.1, limit_dates=[], **kw)
+    assert ko["tail"] == [{"date": "2025-06-17", "events": 1, "hits": 0}] and ko["touched"] == {}
+
+
+def test_cp4_rows_after_a_notes_end_are_counted_per_technique():
+    from gpin.report import rows_after_end
+
+    cal = _weekdays(10, date(2025, 3, 3))
+    life = lambda last, legs: {"life": {"last": last.isoformat(), "leg_days": legs}}           # noqa: E731
+    notes = [{"last_record": cal[4].isoformat(), "runs": {T6_CFG: {"close": {
+                 "base": life(cal[4], 0), "mo_ko@1,payoff": life(cal[7], 6), "sop_overlay": life(cal[4], 3)}}}},
+             {"last_record": cal[2].isoformat(), "runs": {T6_CFG: {"close": {
+                 "base": life(cal[2], 0), "mo_ko@1,payoff": life(cal[3], 2), "sop_overlay": life(cal[5], 2)}}}}]
+    assert rows_after_end(notes, cfg=T6_CFG, clock="close", calendar=cal) == {
+        "mo_ko@1,payoff": {"notes": 2, "rows": 4}, "sop_overlay": {"notes": 1, "rows": 3}}
+
+
+def test_cp4_formatting_follows_the_repo_rules():
+    from gpin import report
+
+    assert report._p(0.0) == report._p(0.0004) == "&lt;0.001" and report._p(0.0123) == "0.012"
+    assert report._p(None) == "–"
+    src = (STUDY_DIR / "gpin" / "report.py").read_text()
+    assert "1e-9" not in src and "raise TypeError" not in src and "v == 0" not in src
+    assert not re.search(r"\b0\.10?\b", src)                                    # the ES level comes from the prereg
+
+
+def test_cp4_the_page_carries_the_review_statements(t6_files, t6_train, t6_test, tmp_path):
+    from gpin import report
+
+    paths = _t7_world(tmp_path / "w", t6_files, t6_train, t6_test, payload=False, test_runs=False)
+    model = report.build_model(paths)
+    html = report.render(model)
+    text = " ".join(_t7_visible(html).split())
+    n_ki = model["train_tables"]["tables"]["close"]["ki"]["n_eligible"]
+    n_ko = model["train_tables"]["tables"]["close"]["ko"]["n_eligible"]
+    assert f"across the {n_ki} eligible KI rows" in text and f"across the {n_ko} eligible KO rows" in text
+    for name in ("ki-tail-dates", "ko-tail-dates", "ki-outcome", "dist-ko-events", "dist-ki-events"):
+        assert f'data-table="{name}"' in html, name
+    for phrase in ("not an achievable fill", "conservative direction for reserving", "wrong direction for hedging",
+                   "terminal criterion is one-sided", "H5", "residual option legs", "carried fill ratio",
+                   "covers nothing", "no day on which the far IM contract closed at its daily price limit",
+                   "binds every futures target"):
+        assert phrase in text, phrase
+    # the transfer text follows the slice shown
+    tr = model["train_tables"]["tables"]["close"]["ki_transfer"]
+    assert f"{tr['n_events']} training approaches in {tr['n_weeks']} weeks" in text
+    assert "five weeks" not in text
+    # the event columns sit in the event tables; the sample table's first column is the barrier type
+    life = re.search(r'<table data-table="ki-life".*?</table>', html, flags=re.S).group(0)
+    assert "Clip days" not in life and "Cost" not in life
+    assert ">Barrier type<" in html
+    # the per-event table under a strip chart has one row per event
+    rows = re.search(r'<table data-table="dist-ki-events".*?</table>', html, flags=re.S).group(0).count("<tr>") - 1
+    assert rows == len(model["train_events"]["dist"]["ki"]["base"])
+
+
+def test_cp4_the_test_mode_life_caption_says_all_dates(t7_valid):
+    cap = re.search(r'<p class="tcap">([^<]*)</p>\s*<div class="scroll"><table data-table="ko-life"', t7_valid.html)
+    assert cap and "all dates" in cap.group(1)
+
+
+def test_cp4_a_partial_render_never_targets_the_tracked_results(stage5, t6_files, t6_train, t6_test, tmp_path, capsys,
+                                                                  monkeypatch):
+    # the stage's results directory is pointed at a scratch copy, so even a failing run writes nothing tracked
+    fake = tmp_path / "results"
+    fake.mkdir()
+    monkeypatch.setattr(stage5, "RESULTS_DIR", fake)
+    monkeypatch.setattr(stage5, "REPORT_PATH", fake / "report.html")
+    paths = _t7_world(tmp_path / "w", t6_files, t6_train, t6_test)
+    argv = _t7_argv(paths, tmp_path / "x.html")
+    i = argv.index("--out")
+    del argv[i:i + 2]
+    assert stage5.main(argv + ["--partial"]) == 2 and "REFUSED" in capsys.readouterr().err
+    assert stage5.main(argv + ["--partial", "--out", str(fake / "x.html")]) == 2
+    assert list(fake.iterdir()) == []
+    assert stage5.main(argv + ["--partial", "--out", str(tmp_path / "ok.html")]) == 0
+    assert stage5.main(argv) == 0 and (fake / "report.html").exists()          # a full render may go to results
+
+
+def test_cp4_the_limit_days_table_states_what_each_clock_books(t6_files, t6_train, t6_test, tmp_path):
+    from gpin import report
+
+    paths = _t7_world(tmp_path / "w", t6_files, t6_train, t6_test, payload=False, test_runs=False)
+    model = report.build_model(paths)
+    _, boards, chains = _cp4_limit_market()
+    model["limit_days"] = report.limit_days(boards, chains)                  # 2025-04-04 (locked down), 2025-04-08
+    model["limit_days"].append(dict(model["limit_days"][0], date="2025-07-08"))  # a test-dated limit day
+    html = report.render(model)
+    text = " ".join(_t7_visible(html).split())
+    assert 'data-table="limit-days"' in html
+    assert "the VWAP was 2.3% above the close and the next open was 0.0% from the limit close" in text
+    assert "not an achievable fill" in text and "by luck: 2025-04-04" in text
+    body = re.search(r'<table data-table="limit-days".*?</table>', html, flags=re.S).group(0)
+    row = re.search(r"<tr><td>2025-07-08</td>.*?</tr>", body).group(0)
+    assert row.endswith("<td>–</td><td>–</td></tr>")                        # no event count on a day outside the slice

@@ -28,19 +28,22 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
 from quantark.util.exceptions import QuantArkException
-from quantark.util.numerical import is_valid_number
+from quantark.util.numerical import Tolerance, is_close, is_valid_number, is_zero
 
 from s2ts import NOTIONAL
 from s2ts import html as h
+from s2ts.chain import load_chain
 
 from . import BOARD_PATH, CHAIN_PATH, LADDER, OUTPUT_DIR, RESULTS_DIR, STATES_DIR, load_prereg, prereg_hash
 from . import measures
+from .board import load_boards
 from .techniques import TRUE, grid_id, hedge_delta
 
 #: CNY per note to bp of notional.
@@ -361,15 +364,16 @@ def summarise_states(files: Mapping[str, Path], *, split: date, cutoff: Optional
                     opens = m not in prev_models or (_is_ko_model(m) and rec.get("next_ko") != prev_next)
                     if not opens:
                         continue
-                    try:
-                        p_m, p_t = states[m]["engine_price"][c], true["engine_price"][c]
-                        if p_m is None or p_t is None:
-                            raise TypeError("a null centre price")
-                        reserve = (float(p_m) - float(p_t)) * BP
-                        step = (hedge_delta(states[m], spot) - hedge_delta(true, spot)) * spot / NOTIONAL * 100.0
-                    except (QuantArkException, TypeError):
+                    p_m, p_t = states[m]["engine_price"][c], true["engine_price"][c]
+                    if p_m is None or p_t is None:            # a null centre price: no reserve that day
                         skipped += 1
                         continue
+                    try:
+                        step = (hedge_delta(states[m], spot) - hedge_delta(true, spot)) * spot / NOTIONAL * 100.0
+                    except QuantArkException:                 # a null bump price: no hedge step that day
+                        skipped += 1
+                        continue
+                    reserve = (float(p_m) - float(p_t)) * BP
                     cell = acc.setdefault(book, {}).setdefault(m, {"reserve": [], "step": [], "first": []})
                     cell["reserve"].append(reserve)
                     cell["step"].append(step)
@@ -521,6 +525,101 @@ def _reorder(result: Optional[Dict[str, Any]], order: Sequence[str]) -> Optional
     return out
 
 
+#: CFFEX index futures: the daily price limit is this percentage of the previous settlement, prices move in ticks of
+#: ``IM_TICK`` index points (exchange rules, not tolerances).
+IM_PRICE_LIMIT_PCT = 10.0
+IM_TICK = 0.2
+
+
+def _within_tick(price: float, level: float) -> bool:
+    gap = abs(float(price) - float(level))
+    return gap < IM_TICK or is_close(gap, IM_TICK)
+
+
+def limit_days(boards: Mapping[date, Any], chains: Sequence[Any]) -> List[Dict[str, Any]]:
+    """The days on which the far IM contract (the hedge contract, the chain's last IM quote) closed at its daily price
+    limit: the close within one tick of the previous settlement x (1 -/+ the limit). ``locked``: the settlement sits
+    at the limit too. ``vwap_vs_close``: the day's VWAP over the close minus 1 (what the twap clock fills at);
+    ``next_open_vs_close``: the next day's open of the same contract over the close minus 1. Board marks only."""
+    days = [c.day for c in chains]
+    out: List[Dict[str, Any]] = []
+    for i in range(1, len(chains)):
+        code_ = chains[i].im[-1].code
+        bar = boards.get(days[i], None)
+        prev = boards.get(days[i - 1], None)
+        bar = None if bar is None else bar.im.get(code_)
+        prev = None if prev is None else prev.im.get(code_)
+        if bar is None or prev is None or bar.close is None:
+            continue
+        for side, sign in (("down", -1.0), ("up", 1.0)):
+            limit = float(prev.settle) * (1.0 + sign * IM_PRICE_LIMIT_PCT / 100.0)
+            if not _within_tick(bar.close, limit):
+                continue
+            nxt = boards.get(days[i + 1]).im.get(code_) if i + 1 < len(days) and days[i + 1] in boards else None
+            out.append({"date": days[i].isoformat(), "code": code_, "side": side,
+                        "locked": _within_tick(bar.settle, limit), "close": float(bar.close),
+                        "settle": float(bar.settle), "prev_settle": float(prev.settle), "limit": limit,
+                        "vwap_vs_close": None if bar.vwap is None else float(bar.vwap) / float(bar.close) - 1.0,
+                        "next_open_vs_close": (None if nxt is None or nxt.open is None
+                                               else float(nxt.open) / float(bar.close) - 1.0)})
+    return out
+
+
+def _mean(values: Sequence[float]) -> Optional[float]:
+    return float(sum(values) / len(values)) if values else None
+
+
+def event_stats(notes: Sequence[Mapping[str, Any]], *, cfg: str, clock: str, kind: str, book: str, slice_: str,
+                ids: Sequence[str], alpha: float, limit_dates: Sequence[str]) -> Dict[str, Any]:
+    """What the review asked to see behind an ES10 (one barrier type, book and slice, from the run files):
+
+    ``pnl`` (``event_pnl``); ``hits`` (event id -> the KO fired / the approach ended in a knock-in); ``tail``: the
+    baseline's ES10 tail (the ``tail_count(n, alpha)`` worst events, ties by event id) grouped by event date, with how
+    many of them are hits, largest group first; ``outcomes``: per technique the count and mean event P&L of the hits
+    and of the others; ``touched``: per limit day, how many events' windows (the baseline's rows) include it."""
+    pnl = event_pnl(notes, cfg=cfg, clock=clock, kind=kind, book=book, slice_=slice_, ids=ids)
+    owner = {eid: n for n in notes for eid in n.get("events", {})}
+    base = pnl.get("base", {})
+    hits = {eid: bool(owner[eid]["events"][eid].get("hit")) for eid in base}
+    tail: List[Dict[str, Any]] = []
+    if base:
+        k = measures.tail_count(len(base), alpha)
+        worst = sorted(base, key=lambda e: (base[e], e))[:k]
+        groups: Dict[str, List[str]] = {}
+        for eid in worst:
+            groups.setdefault(owner[eid]["events"][eid]["date"], []).append(eid)
+        tail = sorted(({"date": d, "events": len(es), "hits": sum(hits[e] for e in es)} for d, es in groups.items()),
+                      key=lambda r: (-r["events"], r["date"]))
+    outcomes = {tid: {"hit": {"n": sum(1 for e in v if hits.get(e)), "mean": _mean([x for e, x in v.items() if hits.get(e)])},
+                      "miss": {"n": sum(1 for e in v if not hits.get(e)),
+                               "mean": _mean([x for e, x in v.items() if not hits.get(e)])}}
+                for tid, v in pnl.items()}
+    windows = {eid: {d for d, _, _ in _cells(owner[eid], cfg, clock)["base"]["events"][eid]["days"]} for eid in base}
+    touched = {d: sum(1 for w in windows.values() if d in w) for d in limit_dates}
+    return {"pnl": pnl, "hits": hits, "tail": tail, "outcomes": outcomes, "touched": touched}
+
+
+def rows_after_end(notes: Sequence[Mapping[str, Any]], *, cfg: str, clock: str,
+                   calendar: Sequence[date]) -> Dict[str, Dict[str, int]]:
+    """Per technique, the notes whose run continues after the note's last record (option legs left on the book are
+    still hedged until they are gone) and the number of such rows (trading days of ``calendar`` after the last record,
+    up to the run's last row). Techniques without such a row are left out."""
+    cal = [d.isoformat() for d in calendar]
+    out: Dict[str, Dict[str, int]] = {}
+    for note in notes:
+        end = note.get("last_record")
+        for tid, cell in _cells(note, cfg, clock).items():
+            last = cell.get("life", {}).get("last")
+            if end is None or last is None or last <= end:
+                continue
+            rows = sum(1 for d in cal if end < d <= last)
+            if rows:
+                block = out.setdefault(tid, {"notes": 0, "rows": 0})
+                block["notes"] += 1
+                block["rows"] += rows
+    return out
+
+
 def build_model(paths: ReportPaths) -> Dict[str, Any]:
     """Everything the page prints, from the files ``paths`` names; never raises on a missing input."""
     prereg = load_prereg()
@@ -531,9 +630,21 @@ def build_model(paths: ReportPaths) -> Dict[str, Any]:
     clock = str(prereg["clocks"]["primary"])
     books = {"ko": str(prereg["verdict"]["ko_book"]), "ki": str(prereg["verdict"]["ki_book"])}
     train_tables, train_problem = _training_tables(paths, guard, prereg, sample)
+    alpha = float(prereg["statistics"]["es_alpha"])
+
+    # board marks (any date: no P&L is attached to them here) for the limit days, and the trading calendar
+    limits, limits_problem, calendar = None, None, None
+    try:
+        chains = load_chain(paths.chain)
+        calendar = [c.day for c in chains]
+        limits = limit_days(load_boards(paths.board), chains)
+    except (QuantArkException, OSError) as err:
+        limits_problem = f"the board or the chain could not be read: {err}"
+    limit_dates = [r["date"] for r in limits or []]
+    controls = {"ko": ("base_noclip", "ko_wrong"), "ki": ("base_noclip", "ki_wrong")}
 
     def events_block(notes: Sequence[Mapping[str, Any]], slice_: str) -> Dict[str, Any]:
-        out: Dict[str, Any] = {"slice": slice_, "dist": {}, "path": None}
+        out: Dict[str, Any] = {"slice": slice_, "dist": {}, "path": None, "stats": {}, "after_end": None}
         if not notes:
             return out
         available = list(_cells(notes[0], primary, clock))
@@ -541,8 +652,13 @@ def build_model(paths: ReportPaths) -> Dict[str, Any]:
             ids = _shown_ids(guard.selection, kind, available)
             out["dist"][kind] = event_pnl(notes, cfg=primary, clock=clock, kind=kind, book=books[kind], slice_=slice_,
                                           ids=ids)
+            more = ids + [t for t in controls[kind] if t in available and t not in ids]
+            out["stats"][kind] = event_stats(notes, cfg=primary, clock=clock, kind=kind, book=books[kind],
+                                             slice_=slice_, ids=more, alpha=alpha, limit_dates=limit_dates)
         ids = [t for t in ("base", "sop_futures", "sop_overlay") if t in available]
         out["path"] = _path(notes, cfg=primary, clock=clock, kind="ko", book=books["ko"], slice_=slice_, ids=ids)
+        if calendar is not None:
+            out["after_end"] = rows_after_end(notes, cfg=primary, clock=clock, calendar=calendar)
         return out
 
     states, states_problem = None, None
@@ -570,6 +686,7 @@ def build_model(paths: ReportPaths) -> Dict[str, Any]:
         "test_events": events_block(guard.test_notes, "test") if guard.test_ok and guard.test_notes else None,
         "states": states, "states_problem": states_problem,
         "probe": probe,
+        "limit_days": limits, "limits_problem": limits_problem, "alpha": alpha,
         "paths": {k: str(getattr(paths, k)) for k in ("runs_dir", "selection", "backtest", "states_dir", "events",
                                                       "probe")},
     }
@@ -624,13 +741,13 @@ def _ticks(lo: float, hi: float, n: int = 5) -> List[float]:
     mag = 10 ** math.floor(math.log10(raw))
     step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
     out, t = [], math.floor(lo / step) * step
-    while t <= hi + step * 1e-9:
+    while t < hi or is_close(t, hi, rel_tol=Tolerance.RELATIVE, abs_tol=step * Tolerance.RELATIVE):
         out.append(round(t, 10))
         t += step
     return out
 
 
-def strip(rows: Sequence[Mapping[str, Any]], *, label: str, xlabel: str, width: int = 760) -> str:
+def strip(rows: Sequence[Mapping[str, Any]], *, label: str, xlabel: str, alpha: float, width: int = 760) -> str:
     """A linear strip chart: one row per technique, one dot per event, an amber tick at its ES10."""
     left, right, top, bottom, step = 170, 24, 14, 42, 24
     vals = [v for r in rows for v in r["values"]]
@@ -664,7 +781,8 @@ def strip(rows: Sequence[Mapping[str, Any]], *, label: str, xlabel: str, width: 
                         f'data-tip="{esc(tip)}"/>')
     legend = ('<div class="legend"><span><i style="border-top:3px solid var(--s1)"></i>baseline (one dot per '
               'event)</span><span><i style="border-top:3px solid var(--s2)"></i>technique</span><span><i '
-              'style="border-top:3px solid var(--amber)"></i>ES10 (mean of the worst 10%)</span></div>')
+              'style="border-top:3px solid var(--amber)"></i>ES10 (mean of the worst '
+              f'{num(100.0 * alpha, 0)}%)</span></div>')
     return legend + (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
                      + "".join(body) + "</svg>")
 
@@ -691,10 +809,15 @@ def _role(row: Mapping[str, Any]) -> str:
 
 
 def _p(v: Optional[float]) -> str:
-    return "–" if v is None else (num(v, 3) if v >= 0.001 or v == 0 else "&lt;0.001")
+    """A p value at three decimals; below one in a thousand (a share of replicates of zero included) it reads
+    "<0.001", so "0.000" never stands beside it."""
+    if v is None:
+        return "–"
+    return "&lt;0.001" if v < 1.0e-3 and not is_close(v, 1.0e-3) else num(v, 3)
 
 
-def _verdict_tables(t: Mapping[str, Any], *, name: str, test: bool, what: str, clock: str) -> str:
+def _verdict_tables(t: Mapping[str, Any], *, name: str, test: bool, what: str, clock: str,
+                    prereg: Mapping[str, Any]) -> str:
     """The tail table and the whole-life table of one barrier type (test: with the pass flags; training: measures
     only)."""
     lead = (f"Test slice, {clock} clock: {what}. " if test else
@@ -706,6 +829,7 @@ def _verdict_tables(t: Mapping[str, Any], *, name: str, test: bool, what: str, c
         cells = [code(tid), _role(r), num(r.get("es10"), 1), num(r.get("es10_base"), 1), signed(d_es, 1),
                  num(r.get("worst"), 1), num(r.get("worst_base"), 1), num(r.get("mean"), 1), _p(r.get("p")),
                  _p(r.get("p_holm"))]
+        cells += [str(int(r.get("clips") or 0)), num(r.get("mean_cost_bp"), 2)]
         if test:
             cells.append(flag(r.get("tail_pass")))
         rows.append(cells)
@@ -714,35 +838,41 @@ def _verdict_tables(t: Mapping[str, Any], *, name: str, test: bool, what: str, c
         if test:
             lc += [flag(r.get("life_pass")), flag(r.get("win")) if r.get("eligible") else '<span class="dim">–</span>',
                    flag(r.get("robust")) if r.get("eligible") else '<span class="dim">–</span>']
-        lc += [str(int(r.get("clips") or 0)), num(r.get("mean_cost_bp"), 2)]
         life.append(lc)
-    head = ["Technique", "Role", "ES10", "Base ES10", "ES10 − base", "Worst", "Base worst", "Mean", "p", "Holm p"]
+    head = ["Technique", "Role", "ES10", "Base ES10", "ES10 − base", "Worst", "Base worst", "Mean", "p", "Holm p",
+            "Clip days", "Cost"]
     if test:
         head.append("Tail test")
     lhead = ["Technique", "Std ratio", "Terminal − base"]
     if test:
         lhead += ["Life test", "Win", "Robust"]
-    lhead += ["Clip days", "Cost"]
+    st, v = prereg["statistics"], prereg["verdict"]
+    alpha, pmax = float(st["es_alpha"]), float(st["p_max"])
+    frac = Fraction(str(alpha))
     n = f"{t['n_events']} events in {t['n_weeks']} distinct weeks"
     deci = ""
     if test:
-        deci = (" Decidable (at least 20 events in at least 10 weeks)." if t.get("decidable")
-                else " Not decidable: fewer than 20 events or fewer than 10 weeks, so no row can win.")
+        deci = (f" Decidable (at least {v['min_events']} events in at least {v['min_weeks']} weeks)."
+                if t.get("decidable") else
+                f" Not decidable: fewer than {v['min_events']} events or fewer than {v['min_weeks']} weeks, so no row "
+                "can win.")
     return (tbl(f"{name}-tail", head, rows, lead + f"{n}; event-window P&L of the seller, bp of notional, net of costs."
                 + deci,
-                note="ES10 = mean of the worst 10% of events (k = max(1, ceil(0.1 n))); higher is better. p = share of "
-                     "10,000 week-clustered bootstrap replicates with ES10(technique) − ES10(base) ≤ 0; Holm p adjusts "
-                     "it across the eligible rows. Only rows marked eligible or composite can win; baseline, "
-                     "controls, cost levers and the grid points not picked are reported only. Tail test = ES10 higher, worst event not lower and raw p &lt; 0.10.",
+                note=f"ES10 = mean of the worst {num(100.0 * alpha, 0)}% of events (k = max(1, ceil(n x "
+                     f"{frac.numerator}/{frac.denominator}))); higher is better. p = share of {int(st['bootstrap_n']):,} "
+                     "week-clustered bootstrap replicates with ES10(technique) − ES10(base) ≤ 0; Holm p adjusts it "
+                     "across the eligible rows. Only rows marked eligible or composite can win; baseline, controls, "
+                     "cost levers and the grid points not picked are reported only. Clip days = days inside the event "
+                     "windows on which the hedge-ratio cap bound; cost = mean event-window trading cost, bp of "
+                     f"notional. Tail test = ES10 higher, worst event not lower and raw p &lt; {num(pmax, 2)}.",
                 row_cls=cls)
             + tbl(f"{name}-life", lhead, life,
-                  ("Whole life, test runs, " if test else "Training figures, whole life cut at the split, ")
+                  ("Whole life, test runs, all dates, " if test else "Training figures, whole life cut at the split, ")
                   + f"{clock} clock: daily hedged P&L of the unselected notes of the same book "
                   f"({t.get('whole_life', {}).get('n_notes', '–')} notes), day 0 left out.",
-                  note="Std ratio = daily std of the technique / the baseline's (pass at ≤ 1.05). Terminal − base = "
-                       "mean terminal P&L of completed notes minus the baseline's, bp of notional (pass at ≥ −10 bp). "
-                       "Clip days = days inside the event windows on which the hedge-ratio cap bound. Cost = mean "
-                       "event-window cost, bp of notional." + (" Win = tail test and life test; robust = a winner that "
+                  note=f"Std ratio = daily std of the technique / the baseline's (pass at ≤ {num(v['std_ratio_max'], 2)})."
+                       " Terminal − base = mean terminal P&L of completed notes minus the baseline's, bp of notional "
+                       f"(pass at ≥ −{num(v['terminal_slack_bp'], 0)} bp)." + (" Win = tail test and life test; robust = a winner that "
                                                               "also passes the tail test under twap and next_open."
                                                               if test else "")))
 
@@ -758,6 +888,151 @@ def _no_test_line(model: Mapping[str, Any]) -> str:
         return ""
     return ('<p class="note missing">No test number is shown here (see the banner at the top). The rows below are '
             'training figures.</p>')
+
+
+def _false_winners(t: Optional[Mapping[str, Any]], kind: str, prereg: Mapping[str, Any]) -> str:
+    """The multiple-testing statement, with the eligible count of the table shown."""
+    pmax = float(prereg["statistics"]["p_max"])
+    if not t or not t.get("n_eligible"):
+        return ""
+    n = int(t["n_eligible"])
+    return (f" {n} eligible {kind.upper()} rows are tested at raw p &lt; {num(pmax, 2)}, so about {num(n * pmax, 1)} "
+            f"false winners are expected by chance across the {n} eligible {kind.upper()} rows (about one false winner "
+            f"per {num(1.0 / pmax, 0)} rows); Holm-adjusted p is printed beside the raw p, and adjacent weeks share "
+            "market days, so p is optimistic.")
+
+
+def _events_shown(model: Mapping[str, Any]) -> Tuple[Optional[Mapping[str, Any]], str]:
+    """The run-file block of the slice shown: test when the guard passed and test runs exist, else training."""
+    if model["test_events"] is not None:
+        return model["test_events"], "Test slice"
+    if model["train_events"] is not None and not model["guard"]["test_ok"]:
+        return model["train_events"], "Training figures (events dated before the split)"
+    return None, ""
+
+
+def _concentrated(tail: Sequence[Mapping[str, Any]]) -> bool:
+    """A tail is concentrated when one event date holds at least a third of it (and more than one event)."""
+    if not tail:
+        return False
+    k = sum(r["events"] for r in tail)
+    return tail[0]["events"] > 1 and 3 * tail[0]["events"] >= k
+
+
+def _tail_dates(model: Mapping[str, Any], kind: str) -> str:
+    """The baseline's ES tail grouped by event date, from the run files of the slice shown."""
+    block, label = _events_shown(model)
+    stats = None if block is None else block["stats"].get(kind)
+    if not stats or not stats["tail"]:
+        return unavailable(f"no run file of the slice shown holds a {kind.upper()} event")
+    limit = {r["date"] for r in model["limit_days"] or []}
+    word, hit = ("KO pin events", "fired") if kind == "ko" else ("KI approaches", "knocked in")
+    k = sum(r["events"] for r in stats["tail"])
+    top = stats["tail"][0]
+    rows = [[esc(r["date"]), str(r["events"]), str(r["hits"]), "yes" if r["date"] in limit else ""]
+            for r in stats["tail"]]
+    if _concentrated(stats["tail"]):
+        lead = (f"<p>The baseline's tail is concentrated in single market days: {top['events']} of the {k} {word} in "
+                f"its ES10 tail are dated {esc(top['date'])}" + (f", {top['hits']} of them {hit}" if top["hits"] else "")
+                + ". Events of one day are one market move, not independent draws.</p>")
+    else:
+        lead = (f"<p>The {k} {word} in the baseline's ES10 tail are spread over {len(stats['tail'])} event dates; no "
+                f"date holds more than {top['events']} of them.</p>")
+    return lead + tbl(f"{kind}-tail-dates", ["Event date", "Events in the tail", hit.capitalize(),
+                                             "Far IM at its limit"], rows,
+                      f"{label}, close clock: the {k} {word} in the baseline's ES10 tail (its worst "
+                      f"{num(100.0 * model['alpha'], 0)}%), by event date.")
+
+
+def _outcomes(model: Mapping[str, Any], t: Optional[Mapping[str, Any]]) -> str:
+    """Mean KI event P&L split by how the approach ended, for the baseline, the eligible rows and the controls."""
+    block, label = _events_shown(model)
+    stats = None if block is None else block["stats"].get("ki")
+    if not stats or not stats["outcomes"]:
+        return unavailable("no run file of the slice shown holds a KI approach")
+    eligible = [tid for tid in (t or {}).get("order", []) if t["rows"][tid].get("eligible")]
+    ids = ["base"] + [x for x in ("base_noclip", "ki_wrong") if x in stats["outcomes"]] + eligible
+    rows = []
+    for tid in dict.fromkeys(ids):
+        o = stats["outcomes"].get(tid)
+        if o is None:
+            continue
+        d = None if o["hit"]["mean"] is None or o["miss"]["mean"] is None else o["hit"]["mean"] - o["miss"]["mean"]
+        rows.append([code(tid), str(o["hit"]["n"]), num(o["hit"]["mean"], 1), str(o["miss"]["n"]),
+                     num(o["miss"]["mean"], 1), signed(d, 1)])
+    base = stats["outcomes"]["base"]
+    lead = ("<p>Rules that carry less long futures into the KI barrier (<code>ki_wrong</code>, the raised-barrier "
+            "control; <code>ki_cap</code>; <code>secant</code> at a wide bump) gain when the approach ends in a "
+            "knock-in and pay when the index rebounds, so their mean P&amp;L is partly a directional outcome of how "
+            f"many approaches knocked in ({base['hit']['n']} knock-ins and {base['miss']['n']} rebounds here). The "
+            "whole-life test catches this only through the std criterion, because the terminal criterion is "
+            "one-sided (it only asks that a technique not lose more than the slack).</p>")
+    out = lead + tbl("ki-outcome", ["Technique", "Knocked in", "Mean (bp)", "Did not", "Mean (bp)", "Difference"],
+                     rows, f"{label}, close clock: mean event-window P&L of the KI approaches, split by whether the "
+                           "approach ended in a knock-in, bp of notional.")
+    rows_t = (t or {}).get("rows", {})
+    if "ki_wrong" in rows_t and rows_t["ki_wrong"].get("es10") is not None:
+        w = rows_t["ki_wrong"]
+        better = w["es10"] > w["es10_base"] and not is_close(w["es10"], w["es10_base"])
+        where = "on the test slice" if model["test_tables"] is not None else "on the training slice"
+        out += ("<p>Lowering the booked KI barrier is the conservative direction for reserving (it shows a reserve, "
+                "section 09) but the wrong direction for hedging a gap down: the lower barrier keeps more long "
+                "futures into the knock-in, which the seller then sells after the gap. Hypothesis H5 (the wrong-way "
+                "controls are worse than the baseline) "
+                + (f"is not supported for <code>ki_wrong</code> {where}: its ES10 is {num(w['es10'], 1)} bp against "
+                   f"{num(w['es10_base'], 1)} bp for the baseline, because the raised barrier carries less long "
+                   "futures into the knock-ins that make the tail." if better else
+                   f"holds for <code>ki_wrong</code> {where}: its ES10 is {num(w['es10'], 1)} bp against "
+                   f"{num(w['es10_base'], 1)} bp for the baseline.") + "</p>")
+    return out
+
+
+def _limit_block(model: Mapping[str, Any]) -> str:
+    """The days the far IM contract closed at its daily price limit, what each clock does there, and the events of the
+    slice shown whose windows hold them."""
+    days = model["limit_days"]
+    if days is None:
+        return unavailable(model["limits_problem"] or "the board and the chain")
+    if not days:
+        return ("<p>There is no day on which the far IM contract closed at its daily price limit in the data, so every "
+                "close-clock fill was at a traded price.</p>")
+    block, label = _events_shown(model)
+    split = model["prereg"]["split_date"]
+    test_rows = model["test_events"] is not None
+
+    def touched(kind: str, d: str) -> str:
+        if block is None or (not test_rows and d >= split):
+            return "–"
+        return str(block["stats"].get(kind, {}).get("touched", {}).get(d, 0))
+
+    rows = [[esc(r["date"]), code(r["code"]), r["side"], "locked" if r["locked"] else "close only",
+             num(r["close"], 1), num(r["limit"], 1), "–" if r["vwap_vs_close"] is None else signed(100 * r["vwap_vs_close"], 2),
+             "–" if r["next_open_vs_close"] is None else signed(100 * r["next_open_vs_close"], 2),
+             touched("ko", r["date"]), touched("ki", r["date"])] for r in days]
+    parts = ["<p>On a day the far IM contract closed at its daily price limit, a sale (at a limit down) or a purchase "
+             "(at a limit up) at the close was not executable. The close clock books it anyway; the twap clock fills "
+             "the close-state size at the day's VWAP, which no desk could have known at the time. The twap "
+             "improvement of the KI tail on such days is therefore not an achievable fill."]
+    for r in days:
+        if r["locked"] and r["vwap_vs_close"] is not None:
+            parts.append(f" On {esc(r['date'])} ({r['side']}, locked) the VWAP was {num(100 * abs(r['vwap_vs_close']), 1)}% "
+                         f"{'above' if r['vwap_vs_close'] > 0 else 'below'} the close"
+                         + ("" if r["next_open_vs_close"] is None else
+                            f" and the next open was {num(100 * abs(r['next_open_vs_close']), 1)}% from the limit close")
+                         + ".")
+    small = [r for r in days if r["locked"] and r["next_open_vs_close"] is not None
+             and abs(r["next_open_vs_close"]) < 1.0e-2]
+    if small:
+        parts.append(" Where the next open was within 1% of the limit close the close figure is about right, by luck: "
+                     + ", ".join(esc(r["date"]) for r in small) + ".")
+    parts.append("</p>")
+    return "".join(parts) + tbl(
+        "limit-days", ["Date", "Contract", "Side", "Locked", "Close", "Limit price", "VWAP vs close (%)",
+                       "Next open vs close (%)", "KO events touched", "KI events touched"], rows,
+        f"Board marks, every day of the data: the far IM contract at its daily price limit (±"
+        f"{num(IM_PRICE_LIMIT_PCT, 0)}% of the previous settlement, within one {num(IM_TICK, 1)}-point tick); events "
+        f"touched = events of the slice shown ({label or 'none'}) whose window holds the day.",
+        note="Locked = the settlement sits at the limit too. A dash: the day lies outside the slice shown.")
 
 
 def section_design(model: Mapping[str, Any]) -> str:
@@ -802,11 +1077,12 @@ def section_design(model: Mapping[str, Any]) -> str:
         rows = [[code(r["book"]), "KO pin events" if r["kind"] == "ko" else "KI approaches",
                  "training (before split)" if r["slice"] == "train" else "test (on or after split)",
                  str(r["events"]), str(r["weeks"]), str(r["hits"])] for r in model["sample"]]
-        parts.append(tbl("design-sample", ["Book", "Events", "Slice", "Events", "Distinct weeks", "Fired / knocked in"],
+        parts.append(tbl("design-sample", ["Book", "Barrier type", "Slice", "Events", "Distinct weeks", "Fired / knocked in"],
                          rows, "Sample sizes per book, barrier type and slice: every event of every priced note "
                                "(results/events.json); weeks are ISO weeks of the event date, the bootstrap's clusters.",
                          note="Fired = KO events whose observation redeemed the note; knocked in = KI approaches ending "
-                              "in a knock-in. The verdict needs at least 20 test events in at least 10 weeks."))
+                              f"in a knock-in. The verdict needs at least {v['min_events']} test events in at least "
+                              f"{v['min_weeks']} weeks."))
     else:
         parts.append(unavailable("results/events.json: the sample sizes"))
     notes = p["clock_notes"]
@@ -842,15 +1118,17 @@ def section_ko(model: Mapping[str, Any]) -> str:
     clock = model["primary"]["clock"]
     parts = ['<p class="lead">Each technique against the baseline (<code>base</code>: hedge the true note\'s 1% '
              "bump delta with IM at every close) on the window P&amp;L of each KO pin event of the "
-             f"<code>{esc(model['books']['ko'])}</code> book. About ten rows are tested at raw p &lt; 0.10, so about "
-             "one false winner is expected by chance; adjacent weeks share market days, so p is optimistic. Controls "
+             f"<code>{esc(model['books']['ko'])}</code> book."
+             + _false_winners(None if src is None else src["tables"][clock]["ko"], "ko", model["prereg"])
+             + " Controls "
              "(<code>ko_wrong</code>, the wrong-way shift; <code>base_noclip</code>), the <code>band</code> cost rows "
              "and the grid points that were not picked are shown and never eligible.</p>", _no_test_line(model)]
     if src is None:
         parts.append(unavailable("no current test payload and no current training run: " + (model["train_problem"] or "")))
     else:
         parts.append(_verdict_tables(src["tables"][clock]["ko"], name="ko", test=test, clock=clock,
-                                     what=f"KO pin events of {model['books']['ko']}"))
+                                     what=f"KO pin events of {model['books']['ko']}", prereg=model["prereg"]))
+        parts.append(_tail_dates(model, "ko"))
     return h.section(2, "ko", "KO VERDICT", "KO pin: does a technique improve the tail?", "".join(parts))
 
 
@@ -863,23 +1141,33 @@ def section_ki(model: Mapping[str, Any]) -> str:
              f"capped at {num(cap, 1)}, i.e. IM notional at most {num(cap, 0)} times the note's) binds on the seasoned "
              "book near its barrier, so the KI baseline is a limit-constrained hedge. <code>base_noclip</code> is the "
              "same hedge without the cap, shown beside <code>base</code> with the number of days the cap bound inside "
-             "the windows (clip days); it is a control and never eligible.</p>", _no_test_line(model)]
+             "the windows (clip days); it is a control and never eligible."
+             + _false_winners(None if src is None else src["tables"][clock]["ki"], "ki", model["prereg"]) + "</p>",
+             _no_test_line(model)]
     if src is None:
         parts.append(unavailable("no current test payload and no current training run: " + (model["train_problem"] or "")))
     else:
         t = src["tables"][clock]
         parts.append(_verdict_tables(t["ki"], name="ki", test=test, clock=clock,
-                                     what=f"KI approaches of {model['books']['ki']}"))
+                                     what=f"KI approaches of {model['books']['ki']}", prereg=model["prereg"]))
         rows = t["ki"]["rows"]
         if "base" in rows and "base_noclip" in rows:
             parts.append(f'<p class="note">Clip days inside the windows: base {int(rows["base"].get("clips") or 0)}, '
                          f'base_noclip {int(rows["base_noclip"].get("clips") or 0)}.</p>')
+        parts.append(h.sub("Where the KI tail comes from"))
+        parts.append(_tail_dates(model, "ki"))
+        parts.append(h.sub("Days the hedge could not trade at the close"))
+        parts.append(_limit_block(model))
+        parts.append(h.sub("Knock-in or rebound: a directional part of the KI P&L"))
+        parts.append(_outcomes(model, t["ki"]))
         tr = t.get("ki_transfer")
         parts.append(h.sub("Transfer check on the 2Y product's own approaches"))
-        parts.append('<p>The same rows on the KI approaches of the 2Y book (ki75). Its test approaches are five weeks '
-                     "of one episode with a small gap, because those notes still have 15 to 21 months to run (section "
-                     "04), so the rows carry measures only: no p, no verdict.</p>")
         if tr:
+            word = "test" if test else "training"
+            parts.append(f"<p>The same rows on the KI approaches of the 2Y book ({esc(tr['book'])}): here "
+                         f"{tr['n_events']} {word} approaches in {tr['n_weeks']} weeks. Those notes still have a long "
+                         "life left, so the gap is small (section 04), and the approaches cluster in few market "
+                         "episodes: the rows carry measures only, no p and no verdict.</p>")
             trows = [[code(tid), str(r.get("n_events")), str(r.get("n_weeks")), num(r.get("es10"), 1),
                       num(r.get("es10_base"), 1), num(r.get("worst"), 1), num(r.get("worst_base"), 1),
                       num(r.get("mean"), 1)] for tid, r in ((tid, tr["rows"][tid]) for tid in tr["order"])]
@@ -1062,14 +1350,14 @@ def section_gamma(model: Mapping[str, Any]) -> str:
     return h.section(7, "gamma", "GAMMA", "Gamma carried into a fixing", "".join(parts))
 
 
-def _dist_block(block: Mapping[str, Any], kind: str, label: str) -> str:
+def _dist_block(block: Mapping[str, Any], kind: str, label: str, alpha: float) -> str:
     data = block["dist"].get(kind) or {}
     if "base" not in data:
         return unavailable(f"no {kind.upper()} event in the {label}")
     rows, trows = [], []
     for tid, by_event in data.items():
         vals = [by_event[e] for e in sorted(by_event)]
-        es10 = measures.es(vals, 0.10)
+        es10 = measures.es(vals, alpha)
         rows.append({"name": tid, "values": vals, "tips": [f"{tid} · {e.split('|')[1]} {e.split('|')[2]} · "
                                                            f"{num(by_event[e], 1)} bp" for e in sorted(by_event)],
                      "colour": "var(--s1)" if tid == "base" else "var(--s2)", "es": es10})
@@ -1078,11 +1366,25 @@ def _dist_block(block: Mapping[str, Any], kind: str, label: str) -> str:
                       num(float(np.median(a)), 1), num(float(a.mean()), 1), num(float(a.max()), 1)])
     word, one = ("KO pin events", "KO pin event") if kind == "ko" else ("KI approaches", "KI approach")
     svg = strip(rows, label=f"Event-window P&L of the baseline and the selected techniques, {word}",
-                xlabel="EVENT-WINDOW P&L OF THE SELLER, BP OF NOTIONAL")
+                xlabel="EVENT-WINDOW P&L OF THE SELLER, BP OF NOTIONAL", alpha=alpha)
     cap = f"{label}, close clock: one dot per {one}, the baseline against the training picks and composites"
     return (chart(f"dist-{kind}", svg, f"Event-window P&L · {word}", cap)
             + tbl(f"dist-{kind}", ["Technique", "Events", "ES10", "Worst", "10th pct", "Median", "Mean", "Best"], trows,
-                  f"The chart's numbers ({label}, close clock): event-window P&L, bp of notional."))
+                  f"The chart's summary ({label}, close clock): event-window P&L, bp of notional.")
+            + _per_event(block, kind, data, label, one))
+
+
+def _per_event(block: Mapping[str, Any], kind: str, data: Mapping[str, Mapping[str, float]], label: str,
+               one: str) -> str:
+    """Every plotted dot: one row per event, one column per technique (collapsed under the chart)."""
+    hits = block.get("stats", {}).get(kind, {}).get("hits", {})
+    hit = "Fired" if kind == "ko" else "Knocked in"
+    events = sorted(data["base"], key=lambda e: (e.split("|")[2], e))
+    rows = [[esc(e.split("|")[2]), code(e.split("|")[1]), "yes" if hits.get(e) else ""]
+            + [num(data[t].get(e), 1) for t in data] for e in events]
+    table = tbl(f"dist-{kind}-events", ["Event date", "Note", hit] + list(data), rows,
+                f"The chart's dots ({label}, close clock): event-window P&L of every {one}, bp of notional.")
+    return f'<details class="dots"><summary>Every {one}: the plotted values ({len(events)} rows)</summary>{table}</details>'
 
 
 def _path_block(path: Mapping[str, Any], label: str) -> str:
@@ -1114,7 +1416,9 @@ def _path_block(path: Mapping[str, Any], label: str) -> str:
     return (chart("path-ko", pnl, "An event path · hedged P&L", cap)
             + chart("path-ko-hedge", hr, "An event path · hedge ratio", cap)
             + tbl("path-ko", head, rows, f"The charts' numbers ({cap}): cumulative hedged P&L, bp of "
-                                         "notional; hedge ratio, IM notional / note notional in %."))
+                                         "notional; hedge ratio, IM notional / note notional in %.",
+                  note="A hedge ratio on or after the fixing day of an ended note is the hedge of residual option legs "
+                       "left on the book (they could not all be closed that day), within the futures position limit."))
 
 
 def section_pnl(model: Mapping[str, Any]) -> str:
@@ -1130,7 +1434,7 @@ def section_pnl(model: Mapping[str, Any]) -> str:
         parts.append(unavailable("no current run files to draw the event P&L from"))
     for block, label in blocks:
         for kind in ("ko", "ki"):
-            parts.append(_dist_block(block, kind, label))
+            parts.append(_dist_block(block, kind, label, model["alpha"]))
         if block["path"] is not None:
             parts.append(_path_block(block["path"], label))
         else:
@@ -1268,8 +1572,47 @@ def section_train(model: Mapping[str, Any]) -> str:
     return h.section(10, "train", "TRAINING PICKS", "The training selection", body)
 
 
+def _after_end(model: Mapping[str, Any]) -> str:
+    """Rows of a run after its note ended (residual option legs still hedged), per technique, for the slice shown."""
+    block, label = _events_shown(model)
+    after = None if block is None else block.get("after_end")
+    cap = model["prereg"]["im_clip"]
+    rule = ("<b>The futures position limit binds every futures target</b> (hedge ratio in "
+            f"[{num(cap[0], 2)}, {num(cap[1], 1)}]), including the hedge of option legs left on the book after a note "
+            "has ended: such a hedge is clipped and counted like any other.")
+    if after is None:
+        return rule + " The run files of the slice shown are not available, so the rows after a note's end are not counted."
+    if not after:
+        return rule + f" In the slice shown ({label}) no run continues after its note's end."
+    parts = "; ".join(f"<code>{esc(t)}</code> {a['rows']} rows on {a['notes']} notes" for t, a in after.items())
+    return (rule + f" Rows after the note's end (the residual legs hedged), {label}, close clock: {parts}. The run "
+            "files store the clip count per whole life, not per row, so how many of these rows were clipped is not "
+            "shown.")
+
+
+def _ki_tail_line(model: Mapping[str, Any]) -> str:
+    block, label = _events_shown(model)
+    tail = [] if block is None else block["stats"].get("ki", {}).get("tail", [])
+    if not _concentrated(tail):
+        return ""
+    k = sum(r["events"] for r in tail)
+    return (f" The KI tail is concentrated in single market days: {tail[0]['events']} of the {k} tail approaches "
+            f"({label}) are dated {esc(tail[0]['date'])} (section 03).")
+
+
 def section_limits(model: Mapping[str, Any]) -> str:
-    items = [
+    days = model["limit_days"] or []
+    limit_line = ("<b>Limit days.</b> On a day the far IM contract closed at its daily price limit the close clock "
+                  "books a trade that could not be executed and the twap clock fills it at a VWAP no desk could have "
+                  "known: the twap improvement of the KI tail on such days is not an achievable fill (section 03). "
+                  + (f"Limit closes in the data: {', '.join(esc(r['date']) + ' (' + r['side'] + (', locked' if r['locked'] else '') + ')' for r in days)}."
+                     if days else "No limit close in the data." if model["limit_days"] is not None
+                     else "The board could not be read, so limit days are not listed.")
+                  + _ki_tail_line(model))
+    items = [limit_line, _after_end(model),
+             "<b>The carried fill ratio is reset when an overlay closes.</b> A day whose target wants no leg and "
+             "carries no refusal sets the carried fill ratio to 0, so the residual of a closed overlay covers nothing "
+             "on a later refusal day; that is why the minimum fill ratio of an overlay technique can read 0%.",
         "<b>Scenario sizing mostly hits the 3x cap.</b> Unless the option series ends within about a week of the "
         "observation, the scenario lot count is capped at 3 times the payoff lot count, so "
         "<code>mo_ko@1,scenario</code> is in practice about 3 x the payoff lots.",
@@ -1305,9 +1648,13 @@ def section_sources(model: Mapping[str, Any]) -> str:
              "inputs_hash": "recorded inputs"}
     rows = [[esc(short[k]), code((g["hashes"].get(k) or "–")[:12]), code((sel.get(k) or "–")[:12]),
              code((ts.get(k) or "–")[:12]), code(((pay.get("stamp") or {}).get(k) or "–")[:12])] for k in HASHES]
+    covered = (f"The ledger-side code hash covers the package files {', '.join(measures.CODE_FILES)}, the driver "
+               f"{measures.DRIVER_FILE}, the sibling s2ts files {', '.join(measures.S2TS_CODE_FILES)} and the numpy, "
+               "scipy and quantark versions; the report itself is not in it (it only displays). The recorded-inputs "
+               "hash covers the board, the chain and every state file's pricing fingerprint.")
     body = (tbl("sources", ["Hash", "Current files", "Training selection", "Training runs", "Test payload"], rows,
                 "The four hashes the guard compares (first 12 hex digits): a test number is printed only when the "
-                "selection and the payload carry the current four.")
+                "selection and the payload carry the current four.", note=esc(covered))
             + h.points([f"Training run files: {g['train_present']} of {g['train_listed']} note files present"
                         + ("" if g["training_ok"] else " (not shown: " + "; ".join(g["training_problems"]) + ")"),
                         f"Test run files read: {g['test_present']}",
@@ -1364,6 +1711,10 @@ EXTRA_CSS = """
 .banner b{color:var(--amber);font-weight:600}
 .banner.ok{border-left-color:var(--up)}.banner.ok b{color:var(--up)}
 p.tcap{margin:28px 0 4px;font:12px/1.5 var(--mono);color:var(--ink-2);max-width:none}
+@media (max-width:820px){.fbar>span.fld{display:none}}
+details.dots{margin:10px 0 0}
+details.dots summary{cursor:pointer;font:11px/1.5 var(--mono);letter-spacing:.06em;color:var(--amber)}
+details.dots .scroll{max-height:420px;overflow:auto}
 tr.vrow td:first-child code{color:var(--amber)}
 .chart .esmark{stroke:var(--amber);stroke-width:2}
 section .body table{font-size:12px}

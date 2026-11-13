@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from quantark.util.exceptions import QuantArkException  # noqa: E402
 
-from gpin import BOARD_PATH, CHAIN_PATH, OUTPUT_DIR, RESULTS_DIR, STATES_DIR  # noqa: E402
+from gpin import BOARD_PATH, CHAIN_PATH, OUTPUT_DIR, RESULTS_DIR, STATES_DIR, StudyDataError  # noqa: E402
 from gpin.report import ReportPaths, build_model, render  # noqa: E402
 
 REPORT_PATH = RESULTS_DIR / "report.html"
@@ -54,7 +54,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def resolve(args: argparse.Namespace) -> Job:
-    """The inputs and the destination of this run."""
+    """The inputs and the destination of this run. A partial render (a smoke run) never goes to the tracked results
+    directory, as a partial ledger run never does."""
+    if args.partial and Path(args.out).resolve().parent == Path(RESULTS_DIR).resolve():
+        raise StudyDataError(f"a partial render is a smoke run: give it an --out outside {RESULTS_DIR}")
     paths = ReportPaths(runs_dir=Path(args.runs_dir), selection=Path(args.selection), backtest=Path(args.backtest),
                         states_dir=Path(args.states_dir), events=Path(args.events), board=Path(args.board),
                         chain=Path(args.chain), probe=Path(args.probe), partial=bool(args.partial))
@@ -77,8 +80,8 @@ def write_atomic(path: Path, text: str) -> None:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    job = resolve(parse_args(argv))
     try:
+        job = resolve(parse_args(argv))
         model = build_model(job.paths)
         write_atomic(job.out, render(model))
     except QuantArkException as err:
