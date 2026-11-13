@@ -36,6 +36,7 @@ from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnav
 from quantark.util.exceptions import PricingError
 from quantark.util.numerical import Tolerance, is_zero
 
+from .continuous_ki_days import crossed_by, split_interval_mass, survival_after_rows
 from .v1_adjoint import MarchLog, forward_pass
 
 __all__ = [
@@ -69,14 +70,6 @@ def _df(env, t: float) -> float:
     return float(env.get_discount_factor(float(t)))
 
 
-def _survival(times, probability, ko_times, ko_probability):
-    """P(not yet knocked in and not knocked out after each row); a knock-out at a row's own time is out by then."""
-    order = np.argsort(ko_times, kind="stable")
-    cumulative_ko = np.concatenate([[0.0], np.cumsum(ko_probability[order])])
-    ko_by_row = cumulative_ko[np.searchsorted(ko_times[order], times + Tolerance.ZERO, side="right")]
-    return 1.0 - np.cumsum(probability) - ko_by_row
-
-
 def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: bool,
                    ki_records: Sequence, refusal: Optional[str] = None):
     """``(probability, expected_time, KnockInTable, expected_time_reason)`` from the forward pass (DESIGN §4.5): rows
@@ -87,8 +80,6 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
         AdjointUnavailable: ``refusal`` given, or the pass does not transpose this march (reason given).
         PricingError: first knock-in mass off the product's KI schedule (an invariant).
     """
-    from .v2.statistics import _crossed_by  # the first-passage law of an interval (QUAD V2's, shared)
-
     if refusal is not None:
         raise AdjointUnavailable(refusal)
     result = forward_pass(log)
@@ -102,33 +93,20 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
         steps = list(reversed(log.steps))
         starts_t = np.concatenate([[0.0], t[:-1]])
         day_starts = np.concatenate([[0.0], days[:-1]]) if days.size else np.zeros(0)
-        day_mass = np.zeros(days.size)
-        for i in range(t.size):
-            crossing, decided = float(interval_p[i]), float(event_p[i])
-            if days.size == 0 or (crossing == 0.0 and decided == 0.0):
-                continue
+
+        def crossed_at(i, inside):
             s0, s1 = float(starts_t[i]), float(t[i])
-            at_day_end = np.where(days >= s1 - Tolerance.ZERO, crossing, 0.0)
-            at_day_end[-1] = crossing
-            inside = np.flatnonzero((days > s0 + Tolerance.ZERO) & (days < s1 - Tolerance.ZERO))
-            inside = inside[inside < days.size - 1]
-            if crossing != 0.0 and inside.size:
-                tau, alpha = steps[i].diffusion[0], steps[i].diffusion[1]
-                log_barrier, _, _, reverse = steps[i].bridge
-                weights = result.interval_start_dual[i]
-                # the step's coefficients are constant: its variance accrues linearly in time
-                fractions = np.clip((days[inside] - s0) / (s1 - s0), 0.0, 1.0)
-                law = ((log.math_utils.grid, weights), 2.0 * tau * alpha, 2.0 * tau, log_barrier, reverse)
-                # the dual is signed at round-off level where the note is all but knocked out (its weights carry the
-                # projection's ringing): the split is linear in it, so only a law with no mass at all is refused
-                crossed = _crossed_by(law, np.r_[fractions, 1.0])
-                if crossed[-1] == 0.0:
-                    raise PricingError("a QUAD V1 continuous knock-in interval has bridge mass but no crossing law")
-                at_day_end[inside] = crossing * crossed[:-1] / crossed[-1]
-            share = np.diff(np.concatenate([[0.0], at_day_end]))
-            if decided != 0.0:
-                share[min(int(np.searchsorted(days, s1 - Tolerance.ZERO, side="left")), days.size - 1)] += decided
-            day_mass += share
+            tau, alpha = steps[i].diffusion[0], steps[i].diffusion[1]
+            log_barrier, _, _, reverse = steps[i].bridge
+            weights = result.interval_start_dual[i]
+            # the step's coefficients are constant: its variance accrues linearly in time
+            fractions = np.clip((days[inside] - s0) / (s1 - s0), 0.0, 1.0)
+            law = ((log.math_utils.grid, weights), 2.0 * tau * alpha, 2.0 * tau, log_barrier, reverse)
+            # the dual is signed at round-off level where the note is all but knocked out (its weights carry the
+            # projection's ringing): the split is linear in it, so only a law with no mass at all is refused
+            return crossed_by(law, np.r_[fractions, 1.0])
+
+        day_mass = split_interval_mass(days, t, interval_p, event_p, crossed_at, engine="QUAD V1")
         probability = day_mass
         weighted = float(np.sum(0.5 * (day_starts + days) * probability))
         grid = np.unique(np.concatenate([[0.0], t]))
@@ -162,7 +140,7 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
         k = int(np.argmin(probability))
         raise AdjointUnavailable(f"undefined: the recursion's first knock-in mass is negative on the row at t = "
                                  f"{float(times[k])!r} ({float(probability[k])!r}); refine the grid")
-    survival = _survival(times, probability, t, ko_p)
+    survival = survival_after_rows(times, probability, t, ko_p)
     table = KnockInTable(times=times, payment_times=times, dates=dates, payment_dates=dates,
                          probability=probability, survival=survival, interpolated=interpolated,
                          interpolation_scheme=scheme if bool(np.any(interpolated)) else None)

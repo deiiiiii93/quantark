@@ -295,6 +295,17 @@ def test_step_transpose_is_the_adjoint_of_step_columns(name, douglas):
     assert lhs == pytest.approx(rhs, rel=1e-12, abs=1e-10)
 
 
+def test_the_mixed_derivative_threshold_is_one_shared_constant():
+    """The step and its transpose switch the mixed-derivative term off at the same |rho| (one constant, T22)."""
+    import inspect
+
+    from quantark.asset.equity.engine.pde import adi_columns
+
+    assert vol_model_adjoint.RHO_OFF is adi_columns.RHO_OFF
+    assert "1e-12" not in inspect.getsource(adi_columns.step_columns)
+    assert "1e-12" not in inspect.getsource(vol_model_adjoint)
+
+
 # --- AC13 -----------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", list(ROUTES))

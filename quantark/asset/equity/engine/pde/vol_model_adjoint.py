@@ -37,6 +37,7 @@ from quantark.util.exceptions import PricingError
 from quantark.util.numerical import Tolerance, is_close
 from quantark.util.numerical.tridiag import solve_tridiag_batch
 
+from .adi_columns import RHO_OFF
 from .core.statistics.adjoint import (
     ALIVE,
     KI,
@@ -51,8 +52,6 @@ from .core.statistics.adjoint import (
 
 __all__ = ["ADIStep", "ADIEvents", "adi_forward_pass", "readout_weights_2d", "StepTranspose"]
 
-#: ``step_columns``' threshold for a mixed-derivative term (``abs(core.rho) <= 1e-12``: no ``A0``)
-_RHO_OFF = 1e-12
 
 
 @dataclass(frozen=True, eq=False)
@@ -125,7 +124,7 @@ class StepTranspose:
         else:
             xx = tuple(np.asarray(w, dtype=float) for w in core._xx)
             x1 = tuple(np.asarray(w, dtype=float) for w in core._x1)
-            v1 = tuple(np.asarray(w, dtype=float) for w in core._v1) if abs(core.rho) > _RHO_OFF else None
+            v1 = tuple(np.asarray(w, dtype=float) for w in core._v1) if abs(core.rho) > RHO_OFF else None
         # A1: the spot generator (no reaction) on the interior; the degenerate v = 0 column's drift term
         self.a1 = tuple(diffusion * w2[:, None] + convection * w1[:, None] for w2, w1 in zip(xx, x1))
         self.a1_v0 = tuple((r - q) * w1 for w1 in x1) if self.degenerate else None
@@ -134,7 +133,7 @@ class StepTranspose:
         self.a2 = (np.asarray(sub, dtype=float), np.asarray(diag, dtype=float), np.asarray(sup, dtype=float))
         self.a2_v0 = (core.kappa * core.theta / (V[1] - V[0])) if self.degenerate else None
         # A0: the mixed derivative
-        self.rho_on = abs(core.rho) > _RHO_OFF
+        self.rho_on = abs(core.rho) > RHO_OFF
         if self.rho_on:
             self.a0 = core.rho * core.sig_eff * lev[:, None] * V[None, 1:-1]
             self.x1, self.v1 = x1, v1

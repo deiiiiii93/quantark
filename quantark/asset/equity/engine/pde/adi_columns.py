@@ -6,6 +6,10 @@ retain the core's scalar sweeps. The claim axis has no model coupling.
 import numpy as np
 from quantark.volmodels.adi_core import solve_tridiag_batch
 
+#: |rho| at or below which the batched step has no mixed-derivative term (no ``A0``, no Craig-Sneyd correction);
+#: the forward adjoint's step transpose (``vol_model_adjoint.StepTranspose``) switches it off at the same value
+RHO_OFF = 1e-12
+
 
 def _bound_spot_caches(core):
     # A rolling claim sweep never revisits old forward intervals. Retaining
@@ -134,7 +138,7 @@ def step_columns(core, U, dt, tau, theta, t_mid, low, high, douglas, force_scala
 
     def A0(A):
         out = np.zeros_like(A)
-        if abs(core.rho) <= 1e-12:
+        if abs(core.rho) <= RHO_OFF:
             return out
         if core._uniform:
             cross = (A[2:, 2:]-A[2:, :-2]-A[:-2, 2:]+A[:-2, :-2])/(4*core.dx*core.dV)
@@ -172,7 +176,7 @@ def step_columns(core, U, dt, tau, theta, t_mid, low, high, douglas, force_scala
     if douglas:
         out = first
     else:
-        corrected = bc(predictor+.5*dt*(A0(first)-a0)) if abs(core.rho)>1e-12 else predictor
+        corrected = bc(predictor+.5*dt*(A0(first)-a0)) if abs(core.rho)>RHO_OFF else predictor
         out = solve_v(solve_s(corrected, a1), a2)
     out *= discount
     out[0], out[-1] = original_low, original_high

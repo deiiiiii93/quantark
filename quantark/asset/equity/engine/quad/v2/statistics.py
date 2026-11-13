@@ -47,6 +47,7 @@ from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import Tolerance, is_close, is_zero
 
+from ..continuous_ki_days import crossed_by, split_interval_mass, survival_after_rows
 from .adjoint import forward_pass
 from .context import interval_moments
 
@@ -219,40 +220,6 @@ def _valuation_decisions(context, spot):
 # --- the knock-in table from the forward pass -----------------------------------------------------------------------
 
 
-def _survival(times, probability, ko_times, ko_probability):
-    """P(not yet knocked in and not knocked out after each row); a knock-out at a row's own time is out by then."""
-    order = np.argsort(ko_times, kind="stable")
-    cumulative_ko = np.concatenate([[0.0], np.cumsum(ko_probability[order])])
-    ko_by_row = cumulative_ko[np.searchsorted(ko_times[order], times + Tolerance.ZERO, side="right")]
-    return 1.0 - np.cumsum(probability) - ko_by_row
-
-
-def _crossed_by(law, fractions) -> np.ndarray:
-    """``Σ w P_x(hit by a fraction of the interval's variance)`` per fraction: the drifted Brownian first-passage law
-    of the reflection kernel (``continuous_readout``), time-changed by the interval's variance."""
-    from scipy.special import ndtr
-
-    (x, weights), mean, variance, barrier, reverse = law
-    fractions = np.atleast_1d(np.asarray(fractions, dtype=float))
-    keep = weights != 0.0
-    x, weights = x[keep], weights[keep]
-    distance = (x - barrier) if reverse else (barrier - x)      # < 0 on the safe side
-    safe = distance < 0.0
-    through = float(np.sum(weights[~safe]))                     # already through the barrier: crossed at once
-    d, w = distance[safe][:, None], weights[safe][:, None]
-    out = np.zeros(fractions.size)
-    positive = fractions > 0.0
-    if np.any(positive):
-        f = fractions[positive][None, :]
-        m, v = mean * f, variance * f
-        drift = -m if reverse else m
-        sd = np.sqrt(v)
-        with np.errstate(over="ignore", invalid="ignore"):
-            hit = ndtr((d - drift) / sd) + np.exp(2 * drift * d / v) * ndtr((d + drift) / sd)
-        out[positive] = np.sum(w * hit, axis=0) + through
-    return out
-
-
 def knock_in_table(product, env, context, spot):
     """``(probability, expected_time, KnockInTable, expected_time_reason)`` from the forward pass (DESIGN §4.5): rows
     on the product's KI schedule (discrete), or one per trading day of the window (continuous, each interval's crossing
@@ -282,31 +249,14 @@ def knock_in_table(product, env, context, spot):
 
         starts_t = np.concatenate([[0.0], t[:-1]])
         day_starts = np.concatenate([[0.0], days[:-1]]) if days.size else np.zeros(0)
-        day_mass = np.zeros(days.size)
-        for i in range(t.size):
-            crossing, decided = float(interval_p[i]), float(event_p[i])
-            if days.size == 0 or (crossing == 0.0 and decided == 0.0):
-                continue
-            s0, s1 = float(starts_t[i]), float(t[i])
-            # the cumulative mass of the interval at each day end: 0 up to its start, all of it from its end (the
-            # mass past the window's last day is kept on that day)
-            at_day_end = np.where(days >= s1 - Tolerance.ZERO, crossing, 0.0)
-            at_day_end[-1] = crossing
-            law = result.interval_law[i]
-            inside = np.flatnonzero((days > s0 + Tolerance.ZERO) & (days < s1 - Tolerance.ZERO))
-            inside = inside[inside < days.size - 1]
-            if crossing != 0.0 and inside.size:
-                (points, weights), mean, variance = law
-                v0 = cumulative[s0]
-                fractions = np.clip((np.array([cumulative[float(days[d])] for d in inside]) - v0) / variance, 0.0, 1.0)
-                crossed = _crossed_by(((points, weights), mean, variance, barrier, reverse), np.r_[fractions, 1.0])
-                if crossed[-1] == 0.0:
-                    raise PricingError("a QUAD V2 continuous crossing interval has mass but no crossing law")
-                at_day_end[inside] = crossing * crossed[:-1] / crossed[-1]
-            share = np.diff(np.concatenate([[0.0], at_day_end]))
-            if decided != 0.0:
-                share[min(int(np.searchsorted(days, s1 - Tolerance.ZERO, side="left")), days.size - 1)] += decided
-            day_mass += share
+
+        def crossed_at(i, inside):
+            (points, weights), mean, variance = result.interval_law[i]
+            v0 = cumulative[float(starts_t[i])]
+            fractions = np.clip((np.array([cumulative[float(days[d])] for d in inside]) - v0) / variance, 0.0, 1.0)
+            return crossed_by(((points, weights), mean, variance, barrier, reverse), np.r_[fractions, 1.0])
+
+        day_mass = split_interval_mass(days, t, interval_p, event_p, crossed_at, engine="QUAD V2")
         probability = day_mass
         midpoint_mass = float(np.sum(0.5 * (day_starts + days) * probability))
         grid = np.unique(np.concatenate([[0.0], t]))
@@ -341,7 +291,7 @@ def knock_in_table(product, env, context, spot):
         k = int(np.argmin(probability))
         raise AdjointUnavailable(f"undefined: the recursion's first knock-in mass is negative on the row at t = "
                                  f"{float(times[k])!r} ({float(probability[k])!r}); refine the mesh")
-    survival = _survival(times, probability, t, ko_p)
+    survival = survival_after_rows(times, probability, t, ko_p)
     table = KnockInTable(times=times, payment_times=times, dates=dates, payment_dates=dates,
                          probability=probability, survival=survival, interpolated=interpolated,
                          interpolation_scheme=scheme if bool(np.any(interpolated)) else None)
