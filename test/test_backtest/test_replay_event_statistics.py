@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import math
-import re
 import sys
 from pathlib import Path
 
@@ -36,24 +35,9 @@ from quantark.asset.equity.engine.event_stats import (  # noqa: E402
 from quantark.asset.equity.param import EngineParams  # noqa: E402
 from quantark.backtest.replay.single import AutocallableBacktestEngine  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[2]
 REASON = "transition: legacy producer"
 DATE = pd.Timestamp("2024-01-02")
 
-#: the T8 consumer modules (spec D15: consumers read statistics as EventStatistics)
-T8_FILES = (
-    "quantark/asset/equity/report/autocallable_risk_report.py",
-    "quantark/asset/equity/riskmeasures/greeks/theta_shift.py",
-    "quantark/backtest/replay/product_replay.py",
-    "quantark/backtest/replay/schema.py",
-    "quantark/portfolio/equity/position.py",
-    "quantark/modelvalidation/builders/equity_snowball.py",
-    "quantark/asset/equity/analysis/autocallable_path_analyzer.py",
-)
-LEGACY = re.compile(
-    r"AutocallableEventStats|PhoenixEventStats|KOResetEventStats|DCNEventStats|RiskNeutralSnowballEventStats"
-    r"|ki_ever_probability|ki_survive_knocked_in_probability|from_autocallable_stats|from_dcn_stats"
-)
 
 KO_TIMES = (2.0 / 365.0, 5.0 / 365.0)
 KO_PAY = (3.0 / 365.0, 6.0 / 365.0)
@@ -167,10 +151,3 @@ def test_an_unavailable_ki_table_records_no_ki_rows_and_invents_none_at_maturity
 def test_a_flagged_ki_settlement_probability_is_nan():
     daily, _rows = _record(_stats(unavailable=("ki_settlement.probability",)))
     assert math.isnan(daily["ki_probability_to_maturity"])
-
-
-@pytest.mark.parametrize("path", T8_FILES)
-def test_consumer_module_names_no_legacy_statistics_type_or_converter(path):
-    text = (ROOT / path).read_text(encoding="utf-8")
-    found = sorted({m.group(0) for m in LEGACY.finditer(text)})
-    assert found == [], f"{path} still names {found}"

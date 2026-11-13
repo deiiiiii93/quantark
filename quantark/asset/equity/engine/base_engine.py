@@ -200,12 +200,10 @@ class BaseEngine(ABC):
 
         Engines that implement calculate_event_stats are adapted to the
         generalized EventDistribution through ``EventDistribution.from_statistics``,
-        the one converter. Their statistics are read as ``EventStatistics``
-        through the transition module (spec D15): the new type passes through
-        unchanged; a producer not yet migrated is converted, its flagged fields
-        listed in ``unavailable`` and its flagged streams carried on the
-        distribution's ``flagged_streams``. ``npv`` is the statistics' ``pv``,
-        a field the transition never flags. Engines without event stats fall
+        the one converter. A producer must return ``EventStatistics``
+        (anything else raises ``ValidationError``); fields it lists in
+        ``unavailable`` are carried on the distribution's ``flagged_streams``.
+        ``npv`` is the statistics' ``pv``. Engines without event stats fall
         back to a maturity-only distribution, which is sufficient for
         deterministic and full-schedule cash legs.
 
@@ -214,7 +212,7 @@ class BaseEngine(ABC):
         the Snowball/Phoenix QUAD engines, which override this method); other
         engines ignore it and return the full distribution.
         """
-        from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
+        from quantark.asset.equity.engine.event_stats import checked_event_statistics
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
         from quantark.asset.equity.engine.settlement_support import (
             validate_settlement_capability,
@@ -225,7 +223,7 @@ class BaseEngine(ABC):
         if emit_distribution:
             produced = self.calculate_event_stats(product, pricing_env)
             if produced is not None:
-                stats = _as_event_statistics(produced)
+                stats = checked_event_statistics(produced)
                 return PricingResult(
                     npv=float(stats.pv),
                     event_distribution=EventDistribution.from_statistics(stats),
@@ -427,10 +425,8 @@ class BaseEngine(ABC):
         expected discounted cashflows for autocallable products. This enables faster
         reporting (especially for QUAD/PDE engines) compared to Monte Carlo analyzers.
 
-        The result type is ``EventStatistics``. Until every producer is migrated
-        (unified event statistics, branch transition), a producer may still return
-        its legacy statistics object; readers convert any result through the
-        transition module and never read a legacy field.
+        The result type is ``EventStatistics``; readers refuse any other type
+        (``checked_event_statistics``).
 
         Default behavior: return None (not supported).
         """

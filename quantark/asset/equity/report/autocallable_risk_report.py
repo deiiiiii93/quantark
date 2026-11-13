@@ -25,7 +25,7 @@ from quantark.asset.equity.analysis.autocallable_path_analyzer import (
     AutocallablePathAnalyzer,
     ShockPnLDistribution,
 )
-from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
+from quantark.asset.equity.engine.event_stats import checked_event_statistics
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -1376,7 +1376,7 @@ def build_snowball_risk_snapshot(
     produced = engine.calculate_event_stats(product, pricing_env)
     conditional_cashflows: list[dict[str, Any]] = []
     if produced is not None:
-        engine_stats = _as_event_statistics(produced)
+        engine_stats = checked_event_statistics(produced)
         conditional_cashflows = _records_payload(
             _render_conditional_cashflow_table(
                 engine_stats.require("observations.times"),
@@ -1787,7 +1787,7 @@ def generate_snowball_risk_report(
     produced = engine.calculate_event_stats(product, pricing_env)
     analyzer: Optional[AutocallablePathAnalyzer] = None
     if produced is not None:
-        event_stats = _as_event_statistics(produced)
+        event_stats = checked_event_statistics(produced)
     else:
         if analyzer_mc_params is None:
             analyzer_mc_params = MCParams(num_paths=20000, time_steps=252)

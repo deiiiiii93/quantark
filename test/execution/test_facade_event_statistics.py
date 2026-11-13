@@ -1,7 +1,7 @@
 """Facades and execution adapters on the unified ``EventStatistics`` (unified event statistics T7).
 
-* The facade/adapter modules name no legacy statistics type and no legacy converter: they read statistics
-  as ``EventStatistics`` (through the branch transition module while producers migrate).
+* The facade/adapter modules read statistics as ``EventStatistics`` (the repository-wide absence of the
+  legacy types is ``test/test_event_statistics_legacy_removed.py``).
 * A producer that returns ``EventStatistics`` directly works through every facade unchanged:
   ``price_with_events`` converts it with ``EventDistribution.from_statistics`` (npv is its ``pv``), the
   EVENT_STATS adapters and the PDE session pass the object through and read only ``pv``.
@@ -9,9 +9,7 @@
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -37,23 +35,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
 
-ROOT = Path(__file__).resolve().parents[2]
 
-#: the T7 facade/adapter modules (spec D15 consumer order: they migrate before any producer)
-T7_FILES = (
-    "quantark/asset/equity/engine/base_engine.py",
-    "quantark/asset/equity/engine/pde_engine.py",
-    "quantark/asset/equity/engine/pde/pde_execution_adapters.py",
-    "quantark/asset/equity/engine/quad/v2/execution_adapter.py",
-    "quantark/execution/greeks.py",
-    "quantark/execution/legacy_adapter.py",
-    "quantark/asset/equity/engine/settlement_support.py",
-)
-#: the legacy statistics types, their ambiguous fields and converters (spec AC24's list less the shim itself)
-LEGACY = re.compile(
-    r"AutocallableEventStats|PhoenixEventStats|KOResetEventStats|DCNEventStats|RiskNeutralSnowballEventStats"
-    r"|ki_ever_probability|ki_survive_knocked_in_probability|from_autocallable_stats|from_dcn_stats"
-)
 
 PROV = StatisticsProvenance(statistics_model="hand_built", price_model="hand_built")
 KO_TIMES = (0.25, 0.5, 0.75, 1.0)
@@ -141,16 +123,6 @@ class _Producer(BaseEngine):
 
     def calculate_event_stats(self, product, pricing_env, *, lifecycle_state=None, **options):
         return self._stats
-
-
-# --- the facade modules read no legacy statistics -------------------------------------------------------
-
-
-@pytest.mark.parametrize("path", T7_FILES)
-def test_facade_module_names_no_legacy_statistics_type_or_converter(path):
-    text = (ROOT / path).read_text(encoding="utf-8")
-    found = sorted({m.group(0) for m in LEGACY.finditer(text)})
-    assert found == [], f"{path} still names {found}"
 
 
 # --- price_with_events on a producer that returns EventStatistics ---------------------------------------

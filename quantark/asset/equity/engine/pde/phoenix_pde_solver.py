@@ -66,12 +66,6 @@ class PhoenixPDESolver(SnowballPDESolver):
     def _event_stats_product_type(self) -> type:
         return PhoenixOption
 
-    def _make_event_stats(self, **fields):
-        from quantark.asset.equity.engine.event_stats import PhoenixEventStats
-
-        fields.setdefault("provenance", self._native_provenance())
-        return PhoenixEventStats(**fields)
-
     # price() and calculate_greeks() are inherited from SnowballPDESolver
     # The _check_product_type() method uses _supported_product_type to validate
 

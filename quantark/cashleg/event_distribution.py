@@ -363,22 +363,6 @@ class EventDistribution:
             return times, survival
         return np.r_[0.0, times], np.r_[1.0, survival]
 
-    # --- legacy converters (D15: routed through the transition module until T21) -----------------------
-
-    @classmethod
-    def from_autocallable_stats(cls, stats) -> "EventDistribution":
-        """A legacy autocallable statistics object, read through the transition module (spec D15)."""
-        from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
-
-        return cls.from_statistics(_as_event_statistics(stats))
-
-    @classmethod
-    def from_dcn_stats(cls, stats) -> "EventDistribution":
-        """A legacy ``DCNEventStats``, read through the transition module (spec D15)."""
-        from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
-
-        return cls.from_statistics(_as_event_statistics(stats))
-
     # --- reading ----------------------------------------------------------------------------------------
 
     def ensure_live(self, reader: str = "an event-dependent reader") -> None:

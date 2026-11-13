@@ -67,12 +67,6 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     def _event_stats_product_type(self) -> type:
         return KnockOutResetSnowballOption
 
-    def _make_event_stats(self, **fields):
-        from quantark.asset.equity.engine.event_stats import KOResetEventStats
-
-        fields.setdefault("provenance", self._native_provenance())
-        return KOResetEventStats(**fields)
-
     # price() / calculate_greeks() / calculate_event_stats() are SnowballPDESolver's; KOResetAdapter
     # marches them (the statistics as the value's PDE group, spec 3B §5.4, decision 6).
 

@@ -45,7 +45,7 @@ from quantark.asset.equity.engine.pde.grid import (
     MarketSnapshot,
     project_between,
 )
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats, EventStatistics, StatisticsProvenance
+from quantark.asset.equity.engine.event_stats import EventStatistics, StatisticsProvenance
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -772,12 +772,6 @@ class SnowballPDESolver(BasePDESolver):
     def _event_stats_product_type(self) -> type:
         """Product type accepted by ``calculate_event_stats`` (overridable)."""
         return SnowballOption
-
-    def _make_event_stats(self, **fields) -> AutocallableEventStats:
-        """Construct the event-stats dataclass (overridable by subclasses), with the native
-        implementation provenance (spec 3B §5.6) unless the caller set one."""
-        fields.setdefault("provenance", self._native_provenance())
-        return AutocallableEventStats(**fields)
 
     def _native_provenance(self) -> StatisticsProvenance:
         """The family's own statistics model, priced by the same model (spec 3B §5.6)."""

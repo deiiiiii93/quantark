@@ -208,10 +208,8 @@ class PDEEngine(BaseEngine):
         """
         Forward to the product's solver, which owns the computation.
 
-        The solver's result is returned as produced (no field is read here):
-        ``EventStatistics`` once the solver family is migrated, its legacy
-        statistics object until then. ``price_with_events`` (inherited) reads it
-        through the transition module.
+        The solver's ``EventStatistics`` is returned as produced (no field is
+        read here); ``price_with_events`` (inherited) checks its type.
 
         The base class returns None for "unsupported"; that default silently
         discarded working solver results (SnowballPDESolver et al. implement

@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.engine._event_stats_transition import _as_event_statistics
+from quantark.asset.equity.engine.event_stats import checked_event_statistics
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import EventStatistics, StatisticsRefused
 from quantark.asset.equity.lifecycle import DCNLifecycleState, ValuationPoint, tracker_for
@@ -742,7 +742,7 @@ class ProductReplay:
         of that kind), never as the flagged number or a stand-in. ``pv`` is the engine's price, never flagged.
         """
         produced, stats_engine = self._calculate_event_stats(product, env)
-        stats = _as_event_statistics(produced)
+        stats = checked_event_statistics(produced)
 
         ko_rows = _available(stats, "observations.is_ko_obs")
         if ko_rows is None:
