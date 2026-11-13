@@ -66,6 +66,9 @@ D9_CAUSES: Dict[str, str] = {
     "i": "npv := price() where the marched stats pv differed by round-off (Heston ADI ~2 ULP)",
     "k": "PDE knocked-in edge row honours the annualized-KI leg (D26): edge-reaching annualized-KI PDE / ADI "
          "price, event_npv and folded records",
+    "l": "PDE knocked-in edge row honours the airbag (D27): partially protected PDE / ADI contracts whose airbag "
+         "changes the knocked-in payoff on the knock-in edge cell (no banked case is one: "
+         "test_no_banked_case_is_in_the_d27_airbag_class)",
 }
 
 
@@ -683,17 +686,21 @@ _WIDE_ROW_INDEPENDENCE = 1e-8
 
 class _BaseKnockInRow:
     """Within the block, the PDE solvers write base's knocked-in edge row (the D26 branch off: the knock-in leg reads
-    as not annualized to ``SnowballPDESolver._boundary_rows_v1``; the product and every other leg are untouched)."""
+    as not annualized to ``SnowballPDESolver._boundary_rows_v1``, and the D27 airbag gate is shut; the product and every
+    other leg are untouched)."""
 
     def __enter__(self):
         from quantark.asset.equity.engine.pde import snowball_pde_solver as sps
 
         self._module, self._real = sps, sps.leg_annualized
+        self._airbag = sps.SnowballPDESolver.__dict__["_airbag_moves_knock_in_edge"]
         sps.leg_annualized = lambda product, leg: False if leg == "knock_in" else self._real(product, leg)
+        sps.SnowballPDESolver._airbag_moves_knock_in_edge = staticmethod(lambda product, env, s_vec: False)
         return self
 
     def __exit__(self, *exc):
         self._module.leg_annualized = self._real
+        self._module.SnowballPDESolver._airbag_moves_knock_in_edge = self._airbag
         return False
 
 
@@ -1155,6 +1162,24 @@ def test_every_mc_case_is_rebanked_on_price_paths():
     rebanked = {cid for rebank in BANKED["header"].get("rebanks", []) if rebank["cause"] == "f"
                 for cid in rebank["cases"]}
     assert mc_cases and mc_cases <= rebanked
+
+
+def test_no_banked_case_is_in_the_d27_airbag_class():
+    """Cause (l), D27, pins no record, because no banked case can reach the airbag edge row: its gate
+    (``SnowballPDESolver._airbag_moves_knock_in_edge``) fires only on a partially protected contract with an airbag,
+    and no banked product is one. Every banked PDE / ADI price therefore reproduces through T14c (or moves by an
+    earlier cause); a case added to the bank in that class would have to be pinned here under (l)."""
+    from quantark.util.enum import ProtectionType
+
+    assert BANKED is not None, "baseline.json is not banked"
+    assert not any(move.cause == "l" for move in EXPECTED_MOVES.values())
+    in_class = []
+    for case_id in BANKED["cases"]:
+        _, product, _ = _case(case_id).fresh()
+        airbag, payoff = getattr(product, "airbag_config", None), getattr(product, "payoff_config", None)
+        if airbag is not None and airbag.airbag_barrier is not None and payoff.protection_type == ProtectionType.PARTIAL:
+            in_class.append(case_id)
+    assert in_class == [], f"in the D27 class, pin under cause (l): {in_class}"
 
 
 def test_expected_moves_name_banked_records_and_d9_causes():
