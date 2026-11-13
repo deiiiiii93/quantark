@@ -2561,12 +2561,12 @@ def test_close_clock_baseline_on_a_surviving_note_matches_hand_computed_rows():
     assert r1["hedged"] == pytest.approx(5000.0 + 100000.0 + accrual1 - cost1)
     assert r1["cash"] == pytest.approx(r0["cash"] + accrual1 + 100000.0 - cost1)
     assert r1["im_lots"] == pytest.approx(6.0) and r1["fill_pnl"] == 0.0
-    # day 2: the data end, the note is alive: 6 lots earn 6 x (-100) x 200, then everything is closed at the close
+    # day 2: the data end, the note is alive: 6 lots earn 6 x (-100) x 200, then everything is marked flat at the
+    # close. The flatten is a mark, not a trade: it costs nothing
     accrual2 = r1["cash"] * RATE_ * dt
-    cost2 = IM_COST * 6 * 5000.0 * IM_MULT_
     assert r2["im_vm"] == pytest.approx(-120000.0) and r2["note_pnl"] == pytest.approx(-105000.0 + 95000.0)
-    assert r2["cost"] == pytest.approx(cost2) and r2["im_lots"] == 0.0 and r2["hedge_ratio"] == 0.0
-    assert r2["hedged"] == pytest.approx(-10000.0 - 120000.0 + accrual2 - cost2)
+    assert r2["cost"] == 0.0 and r2["im_lots"] == 0.0 and r2["hedge_ratio"] == 0.0
+    assert r2["hedged"] == pytest.approx(-10000.0 - 120000.0 + accrual2)
     assert "data_end" in r2["flags"]
     _check_identity(run)
 
@@ -3992,30 +3992,48 @@ def test_mo_ko_for_a_negative_gap_is_the_mirrored_spread_falling_across_the_barr
     _overlay(one.target(_mo_ko_ctx(4950.0, 400000.0, ko_dir=1)), {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0})
 
 
-def test_a_barrier_beyond_the_listing_uses_the_last_listed_interval_or_has_no_strike():
+def test_a_barrier_within_one_listed_step_beyond_the_listing_is_built_and_further_out_is_refused():
     from gpin import techniques as tq
 
     tech = _registry()["mo_ko@1,payoff"]
-    top = [4700.0, 4800.0, 4900.0, 5000.0]                                  # nothing listed above 5000
+    held = {(OV, "P", 4800.0): 7.0}
+
+    def refused(spot, gap, strikes, ko, held_legs=None):
+        t = tech.target(_mo_ko_ctx(spot, gap, mo=_ov_board_mo(strikes=strikes), note=_t5_note(ko=ko), held_legs=held_legs))
+        assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == dict(held_legs or {}), (ko, gap)
+
+    top = [4700.0, 4800.0, 4900.0, 5000.0]                                  # nothing listed above 5000; last step 100
     calls = {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0}
-    # gap > 0 needs only strikes at or below B: K2 = 5000 is the highest of them, the spacing is the last interval's
-    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=_ov_board_mo(strikes=top))), calls)
-    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=_ov_board_mo(strikes=top), note=_t5_note(ko=5060.0))), calls)
+    # gap > 0 needs only strikes at or below B. B on the last strike, 60 points above it and exactly one step above it:
+    # K2 = 5000, the spacing is the last listed interval's
+    for ko in (5000.0, 5060.0, 5100.0):
+        _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=_ov_board_mo(strikes=top), note=_t5_note(ko=ko))), calls)
+    # B more than one listed step above the listing (130 points): no strike near the barrier, refused, what is held stays
+    refused(4950.0, 400000.0, top, 5130.0)
+    refused(4950.0, 400000.0, top, 5130.0, held)
     # gap < 0 needs K1 at or above B and K2 above it: with B = 5000 on the last strike K2 = 5100 is not listed; with B
     # above the last strike there is no K1
-    for note in (_t5_note(), _t5_note(ko=5060.0)):
-        t = tech.target(_mo_ko_ctx(4950.0, -300000.0, mo=_ov_board_mo(strikes=top), note=note))
-        assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == {}
-    # mirrored at the bottom of the listing: B = 5000 below every strike
+    for ko in (5000.0, 5060.0, 5130.0):
+        refused(4950.0, -300000.0, top, ko)
+    # mirrored at the bottom of the listing (first step 100): B 40 points below the lowest strike and exactly one step
+    # below it are built for gap < 0 (K1 = 5100, the lowest listed strike at or above B)
     bottom = [5100.0, 5200.0, 5300.0]
-    note = _t5_note(ko=5060.0)
-    t = tech.target(_mo_ko_ctx(5080.0, -300000.0, mo=_ov_board_mo(strikes=bottom), note=note))
-    _overlay(t, {(OV, "C", 5100.0): -30.0, (OV, "C", 5200.0): 30.0})
-    t = tech.target(_mo_ko_ctx(5080.0, 400000.0, mo=_ov_board_mo(strikes=bottom), note=note))
-    assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == {}
+    puts_or_calls = {(OV, "C", 5100.0): -30.0, (OV, "C", 5200.0): 30.0}
+    for ko in (5060.0, 5000.0):
+        t = tech.target(_mo_ko_ctx(5080.0, -300000.0, mo=_ov_board_mo(strikes=bottom), note=_t5_note(ko=ko)))
+        _overlay(t, puts_or_calls)
+    # B more than one listed step below the listing (120 points): refused
+    refused(5080.0, -300000.0, bottom, 4980.0)
+    refused(5080.0, -300000.0, bottom, 4980.0, held)
+    for ko in (5060.0, 4980.0):                                             # gap > 0 has no K2 at or below B there
+        refused(5080.0, 400000.0, bottom, ko)
     # the function itself: (cp, K1, K2, sign of the K1 leg)
     assert tq.spread_strikes(1.0, 5060.0, 4950.0, top, 2) == ("C", 4800.0, 5000.0, 1.0)
+    assert tq.spread_strikes(1.0, 5100.0, 4950.0, top, 1) == ("C", 4900.0, 5000.0, 1.0)       # one step: inclusive
+    assert tq.spread_strikes(1.0, 5100.5, 4950.0, top, 1) is None
     assert tq.spread_strikes(-1.0, 5060.0, 5080.0, bottom, 2) == ("C", 5100.0, 5300.0, -1.0)
+    assert tq.spread_strikes(-1.0, 5000.0, 5080.0, bottom, 1) == ("C", 5100.0, 5200.0, -1.0)
+    assert tq.spread_strikes(-1.0, 4999.5, 5080.0, bottom, 1) is None
     assert tq.spread_strikes(-1.0, 5060.0, 4950.0, top, 1) is None and tq.spread_strikes(1.0, 5060.0, 5080.0, bottom, 1) is None
     assert tq.spread_strikes(1.0, 5000.0, 4950.0, [5000.0], 1) is None and tq.spread_strikes(1.0, 5000.0, 4950.0, [], 1) is None
 
@@ -5950,3 +5968,140 @@ def test_the_bootstrap_defaults_are_the_pre_registered_replicates_and_seed():
     stats = load_prereg()["statistics"]
     assert (params["n"].default, params["seed"].default) == (stats["bootstrap_n"], stats["seed"]) == (10_000, 20261112)
     assert (default_rules().bootstrap_n, default_rules().seed, default_rules().es_alpha) == (10_000, 20261112, 0.10)
+
+
+# ---------------------------------------------------------------------------
+# CP2 fixes — ledger side
+# ---------------------------------------------------------------------------
+
+# ---- the fill ratio of a refusal day is the last sized one, not 1 ----
+
+PHI_SELECTION = {"sop_futures": {"ko": "ko_shift@0.02", "ki": "ki_cap@1.25"},
+                 "sop_overlay": {"ko": "mo_ko@1,payoff", "ki": "mo_ki@2,payoff"}}
+PHI_LAST = date(2024, 1, 19)                                               # MO2401's last trading day
+PHI_SPOT, PHI_FORWARD, PHI_IM = 4990.0, 4980.0, 4970.0
+
+
+def _phi_world(thin_days):
+    """Six closes at spot 4990 under the KO barrier 5000, the observation five closes after day 1; every KO model is
+    recorded (d(true) = 1000, d(ko_s200) = 700) and the gap is 400,000: from day 1 the overlay wants 40 lots of the 4900
+    / 5000 call spread. 6000 lots trade in every option, so the 500 mio desk (50 x the note) fills 12 lots a day, and
+    its series limit is 24 lots per side. On ``thin_days`` the 5000 call trades 50 lots: it may not be opened."""
+    days = _weekdays(6)
+    specs = []
+    for i, day in enumerate(days):
+        mo = _ov_mo(day, AC8_KO_LASTS, OV_STRIKES, PHI_FORWARD, volume=6000)
+        if i in thin_days:
+            q = mo["MO2401"]["quotes"]
+            q[("C", 5000.0)] = (q[("C", 5000.0)][0], 50, 10000)
+        specs.append(dict(day=day, spot=PHI_SPOT, n=6 - i, gap_ko=400e3, ko_dir=-1, deltas=dict(KO_DELTAS),
+                          im={"IM2403": PHI_IM}, mo=mo))
+    return _t5_world(specs), days
+
+
+def _phi_im_lots(day, lots, phi, futures=700.0, true=1000.0):
+    """IM lots of ``phi x d(true) + (1 - phi) x futures rule - delta of `lots` call spreads held``."""
+    legs = (_leg_delta(day, PHI_LAST, "C", 4900.0, 0.2, lots, PHI_SPOT, PHI_FORWARD)
+            + _leg_delta(day, PHI_LAST, "C", 5000.0, 0.2, -lots, PHI_SPOT, PHI_FORWARD))
+    return (phi * true + (1.0 - phi) * futures - legs) * PHI_SPOT / (200.0 * PHI_IM)
+
+
+def test_a_refusal_day_with_a_partly_filled_overlay_keeps_the_last_sized_fill_ratio():
+    sop = _registry(PHI_SELECTION)["sop_overlay"]
+    (states, boards, chains), d = _phi_world(thin_days={2})
+    rows = _run(states, sop, boards, chains).rows
+    spread = lambda lots: {"MO2401:C:4900": pytest.approx(lots), "MO2401:C:5000": pytest.approx(-lots)}   # noqa: E731
+    # day 0: six closes ahead, no overlay yet: the futures rule alone (ko_shift@0.02: 700)
+    assert rows[0]["legs"] == {} and rows[0]["phi"] == 1.0
+    assert rows[0]["im_lots"] == pytest.approx(700.0 * PHI_SPOT / (200.0 * PHI_IM), rel=1e-12)
+    # day 1: 12 of the 40 lots fill (a tenth of 6000 lots at the desk's 50 x): phi = 0.3
+    assert rows[1]["legs"] == spread(12.0) and rows[1]["phi"] == pytest.approx(0.3) and "volume_cut" in rows[1]["flags"]
+    assert rows[1]["im_lots"] == pytest.approx(_phi_im_lots(d[1], 12.0, 0.3), rel=1e-9)
+    # day 2: the overlay is refused (the 5000 call trades 50 lots); the 12 lots held stay. They still cover 30% of the
+    # digital: the IM target is 0.3 x d(true) + 0.7 x the futures rule - the held legs' delta, and the row says 0.3
+    assert "overlay_not_openable" in rows[2]["flags"] and rows[2]["legs"] == spread(12.0) and rows[2]["unfilled"] == {}
+    assert rows[2]["phi"] == pytest.approx(0.3)
+    assert rows[2]["im_lots"] == pytest.approx(_phi_im_lots(d[2], 12.0, 0.3), rel=1e-9)
+    assert rows[2]["im_lots"] != pytest.approx(_phi_im_lots(d[2], 12.0, 1.0), rel=1e-3)    # not the whole note at d(true)
+    # day 3: a normal sized day again: 12 more lots fill and phi is recomputed (24 of 40)
+    assert "overlay_not_openable" not in rows[3]["flags"] and rows[3]["legs"] == spread(24.0)
+    assert rows[3]["phi"] == pytest.approx(0.6)
+    assert rows[3]["im_lots"] == pytest.approx(_phi_im_lots(d[3], 24.0, 0.6), rel=1e-9)
+    _check_identity(_run(states, sop, boards, chains))
+
+
+def test_a_refusal_keeps_the_latest_sized_fill_ratio_and_nothing_held_keeps_the_present_rule():
+    sop = _registry(PHI_SELECTION)["sop_overlay"]
+    # refused on day 1 with nothing held (nothing was ever sized): no leg is wanted, phi is 1 and the futures rule is all
+    (states, boards, chains), d = _phi_world(thin_days={1, 4})
+    rows = _run(states, sop, boards, chains).rows
+    assert "overlay_not_openable" in rows[1]["flags"] and rows[1]["legs"] == {} and rows[1]["phi"] == 1.0
+    assert rows[1]["im_lots"] == pytest.approx(700.0 * PHI_SPOT / (200.0 * PHI_IM), rel=1e-12)
+    # days 2 and 3 fill 12 lots each (phi 0.3, then 0.6); the refusal of day 4 carries the latest, 0.6
+    assert (rows[2]["phi"], rows[3]["phi"]) == (pytest.approx(0.3), pytest.approx(0.6))
+    assert "overlay_not_openable" in rows[4]["flags"] and rows[4]["phi"] == pytest.approx(0.6)
+    assert rows[4]["im_lots"] == pytest.approx(_phi_im_lots(d[4], 24.0, 0.6), rel=1e-9)
+    # the same under next_open on days that are not fixings
+    late = _run(states, sop, boards, chains, "next_open").rows
+    assert [r["phi"] for r in late[:5]] == [r["phi"] for r in rows[:5]]
+    assert [r["im_lots"] for r in late[:5]] == [r["im_lots"] for r in rows[:5]]
+    # an overlay alone (both note deltas are d(true)) is hedged the same whatever phi says; its row carries it too
+    solo = _run(states, _registry()["mo_ko@1,payoff"], boards, chains).rows
+    assert solo[4]["phi"] == pytest.approx(0.6)
+    assert solo[4]["im_lots"] == pytest.approx(_phi_im_lots(d[4], 24.0, 0.6, futures=1000.0), rel=1e-9)
+
+
+# ---- the flatten at the data end and at `until` is a mark, not a trade: it costs nothing ----
+
+@pytest.mark.parametrize("mode", ["close", "twap", "next_open"])
+def test_the_flatten_at_the_data_end_and_at_until_costs_nothing_and_keeps_the_identity(mode):
+    n = 4
+    d = _weekdays(n)
+    last = d[0] + timedelta(days=60)
+    quotes = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, 0.2), None, 5000, 10000)} for i in range(n)]
+    (states, boards, chains), d = _leg_world(n, last, quotes)
+    tech = _Scripted(lambda ctx: {KEY_C5000: 2.0} if ctx.day_index >= 1 else {})
+    for until, flag, k in ((None, "data_end", 3), (d[2], "until", 2)):
+        run = _run(states, tech, boards, chains, mode, desk_notional=NOTIONAL_, until=until)
+        end, before = run.rows[k], run.rows[k - 1]
+        assert len(run.rows) == k + 1 and flag in end["flags"]
+        assert before["legs"] == {STR_C5000: 2.0} and before["im_lots"] != 0.0     # an IM hedge and a leg are carried in
+        assert end["legs"] == {} and end["im_lots"] == 0.0 and end["cost"] == 0.0  # marked flat, nothing charged
+        # the leg is marked out at the day's settlement: its value comes back as cash
+        s_end = quotes[k][("C", 5000.0)][0]
+        assert end["cash"] == pytest.approx(before["cash"] + end["accrual"] + end["im_vm"] + 2.0 * s_end * 100.0, abs=CASH_TOL)
+        assert end["hedged"] == pytest.approx(end["note_pnl"] + end["im_vm"] + end["mo_mtm"] + end["accrual"], abs=CASH_TOL)
+        assert sum(r["cost"] for r in run.rows[:k]) > 0.0                           # the trades before it do cost
+        _check_identity(run)
+
+
+# ---- the note's book and KI multiple come from the state file, never from a default ----
+
+@pytest.mark.parametrize("missing", ["book", "ki_pct"])
+def test_a_state_without_its_book_or_its_ki_multiple_fails_closed(missing):
+    from gpin.techniques import Base
+
+    states, boards, chains = _world_a()
+    del states[missing]
+    with pytest.raises(StudyDataError, match=missing):
+        _run(states, Base(), boards, chains)
+
+
+# ---- no inline numeric tolerance in the ledger-side code ----
+
+def test_a_bump_must_be_a_ladder_step_by_the_repos_comparison():
+    import re
+    from gpin.techniques import hedge_delta
+
+    state = _ladder_state(100.0, 1234.0, 0.0, 5000.0)
+    assert hedge_delta(state, 5000.0, bump=0.01) == pytest.approx(1234.0, rel=1e-12)
+    assert hedge_delta(state, 5000.0, bump=0.03 * (1.0 + 1e-13)) == pytest.approx(1234.0, rel=1e-12)   # rounding noise
+    # half a billionth of an index fraction off a 1% step is not the step (relative 5e-8, the repo's tolerance is 1e-9)
+    with pytest.raises(ValidationError):
+        hedge_delta(state, 5000.0, bump=0.01 + 5e-10)
+    with pytest.raises(ValidationError):
+        hedge_delta(state, 5000.0, bump=0.015)
+    # and no tolerance literal is written inline in the technique or the ledger code
+    for name in ("techniques.py", "ledger.py"):
+        source = (STUDY_DIR / "gpin" / name).read_text(encoding="utf-8")
+        assert re.findall(r"\b\d+(?:\.\d+)?[eE]-\d+\b", source) == [], name

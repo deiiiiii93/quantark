@@ -24,7 +24,12 @@ Choices the contract leaves open (each is also in a test): ``phi`` is the covere
 settlement under every clock; a leg exits uncut on its last trading day (at the close if it traded, else
 cash-settled at the settlement, which costs nothing) and is flattened uncut on the last day; a held leg without a
 mark, an implied vol or a series fails closed; the day's volume cap is shared by every trade of a contract that day;
-what a technique refused that day (``Target.flags``, an overlay it could not build) is written to the row's flags.
+what a technique refused that day (``Target.flags``, an overlay it could not build) is written to the row's flags;
+on such a refusal day with legs held the target asks for exactly the legs held, so ``phi`` is not recomputed (it would
+read 1): the day uses the ``phi`` of the last day on which an overlay was sized (legs desired, no refusal flag), the
+legs held being unchanged since but for expiries, and the row's ``phi`` carries the value used; with no such earlier
+day the recomputed value stands; the flatten on the last available day (data end, ``until``, the note's last record)
+is a mark, not a trade, and costs nothing (a dead note's own flat target on that day is a trade and does cost).
 
 Ledger-side code: no engine, no market data of its own, no file access.
 """
@@ -46,7 +51,7 @@ from s2ts.note import KO_PCT
 from . import LADDER, StudyDataError, load_prereg
 from . import black
 from .board import DayBoard, OptionQuote
-from .techniques import TRUE, DayContext, LegKey, NoteInfo, Target, Technique, freeze, hedge_delta
+from .techniques import TRUE, DayContext, LegKey, NoteInfo, Target, Technique, freeze, hedge_delta, is_refusal
 
 #: The three execution clocks (D7).
 CLOCKS: Tuple[str, ...] = ("close", "twap", "next_open")
@@ -345,19 +350,31 @@ def _legs_delta(pos: _Positions, board: DayBoard, dc: DayChain) -> float:
     return total
 
 
-def _flatten(acc: _Acc, pos: _Positions, board: DayBoard, dc: DayChain, rules: _LegRules, im_rate: float) -> None:
-    """Everything flat at the day's marks (IM close, option settlement), uncut."""
-    _im_trade(acc, pos, {}, "close", dc, board, im_rate)
+def _flatten(acc: _Acc, pos: _Positions, board: DayBoard, dc: DayChain, rules: _LegRules) -> None:
+    """Everything marked flat at the day's marks (IM close, option settlement), uncut and free of cost: the book ends
+    where the data or the slice ends, which is not a trade."""
+    _im_trade(acc, pos, {}, "close", dc, board, 0.0)
     for key in sorted(pos.held_legs()):
         q = _held_quote(board, key, dc.day)
-        _trade_leg(acc, pos, key, -pos.legs[key], float(q.settle), rules)
+        _trade_leg(acc, pos, key, -pos.legs[key], float(q.settle), rules, cost=False)
 
 
 def _execute(acc: _Acc, pos: _Positions, target: Target, spot: float, far_code: str, far_close: float, clip: bool,
              im_kind: str, dc: DayChain, board: DayBoard, rules: _LegRules, used: Dict[LegKey, float],
-             bounds: Tuple[float, float], im_rate: float) -> None:
-    """Fill the target's legs, size the IM hedge net of the legs held and trade it (``im_kind`` fill)."""
+             bounds: Tuple[float, float], im_rate: float, sized_phi: Optional[float] = None) -> Optional[float]:
+    """Fill the target's legs, size the IM hedge net of the legs held and trade it (``im_kind`` fill).
+
+    ``sized_phi``: the fill ratio of the last day on which an overlay was sized. A target that carries an overlay
+    refusal flag while legs are held asks for exactly the legs held, which says nothing about how much of the digital
+    they cover: that day uses ``sized_phi`` (when there is one) instead of the ratio of held to "desired". Returns the
+    fill ratio to carry forward: today's when an overlay was sized today (legs desired, no refusal), else
+    ``sized_phi`` unchanged."""
     _fill_legs(acc, pos, target.legs, board, dc, rules, used)
+    refused = is_refusal(target)
+    if refused and pos.held_legs() and sized_phi is not None:
+        acc.phi = sized_phi
+    elif not refused and any(not is_zero(v) for v in target.legs.values()):
+        sized_phi = acc.phi
     filled = target.note_delta if target.note_delta_if_filled is None else target.note_delta_if_filled
     im_delta = acc.phi * filled + (1.0 - acc.phi) * target.note_delta - _legs_delta(pos, board, dc)
     new_im, clipped = _im_lots(im_delta, spot, far_code, far_close, clip, bounds)
@@ -366,6 +383,7 @@ def _execute(acc: _Acc, pos: _Positions, target: Target, spot: float, far_code: 
     if held and new_im and set(held) != set(new_im):
         acc.flag("roll")
     _im_trade(acc, pos, new_im, im_kind, dc, board, im_rate)
+    return sized_phi
 
 
 # ---------------------------------------------------------------------------
@@ -398,11 +416,12 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
     for k, rec in enumerate(records):
         if start + k >= len(chains) or chain_days[start + k].isoformat() != rec["date"]:
             raise StudyDataError(f"record {rec['date']} is not the chain's day {start + k}")
-    missing = [k for k in ("strike", "ko_level", "ki_level") if data.get(k) is None]
+    missing = [k for k in ("book", "ki_pct", "strike", "ko_level", "ki_level") if data.get(k) is None]
     if missing:
-        raise StudyDataError(f"the state file carries no {', '.join(missing)}: the note's levels are the book's "
-                             "(a seasoned note is not struck at its booking spot) and are never derived here")
-    note = NoteInfo(str(data.get("book", "ki75")), inception, float(data["coupon"]), float(data.get("ki_pct", 0.75)),
+        raise StudyDataError(f"the state file carries no {', '.join(missing)}: the note's book and levels are the "
+                             "pricing pass's (a seasoned note is not struck at its booking spot) and are never "
+                             "defaulted or derived here")
+    note = NoteInfo(str(data["book"]), inception, float(data["coupon"]), float(data["ki_pct"]),
                     KO_PCT, float(records[0]["spot"]), float(data["strike"]), float(data["ko_level"]),
                     float(data["ki_level"]))
     run = Run(note.book, inception, note.coupon, technique.id, technique.family, dict(technique.params), mode,
@@ -411,6 +430,7 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
 
     pos = _Positions()
     pending: Optional[_Pending] = None
+    sized_phi: Optional[float] = None                        # the fill ratio of the last day an overlay was sized
     cash = 0.0
     prev_pv = 0.0
     prev_day: Optional[date] = None
@@ -455,8 +475,8 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
         # 3. legs whose series ends today exit; a fixing-day decision of the previous close fills (next_open)
         _expire_legs(acc, pos, board, dc, rules)
         if pending is not None:
-            _execute(acc, pos, pending.target, pending.spot, pending.far_code, pending.far_close, pending.clip,
-                     "open", dc, board, rules, used, bounds, im_rate)
+            sized_phi = _execute(acc, pos, pending.target, pending.spot, pending.far_code, pending.far_close,
+                                 pending.clip, "open", dc, board, rules, used, bounds, im_rate, sized_phi)
             acc.flag("deferred_fill")
             pending = None
 
@@ -469,7 +489,7 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
                 _execute(acc, pos, Target(0.0, {}), dc.spot, far.code, float(far.close), False, "close", dc, board,
                          rules, used, bounds, im_rate)
             if alive or not pos.flat():
-                _flatten(acc, pos, board, dc, rules, im_rate)
+                _flatten(acc, pos, board, dc, rules)
                 acc.flag("until" if cut_by_until else "data_end")
             if mode == "next_open" and is_fixing:
                 acc.flag("last_day_fixing")
@@ -490,8 +510,8 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
                 pending = _Pending(target, dc.spot, far.code, float(far.close), clip)
                 acc.flag("fixing_deferred")
             else:
-                _execute(acc, pos, target, dc.spot, far.code, float(far.close), clip, im_kind, dc, board, rules, used,
-                         bounds, im_rate)
+                sized_phi = _execute(acc, pos, target, dc.spot, far.code, float(far.close), clip, im_kind, dc, board,
+                                     rules, used, bounds, im_rate, sized_phi)
         pos.im_mark = {code: _im_close(code, dc, board) for code in pos.held_im()}
         pos.leg_mark = {key: float(_held_quote(board, key, day).settle) for key in pos.held_legs()}
         im_lots = sum(pos.held_im().values())

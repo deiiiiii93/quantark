@@ -17,8 +17,9 @@ composites. Rules common to every technique:
   sqrt(max(n, 1)))``;
 * "do not trade IM" (``freeze``, ``band``) is expressed as the hedge currently carried: the IM lots held at the
   board's closes plus the delta of the legs held (``carried_delta``), which the ledger sizes back to the lots held;
-* an overlay that cannot be built whole that day (no series, a strike not listed, a leg without an implied vol, a
-  leg that would have to be opened or increased and fails the D8 screen) is refused: the target keeps the legs held
+* an overlay that cannot be built whole that day (no series, a strike not listed or a barrier more than one listed
+  step beyond the listing, a leg without an implied vol, a leg that would have to be opened or increased and fails
+  the D8 screen) is refused: the target keeps the legs held
   and carries a flag (``overlay_no_series``, ``overlay_no_strike``, ``overlay_no_vol``, ``overlay_not_openable``)
   that the ledger writes to the row.
 
@@ -76,7 +77,7 @@ def _bump_offset(bump: float) -> int:
     step = LADDER[1] - LADDER[0]
     k = int(round(bump / step))
     centre = len(LADDER) // 2
-    if k < 1 or centre - k < 0 or centre + k >= len(LADDER) or abs(k * step - bump) > 1e-9 * max(1.0, bump):
+    if k < 1 or centre - k < 0 or centre + k >= len(LADDER) or not is_close(k * step, bump):
         raise ValidationError(f"bump {bump} is not a whole number of ladder steps inside the ladder")
     return k
 
@@ -556,9 +557,16 @@ class Band(_Rule):
 # MO overlays (spec "Overlay construction")
 # ---------------------------------------------------------------------------
 
-#: Flags of a refused overlay (``Target.flags``; the ledger writes them to the row).
+#: Flags of a refused overlay (``Target.flags``; the ledger writes them to the row). Every refusal flag starts with
+#: ``REFUSAL_PREFIX``: the ledger reads a target carrying one as "the overlay was not sized today".
+REFUSAL_PREFIX = "overlay_"
 NO_SERIES, NO_STRIKE, NO_VOL, NOT_OPENABLE = ("overlay_no_series", "overlay_no_strike", "overlay_no_vol",
                                               "overlay_not_openable")
+
+
+def is_refusal(target: Target) -> bool:
+    """True when the target carries an overlay refusal flag."""
+    return any(str(name).startswith(REFUSAL_PREFIX) for name in target.flags)
 
 
 @dataclass(frozen=True)
@@ -579,12 +587,16 @@ def spread_strikes(gap: float, level: float, spot: float, strikes: Sequence[floa
     option per lot of spread, or ``None`` when the listing has no strike to start from.
 
     The strike step is the listed spacing at the level: the distance between the highest listed strike at or below it
-    and the lowest listed strike above it; when the level is beyond the last listed strike, the spacing of the last
-    listed interval (the one nearest the level). ``gap > 0`` (payoff rising across the level): K2 = the highest listed
-    strike at or below the level, K1 = K2 minus ``steps`` steps, long K1 / short K2 in calls when spot is at or below
-    K2, in puts when both strikes are below spot. ``gap < 0`` (payoff falling): K1 = the lowest listed strike at or
-    above the level, K2 = K1 plus ``steps`` steps, short K1 / long K2 in calls when both strikes are at or above spot,
-    in puts otherwise. K1 and K2 are returned as computed; whether both are listed is the caller's check."""
+    and the lowest listed strike above it. A level beyond the listing takes the spacing of the listed interval nearest
+    to it (the last one below a level above every strike, the first one above a level below every strike), and only
+    when it is at most ONE such step beyond the listing: further out there is no strike near the barrier and the result
+    is ``None`` (a spread struck several steps away from the barrier is not the barrier's hedge).
+
+    ``gap > 0`` (payoff rising across the level): K2 = the highest listed strike at or below the level, K1 = K2 minus
+    ``steps`` steps, long K1 / short K2 in calls when spot is at or below K2, in puts when both strikes are below spot.
+    ``gap < 0`` (payoff falling): K1 = the lowest listed strike at or above the level, K2 = K1 plus ``steps`` steps,
+    short K1 / long K2 in calls when both strikes are at or above spot, in puts otherwise. K1 and K2 are returned as
+    computed; whether both are listed is the caller's check."""
     listed = sorted(float(k) for k in strikes)
     below = [k for k in listed if _at_most(k, level)]
     above = [k for k in listed if not _at_most(k, level)]
@@ -592,8 +604,12 @@ def spread_strikes(gap: float, level: float, spot: float, strikes: Sequence[floa
         step = above[0] - below[-1]
     elif len(below) >= 2:
         step = below[-1] - below[-2]
+        if not _at_most(level - below[-1], step):            # more than one listed step above the listing
+            return None
     elif len(above) >= 2:
         step = above[1] - above[0]
+        if not _at_most(above[0] - level, step):             # more than one listed step below the listing
+            return None
     else:
         return None
     if gap > 0.0:
