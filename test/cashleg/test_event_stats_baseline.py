@@ -278,7 +278,8 @@ def _knock_in_after_ko_removed(live: dict, banked: dict, record: dict) -> None:
 
 
 def _ko_reset_maturity_on_its_own_date(live: dict, banked: dict, record: dict) -> None:
-    """Cause (d), MC KO-reset ABSOLUTE. Base read the legacy MC statistics through the one-maturity layout:
+    """Cause (d), MC (T9) and QUAD V1 (T17) KO-reset ABSOLUTE. Base read the legacy statistics through the one-maturity
+    layout:
     MATURITY_NO_KO = 1 - ΣKO - ki at the last KO record (2y), paid with the knocked-in settlement, and survival
     1 - ΣKO. Now the maturity row is computed directly on its own determination (the first schedule's end, 1y,
     paid at its own settlement) and the survival drops that mass there (F5). The probabilities themselves do not
@@ -489,7 +490,7 @@ def _knocked_out_at_valuation_has_no_knock_in_row(live: dict, banked: dict, reco
     from quantark.cashleg import EventType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
-    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "quad_v2"), record["engine_kind"]
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "quad_v2", "quad_v1"), record["engine_kind"]
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     _, product, env = _case(record["case"]).fresh()
@@ -583,11 +584,11 @@ def _ki_schedule_cut(product, k, env):
 
 
 def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
-    """Cause (e), PDE 1D (T13), native Heston / SLV ADI (T14) and QUAD V2 (T16). Base carried no KI stream (the legacy
-    PDE / ADI table was empty and the converter dropped it; QUAD V2's legacy statistics had no table), so the AT_KI leg
-    raised. Now the forward adjoint pass fills the KI table (the PDE 1D pass; the ADI pass,
-    ``pde/vol_model_adjoint.py``; the QUAD V2 pass, ``quad/v2/adjoint.py``). Pinned without the statistics object it
-    checks:
+    """Cause (e), PDE 1D (T13), native Heston / SLV ADI (T14), QUAD V2 (T16) and QUAD V1 (T17). Base carried no KI
+    stream (the legacy PDE / ADI table was empty and the converter dropped it; QUAD V2's and QUAD V1's legacy statistics
+    had no table), so the AT_KI leg raised. Now the forward adjoint pass fills the KI table (the PDE 1D pass; the ADI
+    pass, ``pde/vol_model_adjoint.py``; the QUAD V2 pass, ``quad/v2/adjoint.py``; the QUAD V1 pass, the transpose of
+    its backward step, ``quad/v1_adjoint.py``). Pinned without the statistics object it checks:
 
     * the axis is the product's own: its KI observations up to the knock-in horizon (discrete), or one numeric
       trading day ``k / bus_days_in_year`` per row up to the horizon (continuous, AC13);
@@ -609,7 +610,8 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
     from quantark.util.enum import ObservationType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
-    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "pde_adi", "pde_adi_slv", "quad_v2"), record["engine_kind"]
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "pde_adi", "pde_adi_slv", "quad_v2", "quad_v1"), (
+        record["engine_kind"])
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     assert "value" in live, f"{record['id']}: still raises {live}"
@@ -647,7 +649,7 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
             assert abs(cumulative[k - 1] - settles_k) <= 1e-8, (
                 f"{record['id']}: Σ first {k} KI rows {cumulative[k - 1]!r} != the cut twin's KI settlement "
                 f"{settles_k!r}")
-    if record["engine_kind"] in ("pde_1d", "quad_v2") and not continuous:
+    if record["engine_kind"] in ("pde_1d", "quad_v2", "quad_v1") and not continuous:
         # and against MC on the same product: a row moved to another date fails. Flat vol only: on this skewed
         # market the LV PDE and LV MC disagree on every outcome (first KO 0.426 vs 0.387, measured, backward columns
         # included -- not the forward pass), so the LV record is pinned by the cut twins above
@@ -1046,6 +1048,56 @@ _T12_KNOCKED_IN_SETTLEMENT = tuple(
     for leg in ("fixed_at_maturity_with_ki", "fixed_at_maturity_any")
 )
 
+# --- moves (T17: QUAD V1 EventStatistics, the transpose of its backward step) --------------------------------------
+
+
+def _v1_decided_coupon_stream(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h), QUAD V1 Phoenix knocked out at valuation. Base emitted no COUPON stream for a note knocked out at the
+    valuation instant (its legacy decided statistics had no coupon row), so a coupon-basis leg raised. Now the coupon
+    decided with the knock-out is its own row (AC11): pinned to the product's own valuation decision (one row at the
+    decided record, probability 1 exactly when the decision pays its coupon) and, for the value, to the banked value of
+    the same leg on the same contract by the three other engines at base (QUAD V2, PDE 1D, MC: the decided event is
+    deterministic, so every engine agrees)."""
+    from quantark.cashleg import EventType
+
+    assert banked.get("raises") == "ValidationError" and "coupon stream" in banked.get("message", ""), banked
+    assert record["engine_kind"] == "quad_v1" and record["features"].get("ko_at_valuation"), record["id"]
+    assert "value" in live, f"{record['id']}: still raises {live}"
+    _, product, env = _case(record["case"]).fresh()
+    carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+    decision = product.decide_observations_at_valuation(env.spot, env, knocked_in=carried)
+    assert decision.knocked_out, record["id"]
+    dist, _ = _live_distribution(record)
+    times = np.asarray(dist.stream_times[EventType.COUPON], dtype=float)
+    expected = np.where(np.isclose(times, float(decision.ko_record.observation_time), rtol=0.0, atol=1e-12),
+                        1.0 if decision.coupon_index is not None else 0.0, 0.0)
+    np.testing.assert_array_equal(np.asarray(dist.probabilities[EventType.COUPON], dtype=float), expected)
+    for other in ("quad_v2_phoenix", "pde_phoenix", "mc_phoenix"):
+        rid = record["id"].replace("quad_v1_phoenix", other, 1)
+        value = float(RECORDS[rid]["outcome"]["value"])
+        abs_tol = max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * float(record["scale"]))
+        assert close(float(live["value"]), value, rel_tol=GOLDEN_REL_TOL, abs_tol=abs_tol), (
+            f"{record['id']}: live {live['value']!r} != {other} banked {value!r}")
+
+
+_T17_KI_AXIS = ("quad_v1_snowball__snowball_cki", "quad_v1_snowball__snowball_dki",
+                "quad_v1_phoenix__phoenix_mem_instant", "quad_v1_phoenix__phoenix_nomem_instant",
+                "quad_v1_phoenix__phoenix_mem_expiry", "quad_v1_phoenix__phoenix_nomem_expiry",
+                "quad_v1_ko_reset__ko_reset_absolute")
+_T17_KO_AT_VALUATION = ("quad_v1_snowball__snowball_cki_ko_at_valuation",
+                        "quad_v1_phoenix__phoenix_mem_instant_ko_at_valuation")
+_T17_DECIDED_COUPON = tuple(
+    f"quad_v1_phoenix__{case}__autocallable_backend_interest_coupon__event"
+    for case in ("phoenix_mem_instant_ko_at_valuation", "phoenix_mem_instant_knocked_in_ko_at_valuation")
+)
+#: the maturity row on its own determination (the first schedule's end) and the F5 survival (cause d, as T9 for MC)
+_T17_KO_RESET_MATURITY = tuple(
+    f"quad_v1_ko_reset__ko_reset_absolute__{leg}__event"
+    for leg in ("accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
+                "fixed_at_maturity_no_ko", "fixed_at_maturity_any")
+)
+
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _KI_AXIS_MOVES},
@@ -1084,6 +1136,12 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knocked_out_at_valuation_has_no_knock_in_row)
        for case in _T16_KO_AT_VALUATION},
     **{rid: MovedBy("h", _v2_terminated_state_has_no_event) for rid in _T16_TERMINATED},
+    # T17: QUAD V1 statistics (the transpose of its backward step; the direct maturity column)
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T17_KI_AXIS},
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _knocked_out_at_valuation_has_no_knock_in_row)
+       for case in _T17_KO_AT_VALUATION},
+    **{rid: MovedBy("h", _v1_decided_coupon_stream) for rid in _T17_DECIDED_COUPON},
+    **{rid: MovedBy("d", _ko_reset_maturity_on_its_own_date) for rid in _T17_KO_RESET_MATURITY},
 }
 
 
