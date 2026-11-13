@@ -1,32 +1,41 @@
 """Stage 4: the ledger pass. Replays the techniques on the recorded states and the real IM / MO marks, one slice at
 a time, and keeps the two slices apart (spec C9, D11). Seller view throughout.
 
+The stamp. Every run computes four hashes once, before anything else (``gpin.measures.stamp``): ``prereg_hash`` (the
+pre-registration), ``events_hash`` (the events file), ``code_hash`` (the ledger-side code
+``gpin/{black,ledger,techniques,measures}.py``) and ``inputs_hash`` (the recorded inputs: the digests of the board and
+chain files and the pricing fingerprint of every state file of the sample found in the states directory). The stamp
+is written into the selection, every run file, the manifest, the training tables and the payload.
+
 ``--slice train`` (blind half). Every ledger run stops at the last trading day before the pre-registered split
 (``until``), so no row dated on or after the split is ever produced; only notes booked before the split are run and
 only their training-dated events are measured. Those three rules are ``gpin.measures.training_scope``'s, inside the
 code hash; this file only follows them. Every grid point of the pre-registration runs under the clocks asked
 for; the training selection is made (``gpin.measures.training_selection``: per row the grid point with the highest
 training ES10 under the primary clock); the two composites it names run too. Written: the run files, the training
-tables and, last, the selection file with the picks, the ``composites`` block the registry reads and three hashes
-(the pre-registration, the events file, the ledger-side code ``gpin/{black,ledger,techniques,measures}.py``).
+tables and, last, the selection file with the picks, the ``composites`` block the registry reads and the four hashes.
 
-``--slice test`` (unblinding). Refused with exit status 2, before any data is read and with nothing written, unless
-the selection file exists and its three hashes equal the current files' (``gpin.measures.check_selection``). Then the
-baseline, the controls, the cost rows, the pick of every row and the composites run over the full data under the
-clocks asked for, plus the sensitivities asked for under the primary clock, and the verdict tables are written to
-the backtest payload.
+``--slice test`` (unblinding). Refused with exit status 2, with no ledger run and nothing created, unless the
+selection file exists and each of its four hashes equals the current files' (``gpin.measures.check_selection``; the
+message names the hash that differs). A re-run of ``01_data.py`` or ``03_pricing.py`` after the selection was made
+changes ``inputs_hash`` and so forces a new selection. Then the baseline, the controls, the cost rows, the pick of
+every row and the composites run over the full data under the clocks asked for, plus the sensitivities asked for
+under the primary clock, and the verdict tables are written to the backtest payload.
 
 Destinations. Without ``--out-dir``: run files under ``OUTPUT_DIR/runs/<slice>/`` (untracked), the selection at
 ``results/selection.json`` and the payload at ``results/backtest.json`` (tracked). With ``--out-dir D``: ``D/runs/
 <slice>/``, ``D/selection.json`` and ``D/backtest.json`` (``--selection`` / ``--backtest`` name them explicitly).
 ``--partial`` allows a states directory that holds only some notes of the sample (a smoke run, e.g. ``states_quick``):
-the selection is marked partial, a barrier type without a training event takes the first grid point of each row, a
-full test slice refuses such a selection, and a partial run is never written to the tracked results.
+the selection is marked partial; a barrier type without a training event is listed in ``empty``, its rows have no
+pick (``id`` null) and no composite is written or run (a composite needs a member for both barriers); the test slice
+of such a selection runs what was picked; a full test slice refuses it; and a partial run is never written to the
+tracked results.
 
-The runs directory (what ``05_report.py`` reads; it can render from the files of any subset of notes):
+The runs directory (what ``05_report.py`` reads; it can render from the files of any subset of notes of one run):
 
-* ``<book>__<inception>.json``, one per note: ``gpin.measures.run_note``'s result plus ``slice`` and ``stamp`` (the
-  three hashes). ``runs[config][clock][technique id]`` is one ledger run kept as ``{"events": {event id: {pnl_bp,
+* ``<book>__<inception>.json``, one per note: ``gpin.measures.run_note``'s result plus ``slice`` and ``stamp``
+  (``{prereg_hash, events_hash, code_hash, inputs_hash}``). ``runs[config][clock][technique id]`` is one ledger run
+  kept as ``{"events": {event id: {pnl_bp,
   cost_bp, clips, leg_days, phi_min, flags, left_out, days: [[date, hedged bp, hedge ratio], ...], gamma (KO
   events)}}, "life": {n, sum_bp, sumsq_bp, terminal_bp, completed, rows, first, last, cost_bp, im_lots_traded,
   clips, leg_days, overlay_days, phi_sum, phi_min, phi_lt1_days, flags}}`` (``gpin.measures.summarise_run``): the
@@ -34,14 +43,23 @@ The runs directory (what ``05_report.py`` reads; it can render from the files of
   descriptive counts. ``events`` holds the note's measured events (training files: training-dated only; test files:
   all, each with its ``slice``), ``gap_observations`` the sign of ``gap_ko`` per observation. ``config`` is
   ``desk<mio>_cost<points>``; the primary one is ``desk500_cost0.2``.
-* ``manifest.json``, written after the note files: slice, stamp, ``until``, split date, the notes, techniques and
-  ``configs`` (``{config: [clocks]}``) of this run, ``partial`` and, for a partial run, ``events_not_measurable``
-  (per note, the events its short state file does not cover). Files not listed there are not this run's.
-* ``tables.json`` (training slice only): ``gpin.measures.tables`` on the training events, the same shape as the
-  backtest payload.
+* ``manifest.json``, written after the note files: slice, ``stamp`` (the four hashes), ``until``, split date, the
+  notes, techniques and ``configs`` (``{config: [clocks]}``) of this run, ``partial`` and, for a partial run,
+  ``events_not_measurable`` (per note, the events its short state file does not cover). Files not listed there are
+  not this run's.
+* ``tables.json`` (training slice only): ``gpin.measures.tables`` on the training events plus ``stamp``, the same
+  shape as the backtest payload.
 
-The backtest payload: ``gpin.measures.tables(..., slice_="test")`` plus ``stamp``, ``selection`` (the pick per row and
-the composites), ``split_date``, ``data`` and ``partial``.
+The selection file: ``{view, slice, split_date, until, clock, config, partial, empty, notes, events, base, rows,
+picks: {barrier: {row: {id, es10, cost_bp, n_events, beats_base, grid}}}, composites, prereg_hash, events_hash,
+code_hash, inputs_hash}`` (``id`` / ``es10`` / ``cost_bp`` null and ``composites`` ``{}`` for an ``empty`` barrier).
+
+The backtest payload: ``gpin.measures.tables(..., slice_="test")`` plus ``stamp`` (the four hashes), ``selection``
+(the pick per row and the composites), ``split_date``, ``data`` and ``partial``.
+
+Before it prints a test number the report calls ``gpin.measures.check_selection`` (the selection against the current
+stamp) and ``gpin.measures.check_payload`` (the stored payload and the ``runs/test`` manifest against the selection
+and the current stamp); ``gpin.measures.tables`` itself refuses note files that do not carry one stamp.
 
 A spawn pool started from this file runs the notes (``--workers``, at most 4; 1 runs in-process), with the group-RSS
 guard and a lock on the runs directory. Any failed note fails the run: nothing is selected on an incomplete pass.
@@ -57,7 +75,6 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing as mp
-import re
 import sys
 import time
 from collections import namedtuple
@@ -73,7 +90,6 @@ from quantark.util.exceptions import QuantArkException  # noqa: E402
 from gpin import BOARD_PATH, CHAIN_PATH, OUTPUT_DIR, RESULTS_DIR, STATES_DIR, StudyDataError, load_prereg  # noqa: E402
 from gpin import measures  # noqa: E402
 from gpin.board import load_boards  # noqa: E402
-from gpin.events import BOOKS, note_id, parse_note_id  # noqa: E402
 from gpin.ledger import CLOCKS  # noqa: E402
 from gpin.techniques import build_registry  # noqa: E402
 from s2ts.chain import load_chain  # noqa: E402
@@ -86,7 +102,6 @@ SELECTION_NAME, BACKTEST_NAME = "selection.json", "backtest.json"
 MAX_WORKERS = 4
 RSS_LIMIT_BYTES = 24 * 1024 ** 3
 RSS_POLL_S = 10.0
-_STATE_FILE = re.compile(r"^(?P<book>[a-z0-9]+)__(?P<inception>\d{4}-\d{2}-\d{2})\.json$")
 
 
 #: One run of this stage, with every path resolved (a namedtuple: this file is also loaded by path, unregistered).
@@ -141,32 +156,6 @@ def resolve(args: argparse.Namespace) -> Job:
 # ---------------------------------------------------------------------------
 # Notes and workers
 # ---------------------------------------------------------------------------
-
-
-def sample_note_ids(sample: Dict[str, Any]) -> List[str]:
-    """Every note id of the events file, books in registry order, by inception."""
-    return [note_id(b, inc) for b in BOOKS if b in sample["books"]
-            for inc in sorted(date.fromisoformat(d) for d in sample["books"][b]["notes"])]
-
-
-def state_files(states_dir: Path, sample: Dict[str, Any], partial: bool) -> Dict[str, Path]:
-    """``{note id: state file}`` of the sample's notes in ``states_dir`` (files are selected by note id: the directory
-    also holds a lock and may hold error files). Every note of the sample must be there unless ``partial``."""
-    wanted = sample_note_ids(sample)
-    found: Dict[str, Path] = {}
-    if Path(states_dir).is_dir():
-        for path in sorted(Path(states_dir).iterdir()):
-            m = _STATE_FILE.match(path.name)
-            if m and m["book"] in BOOKS:
-                found[f"{m['book']}:{m['inception']}"] = path
-    files = {nid: found[nid] for nid in wanted if nid in found}
-    missing = [nid for nid in wanted if nid not in found]
-    if not files:
-        raise StudyDataError(f"{states_dir} holds no state file of the sample")
-    if missing and not partial:
-        raise StudyDataError(f"{len(missing)} notes of the sample have no state file in {states_dir} "
-                             f"(first: {missing[0]}); a smoke run on some notes needs --partial")
-    return files
 
 
 _WORKER: Dict[str, Any] = {}
@@ -246,12 +235,11 @@ def write_runs(job: Job, notes: Dict[str, Dict[str, Any]], stamp: Dict[str, str]
     job.runs_dir.mkdir(parents=True, exist_ok=True)
     keep = set()
     for nid, note in notes.items():
-        book, inception = parse_note_id(nid)
-        name = f"{book}__{inception.isoformat()}.json"
+        name = measures.note_file_name(nid)
         write_json_atomic(job.runs_dir / name, {**note, "slice": job.slice, "stamp": stamp})
         keep.add(name)
     for stale in job.runs_dir.iterdir():
-        if _STATE_FILE.match(stale.name) and stale.name not in keep:
+        if measures.NOTE_FILE.match(stale.name) and stale.name not in keep:
             stale.unlink()
     write_json_atomic(job.runs_dir / "manifest.json", manifest)
 
@@ -375,7 +363,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not job.events.exists():
             raise StudyDataError(f"{job.events} missing: run 02_events.py first")
         sample = json.loads(job.events.read_text(encoding="utf-8"))
-        files = state_files(job.states_dir, sample, job.partial)
+        files = measures.state_files(job.states_dir, sample, job.partial)
         # the four hashes, once per run: the per-note jobs hash nothing
         stamp = measures.stamp(job.events, job.board, job.chain, files)
         return (run_train if job.slice == "train" else run_test)(job, prereg, sample, files, stamp)

@@ -6300,6 +6300,14 @@ def test_the_train_driver_takes_its_cut_off_its_notes_and_its_event_slice_from_t
     capsys.readouterr()
     assert stage4.main(_t6_argv(t6_files, "train", out, "--mode", "close")) != 0
     assert "cannot be measured on a run that stops there" in capsys.readouterr().err and not out.exists()
+    # a slice no event belongs to: nothing is measured in either pass, so (as a smoke run) no barrier has a pick
+    monkeypatch.setattr(measures, "training_scope", scoped(event_slice="none"))
+    out = tmp_path / "d"
+    assert stage4.main(_t6_argv(t6_files, "train", out, "--mode", "close", "--partial")) == 0
+    sel = json.loads((out / "selection.json").read_text())
+    assert (sel["slice"], sel["empty"], sel["composites"]) == ("none", ["ko", "ki"], {})
+    assert json.loads((out / "runs" / "train" / "ki75__2025-06-02.json").read_text())["events"] == {}
+    assert json.loads((out / "runs" / "train" / "tables.json").read_text())["slice"] == "none"
     # and the driver has no split-date logic of its own left
     src = (STUDY_DIR / "04_ledger.py").read_text()
     assert "SPLIT_DATE" not in src and "slice_of" not in src and ".day <" not in src and "training_scope(" in src
@@ -6418,3 +6426,105 @@ def test_the_fourth_hash_is_in_every_file_and_the_inputs_are_hashed_once_per_run
     monkeypatch.setattr(measures, "state_fingerprints", lambda files: read.append(sorted(files)) or real_fps(files))
     assert stage4.main(_t6_argv(t6_files, "train", tmp_path / "out", "--mode", "close")) == 0
     assert sorted(hashed) == ["board.pkl", "chain.pkl", "events.json"] and read == [T6_NOTE_IDS]
+
+
+# ---- finding 3: one stamp across the note files, and a stored payload checked against the current stamp ----
+
+
+def test_tables_refuse_note_files_that_do_not_carry_one_stamp():
+    from gpin.measures import tables
+
+    files, sample, sel, _, _ = _t6_book()
+    prereg = load_prereg()
+    stamp = {"prereg_hash": "p" * 64, "events_hash": "e" * 64, "code_hash": "c" * 64, "inputs_hash": "i" * 64}
+    for f in files:
+        f["stamp"] = dict(stamp)
+    assert tables(files, prereg, sample, sel, slice_="test")["stamp"] == stamp            # one stamp: carried through
+    files[5]["stamp"] = dict(stamp, code_hash="d" * 64)                                   # a file of another run
+    with pytest.raises(ValidationError) as err:
+        tables(files, prereg, sample, sel, slice_="test")
+    assert files[0]["note"] in str(err.value) and files[5]["note"] in str(err.value) and "stamp" in str(err.value)
+    del files[5]["stamp"]                                                                 # a file without one, beside stamped ones
+    with pytest.raises(ValidationError, match="stamp"):
+        tables(files, prereg, sample, sel, slice_="test")
+    for f in files:                                                                       # none stamped (in memory): allowed
+        f.pop("stamp", None)
+    assert "stamp" not in tables(files, prereg, sample, sel, slice_="test")
+
+
+def test_check_payload_refuses_a_stored_payload_or_manifest_that_is_not_the_current_runs(t6_files, t6_train, t6_test):
+    from gpin.measures import PayloadRefused, check_payload
+
+    current = _t6_stamp(t6_files)
+    sel = json.loads((t6_train.out / "selection.json").read_text())
+    back = json.loads((t6_test.out / "backtest.json").read_text())
+    manifest = json.loads((t6_test.out / "runs" / "test" / "manifest.json").read_text())
+    train_manifest = json.loads((t6_train.out / "runs" / "train" / "manifest.json").read_text())
+    for payload in (back, manifest, train_manifest):
+        assert check_payload(payload, sel, current) is None                               # the run's own files pass
+    names = {"prereg_hash": "the pre-registration", "events_hash": "the events file", "code_hash": "the ledger-side code",
+             "inputs_hash": "the recorded inputs"}
+    for key, word in names.items():
+        # a stale payload or manifest: written under another stamp than the current files'
+        for payload in (back, manifest):
+            stale = dict(payload, stamp=dict(payload["stamp"], **{key: "0" * 64}))
+            with pytest.raises(PayloadRefused, match=word) as err:
+                check_payload(stale, sel, current)
+            assert key in str(err.value) and sum(w in str(err.value) for w in names.values()) == 1
+        # the files moved on after the payload was written
+        with pytest.raises(PayloadRefused, match=word):
+            check_payload(back, sel, dict(current, **{key: "1" * 64}))
+        # the payload is not of this selection
+        with pytest.raises(PayloadRefused, match="selection"):
+            check_payload(back, dict(sel, **{key: "2" * 64}), current)
+    with pytest.raises(PayloadRefused, match="no stamp"):
+        check_payload({k: v for k, v in back.items() if k != "stamp"}, sel, current)
+    # a payload whose picks or composites are not the selection's (written from another training run)
+    other = json.loads(json.dumps(back))
+    other["selection"]["composites"]["sop_futures"]["ko"] = "freeze@2"
+    with pytest.raises(PayloadRefused, match="composites"):
+        check_payload(other, sel, current)
+    other = json.loads(json.dumps(back))
+    other["selection"]["picks"]["ki"]["ki_cap"] = "ki_cap@none"
+    with pytest.raises(PayloadRefused, match="picks"):
+        check_payload(other, sel, current)
+    assert issubclass(PayloadRefused, StudyDataError)
+
+
+def test_training_selection_refuses_note_files_that_do_not_carry_one_stamp():
+    from gpin.measures import training_selection
+
+    prereg = load_prereg()
+    tids = list(_registry(None))
+    ko_note, ki_note = ("ki75", date(2024, 1, 2)), ("seas6", date(2024, 1, 2))
+    day = date(2025, 3, 3)
+    ko_e, ki_e = _t6_event("ko", day, note=ko_note), _t6_event("ki", day, start=day, note=ki_note)
+    both = {T6_CFG: ("close",)}
+    notes = [_t6_note_file(n, [e], lambda tid, clock, cfg, e=e: dict(pnl={e.id: -1.0}, daily=[0.0, 1.0]), tids, both)
+             for n, e in ((ko_note, ko_e), (ki_note, ki_e))]
+    notes[0]["stamp"], notes[1]["stamp"] = {"code_hash": "a"}, {"code_hash": "a"}
+    assert training_selection(notes, prereg)["events"]["ko"]["n"] == 1
+    notes[1]["stamp"] = {"code_hash": "b"}
+    with pytest.raises(ValidationError, match="stamp"):
+        training_selection(notes, prereg)
+
+
+def test_measures_lists_the_samples_state_files_so_the_report_can_compute_the_current_stamp(t6_files, tmp_path):
+    """Which state files a run reads is decided beside the stamp (the report needs the same list to check a stored
+    payload): the sample's notes, selected by note id, every one of them unless the run is partial."""
+    from gpin import measures
+
+    sample = _t6_sample()
+    files = measures.state_files(t6_files.states, sample, False)            # the lock and the error file are not notes
+    assert files == {nid: t6_files.states / (nid.replace(":", "__") + ".json") for nid in T6_NOTE_IDS}
+    assert list(files) == T6_NOTE_IDS                                        # books in registry order, by inception
+    assert measures.stamp(t6_files.events, t6_files.board, t6_files.chain, files) == _t6_stamp(t6_files)
+    some = tmp_path / "states"
+    some.mkdir()
+    shutil.copy(t6_files.states / "seas6__2025-06-02.json", some)
+    (some / "ki75__2031-01-06.json").write_text("{}")                        # a state file of no note of the sample
+    with pytest.raises(StudyDataError, match="ki75:2025-06-02"):
+        measures.state_files(some, sample, False)
+    assert list(measures.state_files(some, sample, True)) == ["seas6:2025-06-02"]
+    with pytest.raises(StudyDataError, match="no state file"):
+        measures.state_files(tmp_path / "absent", sample, True)

@@ -7,9 +7,9 @@ of a run. On event P&L: ``es``, ``cluster_bootstrap``, ``tail_test``, ``life_tes
 ``select_on_train`` is the training rule of the registry. ``run_note`` runs every technique on one note and keeps the
 summaries (one file of the runs directory, written by ``04_ledger.py``); ``training_selection`` and ``tables`` aggregate
 such files into the selection and into everything the report prints, so the report can render from any subset of
-files without running the ledger. ``training_scope`` says what the training slice may read. ``stamp`` /
-``check_selection`` are the four hashes (pre-registration, events file, ledger-side code, recorded inputs) and the
-guard of the test slice.
+files without running the ledger. ``training_scope`` says what the training slice may read. ``stamp`` is the four
+hashes (pre-registration, events file, ledger-side code, recorded inputs); ``check_selection`` and ``check_payload``
+are the guards of the test slice and of every stored test number.
 
 Conventions fixed here (each is in a test): a trading day is a day of the chain (the SSE calendar when none is
 given); the note's day-0 row is in no event window and not in the whole-life standard deviation, and is in the
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from bisect import bisect_left
 from collections import Counter
 from dataclasses import dataclass
@@ -45,7 +46,7 @@ from s2ts.measures import holm
 from . import PREREG_PATH, StudyDataError, load_prereg, prereg_hash
 from . import black
 from .board import DayBoard
-from .events import note_id, parse_note_id
+from .events import BOOKS, note_id, parse_note_id
 from .ledger import Run, run_technique
 from .techniques import Technique, grid_id
 
@@ -821,7 +822,7 @@ def merge_notes(first: Mapping[str, Any], second: Mapping[str, Any]) -> Dict[str
 
 
 # ---------------------------------------------------------------------------
-# The three hashes and the guard of the test slice (D11)
+# The four hashes and the guards of the test slice (D11, amended)
 # ---------------------------------------------------------------------------
 
 #: The ledger-side code: an edit to any of these files stales a training selection.
@@ -843,6 +844,44 @@ def file_hash(path: Path) -> str:
     if not path.exists():
         raise StudyDataError(f"{path} missing")
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+#: ``<book>__<inception>.json``: the name of a note's state file and of its run file.
+NOTE_FILE = re.compile(r"^(?P<book>[a-z0-9]+)__(?P<inception>\d{4}-\d{2}-\d{2})\.json$")
+
+
+def note_file_name(note: str) -> str:
+    """``"<book>__<inception>.json"`` of a note id."""
+    book, inception = parse_note_id(note)
+    return f"{book}__{inception.isoformat()}.json"
+
+
+def sample_note_ids(sample: Mapping[str, Any]) -> List[str]:
+    """Every note id of a loaded events file, books in registry order, by inception."""
+    return [note_id(b, inc) for b in BOOKS if b in sample["books"]
+            for inc in sorted(date.fromisoformat(d) for d in sample["books"][b]["notes"])]
+
+
+def state_files(states_dir: Path, sample: Mapping[str, Any], partial: bool = False) -> Dict[str, Path]:
+    """``{note id: state file}`` of the sample's notes in ``states_dir``, in ``sample_note_ids`` order. Files are
+    selected by note id: the directory also holds a lock, may hold error files and state files of notes that are not
+    in the sample. Every note of the sample must be there unless ``partial`` (a smoke run); a directory with none
+    fails closed either way. This is the set the ``inputs_hash`` is taken over, for both slices."""
+    wanted = sample_note_ids(sample)
+    found: Dict[str, Path] = {}
+    if Path(states_dir).is_dir():
+        for path in sorted(Path(states_dir).iterdir()):
+            m = NOTE_FILE.match(path.name)
+            if m and m["book"] in BOOKS:
+                found[f"{m['book']}:{m['inception']}"] = path
+    files = {nid: found[nid] for nid in wanted if nid in found}
+    missing = [nid for nid in wanted if nid not in found]
+    if not files:
+        raise StudyDataError(f"{states_dir} holds no state file of the sample")
+    if missing and not partial:
+        raise StudyDataError(f"{len(missing)} notes of the sample have no state file in {states_dir} "
+                             f"(first: {missing[0]}); a smoke run on some notes needs --partial")
+    return files
 
 
 def state_fingerprints(files: Mapping[str, Path]) -> Dict[str, str]:
@@ -911,6 +950,37 @@ def check_selection(path: Path, current: Mapping[str, str], *, allow_partial: bo
     return selection
 
 
+class PayloadRefused(StudyDataError):
+    """A stored payload, tables file or manifest is not the current run's: no number of it may be printed."""
+
+
+def check_payload(payload: Mapping[str, Any], selection: Mapping[str, Any], current: Mapping[str, str]) -> None:
+    """Passes only when a stored result (the backtest payload, a ``tables.json`` or a runs manifest) was written
+    under the current files and under this training selection: its ``stamp`` equals ``current`` (``stamp``) on all
+    four hashes, the selection carries the same four, and, when it names the picks and composites it was run with
+    (the payload does), they are the selection's. Otherwise ``PayloadRefused`` naming every reason. The report calls
+    this beside ``check_selection`` before printing any test number, so a stale ``runs/test/`` or ``backtest.json``
+    left by an earlier run is never rendered."""
+    stamp_ = payload.get("stamp")
+    if not isinstance(stamp_, Mapping):
+        raise PayloadRefused("the stored result carries no stamp: it cannot be tied to the current files")
+    reasons: List[str] = []
+    for key, what in _HASH_NAMES.items():
+        if stamp_.get(key) != current[key]:
+            reasons.append(f"{what} changed since it was written ({key})")
+        elif selection.get(key) != stamp_.get(key):
+            reasons.append(f"it was not written under this training selection (the selection's {key} differs)")
+    block = payload.get("selection")
+    if block is not None:
+        picks = {b: {row: pick["id"] for row, pick in rows.items()} for b, rows in selection["picks"].items()}
+        if block.get("picks") != picks:
+            reasons.append("its picks are not the training selection's")
+        if block.get("composites") != selection.get("composites"):
+            reasons.append("its composites are not the training selection's")
+    if reasons:
+        raise PayloadRefused("the stored result is refused: " + "; ".join(reasons) + ". Re-run the slice.")
+
+
 # ---------------------------------------------------------------------------
 # Aggregation over stored note files: the training selection and the tables
 # ---------------------------------------------------------------------------
@@ -921,6 +991,17 @@ def _cells(note: Mapping[str, Any], cfg: str, clock: str) -> Mapping[str, Any]:
         return note["runs"][cfg][clock]
     except KeyError:
         raise ValidationError(f"{note.get('note')}: no runs under {cfg} / {clock}") from None
+
+
+def _shared_stamp(notes: Sequence[Mapping[str, Any]]) -> Optional[Dict[str, str]]:
+    """The one stamp the note files carry (``None`` for results still in memory, which carry none). Files of two
+    runs, or a stamped file beside an unstamped one, fail closed: their numbers must not be mixed in a table."""
+    first = notes[0].get("stamp")
+    for note in notes[1:]:
+        if note.get("stamp") != first:
+            raise ValidationError(f"the note files do not carry one stamp: {notes[0].get('note')} and "
+                                  f"{note.get('note')} were written by different runs (or one has no stamp)")
+    return None if first is None else dict(first)
 
 
 def _common_ids(notes: Sequence[Mapping[str, Any]], cfg: str, clock: str) -> List[str]:
@@ -977,6 +1058,7 @@ def training_selection(notes: Sequence[Mapping[str, Any]], prereg: Mapping[str, 
     cfg, clock = primary_config(prereg).key, str(rule["clock"])
     books = {KO: str(rule["ko_book"]), KI: str(rule["ki_book"])}
     ids = _common_ids(notes, cfg, clock)
+    _shared_stamp(notes)
     for note in notes:
         late = [eid for eid, ev in note["events"].items() if ev["slice"] != rule["slice"]]
         if late:
@@ -1132,7 +1214,8 @@ def _flag_totals(counters: Iterable[Mapping[str, int]]) -> Dict[str, int]:
 def tables(notes: Sequence[Mapping[str, Any]], prereg: Mapping[str, Any], sample: Mapping[str, Any],
            selection: Mapping[str, Any], *, slice_: str) -> Dict[str, Any]:
     """Everything the report prints, from stored note files (``run_note``), a loaded events file and the training
-    selection; seller side throughout. Works on any set of files that hold the same runs (a partial set too).
+    selection; seller side throughout. Works on any set of files that hold the same runs (a partial set too) and
+    carry one ``stamp`` (carried into the result; files of different runs are refused).
 
     ``order``: the technique ids in the pre-registration's order (the files are written with sorted keys; every
     table has its own ``order``). ``tables[clock]``: ``ko`` (the KO book's KO pin events, whole life on its headline
@@ -1156,6 +1239,7 @@ def tables(notes: Sequence[Mapping[str, Any]], prereg: Mapping[str, Any], sample
     primary_clock = str(prereg["clocks"]["primary"])
     if not notes:
         raise ValidationError("no note file to aggregate")
+    shared = _shared_stamp(notes)
     order = [primary_clock] + [str(c) for c in prereg["clocks"]["others"]]
     clocks = [c for c in order if c in notes[0]["runs"].get(cfg, {})]
     if primary_clock not in clocks:
@@ -1235,6 +1319,7 @@ def tables(notes: Sequence[Mapping[str, Any]], prereg: Mapping[str, Any], sample
                 for tid in table["rows"]}
     cost_ids = [tid for tid in ids if tid == "base" or meta[tid]["role"] == "cost"]
     return {
+        **({} if shared is None else {"stamp": shared}),
         "view": "seller", "slice": slice_, "primary": {"clock": primary_clock, "config": cfg}, "clocks": clocks,
         "books": {KO: ko_book, KI: ki_book, "ki_transfer": transfer_books},
         "rules": {"es_alpha": rules.es_alpha, "bootstrap_n": rules.bootstrap_n, "seed": rules.seed,
