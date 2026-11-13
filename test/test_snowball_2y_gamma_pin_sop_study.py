@@ -4513,3 +4513,1372 @@ def test_windows_and_overlays_use_the_notes_levels_not_its_booking_spot():
     _delta_only(reg["surv_hold@3"].target(ctx), 450.0)
     # a knocked-in seasoned note back at its KO level: the whole accrued coupon is the digital, 6.4 mio / (100 x 100)
     _overlay(reg["mo_ko@1,payoff"].target(ctx), {("MO2402", "C", 7900.0): 640.0, ("MO2402", "C", 8000.0): -640.0})
+
+
+# ---------------------------------------------------------------------------
+# T6 — measures, training selection, verdict, gamma carry, the ledger driver
+# ---------------------------------------------------------------------------
+
+# ---- ES10 and the week-clustered bootstrap (D10, AC11) ----
+
+
+def test_es_is_the_mean_of_the_k_smallest_values_with_k_the_ceiling_of_a_tenth():
+    from gpin.measures import es
+
+    seven = [3.0, -8.0, 1.0, 12.0, -2.0, 5.0, 0.5]
+    assert es(seven, 0.10) == -8.0                                           # n = 7: k = max(1, ceil(0.7)) = 1
+    twenty_five = [float(v) for v in range(25, 0, -1)]                       # 25 .. 1
+    assert es(twenty_five, 0.10) == pytest.approx((1.0 + 2.0 + 3.0) / 3.0, rel=1e-15)    # k = ceil(2.5) = 3
+    thirty = [float(v) for v in range(30)]
+    assert es(thirty, 0.10) == pytest.approx(1.0, rel=1e-15)                 # k = 3 exactly, not ceil(3.0000000000000004)
+    assert es([4.0], 0.10) == 4.0
+    assert es([4.0, 1.0, 3.0, 2.0], 0.5) == pytest.approx(1.5, rel=1e-15)
+    assert es(seven) == -8.0                                                 # the pre-registered alpha is the default
+    with pytest.raises(ValidationError):
+        es([], 0.10)
+    with pytest.raises(ValidationError):
+        es([1.0, float("nan")], 0.10)
+
+
+def _reference_bootstrap(tech, base, weeks, n, seed, alpha=0.10):
+    """The bootstrap written as a loop over replicates, with the documented draw: clusters in sorted order, replicate
+    ``i`` takes the clusters ``default_rng(seed).integers(0, C, size=(n, C))[i]`` with their multiplicity."""
+    from gpin.measures import es
+
+    clusters = sorted(set(weeks.values()))
+    members = {c: [e for e in sorted(tech) if weeks[e] == c] for c in clusters}
+    draws = np.random.default_rng(seed).integers(0, len(clusters), size=(n, len(clusters)))
+    hits = 0
+    for row in draws:
+        picked = [e for c in row for e in members[clusters[c]]]
+        hits += es([tech[e] for e in picked], alpha) - es([base[e] for e in picked], alpha) <= 0.0
+    return hits / n
+
+
+def test_cluster_bootstrap_identical_arms_give_one_and_a_dominating_arm_gives_zero():
+    from gpin.measures import cluster_bootstrap
+
+    rng = np.random.default_rng(7)
+    base = {f"e{i}": float(v) for i, v in enumerate(rng.normal(0.0, 50.0, 37))}
+    weeks = {e: f"2025-W{30 + i % 11:02d}" for i, e in enumerate(base)}
+    assert cluster_bootstrap(base, dict(base), weeks, n=500) == 1.0          # the difference is 0 on every replicate
+    better = {e: v + 5.0 for e, v in base.items()}                           # ES10 is 5 higher on every resample
+    assert cluster_bootstrap(better, base, weeks, n=500) == 0.0
+    assert cluster_bootstrap(base, better, weeks, n=500) == 1.0
+
+
+def test_cluster_bootstrap_equals_a_replicate_loop_and_a_two_cluster_case_worked_by_hand():
+    from gpin.measures import cluster_bootstrap
+
+    rng = np.random.default_rng(11)
+    base = {f"e{i:02d}": float(v) for i, v in enumerate(rng.normal(0.0, 40.0, 29))}
+    tech = {e: v + float(d) for (e, v), d in zip(base.items(), rng.normal(3.0, 30.0, 29))}
+    sizes = [1, 1, 2, 3, 5, 8, 9]                                            # unequal clusters: 29 events in 7 weeks
+    weeks = {}
+    for (e, _), w in zip(base.items(), [w for w, size in enumerate(sizes) for _ in range(size)]):
+        weeks[e] = f"2025-W{40 + w:02d}"
+    p = cluster_bootstrap(tech, base, weeks, n=400, seed=5)
+    assert p == _reference_bootstrap(tech, base, weeks, 400, 5)
+    assert 0.0 < p < 1.0
+    assert cluster_bootstrap(tech, base, weeks, n=400, seed=5) == p           # fixed seed: the same number again
+    # two one-event weeks; ES10 of two events is their minimum. Resamples (a, a), (a, b), (b, a), (b, b): the technique's
+    # minimum minus the baseline's is -1, +2, +2, +2: p is the share of (a, a) draws, a quarter in expectation
+    tech2, base2, weeks2 = {"a": 9.0, "b": 12.0}, {"a": 10.0, "b": 7.0}, {"a": "2025-W30", "b": "2025-W31"}
+    draws = np.random.default_rng(20261112).integers(0, 2, size=(10_000, 2))
+    expected = float(np.mean((draws == 0).all(axis=1)))
+    p2 = cluster_bootstrap(tech2, base2, weeks2)                             # n = 10,000 and seed 20261112 by default
+    assert p2 == expected and abs(p2 - 0.25) < 0.02
+
+
+def test_cluster_bootstrap_fails_closed_on_unpaired_arms_or_a_missing_week():
+    from gpin.measures import cluster_bootstrap
+
+    with pytest.raises(ValidationError):
+        cluster_bootstrap({"a": 1.0}, {"b": 1.0}, {"a": "w", "b": "w"})
+    with pytest.raises(ValidationError):
+        cluster_bootstrap({"a": 1.0}, {"a": 1.0}, {})
+    with pytest.raises(ValidationError):
+        cluster_bootstrap({}, {}, {})
+
+
+# ---- events, event windows, whole-life statistics, gamma carry (D10, AC11) on hand-made rows ----
+
+T6_CAL = _weekdays(40, date(2025, 5, 5))          # 2025-05-05 (a Monday) .. 2025-06-27: the measures' trading calendar
+T6_NOTE = ("ki75", T6_CAL[0])
+
+
+def _t6_row(day, gross, *, cost=0.0, hedge_ratio=1.0, clipped=False, flags=(), legs=None, phi=1.0, unfilled=None,
+            position_gamma=-2.0, im_lots=10.0):
+    """One ledger row with the keys the measures read: ``hedged = gross - cost`` (CNY)."""
+    return {"date": day.isoformat(), "hedged": gross - cost, "cost": cost, "hedge_ratio": hedge_ratio,
+            "clipped": clipped, "flags": list(flags), "legs": dict(legs or {}), "phi": phi,
+            "unfilled": dict(unfilled or {}), "position_gamma": position_gamma, "im_lots": im_lots}
+
+
+def _t6_run(rows, *, note=T6_NOTE, technique="base", mode="close"):
+    from gpin.ledger import Run
+
+    return Run(note[0], note[1], 0.1, technique, "baseline", {}, mode, 0.2, 1e-4, 5e8, None, rows=list(rows))
+
+
+def _t6_event(kind, day, *, start=None, hit=False, note=T6_NOTE, slice_="train"):
+    from gpin.events import week_key
+    from gpin.measures import Event
+
+    return Event(kind, note[0], note[1], day, start, week_key(day), slice_, hit)
+
+
+def _bp(cny):
+    return cny / NOTIONAL_ * 1.0e4
+
+
+def _t6_rows(last, overrides=None):
+    """Rows on ``T6_CAL[0..last]`` with ``gross_i = 1000 x (i + 1)`` CNY (so every sum of a window is recognisable);
+    ``overrides[i]`` are keyword arguments of that day's row."""
+    return [_t6_row(T6_CAL[i], 1000.0 * (i + 1), **(overrides or {}).get(i, {})) for i in range(last + 1)]
+
+
+def test_events_have_stable_ids_and_are_read_from_the_events_file():
+    from gpin.measures import Event, note_events
+
+    ko = _t6_event("ko", T6_CAL[12], hit=True)
+    ki = _t6_event("ki", T6_CAL[8], start=T6_CAL[5])
+    assert (ko.id, ki.id) == ("ko|ki75:2025-05-05|2025-05-21", "ki|ki75:2025-05-05|2025-05-15")
+    assert ko.note == "ki75:2025-05-05"
+    with pytest.raises(ValidationError):
+        Event("ki", "ki75", T6_CAL[0], T6_CAL[8], None, "2025-W20", "train", False)       # an approach has a first day
+    with pytest.raises(ValidationError):
+        Event("xx", "ki75", T6_CAL[0], T6_CAL[8], None, "2025-W20", "train", False)
+    sample = {"books": {
+        "ki75": {"ko_events": [{"date": "2025-05-21", "fired": True, "inception": "2025-05-05", "prior_gap": 0.01,
+                                "slice": "train", "week": "2025-W21"},
+                               {"date": "2025-07-02", "fired": False, "inception": "2025-06-02", "prior_gap": 0.01,
+                                "slice": "test", "week": "2025-W27"}],
+                 "ki_approaches": [{"date": "2025-05-15", "inception": "2025-05-05", "knocked_in": False,
+                                    "slice": "train", "start": "2025-05-12", "week": "2025-W20"}]},
+        "seas6": {"ko_events": [], "ki_approaches": []}}}
+    got = note_events(sample, "ki75:2025-05-05")
+    assert got == [Event("ki", "ki75", T6_CAL[0], date(2025, 5, 15), date(2025, 5, 12), "2025-W20", "train", False),
+                   Event("ko", "ki75", T6_CAL[0], date(2025, 5, 21), None, "2025-W21", "train", True)]   # by date
+    assert note_events(sample, "seas6:2025-05-05") == []
+    # the committed file: 150 KO pin events and 80 approaches on ki75, 176 approaches on seas6, every id distinct
+    real = json.loads(EVENTS_JSON.read_text(encoding="utf-8"))
+    ids = [e.id for book in ("ki75", "seas6") for inc in real["books"][book]["notes"]
+           for e in note_events(real, f"{book}:{inc}")]
+    assert len(ids) == len(set(ids)) == 150 + 80 + 176
+
+
+def test_event_windows_sum_exactly_the_d10_rows_for_a_survived_ko_a_fired_ko_and_an_approach():
+    from gpin.measures import event_windows, window_dates
+
+    survived = _t6_event("ko", T6_CAL[12])                    # window: 10 trading days ahead .. the day after
+    fired = _t6_event("ko", T6_CAL[33], hit=True)             # the rows end on the KO day: no T+1 row
+    approach = _t6_event("ki", T6_CAL[19], start=T6_CAL[16])
+    assert window_dates(survived, T6_CAL, 10) == (T6_CAL[2], T6_CAL[13])
+    assert window_dates(fired, T6_CAL, 10) == (T6_CAL[23], T6_CAL[34])
+    assert window_dates(approach, T6_CAL, 10) == (T6_CAL[16], T6_CAL[20])
+    # costs: 500 on the day before the survived window (outside), 300 at its first close (the entry trade), 200 at T + 1
+    run = _t6_run(_t6_rows(33, {1: dict(cost=500.0), 2: dict(cost=300.0), 13: dict(cost=200.0)}))
+    got = event_windows(run, [survived, fired, approach], T6_CAL, 10)
+    assert set(got) == {survived.id, fired.id, approach.id}
+    assert got[survived.id] == pytest.approx(_bp(sum(1000.0 * (i + 1) for i in range(2, 14)) - 300.0 - 200.0), rel=1e-12)
+    assert got[fired.id] == pytest.approx(_bp(sum(1000.0 * (i + 1) for i in range(23, 34))), rel=1e-12)   # T+1 counts 0
+    assert got[approach.id] == pytest.approx(_bp(sum(1000.0 * (i + 1) for i in range(16, 21))), rel=1e-12)
+    # under next_open the fired KO has its T+1 row (the hedge carried through the fixing): it is inside the window
+    longer = _t6_run(_t6_rows(34), mode="next_open")
+    assert event_windows(longer, [fired], T6_CAL, 10)[fired.id] == pytest.approx(
+        _bp(sum(1000.0 * (i + 1) for i in range(23, 35))), rel=1e-12)
+    # the pre-registered 10 days are the default
+    assert event_windows(run, [survived], T6_CAL) == {survived.id: got[survived.id]}
+
+
+def test_event_windows_leave_out_the_day_0_row_count_missing_rows_as_zero_and_refuse_another_notes_event():
+    from gpin.measures import event_windows, window_dates
+
+    early = _t6_event("ko", T6_CAL[4])                       # fewer than 10 trading days after the booking day
+    assert window_dates(early, T6_CAL, 10) == (T6_CAL[0], T6_CAL[5])
+    run = _t6_run(_t6_rows(8))
+    assert event_windows(run, [early], T6_CAL, 10)[early.id] == pytest.approx(
+        _bp(sum(1000.0 * (i + 1) for i in range(1, 6))), rel=1e-12)                       # row 0 is not in it
+    last = _t6_event("ko", T6_CAL[-1])                       # the calendar ends on T: there is no trading day after
+    assert window_dates(last, T6_CAL, 10) == (T6_CAL[-11], T6_CAL[-1])
+    gone = _t6_event("ki", T6_CAL[30], start=T6_CAL[28])     # every row of the window is missing: 0, not an error
+    assert event_windows(run, [gone], T6_CAL, 10) == {gone.id: 0.0}
+    with pytest.raises(ValidationError):
+        event_windows(run, [_t6_event("ko", T6_CAL[4], note=("ki75", T6_CAL[1]))], T6_CAL, 10)
+    with pytest.raises(ValidationError):
+        window_dates(_t6_event("ko", date(2025, 5, 10)), T6_CAL, 10)                      # a Saturday: not a trading day
+
+
+def test_life_stats_and_whole_life_leave_day_0_out_of_the_std_and_truncated_notes_out_of_the_terminal():
+    from gpin.measures import life_stats, whole_life
+
+    a = _t6_run([_t6_row(T6_CAL[i], g, cost=c, im_lots=lots, clipped=cl)
+                 for i, (g, c, lots, cl) in enumerate([(50000.0, 100.0, 10.0, False), (3000.0, 0.0, 10.0, False),
+                                                       (-1000.0, 50.0, 12.0, True), (2000.0, 20.0, 0.0, False)])])
+    b = _t6_run([_t6_row(T6_CAL[3 + i], g) for i, g in enumerate([-20000.0, 500.0, 700.0])], note=("ki75", T6_CAL[3]))
+    la, lb = life_stats(a, True), life_stats(b, False)
+    daily_a = [_bp(3000.0), _bp(-1050.0), _bp(1980.0)]
+    assert (la["n"], la["rows"], la["completed"]) == (3, 4, True)
+    assert la["sum_bp"] == pytest.approx(sum(daily_a), rel=1e-12)
+    assert la["sumsq_bp"] == pytest.approx(sum(v * v for v in daily_a), rel=1e-12)
+    assert la["terminal_bp"] == pytest.approx(_bp(49900.0) + sum(daily_a), rel=1e-12)     # day 0 stays in the terminal
+    assert la["cost_bp"] == pytest.approx(_bp(170.0), rel=1e-12) and la["clips"] == 1
+    assert la["im_lots_traded"] == pytest.approx(10.0 + 0.0 + 2.0 + 12.0, rel=1e-12)
+    assert (la["first"], la["last"]) == (T6_CAL[0].isoformat(), T6_CAL[3].isoformat())
+    whole = whole_life([{"life": la}, {"life": lb}])
+    daily = daily_a + [_bp(500.0), _bp(700.0)]
+    assert (whole["n_notes"], whole["n_days"], whole["n_completed"]) == (2, 5, 1)
+    assert whole["std_bp"] == pytest.approx(float(np.std(daily, ddof=1)), rel=1e-10)
+    assert whole["mean_terminal_bp"] == pytest.approx(la["terminal_bp"], rel=1e-12)        # the truncated note is left out
+    assert whole["mean_cost_bp"] == pytest.approx(_bp(170.0) / 2.0, rel=1e-12)
+    assert whole_life([la, lb]) == whole                                                  # the life blocks themselves
+    only_truncated = whole_life([lb])
+    assert only_truncated["mean_terminal_bp"] is None and only_truncated["n_completed"] == 0
+    with pytest.raises(ValidationError):
+        whole_life([])
+
+
+def test_life_stats_count_the_overlay_days_the_fill_ratio_and_the_flags():
+    from gpin.measures import life_stats
+
+    legs = {"MO2507:C:5000": 2.0}
+    run = _t6_run([
+        _t6_row(T6_CAL[0], 0.0),
+        _t6_row(T6_CAL[1], 0.0, legs=legs, phi=0.25, unfilled={"MO2507:C:5000": 6.0}, flags=("volume_cut",)),
+        _t6_row(T6_CAL[2], 0.0, legs=legs, phi=1.0),
+        _t6_row(T6_CAL[3], 0.0, flags=("overlay_no_strike", "roll")),
+        _t6_row(T6_CAL[4], 0.0, unfilled={"MO2507:C:5000": 2.0}, phi=0.0, flags=("refused_open",)),
+    ])
+    life = life_stats(run, False)
+    assert (life["leg_days"], life["overlay_days"], life["phi_lt1_days"]) == (2, 3, 2)
+    assert life["phi_sum"] == pytest.approx(1.25, rel=1e-12) and life["phi_min"] == 0.0
+    assert life["flags"] == {"volume_cut": 1, "overlay_no_strike": 1, "roll": 1, "refused_open": 1}
+    assert life_stats(_t6_run(_t6_rows(3)), False)["phi_min"] is None                     # no overlay day at all
+
+
+T6_SERIES = "MO2506"
+T6_LAST = date(2025, 6, 20)
+
+
+def _t6_board(day, spot, quotes=None, forward=None):
+    mo = None if quotes is None else {T6_SERIES: dict(last=T6_LAST, forward=forward or spot, quotes=quotes)}
+    return _t5_board(day, spot, im={"IM2509": spot}, mo=mo)
+
+
+def test_gamma_carry_is_the_net_gamma_at_the_close_before_the_fixing_and_the_hedge_carried_into_it():
+    from gpin import black
+    from gpin.measures import gamma_carry
+
+    event = _t6_event("ko", T6_CAL[12])
+    t1, spot, forward = T6_CAL[11], 4990.0, 4975.0
+    info = _series_info(t1, T6_LAST, forward)
+    quotes = {("C", k): (_px(t1, T6_LAST, "C", k, vol, forward), 5000, 9000) for k, vol in ((4900.0, 0.22), (5000.0, 0.2))}
+    boards = {t1: _t6_board(t1, spot, quotes, forward)}
+    legs = {"MO2506:C:4900": 40.0, "MO2506:C:5000": -40.0}
+    ratios = {2: 1.2, 5: 2.4, 11: 0.9, 12: 0.1, 13: 0.0}
+    rows = _t6_rows(13, {i: dict(hedge_ratio=h) for i, h in ratios.items()})
+    rows[11] = _t6_row(t1, 12000.0, hedge_ratio=0.9, legs=legs, position_gamma=-35.0)
+    got = gamma_carry(_t6_run(rows), [event, _t6_event("ki", T6_CAL[8], start=T6_CAL[6])], boards, T6_CAL, 10)
+    assert set(got) == {event.id}                             # KO events only
+    g = got[event.id]
+    # Black-76 gamma under the proportional forward: discount x pdf(d1) / (F sigma sqrt(T)) x (F / S)^2, x 100 a lot
+    def gamma(k, vol):
+        s = vol * math.sqrt(info.tenor)
+        d1 = (math.log(forward / k) + 0.5 * s * s) / s
+        return info.discount * _norm.pdf(d1) / (forward * s) * (forward / spot) ** 2
+    legs_gamma = 100.0 * (40.0 * gamma(4900.0, 0.22) - 40.0 * gamma(5000.0, 0.2))
+    assert legs_gamma == pytest.approx(100.0 * 40.0 * (black.index_gamma(0.22, "C", 4900.0, info, spot)
+                                                         - black.index_gamma(0.2, "C", 5000.0, info, spot)), rel=1e-9)
+    assert g["date"] == t1.isoformat() and g["note_gamma"] == -35.0
+    assert g["legs_gamma"] == pytest.approx(legs_gamma, rel=1e-6)
+    assert g["net_gamma"] == pytest.approx(-35.0 + legs_gamma, rel=1e-6)
+    assert g["net_gamma_1pct_bp"] == pytest.approx(_bp((-35.0 + legs_gamma) * (0.01 * spot) ** 2), rel=1e-6)
+    assert g["hedge_into_fixing"] == 0.9                      # the hedge carried at the T-1 close
+    assert g["hedge_max"] == 2.4                              # the largest in the window (rows 2 .. 13)
+    # no legs: the note's gamma alone, and no board is needed; a missing T-1 row or a null gamma gives nulls
+    plain = gamma_carry(_t6_run(_t6_rows(13, {11: dict(position_gamma=-7.0)})), [event], {}, T6_CAL, 10)[event.id]
+    assert (plain["note_gamma"], plain["legs_gamma"], plain["net_gamma"]) == (-7.0, 0.0, -7.0)
+    assert plain["net_gamma_1pct_bp"] is None                 # no board, no spot to scale with
+    cut = gamma_carry(_t6_run(_t6_rows(5)), [event], {}, T6_CAL, 10)[event.id]
+    assert (cut["note_gamma"], cut["net_gamma"], cut["hedge_into_fixing"]) == (None, None, None)
+    # a leg held without a mark on the board fails closed
+    with pytest.raises(StudyDataError):
+        gamma_carry(_t6_run(rows), [event], {t1: _t6_board(t1, spot)}, T6_CAL, 10)
+
+
+def test_summarise_run_stores_per_event_what_the_report_needs_and_flags_the_events_left_out_under_next_open():
+    from gpin.measures import event_windows, summarise_run
+
+    ko = _t6_event("ko", T6_CAL[12])
+    ki = _t6_event("ki", T6_CAL[19], start=T6_CAL[16])
+    rows = _t6_rows(20, {2: dict(cost=300.0, clipped=True), 5: dict(clipped=True, flags=("roll",)),
+                           12: dict(flags=("fixing_deferred",)), 17: dict(flags=("overlay_no_series",)),
+                           19: dict(flags=("last_day_fixing",)), 1: dict(clipped=True)})
+    run = _t6_run(rows, mode="next_open")
+    s = summarise_run(run, [ko, ki], T6_CAL, {}, completed=False, ko_days=10)
+    assert set(s) == {"events", "life"} and set(s["events"]) == {ko.id, ki.id}
+    windows = event_windows(run, [ko, ki], T6_CAL, 10)
+    e = s["events"][ko.id]
+    assert e["pnl_bp"] == windows[ko.id] and e["cost_bp"] == pytest.approx(_bp(300.0), rel=1e-12)
+    assert (e["clips"], e["left_out"], e["flags"]) == (2, False, {"roll": 1, "fixing_deferred": 1})
+    assert e["days"][0] == [T6_CAL[2].isoformat(), pytest.approx(_bp(3000.0 - 300.0)), 1.0] and len(e["days"]) == 12
+    assert e["gamma"]["hedge_into_fixing"] == 1.0 and e["gamma"]["note_gamma"] == -2.0
+    k = s["events"][ki.id]
+    assert k["left_out"] is True and k["flags"] == {"overlay_no_series": 1, "last_day_fixing": 1} and "gamma" not in k
+    assert s["life"]["n"] == 20 and s["life"]["completed"] is False
+    json.dumps(s, allow_nan=False)                            # JSON-ready
+
+
+# ---- the verdict (D10, AC11) on hand-made event P&L ----
+
+
+def _t6_arms(n_events=24, n_weeks=12):
+    """``n_events`` events spread over ``n_weeks`` weeks (event i in week i mod n_weeks); the baseline loses ``-100 +
+    10 i`` bp on event i, so with 24 events its ES10 is the mean of -100, -90, -80 and its worst event -100."""
+    base = {f"e{i:02d}": -100.0 + 10.0 * i for i in range(n_events)}
+    weeks = {e: f"2025-W{30 + i % n_weeks:02d}" for i, e in enumerate(base)}
+    return base, weeks
+
+
+def _t6_life(std, terminal):
+    return {"n_notes": 13, "n_days": 4000, "std_bp": std, "n_completed": 9, "mean_terminal_bp": terminal,
+            "mean_cost_bp": 1.0, "mean_im_lots_traded": 2.0}
+
+
+def _t6_rules(**kw):
+    from dataclasses import replace
+    from gpin.measures import Rules
+
+    return replace(Rules.from_prereg(load_prereg()), **{"bootstrap_n": 2000, **kw})
+
+
+def test_rules_are_the_pre_registered_numbers():
+    from gpin.measures import Rules
+
+    r = Rules.from_prereg(load_prereg())
+    assert (r.es_alpha, r.bootstrap_n, r.seed, r.p_max) == (0.10, 10000, 20261112, 0.10)
+    assert (r.std_ratio_max, r.terminal_slack_bp, r.min_events, r.min_weeks, r.ko_days) == (1.05, 10.0, 20, 10, 10)
+
+
+def test_verdict_win_needs_the_tail_and_the_whole_life():
+    from gpin.measures import verdict
+
+    base, weeks = _t6_arms()
+    tech = {e: v + 30.0 for e, v in base.items()}
+    v = verdict(tech, base, weeks, _t6_life(10.4, -5.0), _t6_life(10.0, 0.0), _t6_rules())
+    assert (v["n_events"], v["n_weeks"], v["decidable"]) == (24, 12, True)
+    assert v["es10"] == pytest.approx(-60.0) and v["es10_base"] == pytest.approx(-90.0)   # k = ceil(2.4) = 3
+    assert (v["worst"], v["worst_base"], v["p"]) == (-70.0, -100.0, 0.0)
+    assert v["mean"] == pytest.approx(45.0) and v["mean_base"] == pytest.approx(15.0)
+    assert (v["es_higher"], v["worst_not_lower"], v["tail_pass"]) == (True, True, True)
+    assert v["std_ratio"] == pytest.approx(1.04) and v["terminal_diff_bp"] == pytest.approx(-5.0)
+    assert (v["std_pass"], v["terminal_pass"], v["life_pass"], v["win"]) == (True, True, True, True)
+    # the bounds are inclusive: 1.05 x the baseline's std and exactly 10 bp below its terminal P&L still pass
+    edge = verdict(tech, base, weeks, _t6_life(10.5, -10.0), _t6_life(10.0, 0.0), _t6_rules())
+    assert (edge["life_pass"], edge["win"]) == (True, True)
+
+
+def test_verdict_fails_on_the_tail():
+    from gpin.measures import cluster_bootstrap, verdict
+
+    base, weeks = _t6_arms()
+    good_life = (_t6_life(10.0, 0.0), _t6_life(10.0, 0.0))
+    # ES10 higher (-130, -60, -50 against -100, -90, -80) but the worst event is lower
+    tech = {e: v + 30.0 for e, v in base.items()}
+    tech["e00"] = -130.0
+    v = verdict(tech, base, weeks, *good_life, _t6_rules())
+    assert v["es10"] == pytest.approx(-80.0) and (v["es_higher"], v["worst_not_lower"]) == (True, False)
+    assert (v["tail_pass"], v["life_pass"], v["win"]) == (False, True, False)
+    # ES10 not higher: the same events
+    same = verdict(dict(base), base, weeks, *good_life, _t6_rules())
+    assert (same["es_higher"], same["worst_not_lower"], same["p"], same["tail_pass"], same["win"]) == (
+        False, True, 1.0, False, False)
+    # ES10 higher and the worst event higher, but the gain sits in one week (events 0 and 12, both week 30): every
+    # resample without that week shows no gain, (11 / 12) ** 12 = 35% of them
+    one_week = dict(base)
+    one_week["e00"], one_week["e12"] = -70.0, 50.0
+    v = verdict(one_week, base, weeks, *good_life, _t6_rules())
+    assert v["es10"] == pytest.approx((-90.0 - 80.0 - 70.0) / 3.0) and v["worst"] == -90.0
+    assert v["p"] == cluster_bootstrap(one_week, base, weeks, n=2000) and abs(v["p"] - (11.0 / 12.0) ** 12) < 0.03
+    assert (v["es_higher"], v["worst_not_lower"], v["tail_pass"], v["win"]) == (True, True, False, False)
+
+
+def test_verdict_fails_on_the_whole_life():
+    from gpin.measures import verdict
+
+    base, weeks = _t6_arms()
+    tech = {e: v + 30.0 for e, v in base.items()}
+    noisy = verdict(tech, base, weeks, _t6_life(10.6, 0.0), _t6_life(10.0, 0.0), _t6_rules())
+    assert (noisy["tail_pass"], noisy["std_pass"], noisy["terminal_pass"], noisy["life_pass"], noisy["win"]) == (
+        True, False, True, False, False)
+    costly = verdict(tech, base, weeks, _t6_life(9.0, -10.5), _t6_life(10.0, 0.0), _t6_rules())
+    assert (costly["tail_pass"], costly["std_pass"], costly["terminal_pass"], costly["life_pass"], costly["win"]) == (
+        True, True, False, False, False)
+    # no completed note: the terminal criterion cannot be evaluated, so neither can the win
+    unknown = verdict(tech, base, weeks, _t6_life(9.0, None), _t6_life(10.0, None), _t6_rules())
+    assert (unknown["terminal_pass"], unknown["life_pass"], unknown["win"]) == (None, None, None)
+
+
+def test_verdict_is_not_decidable_with_too_few_events_or_too_few_weeks():
+    from gpin.measures import verdict
+
+    lives = (_t6_life(10.0, 0.0), _t6_life(10.0, 0.0))
+    for n_events, n_weeks, decidable in ((19, 12, False), (24, 9, False), (20, 10, True)):
+        base, weeks = _t6_arms(n_events, n_weeks)
+        tech = {e: v + 30.0 for e, v in base.items()}
+        v = verdict(tech, base, weeks, *lives, _t6_rules())
+        assert (v["n_events"], v["n_weeks"], v["decidable"]) == (n_events, n_weeks, decidable)
+        assert v["tail_pass"] is True and v["life_pass"] is True         # the measures are still reported
+        assert v["win"] is (True if decidable else None)
+    # no event at all: nothing to measure, not decidable
+    none = verdict({}, {}, {}, *lives, _t6_rules())
+    assert (none["n_events"], none["n_weeks"], none["decidable"], none["es10"], none["p"], none["tail_pass"],
+            none["win"]) == (0, 0, False, None, None, None, None)
+    with pytest.raises(ValidationError):
+        verdict({"a": 1.0}, {"b": 1.0}, {"a": "w", "b": "w"}, *lives, _t6_rules())
+
+
+# ---- training selection (AC12) on hand-made training tables ----
+
+
+def _t6_windows(es_by_id):
+    """``{technique id: {event: bp}}`` over three events whose worst is the given number (ES10 of three = the worst)."""
+    return {tid: {"e1": v, "e2": v + 10.0, "e3": v + 20.0} for tid, v in es_by_id.items()}
+
+
+T6_KO_ES = {
+    "base": -40.0,
+    "ko_shift@0.01": -50.0, "ko_shift@0.02": -30.0, "ko_shift@0.03": -40.0,
+    "ko_spread@0.015": -45.0, "ko_spread@0.03": -45.0,                    # a tie: the lower cost wins
+    "ko_bend@0.015,3": -45.0, "ko_bend@0.03,3": -45.0, "ko_bend@0.03,5": -46.0,   # a tie on both: the grid's order
+    "secant@0.03": -60.0, "secant@0.05": -20.0,
+    "surv_hold@1": -25.0, "surv_hold@3": -35.0,
+    "derisk@3": -70.0, "derisk@5": -65.0,                                 # the winner does not beat the baseline
+    "freeze@1": -80.0, "freeze@2": -85.0,
+    "mo_ko@1,payoff": -22.0, "mo_ko@2,payoff": -28.0, "mo_ko@1,scenario": -21.0,
+}
+T6_KI_ES = {
+    "base": -20.0,
+    "ki_shift@-0.01": -15.0, "ki_shift@-0.02": -12.0,
+    "secant@0.03": -10.0, "secant@0.05": -90.0,                           # the other h than at the KO barrier
+    "ki_cap@1.0": -12.0, "ki_cap@1.25": -30.0,
+    "mo_ki@2,payoff": -5.0, "mo_ki@2,scenario": -7.0,
+}
+
+
+def _t6_costs(**overrides):
+    costs = {"ko": {tid: 1.0 for tid in T6_KO_ES}, "ki": {tid: 1.0 for tid in T6_KI_ES}}
+    costs["ko"].update({"ko_spread@0.015": 3.0, "ko_spread@0.03": 2.0})
+    for barrier, block in overrides.items():
+        costs[barrier].update(block)
+    return costs
+
+
+def test_select_on_train_picks_the_highest_training_es10_per_row_and_barrier_with_the_tie_rule():
+    from gpin.measures import select_on_train
+
+    windows = {"ko": _t6_windows(T6_KO_ES), "ki": _t6_windows(T6_KI_ES)}
+    sel = select_on_train(load_prereg(), windows, _t6_costs())
+    assert {row: p["id"] for row, p in sel["picks"]["ko"].items()} == {
+        "ko_shift": "ko_shift@0.02", "ko_spread": "ko_spread@0.03", "ko_bend": "ko_bend@0.015,3",
+        "secant": "secant@0.05", "surv_hold": "surv_hold@1", "derisk": "derisk@5", "freeze": "freeze@1",
+        "mo_ko": "mo_ko@1,scenario"}
+    assert {row: p["id"] for row, p in sel["picks"]["ki"].items()} == {
+        "ki_shift": "ki_shift@-0.02", "secant": "secant@0.03", "ki_cap": "ki_cap@1.0", "mo_ki": "mo_ki@2,payoff"}
+    pick = sel["picks"]["ko"]["ko_shift"]
+    assert (pick["es10"], pick["cost_bp"], pick["n_events"], pick["beats_base"]) == (-30.0, 1.0, 3, True)
+    assert pick["grid"] == {"ko_shift@0.01": {"es10": -50.0, "cost_bp": 1.0},
+                            "ko_shift@0.02": {"es10": -30.0, "cost_bp": 1.0},
+                            "ko_shift@0.03": {"es10": -40.0, "cost_bp": 1.0}}
+    # a row whose winner does not beat the baseline is still carried to the test with that winner
+    assert (sel["picks"]["ko"]["derisk"]["es10"], sel["picks"]["ko"]["derisk"]["beats_base"]) == (-65.0, False)
+    assert sel["picks"]["ko"]["ko_shift"]["beats_base"] is True
+    assert sel["base"] == {"ko": {"es10": -40.0, "n_events": 3}, "ki": {"es10": -20.0, "n_events": 3}}
+    assert sel["rows"] == {b: list(rows) for b, rows in sel["picks"].items()}
+    # composite members: the winner across the futures-side rows of each barrier; the overlay rows' own picks
+    assert sel["composites"] == {"sop_futures": {"ko": "secant@0.05", "ki": "secant@0.03"},
+                                 "sop_overlay": {"ko": "mo_ko@1,scenario", "ki": "mo_ki@2,payoff"}}
+    assert set(_registry(sel["composites"])) >= {"sop_futures", "sop_overlay"}        # the registry accepts it
+
+
+def test_select_on_train_breaks_a_tie_across_rows_by_the_lower_cost_then_by_the_registered_order():
+    from gpin.measures import select_on_train
+
+    ki = dict(T6_KI_ES)
+    ki["ki_cap@1.0"] = -10.0                                # ties secant@0.03 for the futures-side KI member
+    windows = {"ko": _t6_windows(T6_KO_ES), "ki": _t6_windows(ki)}
+    cheaper = select_on_train(load_prereg(), windows, _t6_costs(ki={"ki_cap@1.0": 0.5}))
+    assert cheaper["composites"]["sop_futures"]["ki"] == "ki_cap@1.0"
+    # the same cost too: the row listed first in the composite's members (ki_shift, ki_cap, secant)
+    assert select_on_train(load_prereg(), windows, _t6_costs())["composites"]["sop_futures"]["ki"] == "ki_cap@1.0"
+    dearer = select_on_train(load_prereg(), windows, _t6_costs(ki={"ki_cap@1.0": 1.5}))
+    assert dearer["composites"]["sop_futures"]["ki"] == "secant@0.03"
+
+
+def test_select_on_train_fails_closed_on_missing_runs_unpaired_events_and_an_empty_training_slice():
+    from gpin.measures import select_on_train
+
+    windows = {"ko": _t6_windows(T6_KO_ES), "ki": _t6_windows(T6_KI_ES)}
+    missing = {"ko": {k: v for k, v in windows["ko"].items() if k != "freeze@2"}, "ki": windows["ki"]}
+    with pytest.raises(ValidationError):
+        select_on_train(load_prereg(), missing, _t6_costs())
+    unpaired = {"ko": dict(windows["ko"]), "ki": windows["ki"]}
+    unpaired["ko"]["freeze@2"] = {"e1": 1.0, "e2": 2.0}
+    with pytest.raises(ValidationError):
+        select_on_train(load_prereg(), unpaired, _t6_costs())
+    empty = {"ko": {tid: {} for tid in T6_KO_ES}, "ki": windows["ki"]}
+    with pytest.raises(StudyDataError):
+        select_on_train(load_prereg(), empty, _t6_costs())
+    # a partial set of states (a smoke run) may have no event of a barrier type: said so, and the first grid point of
+    # each row stands in; such a selection is marked and the test slice refuses it
+    partial = select_on_train(load_prereg(), empty, _t6_costs(), allow_empty=True)
+    assert partial["empty"] == ["ko"]
+    assert partial["picks"]["ko"]["ko_shift"] == {
+        "id": "ko_shift@0.01", "es10": None, "cost_bp": 1.0, "n_events": 0, "beats_base": None,
+        "grid": {tid: {"es10": None, "cost_bp": 1.0} for tid in ("ko_shift@0.01", "ko_shift@0.02", "ko_shift@0.03")}}
+    assert partial["composites"]["sop_futures"] == {"ko": "ko_shift@0.01", "ki": "secant@0.03"}
+    assert select_on_train(load_prereg(), windows, _t6_costs())["empty"] == []
+
+
+def test_evaluated_ids_are_the_baselines_the_controls_the_cost_rows_the_picks_and_the_composites():
+    from gpin.measures import evaluated_ids, select_on_train
+
+    sel = select_on_train(load_prereg(), {"ko": _t6_windows(T6_KO_ES), "ki": _t6_windows(T6_KI_ES)}, _t6_costs())
+    assert evaluated_ids(load_prereg(), sel) == [
+        "base", "base_noclip", "ko_shift@0.02", "ko_spread@0.03", "ko_bend@0.015,3", "ki_shift@-0.02", "ko_wrong",
+        "ki_wrong", "secant@0.03", "secant@0.05", "ki_cap@1.0", "surv_hold@1", "derisk@5", "freeze@1",
+        "mo_ko@1,scenario", "mo_ki@2,payoff", "sop_futures", "sop_overlay", "band@0.02", "band@0.05"]
+
+
+# ---- a hand-made market straddling the split: a 2Y note at its KO barrier and a seasoned note at its KI barrier ----
+
+T6_DAYS = _weekdays(40, date(2025, 6, 2))          # 2025-06-02 (a Monday) .. 2025-07-25; day 21 is the split date
+T6_SPLIT, T6_UNTIL = date(2025, 7, 1), date(2025, 6, 30)
+T6_SPOTS = [5080.0, 5080.0, 5070.0, 5060.0, 5075.0, 5085.0, 4930.0, 4900.0, 4830.0, 4920.0,      # 0 .. 9
+            5090.0, 4990.0, 5050.0, 5060.0, 5070.0, 5080.0, 5090.0, 5100.0, 5080.0, 5060.0,      # 10 .. 19
+            5050.0, 5040.0, 5030.0, 4920.0, 4880.0, 4820.0, 4690.0, 4950.0, 4960.0, 4980.0,      # 20 .. 29
+            4990.0, 5020.0, 5030.0, 5035.0, 5040.0, 5030.0, 5020.0, 5025.0, 5030.0, 5040.0]      # 30 .. 39
+T6_KO_OBS = (11, 31)                               # the 2Y note's observations: 06-17 survived, 07-15 fired
+T6_KI_LEVEL = 4700.0                               # the seasoned note's KI level: window at or below 4935
+T6_KI_RUNS = ((6, 9), (23, 26))                    # its approaches: 06-10 .. 06-13, and 07-03 .. 07-08 ending in a knock-in
+T6_LASTS = {"MO2507": date(2025, 8, 1), "MO2508": date(2025, 8, 15)}
+T6_STRIKES = [4400.0 + 100.0 * i for i in range(10)]                        # 4400 .. 5300
+
+
+def _t6_specs(kind):
+    specs = []
+    for i, (day, spot) in enumerate(zip(T6_DAYS, T6_SPOTS)):
+        sp = dict(day=day, spot=spot, im={"IM2509": spot - 20.0}, mo=_ov_mo(day, T6_LASTS, T6_STRIKES, spot - 10.0))
+        if kind == "ko":
+            obs = next(o for o in T6_KO_OBS + (60,) if o > i)
+            in_window = obs - i <= 10 and obs in T6_KO_OBS
+            sp.update(n=obs - i, ko_dir=-1 if in_window else None, gap_ko=4.0e5 if in_window else None,
+                      deltas=dict(KO_DELTAS) if in_window else {"true": 1000.0},
+                      prices={m: 150000.0 + 1000.0 * (spot - 5000.0) for m in KO_DELTAS})
+        else:
+            in_window = any(a <= i <= b for a, b in T6_KI_RUNS) and i != 26
+            sp.update(n=70 - i, knocked_in=i >= 26, deltas=dict(KI_DELTAS) if in_window else {"true": 2000.0},
+                      prices={"true": 400000.0 + 2000.0 * (spot - 5000.0), "ki_m200": 100000.0, "kin": -300000.0})
+        specs.append(sp)
+    return specs
+
+
+def _t6_market():
+    """``(ko_states, ki_states, boards, chains)``: the 2Y note ``ki75:2025-06-02`` (strike and KO level 5000; it
+    survives 06-17 and is redeemed on 07-15) and the seasoned note ``seas6:2025-06-02`` (KI level 4700; it knocks in on
+    07-08 and is alive at the data end), on one market."""
+    from gpin.board import DayBoard, ImBar
+
+    ko_states, boards, chains = _t5_world(_t6_specs("ko"))
+    ki_states, _, _ = _t5_world(_t6_specs("ki"), strike=T6_KI_LEVEL / 0.75, ki=T6_KI_LEVEL, book="seas6")
+    # IM bars with an open and a VWAP, so the twap and next_open clocks have their fills
+    boards = {d: DayBoard(d, b.spot, {c: ImBar(bar.close - 6.0, bar.close, bar.close, bar.close - 2.0, 1000)
+                                      for c, bar in b.im.items()}, b.mo, b.series) for d, b in boards.items()}
+    dead = ko_states["days"][31]
+    dead.update(alive=False, engine_note_cash=250000.0, end_reason="ko", states={}, next_ko=None, days_to_ko=None)
+    ko_states["days"] = ko_states["days"][:32]
+    return ko_states, ki_states, boards, chains
+
+
+def _t6_sample():
+    """The events file of the hand-made market, in the shape of ``results/events.json``."""
+    def iso(i):
+        return T6_DAYS[i].isoformat()
+
+    def ko(i, fired):
+        return {"date": iso(i), "fired": fired, "inception": iso(0), "prior_gap": 0.01,
+                "slice": "train" if T6_DAYS[i] < T6_SPLIT else "test", "week": week_key_of(T6_DAYS[i])}
+
+    def ki(a, b, knocked):
+        return {"date": iso(b), "inception": iso(0), "knocked_in": knocked, "start": iso(a),
+                "slice": "train" if T6_DAYS[b] < T6_SPLIT else "test", "week": week_key_of(T6_DAYS[b])}
+
+    note = {"end_date": iso(39), "end_reason": "truncated", "ki_date": None, "ko_date": None, "ko_observations": 0}
+    return {"split_date": "2025-07-01", "books": {
+        "ki75": {"headline": [iso(0)], "pin": [], "notes": {iso(0): dict(note)},
+                 "ko_events": [ko(11, False), ko(31, True)], "ki_approaches": []},
+        "seas6": {"headline": [iso(0)], "pin": [], "notes": {iso(0): dict(note)},
+                  "ko_events": [], "ki_approaches": [ki(6, 9, False), ki(23, 26, True)]}}}
+
+
+@pytest.fixture(scope="module")
+def t6_market():
+    return _t6_market()
+
+
+def _t6_plan(modes=("close",)):
+    from gpin.measures import primary_config
+
+    return [(primary_config(load_prereg()), tuple(modes))]
+
+
+def test_configs_are_the_pre_registered_desk_and_cost_and_one_at_a_time_sensitivities():
+    from gpin.measures import Config, primary_config, sensitivity_configs
+
+    prereg = load_prereg()
+    primary = primary_config(prereg)
+    assert (primary, primary.key) == (Config(5.0e8, 0.2), "desk500_cost0.2")
+    assert sensitivity_configs(prereg, [5.0e8], [0.2]) == []
+    assert [c.key for c in sensitivity_configs(prereg, [5.0e8, 1.0e8], [0.2, 1.0])] == [
+        "desk100_cost0.2", "desk500_cost1"]                               # never both changed at once
+
+
+def test_run_note_keeps_per_technique_and_clock_the_events_the_life_and_the_gap_observations(t6_market):
+    from gpin.measures import (event_windows, gap_observations, life_stats, note_completed, note_events, run_note,
+                               summarise_run)
+
+    ko_states, ki_states, boards, chains = t6_market
+    reg = _registry()
+    techs = [reg["base"], reg["surv_hold@1"], reg["mo_ko@1,payoff"]]
+    events = note_events(_t6_sample(), "ki75:2025-06-02")
+    note = run_note(ko_states, techs, boards, chains, events, plan=_t6_plan(("close", "next_open")))
+    assert (note["note"], note["book"], note["inception"], note["until"]) == ("ki75:2025-06-02", "ki75", "2025-06-02", None)
+    assert (note["completed"], note["end_reason"], note["last_record"]) == (True, "ko", "2025-07-15")
+    assert note["events"] == {e.id: e.to_json() for e in events} and len(events) == 2
+    assert set(note["runs"]) == {"desk500_cost0.2"} and set(note["runs"]["desk500_cost0.2"]) == {"close", "next_open"}
+    assert list(note["runs"]["desk500_cost0.2"]["close"]) == ["base", "surv_hold@1", "mo_ko@1,payoff"]
+    # one cell is the summary of that run
+    run = _run(ko_states, reg["surv_hold@1"], boards, chains)
+    days = [c.day for c in chains]
+    got = note["runs"]["desk500_cost0.2"]["close"]["surv_hold@1"]
+    assert got == summarise_run(run, events, days, boards, completed=True)
+    assert got["life"] == life_stats(run, True) and got["life"]["last"] == "2025-07-15"
+    assert {eid: e["pnl_bp"] for eid, e in got["events"].items()} == event_windows(run, events, days)
+    # the technique does act: the survived-branch delta into each fixing is not the baseline's hedge
+    base = note["runs"]["desk500_cost0.2"]["close"]["base"]
+    for e in events:
+        assert got["events"][e.id]["gamma"]["hedge_into_fixing"] < base["events"][e.id]["gamma"]["hedge_into_fixing"]
+    # under next_open the redeemed note has its T+1 row
+    assert note["runs"]["desk500_cost0.2"]["next_open"]["base"]["life"]["last"] == "2025-07-16"
+    # the overlay holds legs into the fixing: their gamma is in the net gamma
+    overlay = note["runs"]["desk500_cost0.2"]["close"]["mo_ko@1,payoff"]["events"][events[0].id]
+    assert overlay["leg_days"] > 0 and overlay["gamma"]["legs_gamma"] != 0.0
+    assert overlay["gamma"]["net_gamma"] == pytest.approx(overlay["gamma"]["note_gamma"] + overlay["gamma"]["legs_gamma"])
+    # gap observations: the first KO-window day of each observation
+    assert note["gap_observations"] == gap_observations(ko_states, None) == [
+        {"obs": "2025-06-17", "date": "2025-06-03", "gap_ko_bp": 400.0, "ko_dir": -1},
+        {"obs": "2025-07-15", "date": "2025-07-01", "gap_ko_bp": 400.0, "ko_dir": -1}]
+    assert note_completed(ko_states, None) and not note_completed(ko_states, T6_UNTIL)
+    assert not note_completed(ki_states, None)
+    json.dumps(note, allow_nan=False)
+
+
+def test_run_note_on_the_training_slice_stops_at_the_last_day_before_the_split(t6_market):
+    from gpin.measures import note_events, run_note
+
+    ko_states, ki_states, boards, chains = t6_market
+    reg = _registry()
+    for states, nid in ((ko_states, "ki75:2025-06-02"), (ki_states, "seas6:2025-06-02")):
+        events = [e for e in note_events(_t6_sample(), nid) if e.slice == "train"]
+        assert len(events) == 1
+        note = run_note(states, [reg["base"], reg["ki_cap@1.0"]], boards, chains, events,
+                        plan=_t6_plan(("close", "twap", "next_open")), until=T6_UNTIL)
+        assert (note["until"], note["completed"]) == ("2025-06-30", False)
+        assert [g["obs"] for g in note["gap_observations"]] == (["2025-06-17"] if states is ko_states else [])
+        for clock, cells in note["runs"]["desk500_cost0.2"].items():
+            for tid, cell in cells.items():
+                assert cell["life"]["last"] == "2025-06-30" and cell["life"]["rows"] == 21
+                assert all(d[0] < "2025-07-01" for e in cell["events"].values() for d in e["days"])
+        # an event dated on or after the split is refused: no test-dated P&L is ever computed on the training slice
+        with pytest.raises(ValidationError):
+            run_note(states, [reg["base"]], boards, chains, note_events(_t6_sample(), nid), plan=_t6_plan(),
+                     until=T6_UNTIL)
+
+
+def test_run_note_refuses_an_event_dated_after_the_notes_last_recorded_day(t6_market):
+    """A short diagnostic state file (``03_pricing.py --quick``) ends before its note's events: their windows would
+    hold no row and count 0, which is not a measurement."""
+    from gpin.measures import measurable_events, note_events, run_note
+
+    ko_states, _, boards, chains = t6_market
+    short = dict(ko_states, days=ko_states["days"][:8])                    # 06-02 .. 06-11, the note alive
+    events = note_events(_t6_sample(), "ki75:2025-06-02")
+    with pytest.raises(ValidationError, match="last recorded day"):
+        run_note(short, [_registry()["base"]], boards, chains, events, plan=_t6_plan())
+    assert measurable_events(short, events) == [] and measurable_events(ko_states, events) == events
+    note = run_note(short, [_registry()["base"]], boards, chains, [], plan=_t6_plan())
+    assert (note["completed"], note["last_record"], note["events"]) == (False, "2025-06-11", {})
+
+
+def test_merge_notes_adds_the_composites_runs_and_refuses_anything_else(t6_market):
+    from gpin.measures import merge_notes, note_events, run_note
+
+    ko_states, _, boards, chains = t6_market
+    reg = _registry()
+    events = note_events(_t6_sample(), "ki75:2025-06-02")
+    first = run_note(ko_states, [reg["base"]], boards, chains, events, plan=_t6_plan())
+    second = run_note(ko_states, [reg["sop_futures"]], boards, chains, events, plan=_t6_plan())
+    merged = merge_notes(first, second)
+    assert list(merged["runs"]["desk500_cost0.2"]["close"]) == ["base", "sop_futures"]
+    assert list(first["runs"]["desk500_cost0.2"]["close"]) == ["base"]                 # the inputs are not changed
+    with pytest.raises(ValidationError):
+        merge_notes(first, first)                                                      # the same technique twice
+    other = dict(second, until="2025-06-30")
+    with pytest.raises(ValidationError):
+        merge_notes(first, other)
+
+
+# ---- the three hashes and the guard of the test slice (D11, AC12) ----
+
+
+def test_the_code_hash_covers_exactly_the_ledger_side_files(tmp_path):
+    import hashlib
+    from gpin import measures
+
+    assert measures.CODE_FILES == ("black.py", "ledger.py", "techniques.py", "measures.py")
+    h = hashlib.sha256()
+    for name in measures.CODE_FILES:
+        h.update(name.encode("utf-8") + b"\0" + (STUDY_DIR / "gpin" / name).read_bytes() + b"\0")
+    assert measures.code_hash() == h.hexdigest()
+    # a copy with one ledger-side file changed hashes differently; a pricing-side file is not in it
+    for name in measures.CODE_FILES + ("pricing.py",):
+        (tmp_path / name).write_bytes((STUDY_DIR / "gpin" / name).read_bytes())
+    assert measures.code_hash(tmp_path) == measures.code_hash()
+    (tmp_path / "pricing.py").write_text("# changed\n")
+    assert measures.code_hash(tmp_path) == measures.code_hash()
+    (tmp_path / "black.py").write_bytes((tmp_path / "black.py").read_bytes() + b"\n")
+    assert measures.code_hash(tmp_path) != measures.code_hash()
+    f = tmp_path / "events.json"
+    f.write_text("{}")
+    assert measures.file_hash(f) == hashlib.sha256(b"{}").hexdigest()
+    assert measures.stamp(f) == {"prereg_hash": prereg_hash(), "events_hash": measures.file_hash(f),
+                                 "code_hash": measures.code_hash()}
+
+
+def test_check_selection_refuses_a_missing_file_each_wrong_hash_and_a_partial_selection(tmp_path):
+    from gpin.measures import SelectionRefused, check_selection
+
+    current = {"prereg_hash": "p" * 64, "events_hash": "e" * 64, "code_hash": "c" * 64}
+    path = tmp_path / "selection.json"
+    with pytest.raises(SelectionRefused, match="does not exist"):
+        check_selection(path, current)
+    good = {**current, "partial": False, "picks": {}, "composites": {}}
+    path.write_text(json.dumps(good))
+    assert check_selection(path, current) == good
+    for key, word in (("prereg_hash", "pre-registration"), ("events_hash", "events"), ("code_hash", "ledger-side code")):
+        path.write_text(json.dumps({**good, key: "0" * 64}))
+        with pytest.raises(SelectionRefused, match=word) as err:
+            check_selection(path, current)
+        assert sum(w in str(err.value) for w in ("pre-registration", "events file", "ledger-side code")) == 1
+    path.write_text(json.dumps({k: v for k, v in good.items() if k != "code_hash"}))
+    with pytest.raises(SelectionRefused, match="ledger-side code"):
+        check_selection(path, current)
+    path.write_text(json.dumps({**good, "partial": True}))
+    with pytest.raises(SelectionRefused, match="partial"):
+        check_selection(path, current)
+    assert check_selection(path, current, allow_partial=True)["partial"] is True
+    assert issubclass(SelectionRefused, StudyDataError)
+
+
+# ---- aggregation: the training selection and the verdict tables from stored note files (hand-made) ----
+
+T6_CFG, T6_CFG_DESK = "desk500_cost0.2", "desk100_cost0.2"
+
+
+def _t6_cell(note, events, pnl, daily, *, completed=True, left_out=(), cost=0.5, clips=1, hedge=1.5, flags=None,
+             legs=False):
+    """One stored run: ``pnl[event id]`` bp per event of ``events``, ``daily`` CNY rows (the first is day 0)."""
+    from gpin.measures import life_stats
+
+    cells = {}
+    for e in events:
+        cells[e.id] = {"pnl_bp": pnl[e.id], "cost_bp": cost, "clips": clips, "leg_days": 2 if legs else 0,
+                       "phi_min": 0.5 if legs else None, "flags": dict(flags or {}), "left_out": e.id in left_out,
+                       "days": []}
+        if e.kind == "ko":
+            cells[e.id]["gamma"] = {"date": "2025-07-01", "note_gamma": -10.0, "legs_gamma": 4.0 if legs else 0.0,
+                                    "net_gamma": -6.0 if legs else -10.0, "net_gamma_1pct_bp": -3.0 if legs else -5.0,
+                                    "hedge_into_fixing": hedge, "hedge_max": hedge + 0.5}
+    rows = [_t6_row(T6_CAL[i], g, legs={"MO2507:C:5000": 1.0} if legs and i == 1 else None, phi=0.5 if legs and i == 1 else 1.0,
+                    flags=("volume_cut",) if legs and i == 1 else ()) for i, g in enumerate(daily)]
+    return {"events": cells, "life": life_stats(_t6_run(rows, note=(note[0], T6_CAL[0])), completed)}
+
+
+def _t6_note_file(note, events, cell_fn, tids, cells_of, *, gaps=()):
+    """A stored note file: ``cell_fn(tid, clock, config) -> keyword arguments of _t6_cell`` for every technique of every
+    ``(config, clocks)`` of ``cells_of``."""
+    from gpin.events import note_id
+
+    return {"note": note_id(*note), "book": note[0], "inception": note[1].isoformat(), "until": None,
+            "completed": True, "end_reason": "ko", "last_record": "2025-12-31",
+            "events": {e.id: e.to_json() for e in events}, "gap_observations": list(gaps),
+            "runs": {cfg: {clock: {tid: _t6_cell(note, events, **cell_fn(tid, clock, cfg)) for tid in tids}
+                           for clock in clocks} for cfg, clocks in cells_of.items()}}
+
+
+def _t6_selection():
+    from gpin.measures import select_on_train
+
+    return select_on_train(load_prereg(), {"ko": _t6_windows(T6_KO_ES), "ki": _t6_windows(T6_KI_ES)}, _t6_costs())
+
+
+def test_training_selection_reads_the_training_events_of_the_selection_books_under_the_primary_clock():
+    from gpin.measures import select_on_train, training_selection
+
+    prereg = load_prereg()
+    tids = list(_registry(None))                                           # every grid point, no composite
+    ko_note, ki_note, other = ("ki75", date(2024, 1, 2)), ("seas6", date(2024, 1, 2)), ("ki75", date(2024, 1, 3))
+    days = [date(2025, 3, 3), date(2025, 3, 10), date(2025, 3, 17)]
+    ko_events = [_t6_event("ko", d, note=ko_note) for d in days]
+    ki_events = [_t6_event("ki", d, start=d, note=ki_note) for d in days]
+    stray = [_t6_event("ki", days[0], start=days[0], note=other)]            # a ki75 approach: not the KI selection book
+
+    def cells(es_by_id, events, wild=False):
+        def fn(tid, clock, cfg):
+            v = es_by_id.get(tid, es_by_id["base"])
+            if clock != "close" or wild:
+                v = 1.0e6 if tid == "ko_shift@0.01" else -1.0e6           # another clock or book must not be read
+            cost = {"ko_spread@0.015": 3.0, "ko_spread@0.03": 2.0}.get(tid, 1.0)
+            return dict(pnl={e.id: v + 10.0 * k for k, e in enumerate(events)}, daily=[0.0, 1000.0], cost=cost)
+        return fn
+
+    both = {T6_CFG: ("close", "twap")}
+    notes = [_t6_note_file(ko_note, ko_events, cells(T6_KO_ES, ko_events), tids, both),
+             _t6_note_file(ki_note, ki_events, cells(T6_KI_ES, ki_events), tids, both),
+             _t6_note_file(other, stray, cells(T6_KI_ES, stray, wild=True), tids, both)]
+    got = training_selection(notes, prereg)
+    want = select_on_train(prereg, {"ko": _t6_windows(T6_KO_ES), "ki": _t6_windows(T6_KI_ES)}, _t6_costs())
+    assert got["composites"] == want["composites"] and got["base"] == want["base"] and got["empty"] == []
+    assert {b: {r: p["id"] for r, p in rows.items()} for b, rows in got["picks"].items()} == {
+        b: {r: p["id"] for r, p in rows.items()} for b, rows in want["picks"].items()}
+    assert got["picks"]["ko"]["ko_spread"]["cost_bp"] == pytest.approx(2.0)   # the mean event-window cost breaks the tie
+    assert got["events"] == {"ko": {"n": 3, "weeks": 3, "book": "ki75"}, "ki": {"n": 3, "weeks": 3, "book": "seas6"}}
+    # a test-dated event in a training file is refused outright
+    late_event = _t6_event("ko", date(2025, 7, 2), note=ko_note, slice_="test")
+    late = _t6_note_file(ko_note, [late_event], lambda tid, clock, cfg: dict(pnl={late_event.id: 0.0}, daily=[0.0, 1.0]),
+                         tids, both)
+    with pytest.raises(ValidationError):
+        training_selection([late, notes[1]], prereg)
+    # no training event of a barrier type: fails closed unless the run is a smoke run on a partial set of states
+    with pytest.raises(StudyDataError):
+        training_selection(notes[:1], prereg)
+    assert training_selection(notes[:1], prereg, allow_empty=True)["empty"] == ["ki"]
+
+
+def _t6_book():
+    """Stored test-slice files of a hand-made sample: 12 ``ki75`` pin notes with two KO pin events each (24 events in
+    12 weeks; event i loses the baseline ``-100 + 10 i`` bp), 2 ``ki75`` headline notes without events, 24 ``seas6``
+    bookings with one approach each, and two ``ki75`` approaches (the transfer check)."""
+    from gpin.measures import evaluated_ids
+
+    prereg, sel = load_prereg(), _t6_selection()
+    tids = evaluated_ids(prereg, sel)
+    monday = date(2025, 7, 7)
+
+    def day_of(i):
+        return monday + timedelta(days=7 * (i % 12) + i // 12)
+
+    pins = [("ki75", d) for d in _weekdays(12, date(2024, 1, 2))]
+    heads = [("ki75", date(2023, 10, 9)), ("ki75", date(2023, 11, 1))]
+    seas = [("seas6", date(2024, 2, 5) + timedelta(days=7 * j)) for j in range(24)]
+    index, files = {}, []
+    cells_of = {T6_CFG: ("close", "twap", "next_open"), T6_CFG_DESK: ("close",)}
+
+    def gain(tid, clock, cfg, kind, i):
+        if kind == "ki":
+            return 30.0 if tid == "ki_cap@1.0" else 0.0
+        if tid == "ko_spread@0.03":                                        # the whole gain sits in one week
+            return {0: 30.0, 12: 30.0}.get(i, 0.0)
+        if tid == "derisk@5" and clock == "next_open":
+            return 0.0
+        if tid == "mo_ko@1,scenario":
+            return 60.0 if cfg == T6_CFG_DESK else 30.0
+        return 30.0 if tid in ("surv_hold@1", "derisk@5", "freeze@1", "ko_wrong", "sop_futures") else 0.0
+
+    def cell_fn(note, events, daily, wild=1.0):
+        def fn(tid, clock, cfg):
+            pnl = {}
+            for e in events:
+                kind, i = index[e.id]
+                pnl[e.id] = (-5000.0 if e.slice == "train" else -100.0 + 10.0 * i + gain(tid, clock, cfg, kind, i))
+            scale = wild * (2.0 if tid == "freeze@1" else 1.0)
+            out = dict(pnl=pnl, daily=[daily[0]] + [scale * g for g in daily[1:]],
+                       left_out=[e.id for e in events if clock == "next_open" and index[e.id] == ("ko", 23)],
+                       hedge=0.8 if tid == "surv_hold@1" else 1.5, legs=tid.startswith("mo_ko"))
+            if tid == "mo_ko@1,scenario":
+                out["flags"] = {"overlay_no_strike": 1}
+            return out
+        return fn
+
+    for j, note in enumerate(pins):
+        events = [_t6_event("ko", day_of(i), note=note, slice_="test", hit=i % 2 == 0) for i in (2 * j, 2 * j + 1)]
+        for e, i in zip(events, (2 * j, 2 * j + 1)):
+            index[e.id] = ("ko", i)
+        train = _t6_event("ko", date(2025, 3, 3), note=note)               # a training event: not a test number
+        index[train.id] = ("ko", 0)
+        events.append(train)
+        if j < 2:
+            approach = _t6_event("ki", day_of(j), start=day_of(j), note=note, slice_="test")
+            index[approach.id] = ("ki", j)
+            events.append(approach)
+        gaps = [{"obs": day_of(2 * j).isoformat(), "date": "2025-06-20", "gap_ko_bp": 400.0 if j else -3.0, "ko_dir": -1}]
+        files.append(_t6_note_file(note, events, cell_fn(note, events, [50000.0, 3000.0, -1000.0], wild=100.0), tids,
+                                   cells_of, gaps=gaps))
+    for note in heads:
+        files.append(_t6_note_file(note, [], cell_fn(note, [], [50000.0, 3000.0, -1000.0, 2000.0, -2500.0]), tids,
+                                   cells_of))
+    for i, note in enumerate(seas):
+        e = _t6_event("ki", day_of(i), start=day_of(i), note=note, slice_="test", hit=i % 3 == 0)
+        index[e.id] = ("ki", i)
+        gaps = [{"obs": "2025-08-01", "date": "2025-07-20", "gap_ko_bp": 0.0, "ko_dir": 0}] if i == 0 else []
+        files.append(_t6_note_file(note, [e], cell_fn(note, [e], [-80000.0, 1000.0, -1000.0]), tids, cells_of, gaps=gaps))
+    sample = {"books": {
+        "ki75": {"headline": [n[1].isoformat() for n in heads], "pin": [{"inception": n[1].isoformat()} for n in pins]},
+        "seas6": {"headline": [n[1].isoformat() for n in seas], "pin": []}}}
+    last_ko = next(eid for eid, v in index.items() if v == ("ko", 23))
+    return files, sample, sel, tids, last_ko
+
+
+@pytest.fixture(scope="module")
+def t6_tables():
+    from gpin.measures import tables
+
+    files, sample, sel, tids, last_ko = _t6_book()
+    return tables(files, load_prereg(), sample, sel, slice_="test"), tids, last_ko
+
+
+def test_tables_give_the_ko_verdict_on_test_events_with_the_whole_life_of_the_headline_notes(t6_tables):
+    from s2ts.measures import holm
+
+    out, tids, _ = t6_tables
+    assert (out["view"], out["slice"], out["clocks"]) == ("seller", "test", ["close", "twap", "next_open"])
+    assert out["primary"] == {"clock": "close", "config": T6_CFG}
+    assert out["notes"] == {"n": 38, "ki75": 14, "seas6": 24}
+    t = out["tables"]["close"]["ko"]
+    assert (t["book"], t["barrier"], t["slice"], t["n_events"], t["n_weeks"], t["decidable"]) == (
+        "ki75", "ko", "test", 24, 12, True)
+    assert (t["whole_life"], t["left_out"]) == ({"set": "headline", "n_notes": 2}, [])
+    rows = t["rows"]
+    assert "ki_shift@-0.02" not in rows and "ki_wrong" not in rows and "mo_ki@2,payoff" not in rows
+    assert list(rows) == t["order"] == [tid for tid in tids if tid in rows] and len(rows) == 16 and out["order"] == tids
+    win = rows["surv_hold@1"]
+    assert win["es10"] == pytest.approx(-60.0) and win["es10_base"] == pytest.approx(-90.0) and win["p"] == 0.0
+    assert (win["eligible"], win["tail_pass"], win["life_pass"], win["win"], win["robust"]) == (True,) * 5
+    assert (win["row"], win["role"], win["clips"], win["mean_cost_bp"]) == ("surv_hold", "candidate", 24, 0.5)
+    # the whole life is the two headline notes': the pin notes' hundred-fold daily P&L is not in it
+    daily = [_bp(g) for g in (3000.0, -1000.0, 2000.0, -2500.0)] * 2
+    assert win["std_bp"] == pytest.approx(float(np.std(daily, ddof=1)), rel=1e-10) and win["std_ratio"] == pytest.approx(1.0)
+    assert win["mean_terminal_bp"] == pytest.approx(_bp(51500.0), rel=1e-12) and win["n_completed"] == 2
+    # passes under close and twap but not under next_open: a win that is not robust
+    assert (rows["derisk@5"]["win"], rows["derisk@5"]["robust"]) == (True, False)
+    assert out["tables"]["next_open"]["ko"]["rows"]["derisk@5"]["tail_pass"] is False
+    # the tail passes, the daily std is twice the baseline's: fails on the whole life
+    fz = rows["freeze@1"]
+    assert (fz["tail_pass"], fz["std_pass"], fz["life_pass"], fz["win"], fz["robust"]) == (True, False, False, False, False)
+    assert fz["std_ratio"] == pytest.approx(2.0)
+    # same events as the baseline: fails on the tail
+    assert (rows["ko_shift@0.02"]["tail_pass"], rows["ko_shift@0.02"]["win"]) == (False, False)
+    # controls, cost rows, the baseline and the other barrier's pick of a row are reported, never eligible
+    for tid in ("base", "base_noclip", "ko_wrong", "band@0.02", "band@0.05", "secant@0.03"):
+        assert (rows[tid]["eligible"], rows[tid]["win"], rows[tid]["robust"], rows[tid]["p_holm"]) == (False, None, None, None)
+    assert rows["ko_wrong"]["tail_pass"] is True and rows["ko_wrong"]["p"] == 0.0
+    # Holm across the ten eligible rows, beside the raw p
+    eligible = [tid for tid, r in rows.items() if r["eligible"]]
+    assert eligible == ["ko_shift@0.02", "ko_spread@0.03", "ko_bend@0.015,3", "secant@0.05", "surv_hold@1", "derisk@5",
+                        "freeze@1", "mo_ko@1,scenario", "sop_futures", "sop_overlay"]
+    assert [rows[tid]["p_holm"] for tid in eligible] == holm([rows[tid]["p"] for tid in eligible])
+    spread = rows["ko_spread@0.03"]
+    assert 0.25 < spread["p"] < 0.45 and spread["p_holm"] > spread["p"] and spread["win"] is False
+    assert t["n_eligible"] == 10 and t["wins"] == ["surv_hold@1", "derisk@5", "mo_ko@1,scenario", "sop_futures"]
+
+
+def test_tables_leave_out_the_last_day_fixing_under_next_open_and_filter_the_slice(t6_tables):
+    out, _, last_ko = t6_tables
+    t = out["tables"]["next_open"]["ko"]
+    assert (t["n_events"], t["n_weeks"], t["left_out"]) == (23, 12, [last_ko])
+    # without event 23 (+130 for the baseline) nothing changes in the tail of 23 events: k = ceil(2.3) = 3
+    assert t["rows"]["surv_hold@1"]["es10"] == pytest.approx(-60.0) and t["rows"]["base"]["worst"] == -100.0
+    assert out["tables"]["twap"]["ko"]["n_events"] == 24
+    # the training events of the same files (-5000 bp each) are in no test table
+    assert all(r["worst"] > -200.0 for c in out["tables"].values() for r in c["ko"]["rows"].values())
+    assert out["tables"]["close"]["ko"]["rows"]["base"]["robust"] is None
+    assert "robust" not in out["tables"]["twap"]["ko"]["rows"]["surv_hold@1"]            # only the primary clock's table
+
+
+def test_tables_give_the_ki_verdict_on_the_seasoned_book_and_the_ki75_transfer_without_a_verdict(t6_tables):
+    out, _, _ = t6_tables
+    t = out["tables"]["close"]["ki"]
+    assert (t["book"], t["barrier"], t["n_events"], t["n_weeks"], t["decidable"]) == ("seas6", "ki", 24, 12, True)
+    assert t["whole_life"] == {"set": "headline", "n_notes": 24}
+    rows = t["rows"]
+    assert "surv_hold@1" not in rows and "mo_ko@1,scenario" not in rows and "ko_wrong" not in rows
+    assert [tid for tid, r in rows.items() if r["eligible"]] == [
+        "ki_shift@-0.02", "secant@0.03", "ki_cap@1.0", "mo_ki@2,payoff", "sop_futures", "sop_overlay"]
+    assert (rows["ki_cap@1.0"]["win"], rows["ki_cap@1.0"]["robust"], rows["ki_shift@-0.02"]["win"]) == (True, True, False)
+    assert rows["secant@0.05"]["eligible"] is False and rows["ki_wrong"]["win"] is None
+    # the same picks on the 2Y product's own approaches: measures only
+    tr = out["tables"]["close"]["ki_transfer"]
+    assert (tr["book"], tr["n_events"], tr["n_weeks"], tr["verdict"]) == ("ki75", 2, 2, False)
+    assert set(tr["rows"]) == set(rows)
+    cap = tr["rows"]["ki_cap@1.0"]
+    assert (cap["es10"], cap["es10_base"], cap["worst"], cap["worst_base"]) == (-70.0, -100.0, -70.0, -100.0)
+    assert not {"win", "p", "p_holm", "tail_pass", "life_pass", "robust", "decidable"} & set(cap)
+
+
+def test_tables_carry_the_sensitivities_the_pin_set_the_gamma_carry_and_the_descriptive_extras(t6_tables):
+    out, tids, _ = t6_tables
+    sens = out["sensitivities"]
+    assert set(sens) == {T6_CFG_DESK} and set(sens[T6_CFG_DESK]) == {"close"}
+    assert sens[T6_CFG_DESK]["close"]["ko"]["rows"]["mo_ko@1,scenario"]["es10"] == pytest.approx(-30.0)
+    assert out["tables"]["close"]["ko"]["rows"]["mo_ko@1,scenario"]["es10"] == pytest.approx(-60.0)
+    # the pin set's whole life is printed separately and decides nothing
+    pin = out["whole_life_pin"]["close"]
+    assert set(pin) == set(tids) and pin["base"]["n_notes"] == 12
+    assert pin["base"]["std_bp"] == pytest.approx(float(np.std([_bp(3.0e5), _bp(-1.0e5)] * 12, ddof=1)), rel=1e-10)
+    # gamma carry on the KO test events, per technique
+    g = out["gamma_carry"]["close"]
+    assert g["base"] == {"n_events": 24, "mean_note_gamma": -10.0, "mean_legs_gamma": 0.0, "mean_net_gamma": -10.0,
+                         "mean_net_gamma_1pct_bp": -5.0, "mean_hedge_into_fixing": 1.5, "mean_hedge_max": 2.0,
+                         "max_hedge_max": 2.0}
+    assert g["surv_hold@1"]["mean_hedge_into_fixing"] == pytest.approx(0.8)
+    assert g["mo_ko@1,scenario"]["mean_net_gamma"] == pytest.approx(-6.0)
+    assert g["mo_ko@1,scenario"]["mean_legs_gamma"] == pytest.approx(4.0)
+    assert out["gamma_carry"]["next_open"]["base"]["n_events"] == 23
+    x = out["extras"]
+    assert x["gap_observations"] == {"ki75": {"n": 12, "positive": 11, "negative": 1, "zero": 0, "non_positive": 1},
+                                     "seas6": {"n": 1, "positive": 0, "negative": 0, "zero": 1, "non_positive": 1}}
+    assert x["left_out"] == {"close": {"ko": 0, "ki": 0}, "twap": {"ko": 0, "ki": 0}, "next_open": {"ko": 1, "ki": 0}}
+    ov = x["overlay"]["close"]
+    assert set(ov) == {"mo_ko@1,scenario"}                                     # the only technique that held a leg
+    assert ov["mo_ko@1,scenario"] == {"leg_days": 38, "overlay_days": 38, "phi_lt1_days": 38, "phi_mean": 0.5,
+                                      "phi_min": 0.5, "flags": {"volume_cut": 38}}
+    assert x["flags"]["close"]["mo_ko@1,scenario"] == {"volume_cut": 38} and x["flags"]["close"]["base"] == {}
+    assert x["event_flags"]["close"]["ko"]["mo_ko@1,scenario"] == {"overlay_no_strike": 24}
+    band = x["band"]["ki75"]
+    assert set(band) == {"base", "band@0.02", "band@0.05"} and band["base"]["n_notes"] == 2
+    assert band["band@0.02"]["mean_cost_bp"] == pytest.approx(0.0) and "mean_im_lots_traded" in band["band@0.05"]
+    assert out["techniques"]["secant@0.05"] == {"row": "secant", "family": "2 futures-only", "role": "candidate",
+                                                "barrier": "both", "eligible": ["ko"]}
+    assert out["techniques"]["sop_futures"]["eligible"] == ["ko", "ki"] and out["techniques"]["ko_wrong"]["eligible"] == []
+    text = json.dumps(out, allow_nan=False)
+    assert "holder" not in text.lower()
+
+
+def test_tables_fail_closed_on_files_that_do_not_hold_the_same_runs():
+    from gpin.measures import tables
+
+    files, sample, sel, tids, _ = _t6_book()
+    del files[3]["runs"][T6_CFG]["close"]["freeze@1"]
+    with pytest.raises(ValidationError):
+        tables(files, load_prereg(), sample, sel, slice_="test")
+    with pytest.raises(ValidationError):
+        tables([], load_prereg(), sample, sel, slice_="test")
+
+
+# ---- the ledger driver: slice separation and the hash guard (D11, AC12), on the hand-made market in tmp dirs ----
+
+import pickle  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+T6_NOTE_IDS = ["ki75:2025-06-02", "seas6:2025-06-02"]
+
+
+@pytest.fixture(scope="module")
+def stage4():
+    return _load_stage("04_ledger.py")
+
+
+@pytest.fixture(scope="module")
+def t6_files(tmp_path_factory, t6_market):
+    """The hand-made market as the driver's inputs: a states directory (with the junk a real one holds), the events
+    file and the board and chain pickles."""
+    root = tmp_path_factory.mktemp("t6_driver")
+    ko_states, ki_states, boards, chains = t6_market
+    states = root / "states"
+    states.mkdir()
+    (states / "ki75__2025-06-02.json").write_text(json.dumps(ko_states))
+    (states / "seas6__2025-06-02.json").write_text(json.dumps(ki_states))
+    (states / ".lock").write_text("1")
+    (states / "ki75__2025-06-03.error.json").write_text("{}")
+    events = root / "events.json"
+    events.write_text(json.dumps(_t6_sample()))
+    with open(root / "board.pkl", "wb") as fh:
+        pickle.dump(boards, fh)
+    with open(root / "chain.pkl", "wb") as fh:
+        pickle.dump(chains, fh)
+    return SimpleNamespace(root=root, states=states, events=events, board=root / "board.pkl", chain=root / "chain.pkl")
+
+
+def _t6_argv(files, slice_, out, *extra, states=None, events=None):
+    return ["--slice", slice_, "--states-dir", str(states or files.states), "--out-dir", str(out),
+            "--events", str(events or files.events), "--board", str(files.board), "--chain", str(files.chain),
+            "--workers", "1", *extra]
+
+
+class _LedgerSpy:
+    """Wraps ``gpin.measures.run_technique``: what ``until`` every run was given and the last date it produced."""
+
+    def __init__(self):
+        from gpin import measures
+
+        self.measures, self.real, self.calls = measures, measures.run_technique, []
+
+    def __enter__(self):
+        def spy(states, technique, boards, chains, **kw):
+            run = self.real(states, technique, boards, chains, **kw)
+            self.calls.append((technique.id, kw["mode"], kw["until"], max(r["date"] for r in run.rows)))
+            return run
+
+        self.measures.run_technique = spy
+        return self
+
+    def __exit__(self, *exc):
+        self.measures.run_technique = self.real
+
+
+@pytest.fixture(scope="module")
+def t6_train(stage4, t6_files):
+    out = t6_files.root / "out"
+    tracked = [STUDY_DIR / "results" / name for name in ("selection.json", "backtest.json")]
+    before = [p.exists() for p in tracked]
+    with _LedgerSpy() as spy:
+        rc = stage4.main(_t6_argv(t6_files, "train", out))
+    assert [p.exists() for p in tracked] == before                     # the tracked results are not this run's
+    return SimpleNamespace(out=out, rc=rc, calls=spy.calls)
+
+
+def test_the_train_slice_writes_the_selection_with_the_picks_and_the_three_hashes(t6_train, t6_files):
+    from gpin import measures
+    from gpin.techniques import build_registry, composite_selection
+
+    assert t6_train.rc == 0
+    path = t6_train.out / "selection.json"                               # the selection follows --out-dir
+    sel = json.loads(path.read_text())
+    current = measures.stamp(t6_files.events)
+    assert {k: sel[k] for k in current} == current
+    assert current["prereg_hash"] == prereg_hash() and current["code_hash"] == measures.code_hash()
+    assert (sel["view"], sel["slice"], sel["split_date"], sel["until"], sel["clock"], sel["config"]) == (
+        "seller", "train", "2025-07-01", "2025-06-30", "close", "desk500_cost0.2")
+    assert (sel["partial"], sel["empty"], sel["notes"]) == (False, [], T6_NOTE_IDS)
+    assert sel["events"] == {"ko": {"n": 1, "weeks": 1, "book": "ki75"}, "ki": {"n": 1, "weeks": 1, "book": "seas6"}}
+    # the file is written with sorted keys: the rows' registered order is kept beside the picks
+    assert sel["rows"] == {"ko": ["ko_shift", "ko_spread", "ko_bend", "secant", "surv_hold", "derisk", "freeze", "mo_ko"],
+                           "ki": ["ki_shift", "secant", "ki_cap", "mo_ki"]}
+    assert {b: sorted(rows) for b, rows in sel["picks"].items()} == {b: sorted(rows) for b, rows in sel["rows"].items()}
+    for barrier, rows in sel["picks"].items():
+        for row, pick in rows.items():
+            # the highest training ES10 of the row (grid points equal to rounding are a tie: lower cost, then order)
+            assert pick["id"] in pick["grid"]
+            assert pick["es10"] == pytest.approx(max(g["es10"] for g in pick["grid"].values()), rel=1e-9)
+            assert pick["n_events"] == 1 and isinstance(pick["beats_base"], bool)
+    # the composites block is what the registry reads
+    assert composite_selection(path) == sel["composites"]
+    reg = build_registry(load_prereg(), composite_selection(path))
+    assert reg["sop_futures"].params == sel["composites"]["sop_futures"]
+    assert sel["composites"]["sop_overlay"] == {"ko": sel["picks"]["ko"]["mo_ko"]["id"],
+                                                "ki": sel["picks"]["ki"]["mo_ki"]["id"]}
+    assert "holder" not in path.read_text().lower()
+
+
+def test_the_train_slice_writes_no_row_dated_on_or_after_the_split(t6_train):
+    # every ledger run was cut at the last trading day before the split, and none produced a later row
+    assert len(t6_train.calls) == 2 * 33 * 3                             # 2 notes x (31 grid points + 2 composites) x 3 clocks
+    assert {c[2] for c in t6_train.calls} == {T6_UNTIL}
+    assert max(c[3] for c in t6_train.calls) == "2025-06-30"
+    assert {c[0] for c in t6_train.calls} >= {"sop_futures", "sop_overlay", "base", "band@0.05"}
+    runs = t6_train.out / "runs" / "train"
+    names = sorted(p.name for p in runs.iterdir())
+    assert names == ["ki75__2025-06-02.json", "manifest.json", "seas6__2025-06-02.json", "tables.json"]
+    assert not (t6_train.out / "runs" / "test").exists() and not (t6_train.out / "backtest.json").exists()
+    for p in runs.iterdir():                                             # no date of the test slice anywhere in the files
+        dates = re.findall(r"\d{4}-\d{2}-\d{2}", p.read_text())
+        assert dates and max(dates) <= ("2025-07-01" if p.name in ("manifest.json", "tables.json") else "2025-06-30"), p.name
+    manifest = json.loads((runs / "manifest.json").read_text())
+    assert (manifest["slice"], manifest["until"], manifest["split_date"], manifest["partial"]) == (
+        "train", "2025-06-30", "2025-07-01", False)
+    assert manifest["notes"] == T6_NOTE_IDS and manifest["configs"] == {"desk500_cost0.2": ["close", "twap", "next_open"]}
+    assert len(manifest["techniques"]) == 33 and manifest["techniques"][-2:] == ["sop_futures", "sop_overlay"]
+    note = json.loads((runs / "ki75__2025-06-02.json").read_text())
+    assert (note["slice"], note["until"], note["completed"]) == ("train", "2025-06-30", False)
+    assert (note["end_reason"], note["last_record"]) == (None, "2025-06-30")   # how the note ends later is not written
+    assert list(note["events"]) == ["ko|ki75:2025-06-02|2025-06-17"]     # the 07-15 observation is not in a training file
+    assert note["stamp"] == manifest["stamp"]
+    cell = note["runs"]["desk500_cost0.2"]["close"]["sop_overlay"]
+    assert cell["life"]["last"] == "2025-06-30" and set(cell["events"]) == set(note["events"])
+    tables = json.loads((runs / "tables.json").read_text())
+    assert (tables["slice"], tables["tables"]["close"]["ko"]["n_events"], tables["tables"]["close"]["ki"]["n_events"]) == (
+        "train", 1, 1)
+    assert len(tables["tables"]["close"]["ko"]["rows"]) == 2 + 3 + 2 + 3 + 1 + 2 + 2 + 2 + 2 + 3 + 2 + 2
+
+
+def _t6_tampered(t6_train, tmp_path, **changes):
+    sel = json.loads((t6_train.out / "selection.json").read_text())
+    sel.update(changes)
+    path = tmp_path / "selection.json"
+    path.write_text(json.dumps(sel))
+    return path
+
+
+def test_the_test_slice_refuses_without_a_selection_and_with_each_hash_wrong(stage4, t6_files, t6_train, tmp_path,
+                                                                              capsys, monkeypatch):
+    def refused(argv, word):
+        out = Path(argv[argv.index("--out-dir") + 1])
+        with _LedgerSpy() as spy:
+            rc = stage4.main(argv)
+        err = capsys.readouterr().err
+        assert rc != 0 and "REFUSED" in err and word in err, err
+        assert spy.calls == [] and not out.exists()                      # no ledger run, nothing written
+        return err
+
+    refused(_t6_argv(t6_files, "test", tmp_path / "a"), "does not exist")
+    for key, word in (("prereg_hash", "the pre-registration"), ("events_hash", "the events file"),
+                      ("code_hash", "the ledger-side code")):
+        sel = _t6_tampered(t6_train, tmp_path, **{key: "0" * 64})
+        err = refused(_t6_argv(t6_files, "test", tmp_path / "b", "--selection", str(sel)), word)
+        assert sum(w in err for w in ("the pre-registration", "the events file", "the ledger-side code")) == 1
+    # the files themselves changed after the selection was made: the events file ...
+    good = str(t6_train.out / "selection.json")
+    events = tmp_path / "events.json"
+    events.write_text(t6_files.events.read_text() + "\n")
+    refused(_t6_argv(t6_files, "test", tmp_path / "c", "--selection", good, events=events), "the events file")
+    # ... the ledger-side code, the pre-registration
+    from gpin import measures
+
+    with monkeypatch.context() as m:
+        m.setattr(measures, "code_hash", lambda directory=None: "1" * 64)
+        refused(_t6_argv(t6_files, "test", tmp_path / "d", "--selection", good), "the ledger-side code")
+    with monkeypatch.context() as m:
+        m.setattr(measures, "prereg_hash", lambda path=None: "2" * 64)
+        refused(_t6_argv(t6_files, "test", tmp_path / "e", "--selection", good), "the pre-registration")
+
+
+def test_the_test_slice_exits_non_zero_from_the_command_line_without_a_selection(t6_files, tmp_path):
+    import os
+
+    env = dict(os.environ, PYTHONPATH=str(STUDY_DIR.parents[2]))
+    done = subprocess.run([sys.executable, str(STUDY_DIR / "04_ledger.py"), *_t6_argv(t6_files, "test", tmp_path / "out")],
+                          capture_output=True, text=True, env=env, timeout=120)
+    assert done.returncode == 2 and "REFUSED" in done.stderr and "does not exist" in done.stderr
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.fixture(scope="module")
+def t6_test(stage4, t6_files, t6_train):
+    """The test slice on the hand-made market, with both sensitivities, into its own out-dir (the selection is the
+    training run's)."""
+    out = t6_files.root / "out_test"
+    with _LedgerSpy() as spy:
+        rc = stage4.main(_t6_argv(t6_files, "test", out, "--selection", str(t6_train.out / "selection.json"),
+                                  "--desk-notional", "5e8", "1e8", "--mo-cost-pt", "0.2", "1.0"))
+    return SimpleNamespace(out=out, rc=rc, calls=spy.calls)
+
+
+def test_the_test_slice_runs_the_selected_techniques_over_the_full_data_and_writes_the_backtest(t6_test, t6_train):
+    from gpin.measures import evaluated_ids
+
+    assert t6_test.rc == 0
+    sel = json.loads((t6_train.out / "selection.json").read_text())
+    ids = evaluated_ids(load_prereg(), sel)
+    assert {c[2] for c in t6_test.calls} == {None}                       # no cut: the full data
+    assert {c[0] for c in t6_test.calls} == set(ids)
+    assert len(t6_test.calls) == 2 * len(ids) * (3 + 2)                  # three clocks, and two sensitivities under close
+    back = json.loads((t6_test.out / "backtest.json").read_text())       # the payload follows --out-dir too
+    assert (back["view"], back["slice"], back["clocks"], back["partial"]) == ("seller", "test",
+                                                                             ["close", "twap", "next_open"], False)
+    assert back["stamp"] == {k: sel[k] for k in ("prereg_hash", "events_hash", "code_hash")}
+    assert back["selection"]["composites"] == sel["composites"]
+    assert back["selection"]["picks"] == {b: {row: p["id"] for row, p in rows.items()} for b, rows in sel["picks"].items()}
+    assert set(back["sensitivities"]) == {"desk100_cost0.2", "desk500_cost1"}
+    for clock in back["clocks"]:
+        for barrier, book in (("ko", "ki75"), ("ki", "seas6")):
+            t = back["tables"][clock][barrier]
+            assert (t["book"], t["slice"], t["n_events"], t["decidable"], t["wins"]) == (book, "test", 1, False, [])
+            assert all(r["win"] is None and r["es10"] is not None for r in t["rows"].values())
+    ko = back["tables"]["close"]["ko"]
+    assert back["order"] == ids and ko["order"] == [tid for tid in ids if tid in ko["rows"]] and len(ko["order"]) == len(ko["rows"])
+    # the redeemed 2Y note: one KO test event, a fired one, with its gamma carry
+    assert back["gamma_carry"]["close"]["base"]["n_events"] == 1
+    assert back["extras"]["gap_observations"]["ki75"] == {"n": 2, "positive": 2, "negative": 0, "zero": 0, "non_positive": 0}
+    text = (t6_test.out / "backtest.json").read_text()
+    assert "holder" not in text.lower() and "NaN" not in text
+    runs = t6_test.out / "runs" / "test"
+    manifest = json.loads((runs / "manifest.json").read_text())
+    assert (manifest["slice"], manifest["until"], manifest["techniques"]) == ("test", None, ids)
+    assert manifest["configs"] == {"desk500_cost0.2": ["close", "twap", "next_open"], "desk100_cost0.2": ["close"],
+                                   "desk500_cost1": ["close"]}
+    note = json.loads((runs / "ki75__2025-06-02.json").read_text())
+    assert (note["completed"], note["end_reason"], len(note["events"])) == (True, "ko", 2)
+    assert note["runs"]["desk500_cost0.2"]["next_open"]["base"]["life"]["last"] == "2025-07-16"
+    assert "holder" not in json.dumps(note).lower()
+    # the training run's files are untouched by the test slice
+    assert not (t6_test.out / "runs" / "train").exists() and not (t6_test.out / "selection.json").exists()
+
+
+def test_a_partial_set_of_states_needs_the_flag_marks_the_selection_and_is_refused_by_a_full_test_slice(
+        stage4, t6_files, tmp_path, capsys):
+    states = tmp_path / "states"
+    states.mkdir()
+    shutil.copy(t6_files.states / "seas6__2025-06-02.json", states)
+    out = tmp_path / "out"
+    assert stage4.main(_t6_argv(t6_files, "train", out, states=states)) != 0      # a sample note has no state file
+    assert "ki75:2025-06-02" in capsys.readouterr().err and not out.exists()
+    assert stage4.main(_t6_argv(t6_files, "train", out, "--partial", "--mode", "close", states=states)) == 0
+    sel = json.loads((out / "selection.json").read_text())
+    assert (sel["partial"], sel["empty"], sel["notes"]) == (True, ["ko"], ["seas6:2025-06-02"])
+    assert sel["picks"]["ko"]["ko_shift"]["es10"] is None and sel["picks"]["ki"]["ki_cap"]["es10"] is not None
+    assert json.loads((out / "runs" / "train" / "manifest.json").read_text())["configs"] == {"desk500_cost0.2": ["close"]}
+    capsys.readouterr()
+    assert stage4.main(_t6_argv(t6_files, "test", out, "--mode", "close", states=states)) != 0
+    assert "partial" in capsys.readouterr().err and not (out / "backtest.json").exists()
+    assert stage4.main(_t6_argv(t6_files, "test", out, "--partial", "--mode", "close", states=states)) == 0
+    back = json.loads((out / "backtest.json").read_text())
+    assert (back["partial"], back["clocks"], back["notes"]["n"]) == (True, ["close"], 1)
+    assert back["tables"]["close"]["ko"]["n_events"] == 0 and back["tables"]["close"]["ko"]["rows"]["base"]["es10"] is None
+    # every note is there but one state file is a short diagnostic one (as --quick writes): its later events cannot be
+    # measured. A full run refuses; a smoke run leaves those events out and says how many
+    short = json.loads((t6_files.states / "ki75__2025-06-02.json").read_text())
+    short["days"] = short["days"][:8]
+    (states / "ki75__2025-06-02.json").write_text(json.dumps(short))
+    out2 = tmp_path / "out2"
+    capsys.readouterr()
+    assert stage4.main(_t6_argv(t6_files, "train", out2, "--mode", "close", states=states)) != 0
+    assert "last recorded day" in capsys.readouterr().err and not out2.exists()
+    assert stage4.main(_t6_argv(t6_files, "train", out2, "--partial", "--mode", "close", states=states)) == 0
+    sel = json.loads((out2 / "selection.json").read_text())
+    assert (sel["partial"], sel["empty"], sel["notes"]) == (True, ["ko"], T6_NOTE_IDS)
+    manifest = json.loads((out2 / "runs" / "train" / "manifest.json").read_text())
+    assert manifest["events_not_measurable"] == {"ki75:2025-06-02": 1}
+
+
+def test_the_driver_resolves_its_paths_and_never_sends_a_partial_run_to_the_tracked_results(stage4, tmp_path):
+    from gpin import OUTPUT_DIR, RESULTS_DIR, STATES_DIR
+
+    plain = stage4.resolve(stage4.parse_args(["--slice", "train"]))
+    assert (plain.states_dir, plain.runs_dir) == (STATES_DIR, OUTPUT_DIR / "runs" / "train")
+    assert (plain.selection, plain.backtest) == (RESULTS_DIR / "selection.json", RESULTS_DIR / "backtest.json")
+    assert (plain.workers, plain.modes, plain.partial) == (4, ("close", "twap", "next_open"), False)
+    scratch = stage4.resolve(stage4.parse_args(["--slice", "test", "--out-dir", str(tmp_path), "--mode", "twap"]))
+    assert (scratch.runs_dir, scratch.selection, scratch.backtest) == (
+        tmp_path / "runs" / "test", tmp_path / "selection.json", tmp_path / "backtest.json")
+    assert scratch.modes == ("close", "twap")                            # the primary clock always runs
+    named = stage4.resolve(stage4.parse_args(["--slice", "test", "--out-dir", str(tmp_path), "--selection", "x.json",
+                                              "--backtest", "y.json", "--workers", "9"]))
+    assert (named.selection, named.backtest, named.workers) == (Path("x.json"), Path("y.json"), 4)   # at most 4 workers
+    with pytest.raises(StudyDataError):
+        stage4.resolve(stage4.parse_args(["--slice", "train", "--partial"]))
+    with pytest.raises(StudyDataError):
+        stage4.resolve(stage4.parse_args(["--slice", "test", "--partial", "--out-dir", str(tmp_path),
+                                          "--backtest", str(RESULTS_DIR / "backtest.json")]))
