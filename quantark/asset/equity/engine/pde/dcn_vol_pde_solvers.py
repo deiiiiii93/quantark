@@ -97,6 +97,10 @@ class LocalVolDCNPDEEngine(LocalVolSurfaceMixin, DCNPDEEngine):
     def _session_outputs(self, product, pricing_env, **kwargs):
         return self._with_surface(pricing_env, lambda: DCNPDEEngine._session_outputs(self, product, pricing_env, **kwargs))
 
+    def _statistics(self, product, pricing_env, lifecycle_state):
+        return self._with_surface(pricing_env, lambda: DCNPDEEngine._statistics(
+            self, product, pricing_env, lifecycle_state))
+
     def calculate_spot_greeks_curve(self, product, pricing_env, spot_levels):
         return self._with_surface(pricing_env, lambda: DCNPDEEngine.calculate_spot_greeks_curve(
             self, product, pricing_env, spot_levels))
@@ -193,8 +197,41 @@ class HestonDCNPDESolver(BaseEngine):
         self.v0_boundary = str(v0_boundary)
         self.v_grid_power = float(v_grid_power)
 
+    #: the price model of the statistics' provenance (the native ADI march's own, unified event statistics T15)
+    _price_model = "heston_adi_2d"
+
     def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
         return self.price_detailed(product, pricing_env, lifecycle_state=lifecycle_state).pv
+
+    # -- event statistics (unified event statistics spec T15) --
+    def calculate_event_stats(self, product, pricing_env, *, streams=None, lifecycle_state=None):
+        """The DCN's ``EventStatistics`` (``pv`` is ``price()``, D23): every outcome and the per-date knock-in table
+        from the exact forward adjoint of this solver's own ADI march (``pde/dcn_statistics.py``), times on DCN
+        ``price()``'s ACT/365F axis (D12). ``None`` for a knocked-out or matured lifecycle state with nothing left
+        unpaid (AC17). ``streams`` is accepted and nothing is pruned (one pass yields every outcome).
+
+        Raises:
+            AdjointUnavailable: the core's sweep has no transpose (sparse / semi-Lagrangian variance transport).
+        """
+        from quantark.asset.equity.engine.pde.dcn_statistics import dcn_adi_statistics
+        return dcn_adi_statistics(self, product, pricing_env, lifecycle_state=lifecycle_state)[1]
+
+    def price_with_events(self, product, pricing_env, emit_distribution=True, streams=None, *,
+                          lifecycle_state=None):
+        """NPV (``price()``) and the DCN's event distribution (``EventDistribution.from_statistics``); a knocked-out
+        or matured lifecycle state has no event left (``EventDistribution.ended``, AC17)."""
+        from quantark.asset.equity.engine.pde.dcn_statistics import dcn_adi_statistics
+        from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+
+        validate_settlement_capability(self, product, lifecycle_state)
+        if not emit_distribution:
+            npv = self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+            return PricingResult(npv=npv, event_distribution=EventDistribution.trivial(
+                max(float(product.get_maturity(pricing_env)), 0.0)))
+        pv, stats = dcn_adi_statistics(self, product, pricing_env, lifecycle_state=lifecycle_state)
+        dist = EventDistribution.ended() if stats is None else EventDistribution.from_statistics(stats)
+        return PricingResult(npv=pv, event_distribution=dist)
 
     def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
         """Per-unit PV with ``overlay``'s (buyer-view) cash legs folded into both 2-D surfaces (ship spec D4, D9).
@@ -290,7 +327,10 @@ class HestonDCNPDESolver(BaseEngine):
             return result
         return dataclasses.replace(result, pv=result.pv + state.pending_pv)
 
-    def _price_contingent(self, product, pricing_env, overlay=None) -> DCNPDEResult:
+    def _price_contingent(self, product, pricing_env, overlay=None, log=None) -> DCNPDEResult:
+        """The contingent claim's price. ``log`` (a dict, the statistics' forward pass only, never with ``overlay``)
+        records the march as it runs -- the core, each (half) step's ``(dt, tau, t_mid, theta, douglas, node)``, each
+        date's event cash, the terminal block and the read surface -- without changing any arithmetic."""
         ctx = build_dcn_grid_context(product)
         df = make_df_fn(pricing_env)
         # folded cash legs (price_folded only), bound to this grid's rows, buyer-view
@@ -421,6 +461,14 @@ class HestonDCNPDESolver(BaseEngine):
             )
             v0 = np.full_like(v1, fold.no_ki * d_settle)
         cpn_amt, ko_amt = event_amounts(len(ctx.obs_cols) - 1, T)
+        if log is not None:
+            log.update(
+                core=core, product=product, df=df, entries=[],
+                apply=lambda a0, a1, c, k: self._apply_events(a0, a1, c, k, x_grid, masks, product),
+                terminal=("terminal", T, len(ctx.obs_cols) - 1, cpn_amt, ko_amt),
+                v1_terminal=v1.copy(),
+                low=lambda tau: float(v1_boundary_hook(np.zeros((self.n_x, self.n_v)), tau)[0, 0]),
+            )
         v0, v1 = self._apply_events(
             v0, v1, cpn_amt, ko_amt, x_grid, masks, product
         )
@@ -440,10 +488,15 @@ class HestonDCNPDESolver(BaseEngine):
                         U = self._step_surface(
                             core, U, dt / 2.0, tau_new, t_mid, True
                         )
+                        if log is not None and hook is v1_boundary_hook:
+                            log["entries"].append(("step", dt / 2.0, tau_new, t_mid, 1.0, True, t_new))
                 else:
                     U = self._step_surface(
                         core, U, dt, T - t_lo, t_lo + dt / 2.0, False
                     )
+                    if log is not None and hook is v1_boundary_hook:
+                        log["entries"].append(("step", dt, T - t_lo, t_lo + dt / 2.0, self.theta,
+                                               self.scheme == ADIScheme.DOUGLAS, t_lo))
                 surfaces.append(U)
             core._boundary_hook = None
             v1, v0 = surfaces
@@ -455,14 +508,20 @@ class HestonDCNPDESolver(BaseEngine):
                 j = obs_at_col.get(k)
                 if j is not None:
                     cpn_amt, ko_amt = event_amounts(j, t_lo)
+                    if log is not None:
+                        log["entries"].append(("event", t_lo, float(times[k]), j, cpn_amt, ko_amt))
                     v0, v1 = self._apply_events(
                         v0, v1, cpn_amt, ko_amt, x_grid, masks, product
                     )
                     rann = self.rannacher_steps
                 elif self._nodal:
                     # every daily node is a KI monitoring date
+                    if log is not None:
+                        log["entries"].append(("event", t_lo, float(times[k]), None, None, None))
                     v0 = np.where(masks[0], v1, v0)
                 else:
+                    if log is not None:
+                        log["entries"].append(("event", t_lo, float(times[k]), None, None, None))
                     v0 = self._apply_events(
                         v0, v1, None, None, x_grid, masks, product
                     )[0]
@@ -474,6 +533,8 @@ class HestonDCNPDESolver(BaseEngine):
             and float(pricing_env.spot) <= product.ki_barrier
         )
         surface = v1 if observed_ki_at_valuation else v0
+        if log is not None:
+            log.update(read_ki=observed_ki_at_valuation, read_surface=surface)
         pv_unsigned = core.interpolate(
             surface,
             float(np.log(float(pricing_env.spot))),

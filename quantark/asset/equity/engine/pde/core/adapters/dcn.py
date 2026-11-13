@@ -52,10 +52,15 @@ class DCNEvents:
 
     def apply(self, v0, v1, j, t_obs):
         """The contract at one date (backward order coupon, knock-out, knock-in); ``j`` None: knock-in only."""
+        cpn, ko = (None, None) if j is None else self.amounts(j, t_obs)
+        return self.apply_amounts(v0, v1, cpn, ko)
+
+    def apply_amounts(self, v0, v1, cpn, ko):
+        """``apply`` with the date's (coupon, knock-out) cash given (``None``: that event is not active); affine in
+        ``(v0, v1, cpn, ko)``, acting on axis 0 (the statistics' forward pass reads its operators from it)."""
         from quantark.asset.equity.engine.pde.dcn_pde_solver import apply_dcn_events
         from quantark.asset.equity.engine.pde.grid.events import project_between, project_piecewise
         p, sp = self.product, self.layout.spatial
-        cpn, ko = (None, None) if j is None else self.amounts(j, t_obs)
         if self.nodal:                                   # decision 23: the legacy masks
             return apply_dcn_events(v0, v1, self.cp_mask, self.ko_mask, self.ki_mask, cpn, ko)
         if ko is not None:
@@ -107,6 +112,32 @@ class DCNEvents:
                 alive_up += fold.no_ki * df(ctx.loss_pay_time) / df(t)
                 ki_up += fold.ki * df(ctx.loss_pay_time) / df(t)
         return (loss, loss), (alive_up, ki_up)
+
+    def edge_terms(self, t):
+        """The outcomes behind ``rows(t)`` (unfolded), for the statistics (D23: the statistics describe the price's
+        own rows): ``(lower, upper_alive, upper_ki)``.
+
+        ``lower``: the loss row's value (both surfaces): a certain knock-in at the next daily date, settled knocked
+        in. ``upper_alive``: ``(coupon rows, knock-out row or None)`` -- the fixed coupons collected before the next
+        eligible knock-out observation, then that knock-out (``None``: no knock-out left, the edge matures never
+        knocked in). ``upper_ki``: the next knock-out row, or ``None`` (the edge settles knocked in, worth 0 there).
+        """
+        if self.fold is not None:
+            raise PricingError("the statistics read the unfolded rows")
+        p, ctx, df, solver, env = self.product, self.ctx, self.df, self.solver, self.env
+        s_lo = float(self.s[0])
+        fwd = s_lo * solver._carry_df_between_times(env, t, self.T) / solver._df_between_times(env, t, self.T)
+        loss = -(p.notional / p.initial_price) * p.participation * max(p.k_loss - fwd, 0.0) * df(ctx.loss_pay_time) / df(t)
+        coupons, ko_row = [], None
+        for j, c in enumerate(ctx.obs_cols):
+            if float(ctx.times[c]) <= t:
+                continue
+            if ctx.obs_is_ko[j]:
+                ko_row = j
+                break
+            if ctx.obs_is_coupon[j]:
+                coupons.append(j)
+        return loss, (tuple(coupons), ko_row), ko_row
 
 
 def _bind(fold, ctx):

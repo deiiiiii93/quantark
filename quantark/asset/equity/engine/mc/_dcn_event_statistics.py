@@ -31,7 +31,6 @@ from typing import Dict, Mapping, Optional, Sequence
 import numpy as np
 
 from quantark.asset.equity.engine.event_stats import (
-    CashLedger,
     CouponTable,
     EventStatistics,
     KnockInStatistics,
@@ -257,41 +256,8 @@ def dcn_event_statistics(product, pricing_env, ctx, *, pv: float, records: Seque
 
 def terminated_dcn_statistics(product, state, *, pv: float, engine_name: str) -> Optional[EventStatistics]:
     """A knocked-out or matured lifecycle state (spec AC17, DESIGN 4.9c): its receivables only, or ``None`` when
-    nothing is left unpaid.
+    nothing is left unpaid -- the engine-neutral ``dcn_statistics.terminated_dcn_statistics`` (shared with the DCN PDE
+    engines), with the MC's standard-error reason (nothing simulated)."""
+    from quantark.asset.equity.engine.dcn_statistics import terminated_dcn_statistics as terminated
 
-    Every termination probability is 0 and the probability identity is not checked (the type recognises the
-    terminated note from these rows); ``pv`` (the receivables' value) reconciles with the receivables. The knock-in
-    path statistics follow the valuation-date rule of a note knocked out at valuation: P(knock in) = 1 with one KI
-    row at t = 0 when the note was already knocked in, else 0 with an empty table.
-    """
-    receivables = state.receivables_table(product.schedule.valuation_date)
-    if receivables.size == 0:
-        return None
-    valuation = product.schedule.valuation_date
-    empty_rows = dict(times=[], payment_times=[], is_ko_obs=[], is_coupon_obs=[], probability=[], survival=[],
-                      discounted_cash=[], cash_to_pay=[], payment_is_path_dependent=[])
-    observations = ObservationTable(**empty_rows)
-    coupons = CouponTable(probability=[], survival=[], payment_times=[], discounted_cash=[], cash_to_pay=[],
-                          payment_is_path_dependent=[])
-    nothing = dict(time=0.0, payment_time=0.0, probability=0.0, discounted_cash=0.0, cash_to_pay=0.0)
-    carried = bool(product.knocked_in_at_valuation)
-    unavailable = {"standard_errors": TERMINATED}
-    if carried:
-        ki_table = KnockInTable(times=[0.0], payment_times=[0.0], dates=(valuation,), payment_dates=(valuation,),
-                                probability=[1.0], survival=[0.0], interpolated=[False])
-    else:
-        ki_table = KnockInTable.empty()
-        unavailable["knock_in.expected_time"] = NO_KNOCK_IN
-    knock_in = KnockInStatistics(probability=1.0 if carried else 0.0, probability_no_ko=0.0,
-                                 expected_time=0.0 if carried else None, expected_loss=0.0)
-    ledger = CashLedger(
-        determination_times=receivables.decision_times, payment_times=receivables.payment_times,
-        determination_dates=receivables.decision_dates, payment_dates=receivables.payment_dates,
-        discounted_cash=receivables.discounted_cash, cash_to_pay=receivables.cash_to_pay,
-    )
-    return EventStatistics(
-        product_family="dcn", pv=float(pv), observations=observations, coupons=coupons,
-        maturity=OutcomeRow(**nothing), ki_settlement=OutcomeRow(**nothing), knock_in=knock_in, ki_table=ki_table,
-        receivables=receivables, ledger=ledger, expected_lifetime=0.0, provenance=_provenance(engine_name),
-        unavailable=unavailable,
-    )
+    return terminated(product, state, pv=pv, provenance=_provenance(engine_name), standard_errors_reason=TERMINATED)

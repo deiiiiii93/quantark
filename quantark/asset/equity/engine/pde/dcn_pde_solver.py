@@ -144,6 +144,43 @@ class DCNPDEEngine(BasePDESolver):
         return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True),
                          lifecycle_state=lifecycle_state)
 
+    # -- event statistics (unified event statistics spec T15) --
+    def _statistics(self, product, pricing_env, lifecycle_state):
+        """``(price, EventStatistics or None)`` from one price march and the forward pass over it
+        (``pde/dcn_statistics.py``)."""
+        from quantark.asset.equity.engine.pde.dcn_statistics import dcn_1d_statistics
+        return dcn_1d_statistics(self, product, pricing_env, lifecycle_state=lifecycle_state)
+
+    def calculate_event_stats(self, product, pricing_env, *, streams=None, lifecycle_state=None):
+        """The DCN's ``EventStatistics`` (``pv`` is ``price()``, D23): every outcome and the per-date knock-in table
+        from the exact forward adjoint of the price's own march, times on DCN ``price()``'s ACT/365F axis (D12).
+
+        ``None`` for a knocked-out or matured lifecycle state with nothing left unpaid (spec AC17). ``streams`` is
+        accepted and nothing is pruned: the knock-out, coupon and survivor outcomes come from the same forward pass
+        as the knock-in statistics, which no cheaper route produces (as the DCN MC engines).
+
+        Raises:
+            AdjointUnavailable: the march has no exact transpose (a custom stepper, a nonlinear readout).
+        """
+        return self._statistics(product, pricing_env, lifecycle_state)[1]
+
+    def price_with_events(self, product, pricing_env, emit_distribution=True, streams=None, *,
+                          lifecycle_state=None):
+        """NPV (``price()``) and the DCN's event distribution (``EventDistribution.from_statistics``); a knocked-out
+        or matured lifecycle state has no event left (``EventDistribution.ended``, spec AC17).
+        ``emit_distribution=False`` gets the maturity-only distribution without statistics."""
+        from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+
+        validate_settlement_capability(self, product, lifecycle_state)
+        if not emit_distribution:
+            npv = self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+            return PricingResult(npv=npv, event_distribution=EventDistribution.trivial(
+                max(float(product.get_maturity(pricing_env)), 0.0)))
+        pv, stats = self._statistics(product, pricing_env, lifecycle_state)
+        dist = EventDistribution.ended() if stats is None else EventDistribution.from_statistics(stats)
+        return PricingResult(npv=pv, event_distribution=dist)
+
     def price_detailed(self, product, pricing_env, *, lifecycle_state=None, **removed) -> DCNPDEResult:
         reject_removed_kwargs(f"{type(self).__name__}.price_detailed", removed, REMOVED_DCN_NAMES)
         problem = prepare(self, product, pricing_env, OutputRequest(Operation.PRICE), lifecycle_state=lifecycle_state,

@@ -327,6 +327,44 @@ def readout_weights(statistics, states, captures) -> np.ndarray:
     return weights
 
 
+def banded_step_transpose(prepared, j: int, p: np.ndarray, thetas, zero_diffusion_theta_one: bool, bands: dict):
+    """The transpose of the march's banded Crank-Nicolson step ``j`` (``banded_advance``: ``V_pre(j) = [rows;
+    M2^{-1}(M1 V(j+1) + inject); rows]``) on duals ``p`` (``(n_surfaces, n_nodes)``) on its output: ``(duals on
+    V(j+1), duals on the step's lower rows, duals on its upper rows)`` -- same set, ``dt``, ``θ`` (Rannacher /
+    zero-diffusion steps included) and the very factorization the march used. ``bands`` caches ``M2^T``'s bands per
+    factorization."""
+    coeffs = prepared.coefficients
+    k = coeffs.set_at(j)
+    s = coeffs.step_set(k, prepared.factorizations)
+    theta = thetas[j]
+    if zero_diffusion_theta_one and coeffs.is_zero_diffusion(k):
+        theta = 1.0
+    dt = prepared.layout.time.dt[j]
+    banded, lower1, main1, upper1 = factor(Backend.BANDED, s, dt, theta)
+    cached = bands.get(id(banded))
+    if cached is None or cached[0] is not banded:
+        # M2^T: its sub-diagonal is M2's super-diagonal and the other way round
+        cached = bands[id(banded)] = (banded, np.ascontiguousarray(banded[0, 1:]),
+                                      np.ascontiguousarray(banded[1, :]),
+                                      np.ascontiguousarray(banded[2, :-1]))
+    _, dl_t, d_t, du_t = cached
+    rhs = np.array(p[:, 1:-1].T, order="F")
+    _, _, _, q, info = _GTSV(dl_t, d_t, du_t, rhs, False, False, False, True)
+    if info != 0:
+        raise NumericalError(f"the transposed step {j} is singular (gtsv info {info})")
+    out = np.zeros_like(p)
+    r = main1[:, None] * q
+    r[:-1] += lower1[:, None] * q[1:]
+    r[1:] += upper1[:, None] * q[:-1]
+    out[:, 1:-1] = r.T
+    l1, u2 = s.l[1], s.u[-2]
+    out[:, 0] = dt * (1.0 - theta) * l1 * q[0]
+    out[:, -1] = dt * (1.0 - theta) * u2 * q[-1]
+    on_lower = p[:, 0] + dt * theta * l1 * q[0]
+    on_upper = p[:, -1] + dt * theta * u2 * q[-1]
+    return out, on_lower, on_upper
+
+
 class _Pass:
     """One forward pass over a marched statistics block."""
 
@@ -356,36 +394,8 @@ class _Pass:
     def step(self, j: int, p: np.ndarray) -> np.ndarray:
         """Duals on ``V(j+1)`` from the duals ``p`` on the step's output ``V_pre(j) = [rows; M2^{-1}(M1 V(j+1) +
         inject); rows]`` (``banded_advance``)."""
-        prepared = self.prepared
-        coeffs = prepared.coefficients
-        k = coeffs.set_at(j)
-        s = coeffs.step_set(k, prepared.factorizations)
-        theta = self.thetas[j]
-        if self.zero_diffusion_theta_one and coeffs.is_zero_diffusion(k):
-            theta = 1.0
-        dt = self.dt[j]
-        banded, lower1, main1, upper1 = factor(Backend.BANDED, s, dt, theta)
-        bands = self._bands.get(id(banded))
-        if bands is None or bands[0] is not banded:
-            # M2^T: its sub-diagonal is M2's super-diagonal and the other way round
-            bands = self._bands[id(banded)] = (banded, np.ascontiguousarray(banded[0, 1:]),
-                                               np.ascontiguousarray(banded[1, :]),
-                                               np.ascontiguousarray(banded[2, :-1]))
-        _, dl_t, d_t, du_t = bands
-        rhs = np.array(p[:, 1:-1].T, order="F")
-        _, _, _, q, info = _GTSV(dl_t, d_t, du_t, rhs, False, False, False, True)
-        if info != 0:
-            raise NumericalError(f"the transposed step {j} is singular (gtsv info {info})")
-        out = np.zeros_like(p)
-        r = main1[:, None] * q
-        r[:-1] += lower1[:, None] * q[1:]
-        r[1:] += upper1[:, None] * q[:-1]
-        out[:, 1:-1] = r.T
-        l1, u2 = s.l[1], s.u[-2]
-        out[:, 0] = dt * (1.0 - theta) * l1 * q[0]
-        out[:, -1] = dt * (1.0 - theta) * u2 * q[-1]
-        on_lower = p[:, 0] + dt * theta * l1 * q[0]
-        on_upper = p[:, -1] + dt * theta * u2 * q[-1]
+        out, on_lower, on_upper = banded_step_transpose(self.prepared, j, p, self.thetas,
+                                                        self.zero_diffusion_theta_one, self._bands)
         if self.statistics.alive_ki_edge_knocks_in(j):
             # the price's not-knocked-in row there knocks in (D23, ``rows.knocks_in``): its absorbed dual is first
             # knock-in mass; a row with no event matures not knocked in and is no knock-in

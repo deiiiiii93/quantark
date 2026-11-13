@@ -126,3 +126,60 @@ def test_ki_rows_are_the_daily_table_and_one_row_once_knocked_in(run):
             assert len(ki_rows) == stats.ki_table.size > 100
             assert [pd.Timestamp(d) for d in ki_rows["event_date"]] == [
                 pd.Timestamp(d) for d in product.schedule.daily_ki_dates]
+
+
+# --- the DCN PDE event statistics (T15): the same replay with the PDE as the event-statistics engine ---------------
+
+@pytest.fixture(scope="module")
+def pde_run():
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+    from quantark.asset.equity.param import PDEParams
+
+    captured = []
+    original = DCNPDEEngine.calculate_event_stats
+
+    def spy(self, product, pricing_env, **kw):
+        stats = original(self, product, pricing_env, **kw)
+        captured.append((pd.Timestamp(pricing_env.valuation_date).normalize(), product, stats))
+        return stats
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(DCNPDEEngine, "calculate_event_stats", spy)
+    try:
+        days = nyse_like_days(BOOKED, END)
+        config = BookAutocallableBacktestConfig(
+            products=[BookProduct(product=booked_dcn(), quantity=1.0, position_id=1, has_lifecycle=True)],
+            market_data=replay_market(days), hedge=HedgeSpec(kind="spot", multiplier=1.0),
+            engine_config=AutocallableEngineConfig(
+                pricing_engine_type=EngineType.PDE, surface_engine_type=EngineType.PDE,
+                event_stats_engine_type=EngineType.PDE, pde_params=PDEParams(accuracy="fast")),
+            underlying=UNDERLYING, start_date=days[0], end_date=days[-1], fixed_dividend_yield=0.1406,
+            calculate_event_probabilities=True, terminate_on_lifecycle_end=False,
+        )
+        results = BookAutocallableBacktestEngine(config).run()
+    finally:
+        mp.undo()
+    return days, captured, _frame(results.daily_event_summary_df), _frame(results.event_probability_df)
+
+
+def test_pde_replay_records_native_statistics_every_day(pde_run):
+    """At base a DCN replay with event probabilities on the PDE failed closed (no statistics); now every run day
+    records the PDE's native rows, the D21 mapping and the daily KI table, nothing NaN."""
+    days, captured, summary, rows = pde_run
+    assert [d for d, _, _ in captured] == [pd.Timestamp(d) for d in days]
+    assert not summary[list(SUMMARY)].isna().any().any(), summary[list(SUMMARY)]
+    for date, product, stats in captured:
+        row = summary[pd.to_datetime(summary["date"]) == date].iloc[0]
+        ko = stats.observations.is_ko_obs
+        assert row["total_remaining_ko_probability"] == float(np.sum(stats.observations.probability[ko]))
+        assert row["ki_probability_to_maturity"] == stats.ki_settlement.probability
+        assert row["expected_discounted_maturity_cashflow"] == (
+            stats.maturity.discounted_cash + stats.ki_settlement.discounted_cash)
+        assert row["pv"] == stats.pv
+        ki_rows = rows[(pd.to_datetime(rows["date"]) == date) & (rows["event_type"] == "KI")]
+        np.testing.assert_array_equal(ki_rows["event_probability"], stats.ki_table.probability)
+        if date >= pd.Timestamp(KI_DAY):
+            assert list(ki_rows["event_probability"]) == [1.0] and list(ki_rows["event_date"]) == [date]
+        else:
+            assert [pd.Timestamp(d) for d in ki_rows["event_date"]] == [
+                pd.Timestamp(d) for d in product.schedule.daily_ki_dates]
