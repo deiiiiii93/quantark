@@ -112,11 +112,13 @@ class EventStatsRecordingMixin:
     def _recording_event_stats(self):
         """Run ``price()`` inside the block with a fresh recorder; never left behind."""
         recorder = EventStatsRecorder()
+        previous = self.__dict__.get("_stats_recorder")
         self._stats_recorder = recorder
         try:
             yield recorder
         finally:
-            self._stats_recorder = None
+            # restore the caller's recorder (a nested statistics call must not clear an outer one's)
+            self._stats_recorder = previous
             self._last_stats_records = tuple(recorder.records)
 
     def _stats_recording(self) -> bool:

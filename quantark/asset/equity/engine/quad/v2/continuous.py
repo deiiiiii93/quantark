@@ -1,5 +1,4 @@
 """Constant-coefficient continuous KI with full survival-kernel derivatives."""
-from dataclasses import dataclass
 import numpy as np
 from quantark.util.exceptions import NumericalError
 from .basis import gauss
@@ -141,84 +140,6 @@ def deterministic_continuous(states, pairs, barrier, reverse, mean):
         p = next(p for p in states[hit].pieces if p.lo <= boundary < p.hi)
         result[alive] = Function(tuple(pieces), ((boundary, p),))
     return tuple(result)
-
-
-@dataclass(frozen=True)
-class ContinuousKIMonitor:
-    """One-channel KO-independent no-touch claim, owned by a prepared context."""
-    function: object
-    mean: float
-    variance: float
-    discount: float
-    barrier: float
-    reverse: bool
-    params: object
-    method: str
-
-    def probability(self, spots):
-        from .contract import affine
-
-        survival = continuous_readout(
-            self.function, affine([0.0]), np.log(spots), self.mean,
-            self.variance, self.discount, self.barrier, self.reverse, self.params,
-        )[0, 0]
-        probability = 1.0 - survival
-        if np.any(~np.isfinite(probability)) or np.any(
-            (probability < -2e-8) | (probability > 1.0 + 2e-8)
-        ):
-            raise NumericalError("continuous KI monitoring probability is outside [0, 1]")
-        return np.clip(probability, 0.0, 1.0)
-
-
-def prepare_continuous_ki_monitor(contract, means, variances, discounts, mesh, params, op):
-    """Reuse the price clock and mesh, with no note/memory states or cash channels.
-
-    Constant drift per variance admits one analytic reflection readout after
-    a deterministic time change. Otherwise march one no-touch column through
-    the native survival kernel. Neither path performs another note solve.
-    """
-    from .contract import affine, grid_function
-
-    end = contract.metadata.get("ki_monitoring_end")
-    if end is None:
-        return None
-    times = np.array([event.time for event in contract.events])
-    indices = np.flatnonzero(times <= end)
-    if not len(indices) or end == 0.0:
-        return ContinuousKIMonitor(
-            affine([1.0]), 0.0, 0.0, 1.0, contract.continuous_barrier,
-            contract.reverse, params, "valuation_fixing",
-        )
-    last = int(indices[-1])
-    mm, vv, dd = means[:last + 1], variances[:last + 1], discounts[:last + 1]
-    barrier, reverse = contract.continuous_barrier, contract.reverse
-    positive = vv > 0.0
-    ratios = mm[positive] / vv[positive]
-    proportional = (positive.any() and np.all(mm[~positive] == 0.0)
-                    and np.allclose(ratios, ratios[0], rtol=1e-12, atol=1e-12))
-    terminal = affine([1.0 / float(np.prod(dd))])
-    if proportional:
-        return ContinuousKIMonitor(
-            terminal, float(mm.sum()), float(vv.sum()), float(np.prod(dd)),
-            barrier, reverse, params, "analytic_time_change",
-        )
-    zero = affine([0.0])
-    function = terminal
-    for i in range(last, 0, -1):
-        if vv[i] == 0.0:
-            function = deterministic_continuous(
-                (function.shifted(mm[i], dd[i]), zero), ((0, 1),),
-                barrier, reverse, mm[i],
-            )[0]
-        else:
-            values = continuous_grid_readout(
-                function, zero, mm[i], vv[i], dd[i], barrier, reverse, op,
-            )
-            function = grid_function(mesh, values)
-    return ContinuousKIMonitor(
-        function, float(mm[0]), float(vv[0]), float(dd[0]),
-        barrier, reverse, params, "native_survival_recursion",
-    )
 
 
 def continuous_grid_readout(alive, hit, mean, variance, discount, barrier, reverse, op, rolled_hit=None):

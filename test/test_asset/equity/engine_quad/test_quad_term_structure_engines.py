@@ -224,8 +224,8 @@ def test_phoenix_quad_coupon_stats_see_term_structure():
     engine = PhoenixQuadEngine(params=QuadParams(grid_points=801))
     stats_term = engine.calculate_event_stats(_standard_phoenix(), env_term)
     stats_coll = engine.calculate_event_stats(_standard_phoenix(), env_coll)
-    ecc_term = np.asarray(stats_term.expected_discounted_coupon_cashflow)
-    ecc_coll = np.asarray(stats_coll.expected_discounted_coupon_cashflow)
+    ecc_term = np.asarray(stats_term.coupons.discounted_cash)
+    ecc_coll = np.asarray(stats_coll.coupons.discounted_cash)
     assert float(np.sum(ecc_term)) != pytest.approx(
         float(np.sum(ecc_coll)), rel=1e-6
     )
@@ -270,8 +270,8 @@ def test_ko_reset_quad_event_stats_see_term_structure():
     engine = KOResetSnowballQuadEngine()
     st_term = engine.calculate_event_stats(product, env_term)
     st_coll = engine.calculate_event_stats(product, env_coll)
-    cf_term = float(np.sum(np.asarray(st_term.expected_discounted_ko_cashflow)))
-    cf_coll = float(np.sum(np.asarray(st_coll.expected_discounted_ko_cashflow)))
+    cf_term = float(np.sum(np.asarray(st_term.observations.discounted_cash)))
+    cf_coll = float(np.sum(np.asarray(st_coll.observations.discounted_cash)))
     assert cf_term != pytest.approx(cf_coll, rel=1e-6)
 
 
@@ -363,11 +363,10 @@ def test_snowball_continuous_ki_bridge_uses_term_vol():
     px_coll = quad.price(_product(), env_coll)
     assert px_term != pytest.approx(px_coll, rel=1e-5)
 
-    # event-stats path: the fixed KI-ever bridge calls execute with the
-    # per-step vol binding and produce bounded probabilities
+    # event-stats path: the bridge (and its forward transpose, T17) executes with the
+    # per-step vol binding and produces bounded probabilities. The bridge subtracts near-equal survival
+    # terms, so on some architectures the result underflows to roundoff-scale negative noise rather than
+    # exactly 0 -> allow a tiny margin.
     st = quad.calculate_event_stats(_product(), env_term)
-    # Bounded probabilities. The KI-ever bridge subtracts near-equal survival
-    # terms, so on some architectures the result underflows to roundoff-scale
-    # negative noise (~-1e-46) rather than exactly 0 -> allow a tiny margin.
-    assert -GOLDEN_ABS_TOL <= float(st.ki_ever_probability) <= 1.0
-    assert -GOLDEN_ABS_TOL <= float(st.ki_probability) <= 1.0
+    assert -GOLDEN_ABS_TOL <= float(st.knock_in.probability) <= 1.0
+    assert -GOLDEN_ABS_TOL <= float(st.ki_settlement.probability) <= 1.0

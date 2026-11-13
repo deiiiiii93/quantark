@@ -16,11 +16,7 @@ from scipy.special import erfc
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import (
-    AutocallableEventStats,
-    StatisticsProvenance,
-    payment_aware_cashflow_fields,
-)
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_event_values,
@@ -36,7 +32,7 @@ from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import CouponPayType, ObservationType
+from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import (
     EngineType,
     EventProjectionMode,
@@ -160,6 +156,13 @@ class SnowballQuadEngine(BaseEngine):
         if self.params.auto_converge:
             return self._price_with_convergence(product, pricing_env)
         return self._price_once(product, pricing_env)
+
+    def __getstate__(self):
+        """Pickle without the last statistics march's adjoint log (``_last_v1_march``): a per-solve artefact whose
+        event maps are closures over the solve (a process pool ships engines between workers)."""
+        state = dict(self.__dict__)
+        state.pop("_last_v1_march", None)
+        return state
 
     def price_folded(
         self,
@@ -754,17 +757,16 @@ class SnowballQuadEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         *,
         streams: Optional[frozenset] = None,
-    ) -> Optional[AutocallableEventStats]:
-        """Provide per-observation KO probabilities and expected discounted cashflows.
+    ) -> Optional[EventStatistics]:
+        """``EventStatistics`` of the price's own recursion (unified event statistics spec T17).
 
-        Runs a single quadrature recursion over stacked indicator surfaces; usually
-        much faster than MC for risk-neutral event stats.
-
-        ``streams`` (the ``EventType`` set the caller needs, [§11.1]) prunes the
-        auxiliary indicator work exactly as the PDE solvers do: ``None`` keeps the
-        full distribution; otherwise the KI-probability recursion and the Phoenix
-        coupon rows run only when a requested stream reads them. Pruning leaves
-        ``ko_probability`` / ``survival`` / ``pv`` bit-identical.
+        One stacked recursion marches a column per termination outcome through the price's operators: per
+        knock-out record its discounted unit, the maturity unit and cash (never knocked in), the knocked-in
+        settlement unit and cash (and the Phoenix coupon columns). P(knock in before any knock-out), its expected
+        time and the per-date knock-in table come from the forward adjoint pass of that recursion
+        (``v1_adjoint.py``), run only when ``streams`` asks for the knock-in stream (spec D17); every other column
+        is never pruned. ``pv`` is ``price()`` (spec D23). ``None`` for an expired note or one with no knock-out
+        record left.
         """
         if not isinstance(product, self._event_stats_product_type()):
             return None
@@ -775,15 +777,17 @@ class SnowballQuadEngine(BaseEngine):
         return self._compute_event_stats(product, pricing_env, streams=streams)
 
     def _event_stats_on_converged_grid(self, product, pricing_env, *, streams=None):
-        """Use the accepted price grid for every statistical column."""
-        self.price(product, pricing_env)
+        """Use the accepted price grid for every statistical column; ``pv`` is the converged price itself."""
+        pv = float(self.price(product, pricing_env))
         params = replace(
             self.params, auto_converge=False,
             grid_points=self._last_convergence_info["grid_points"],
         )
         candidate = self.__class__(params=params)
         candidate.record_backward_grids = self.record_backward_grids
-        return candidate.calculate_event_stats(product, pricing_env, streams=streams)
+        stats = candidate._compute_event_stats(product, pricing_env, streams=streams, pv=pv)
+        self._last_v1_march = getattr(candidate, "_last_v1_march", None)
+        return stats
 
     def price_with_events(
         self,
@@ -809,7 +813,7 @@ class SnowballQuadEngine(BaseEngine):
             if stats is not None:
                 return PricingResult(
                     npv=float(stats.pv),
-                    event_distribution=EventDistribution.from_autocallable_stats(stats),
+                    event_distribution=EventDistribution.from_statistics(stats),
                 )
 
         if lifecycle_state is None:
@@ -825,9 +829,8 @@ class SnowballQuadEngine(BaseEngine):
         """Product type accepted by ``calculate_event_stats`` (overridable)."""
         return SnowballOption
 
-    def _make_event_stats(self, **fields) -> AutocallableEventStats:
-        """Construct the event-stats dataclass (overridable by subclasses)."""
-        return AutocallableEventStats(**fields)
+    #: the statistics' product family (``EventStatistics.product_family``)
+    _statistics_family = "snowball"
 
     def _apply_observation(
         self, product, grid, spot_grid, spot, width, v_out, v_in, *,
@@ -903,12 +906,19 @@ class SnowballQuadEngine(BaseEngine):
     def _initialize_extra_quad_rows(self, v_out, v_in, n_ko: int) -> None:
         """Terminal values of the extra rows, in place (zero unless a subclass sets them)."""
 
-    def _extract_extra_quad_stats(
-        self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
-        pricing_env=None, df_fn=None,
-    ) -> dict:
-        """Extra event-stats fields from the extra rows (none for Snowball)."""
-        return {}
+    def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn) -> Optional[dict]:
+        """The coupon fields read from the extra rows at the spot (``None``: no coupons, Snowball)."""
+        return None
+
+    def _terminal_cash_surfaces(self, product, pricing_env, spot_grid):
+        """``(knocked-in, not knocked-in)`` maturity redemptions on the lattice, as ``price`` seeds them."""
+        v_in_cash = np.array(
+            [product.get_maturity_payoff_v1(s, pricing_env=pricing_env) for s in spot_grid], dtype=float
+        )
+        v_out_cash = np.array(
+            [product.get_maturity_payoff_v0(s, pricing_env=pricing_env) for s in spot_grid], dtype=float
+        )
+        return v_in_cash, v_out_cash
 
     def _compute_event_stats(
         self,
@@ -916,20 +926,14 @@ class SnowballQuadEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         *,
         streams: Optional[frozenset] = None,
-    ) -> Optional[AutocallableEventStats]:
+        pv: Optional[float] = None,
+    ) -> Optional[EventStatistics]:
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.quad import v1_statistics
+        from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, MarchLog
+
         self._validate_product(product)
-
-        # Stream selection [§11.1], mirroring the PDE contract: KO rows always
-        # run; the KI-probability recursion and the Phoenix coupon rows are
-        # auxiliary and dropped when no requested stream reads them.
-        if streams is None:
-            want_ki = True
-            want_coupon = True
-        else:
-            from quantark.cashleg.event_distribution import EventType
-
-            want_ki = bool(streams & {EventType.KI, EventType.MATURITY_WITH_KI})
-            want_coupon = EventType.COUPON in streams
+        want_ki = es.want_knock_in_path(streams)
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -962,6 +966,7 @@ class SnowballQuadEngine(BaseEngine):
             ki_barrier_continuous = self._continuous_ki_barrier_value(product)
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
+        product_ki_records = list(ki_records)
 
         ko_record_0 = self._match_record(0.0, ko_records)
         # Valuation-time KI state follows the contractual monitoring semantics,
@@ -975,22 +980,11 @@ class SnowballQuadEngine(BaseEngine):
         )
 
         if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
-            stats = self._build_immediate_ko_event_stats(
-                product,
-                pricing_env,
-                ko_records,
-                ko_record_0,
-                knocked_in_at_valuation,
+            return self._decided_ko_statistics(
+                product, pricing_env, ko_records, ko_record_0, streams=streams
             )
-            if not want_ki:
-                stats = replace(
-                    stats, ki_probability=0.0, ki_ever_probability=0.0,
-                    ki_survive_knocked_in_probability=0.0,
-                    ki_times=np.array([]), ki_event_probability=np.array([]),
-                    ki_survival_probability=np.array([]),
-                )
-            return stats
 
+        knock_in_refusal = None
         if ki_records and (
             self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION
         ):
@@ -999,6 +993,7 @@ class SnowballQuadEngine(BaseEngine):
             )
             ki_continuous = True
             ki_records = []
+            knock_in_refusal = v1_statistics.BGK_REASON
 
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
@@ -1075,6 +1070,11 @@ class SnowballQuadEngine(BaseEngine):
         omega_grid = math_utils.z_grid
 
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
+        timings = resolve_structured_payment_timings(product, pricing_env, ko_records)
+        terminal = timings.terminal
+        v_in_cash, v_out_cash = self._terminal_cash_surfaces(product, pricing_env, spot_grid)
+        if pv is None:
+            pv = float(self.price(product, pricing_env))
 
         if str(self.params.event_stats_mode) == "forward_density":
             q = self._forward_event_quantities(
@@ -1088,55 +1088,40 @@ class SnowballQuadEngine(BaseEngine):
                 smoothing_width=smoothing_width,
                 disable_ko_after_ki=disable_ko_after_ki,
                 knocked_in_at_valuation=knocked_in_at_valuation,
-                want_ki=want_ki, want_coupon=want_coupon,
+                want_ki=True, want_coupon=True,
                 df_local=df_local, rate=rate,
-            )
-            pv = float(self.price(product, pricing_env))
-            ko_times = np.array(
-                [rec.observation_time for rec in ko_records], dtype=float
             )
             # Diagnostic only (spec section 8): terminal mass + absorbed KO
             # mass; drifts from 1.0 by edge leakage. Never used numerically.
             self._last_forward_mass_diagnostic = float(q["mass_diagnostic"])
-            return self._assemble_event_stats(
-                product=product, pricing_env=pricing_env, pv=pv,
-                ko_records=ko_records, ko_times=ko_times,
-                ko_prob=q["ko_prob"], survival_prob=q["survival_prob"],
-                ed_ko_cf=q["ed_ko_cf"],
-                expected_discounted_maturity_cf=float(
-                    pv - float(np.sum(q["ed_ko_cf"]))
+            return self._forward_density_statistics(
+                product, pricing_env, q, ko_records=ko_records, terminal=terminal, pv=pv,
+                knocked_in_at_valuation=knocked_in_at_valuation, streams=streams,
+                terminal_cash=(
+                    float(df_local(maturity)) * float(terminal.delay_df)
+                    * self._density_integral(math_utils, q["terminal_out"] * v_out_cash),
+                    float(df_local(maturity)) * float(terminal.delay_df)
+                    * self._density_integral(math_utils, q["terminal_in"] * v_in_cash),
                 ),
-                ki_probability=q["ki_probability"],
-                ki_times=q["ki_times"],
-                ki_event_probability=q["ki_event_probability"],
-                ki_survival_probability=q["ki_survival_probability"],
-                ki_ever_probability=q["ki_ever_probability"],
-                ki_survive_knocked_in_probability=q[
-                    "ki_survive_knocked_in_probability"
-                ],
-                extra_fields=q["extra_fields"],
             )
 
-        # --- KO indicator recursion (stacked over KO observations) ---
-        # Rows [0..n_ko-1] are KO indicators; subclasses may append extra rows
-        # (e.g. Phoenix coupon-trigger rows) that ride the same diffusion/jumps.
+        # --- The statistics recursion: one column per outcome, stacked ---
+        # Rows [0..n_ko-1] are knock-out units (one paid at the record's settlement); subclasses append extra rows
+        # (Phoenix coupon columns) that ride the same diffusion/jumps; then the maturity unit and cash (never
+        # knocked in) and the knocked-in settlement unit and cash.
         n_ko = len(ko_records)
-        n_rows = n_ko + (self._n_extra_quad_rows(n_ko) if want_coupon else 0)
+        n_main = n_ko + self._n_extra_quad_rows(n_ko)
+        m_unit, m_cash, kis_unit, kis_cash = n_main, n_main + 1, n_main + 2, n_main + 3
+        n_rows = n_main + 4
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
-        if want_coupon:
-            self._initialize_extra_quad_rows(v_out, v_in, n_ko)
-
-        # The maturity KI indicator is another column of the same event stack.
-        # A carried KI selects v_in at readout; it does not imply no future KO.
-        ki_col = n_rows
-        if want_ki and product.has_ki_barrier:
-            v_in = np.vstack((v_in, np.ones(grid.size)))
-            v_out = np.vstack((v_out, np.zeros(grid.size)))
-        fuse_ki = product.has_ki_barrier and want_ki and not knocked_in_at_valuation
-        if fuse_ki:
-            v_in_ever = np.ones(grid.size, dtype=float)
-            v_out_ever = np.zeros(grid.size, dtype=float)
+        self._initialize_extra_quad_rows(v_out, v_in, n_ko)
+        terminal_out_cash = v_out_cash * terminal.delay_df
+        terminal_in_cash = v_in_cash * terminal.delay_df
+        v_out[m_unit] = 1.0
+        v_out[m_cash] = terminal_out_cash
+        v_in[kis_unit] = 1.0
+        v_in[kis_cash] = terminal_in_cash
 
         # The readout mode governs the event decomposition too, so its parts
         # keep reconciling with the price under either rule.
@@ -1148,6 +1133,10 @@ class SnowballQuadEngine(BaseEngine):
                 "evaluation in this engine. Use readout='legacy_linear'."
             )
         final_transition: Optional[dict] = None
+        log = MarchLog(engine=self, math_utils=math_utils, readout_in=bool(knocked_in_at_valuation),
+                       terminal_out={"maturity_unit": np.ones(grid.size), "maturity_cash": terminal_out_cash},
+                       terminal_in={"ki_settlement_unit": np.ones(grid.size), "ki_settlement_cash": terminal_in_cash})
+        log_ki_barrier = (safe_log(ki_barrier_continuous / spot) if ki_continuous else None)
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
@@ -1163,6 +1152,7 @@ class SnowballQuadEngine(BaseEngine):
 
             ko_is_reachable = ko_record is not None and bool(reachable_ko[int(ko_index)])
             ko_breach = np.zeros_like(v_out)
+            discount_delay = 1.0
             if ko_record is not None:
                 discount_delay = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local
@@ -1178,17 +1168,9 @@ class SnowballQuadEngine(BaseEngine):
                 ko_record=ko_record if ko_is_reachable else None,
                 ko_value=ko_breach, ko_weight=ko_w, ki_record=ki_record,
                 ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                coupon_index=ko_index if want_coupon else None, n_ko=n_ko,
+                coupon_index=ko_index, n_ko=n_ko,
                 coupon_record=ko_record, observation_index=ko_index,
             )
-            if fuse_ki:
-                # Underlying monitoring continues after KO. Use the KI event's
-                # price operator, but no contractual KO absorption.
-                v_out_ever, v_in_ever = SnowballQuadEngine._apply_observation(
-                    self, product, grid, spot_grid, spot, smoothing_width,
-                    v_out_ever, v_in_ever, ki_record=ki_record,
-                    ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                )
 
             tau_step = float(tau[step_index])
             alpha = float(alpha_vec[step_index])
@@ -1199,6 +1181,26 @@ class SnowballQuadEngine(BaseEngine):
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
 
+            # The adjoint log: this step's event map (the same call with every source zero, or one knock-out
+            # source alone) and its diffusion back to the previous step.
+            event = None
+            if ko_record is not None or ki_record is not None or ki_continuous:
+                event = self._statistics_event(
+                    product, grid, spot_grid, spot, smoothing_width,
+                    ko_record=ko_record if ko_is_reachable else None, ko_weight=ko_w,
+                    ki_record=ki_record,
+                    ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                    n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
+                    discount=float(discount_delay),
+                )
+            log.steps.append(EventStep(
+                time=float(obs_time), event=event,
+                sources=(("ko", int(ko_index)),) if ko_is_reachable else (),
+                diffusion=(tau_step, alpha, beta, prefactor, omega_array),
+                bridge=(log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
+                if ki_continuous else None,
+            ))
+
             if step_index == 1 and transition_readout:
                 # Inputs to the transition that reaches the valuation date, so
                 # the readout can evaluate it at the spot.
@@ -1206,8 +1208,6 @@ class SnowballQuadEngine(BaseEngine):
                     "kernel": (prefactor, alpha, beta, tau_step),
                     "in": v_in,
                     "out": v_out,
-                    "ki": (v_in if knocked_in_at_valuation else v_out)[ki_col] if want_ki and product.has_ki_barrier else None,
-                    "out_ever": v_out_ever if fuse_ki else None,
                 }
 
             # The bridge correction below samples BOTH surfaces at this step's
@@ -1227,7 +1227,6 @@ class SnowballQuadEngine(BaseEngine):
             )
 
             if ki_continuous:
-                log_ki_barrier = safe_log(ki_barrier_continuous / spot)
                 v_out = self._diffuse_with_bridge(
                     v_out,
                     v_in_at_obs,
@@ -1259,271 +1258,168 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
-            if fuse_ki:
-                v_in_ever_at_obs = v_in_ever
-                v_in_ever = self._diffuse_fft(
-                    v_in_ever,
-                    math_utils,
-                    omega_array,
-                    prefactor,
-                    full_p_lr,
-                    full_p_ur,
-                    full_p0,
-                    alpha,
-                    beta,
-                    tau_step,
-                )
-                if ki_continuous:
-                    log_ki_barrier = safe_log(ki_barrier_continuous / spot)
-                    v_out_ever = self._diffuse_with_bridge(
-                        v_out_ever,
-                        v_in_ever_at_obs,
-                        math_utils,
-                        omega_array,
-                        prefactor,
-                        full_p_lr,
-                        full_p_ur,
-                        full_p0,
-                        log_ki_barrier,
-                        alpha,
-                        beta,
-                        vol_step,
-                        dt[step_index],
-                        tau_step,
-                        product.is_reverse,
-                    )
-                else:
-                    v_out_ever = self._diffuse_fft(
-                        v_out_ever,
-                        math_utils,
-                        omega_array,
-                        prefactor,
-                        full_p_lr,
-                        full_p_ur,
-                        full_p0,
-                        alpha,
-                        beta,
-                        tau_step,
-                    )
-
         initial_surface = v_in if knocked_in_at_valuation else v_out
         if final_transition is not None:
             prefactor, alpha, beta, tau_step = final_transition["kernel"]
+            log.transition = (prefactor, alpha, beta, tau_step)
             pre = final_transition["in" if knocked_in_at_valuation else "out"]
-            ed_unit = np.asarray(
+            values_at_spot = np.asarray(
                 self._readout_at_spot(
                     pre, math_utils, prefactor, full_p_lr, full_p_ur, full_p0,
                     alpha, beta, tau_step,
                 ),
                 dtype=float,
-            )[:n_ko]
-        else:
-            ed_unit = np.array(
-                [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
-                dtype=float,
-            )
-        ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
-        ko_prob = np.zeros(n_ko, dtype=float)
-        ed_ko_cf = np.zeros(n_ko, dtype=float)
-        survival_prob = np.ones(n_ko, dtype=float)
-
-        cumulative = 0.0
-        for i, rec in enumerate(ko_records):
-            df_total = float(df_local(float(rec.observation_time))) * float(
-                self._ko_discount(
-                    rate, float(rec.observation_time), rec.settlement_time,
-                    df_fn=df_local,
-                )
-            )
-            if df_total > 0:
-                ko_prob[i] = float(ed_unit[i] / df_total)
-            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            ed_ko_cf[i] = float(ed_unit[i] * payoff)
-            cumulative += ko_prob[i]
-            survival_prob[i] = max(0.0, 1.0 - cumulative)
-
-        pv = float(self.price(product, pricing_env))
-        expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
-
-        ki_probability = 0.0
-        ki_ever_probability = 0.0
-        ki_survive_knocked_in_probability = 0.0
-        ki_times = np.array([], dtype=float)
-        ki_event_probability = np.array([], dtype=float)
-        ki_survival_probability = np.array([], dtype=float)
-        if product.has_ki_barrier and want_ki:
-            df_T = float(df_local(maturity))
-            if final_transition is not None:
-                prefactor, alpha, beta, tau_step = final_transition["kernel"]
-                pv_ki_no_ko = float(self._readout_at_spot(
-                    final_transition["ki"], math_utils, prefactor,
-                    full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
-                ))
-            else:
-                pv_ki_no_ko = float(math_utils.interpolate(initial_surface[ki_col], x=0.0))
-            ki_probability = pv_ki_no_ko / df_T
-            ki_survive_knocked_in_probability = ki_probability
-            if knocked_in_at_valuation:
-                ki_ever_probability = 1.0
-                ki_times = np.array([0.0])
-                ki_event_probability = np.array([1.0])
-                ki_survival_probability = np.array([0.0])
-            else:
-                if final_transition is not None:
-                    pv_ki_ever = float(self._readout_at_spot(
-                        final_transition["out_ever"], math_utils, prefactor,
-                        full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
-                    ))
-                else:
-                    pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
-                ki_ever_probability = pv_ki_ever / df_T
-        elif knocked_in_at_valuation and want_ki:
-            # A carried knock-in on a contract whose KI barrier was dropped (parachute collapse):
-            # there is no KI column, but every surviving path settles knocked in, so the
-            # knocked-in settlement probability is the no-knock-out survival (equal to the KI
-            # column readout to rounding when the barrier is kept).
-            ki_probability = max(0.0, 1.0 - float(np.sum(ko_prob)))
-            ki_survive_knocked_in_probability = ki_probability
-            ki_ever_probability = 1.0
-            ki_times = np.array([0.0])
-            ki_event_probability = np.array([1.0])
-            ki_survival_probability = np.array([0.0])
-
-        if want_coupon:
-            extra_fields = self._extract_extra_quad_stats(
-                initial_surface,
-                math_utils,
-                n_ko,
-                ko_records,
-                rate,
-                product,
-                maturity,
-                pricing_env=pricing_env,
-                df_fn=df_local,
             )
         else:
-            extra_fields = {}
-
-        return self._assemble_event_stats(
-            product=product, pricing_env=pricing_env, pv=pv,
-            ko_records=ko_records, ko_times=ko_times, ko_prob=ko_prob,
-            survival_prob=survival_prob, ed_ko_cf=ed_ko_cf,
-            expected_discounted_maturity_cf=expected_discounted_maturity_cf,
-            ki_probability=ki_probability, ki_times=ki_times,
-            ki_event_probability=ki_event_probability,
-            ki_survival_probability=ki_survival_probability,
-            ki_ever_probability=ki_ever_probability,
-            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
-            extra_fields=extra_fields,
-        )
-
-    def _assemble_event_stats(
-        self, *, product, pricing_env, pv, ko_records, ko_times, ko_prob,
-        survival_prob, ed_ko_cf, expected_discounted_maturity_cf,
-        ki_probability, ki_times, ki_event_probability, ki_survival_probability,
-        ki_ever_probability, ki_survive_knocked_in_probability, extra_fields,
-    ):
-        """Shared stats assembly for the stacked and forward event-stats modes.
-
-        ``expected_discounted_maturity_cf`` arrives BEFORE the coupon subtraction;
-        extra cashflow streams (Phoenix coupons) are removed here so
-        pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
-        """
-        n_ko = len(ko_records)
-        coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
-        if coupon_cf is not None:
-            expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
-
-        payment_timings = resolve_structured_payment_timings(
-            product,
-            pricing_env,
-            ko_records,
-        )
-        terminal = payment_timings.terminal
-        determination_times = list(ko_times)
-        payment_times = list(payment_timings.event_payment_times)
-        discounted_cashflows = list(ed_ko_cf)
-        determination_dates = [
-            record.observation_date for record in ko_records
-        ]
-        payment_dates = [
-            record.settlement_date for record in ko_records
-        ]
-
-        if "coupon_probability" in extra_fields:
-            coupon_cashflows = np.asarray(
-                (
-                    extra_fields["expected_discounted_coupon_cashflow"]
-                    if coupon_cf is not None
-                    else np.zeros(n_ko, dtype=float)
-                ),
+            values_at_spot = np.array(
+                [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_rows)],
                 dtype=float,
             )
-            coupon_at_expiry = (
-                product.coupon_config.coupon_pay_type
-                == CouponPayType.EXPIRY
-            )
-            determination_times.extend(ko_times)
-            payment_times.extend(
-                (
-                    np.full(
-                        n_ko,
-                        float(terminal.payment_time),
-                        dtype=float,
-                    )
-                    if coupon_at_expiry
-                    else payment_timings.event_payment_times
-                )
-            )
-            discounted_cashflows.extend(coupon_cashflows)
-            determination_dates.extend(
-                record.observation_date for record in ko_records
-            )
-            payment_dates.extend(
-                (
-                    terminal.payment_date
-                    if coupon_at_expiry
-                    else record.settlement_date
-                )
-                for record in ko_records
-            )
+        ed_unit = values_at_spot[:n_ko]
+        log.columns = {("ko", i): float(ed_unit[i]) for i in range(n_ko)}
+        log.columns.update({
+            ("terminal", "maturity_unit"): float(values_at_spot[m_unit]),
+            ("terminal", "maturity_cash"): float(values_at_spot[m_cash]),
+            ("terminal", "ki_settlement_unit"): float(values_at_spot[kis_unit]),
+            ("terminal", "ki_settlement_cash"): float(values_at_spot[kis_cash]),
+        })
+        self._last_v1_march = log
 
-        determination_times.append(float(terminal.determination_time))
-        payment_times.append(float(terminal.payment_time))
-        discounted_cashflows.append(expected_discounted_maturity_cf)
-        determination_dates.append(terminal.determination_date)
-        payment_dates.append(terminal.payment_date)
-        cashflow_fields = payment_aware_cashflow_fields(
-            pricing_env,
-            determination_times=determination_times,
-            payment_times=payment_times,
-            expected_discounted_cashflows=discounted_cashflows,
-            determination_dates=determination_dates,
-            payment_dates=payment_dates,
+        df_maturity = float(df_local(maturity))
+        timing = dict(time=float(terminal.determination_time), payment_time=float(terminal.payment_time),
+                      date=terminal.determination_date, payment_date=terminal.payment_date)
+        maturity_row = es.outcome_row(pricing_env, probability=float(values_at_spot[m_unit]) / df_maturity,
+                                      discounted=float(values_at_spot[m_cash]), **timing)
+        ki_settlement = es.outcome_row(pricing_env, probability=float(values_at_spot[kis_unit]) / df_maturity,
+                                       discounted=float(values_at_spot[kis_cash]), **timing)
+        coupon_fields = self._coupon_columns(values_at_spot, n_ko, ko_records, product, pricing_env, df_local)
+        observations = es.observation_table(
+            pricing_env, ko_records, ed_unit,
+            is_coupon_obs=None if coupon_fields is None else np.ones(n_ko, dtype=bool),
         )
-
-        return self._make_event_stats(
-            pv=pv,
-            ko_times=ko_times,
-            ko_probability=ko_prob,
-            survival_probability=survival_prob,
-            expected_discounted_ko_cashflow=ed_ko_cf,
-            ki_probability=ki_probability,
-            expected_discounted_maturity_cashflow=expected_discounted_maturity_cf,
-            reconciliation_error=0.0,
-            ki_times=ki_times,
-            ki_event_probability=ki_event_probability,
-            ki_survival_probability=ki_survival_probability,
-            ki_ever_probability=ki_ever_probability,
-            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
-            provenance=StatisticsProvenance(
-                "quad_v1_forward_density" if self.params.event_stats_mode == "forward_density"
-                else "quad_v1",
-                "quad_v1",
+        unavailable: dict = {}
+        coupons, path_dependent_cash = None, None
+        if coupon_fields is not None:
+            coupons, path_dependent_cash = v1_statistics.coupon_table(
+                pricing_env, terminal, observations, streams=streams, unavailable=unavailable, **coupon_fields
+            )
+        rule = es.knock_in_rule(product, knocked_out_now=False, knocked_in_now=bool(knocked_in_at_valuation))
+        return v1_statistics.statistics(
+            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations,
+            coupons=coupons, maturity=maturity_row, ki_settlement=ki_settlement, rule=rule, want_knock_in=want_ki,
+            forward=lambda: v1_statistics.knock_in_table(
+                product, pricing_env, log, horizon=float(maturity), continuous=bool(ki_continuous),
+                ki_records=product_ki_records,
             ),
-            **cashflow_fields,
-            **extra_fields,
+            unavailable=unavailable, path_dependent_cash=path_dependent_cash, knock_in_refusal=knock_in_refusal,
         )
+
+    def _statistics_event(self, product, grid, spot_grid, spot, width, *, ko_record, ko_weight, ki_record,
+                          ki_barrier_continuous, n_ko, coupon_record, observation_index, discount):
+        """The observation's event map on the two note states, for the adjoint pass: ``event(v_out, v_in, source)``
+        is ``_apply_observation`` with every knock-out source zero (``source=None``) or with the record's own
+        source alone (its discounted unit, as the knock-out column breaches); coupon columns are not touched."""
+
+        def event(v_out, v_in, source):
+            v_out = np.array(v_out, dtype=float)
+            v_in = np.array(v_in, dtype=float)
+            ko_value = np.zeros_like(v_out) if source is None else np.full_like(v_out, discount)
+            return self._apply_observation(
+                product, grid, spot_grid, spot, width, v_out, v_in,
+                ko_record=ko_record, ko_value=ko_value, ko_weight=ko_weight, ki_record=ki_record,
+                ki_barrier_continuous=ki_barrier_continuous, coupon_index=None, n_ko=n_ko,
+                coupon_record=coupon_record, observation_index=observation_index,
+            )
+
+        return event
+
+    def _decided_ko_statistics(self, product, pricing_env, ko_records, ko_record_0, *, streams=None):
+        """A knock-out decided at the valuation instant: certain, on its record (DESIGN §4.5); the whole price is
+        the record's cash. No knock-in path statistics but a carried knock-in (the knock-out wins a tie)."""
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+
+        pv = float(self._get_immediate_ko_payoff(ko_record_0, pricing_env))
+        observations = es.observation_table(pricing_env, ko_records, self._decided_ko_unit(
+            pricing_env, ko_records, ko_record_0))
+        return self._decided_statistics(product, pricing_env, observations, pv=pv, streams=streams,
+                                        terminal=resolve_structured_payment_timings(
+                                            product, pricing_env, ko_records).terminal)
+
+    @staticmethod
+    def _decided_ko_unit(pricing_env, ko_records, decided) -> np.ndarray:
+        """The discounted knock-out units of a knock-out decided now: one paid at the decided record's settlement
+        (its probability exactly 1), zero elsewhere."""
+        unit = np.zeros(len(ko_records), dtype=float)
+        for i, rec in enumerate(ko_records):
+            if rec is decided:
+                payment = rec.settlement_time if rec.settlement_time is not None else rec.observation_time
+                unit[i] = float(pricing_env.get_discount_factor(float(payment)))
+        return unit
+
+    def _decided_statistics(self, product, pricing_env, observations, *, pv, streams, terminal, coupons=None,
+                            unavailable=None):
+        """The statistics of a note decided at the valuation instant: nothing left to mature."""
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.quad import v1_statistics
+
+        nothing = dict(time=float(terminal.determination_time), payment_time=float(terminal.payment_time),
+                       date=terminal.determination_date, payment_date=terminal.payment_date,
+                       probability=0.0, discounted=0.0)
+        carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        rule = es.knock_in_rule(product, knocked_out_now=True, knocked_in_now=carried)
+        return v1_statistics.statistics(
+            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations,
+            coupons=coupons, maturity=es.outcome_row(pricing_env, **nothing),
+            ki_settlement=es.outcome_row(pricing_env, **nothing), rule=rule,
+            want_knock_in=es.want_knock_in_path(streams), forward=None,
+            unavailable={} if unavailable is None else unavailable,
+        )
+
+    def _forward_density_statistics(self, product, pricing_env, q, *, ko_records, terminal, pv,
+                                    knocked_in_at_valuation, streams, terminal_cash):
+        """``EventStatistics`` of the opt-in forward-density mode (provenance ``quad_v1_forward_density``).
+
+        Its own numbers: knock-out probabilities from the absorbed mass, the maturity and knocked-in settlement from
+        the terminal densities (their cash integrated against the redemptions), the Phoenix coupon fields where the
+        density alone determines them. It tracks no first knock-in before a knock-out, so the knock-in path
+        statistics are unavailable with a reason (its KI-ever counted knock-ins after a knock-out, spec AC9)."""
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.quad import v1_statistics
+
+        unit = np.array([
+            float(p) * float(pricing_env.get_discount_factor(
+                float(r.settlement_time if r.settlement_time is not None else r.observation_time)))
+            for p, r in zip(q["ko_prob"], ko_records)
+        ], dtype=float)
+        coupon_fields = self._forward_density_coupon_fields(q, ko_records, product, pricing_env)
+        observations = es.observation_table(
+            pricing_env, ko_records, unit,
+            is_coupon_obs=None if coupon_fields is None else np.ones(len(ko_records), dtype=bool),
+        )
+        timing = dict(time=float(terminal.determination_time), payment_time=float(terminal.payment_time),
+                      date=terminal.determination_date, payment_date=terminal.payment_date)
+        maturity_row = es.outcome_row(pricing_env, probability=float(q["terminal_out_mass"]),
+                                      discounted=float(terminal_cash[0]), **timing)
+        ki_settlement = es.outcome_row(pricing_env, probability=float(q["terminal_in_mass"]),
+                                       discounted=float(terminal_cash[1]), **timing)
+        unavailable: dict = {}
+        coupons, path_dependent_cash = None, None
+        if coupon_fields is not None:
+            coupons, path_dependent_cash = v1_statistics.coupon_table(
+                pricing_env, terminal, observations, streams=streams, unavailable=unavailable, **coupon_fields
+            )
+        rule = es.knock_in_rule(product, knocked_out_now=False, knocked_in_now=bool(knocked_in_at_valuation))
+        return v1_statistics.statistics(
+            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations,
+            coupons=coupons, maturity=maturity_row, ki_settlement=ki_settlement, rule=rule,
+            want_knock_in=es.want_knock_in_path(streams), forward=None, unavailable=unavailable,
+            provenance=v1_statistics.FORWARD_DENSITY_PROVENANCE, path_dependent_cash=path_dependent_cash,
+            knock_in_refusal=v1_statistics.FORWARD_DENSITY_KI_REASON,
+        )
+
+    def _forward_density_coupon_fields(self, q, ko_records, product, pricing_env) -> Optional[dict]:
+        """The forward-density coupon fields (``None``: no coupons, Snowball)."""
+        return None
 
     def _validate_product(self, product: SnowballOption) -> None:
         if product.barrier_config.ko_observation_type != ObservationType.DISCRETE:
@@ -2085,17 +1981,13 @@ class SnowballQuadEngine(BaseEngine):
         want_ki, want_coupon, df_local, rate,
     ) -> dict:
         """Forward transition-density march producing the event-distribution
-        quantities (spec section 4). 2-3 surfaces: p_out / p_in (KO-absorbing,
-        KI-splitting) and, when a KI stream is requested, p_notouch (bridge
-        survival only, no KO absorption) for the "ever" statistic."""
+        quantities (spec section 4): two surfaces p_out / p_in (KO-absorbing,
+        KI-splitting). No knock-in is tracked after a knock-out (unified event
+        statistics T17: the KO-independent "ever" surface is removed)."""
         grid = math_utils.grid
         n_ko = len(ko_records)
         full_p_lr, full_p_ur, full_p0 = 0, grid.size - 1, (grid.size - 1) % 2
         absorbed = np.zeros(n_ko, dtype=float)
-        ever_touched = 0.0
-        track_ever = bool(
-            want_ki and product.has_ki_barrier and not knocked_in_at_valuation
-        )
         extra_state = self._forward_extra_state(n_ko) if want_coupon else None
         log_ki = (
             safe_log(ki_barrier_continuous / spot) if ki_continuous else None
@@ -2107,22 +1999,15 @@ class SnowballQuadEngine(BaseEngine):
         if knocked_in_at_valuation:
             p_in = p_free
             p_out = np.zeros_like(p_free)
-            p_nt = None
         elif ki_continuous and product.has_ki_barrier:
             touch0 = self._forward_seed_touch_probability(
                 math_utils, tau1, log_ki, product.is_reverse
             )
             p_out = p_free * (1.0 - touch0)
             p_in = p_free * touch0
-            if track_ever:
-                ever_touched += self._density_integral(math_utils, p_in)
-                p_nt = p_out.copy()
-            else:
-                p_nt = None
         else:
             p_out = p_free
             p_in = np.zeros_like(p_free)
-            p_nt = p_free.copy() if track_ever else None
 
         for step_index in range(1, len(times) + 1):
             if step_index > 1:
@@ -2132,7 +2017,7 @@ class SnowballQuadEngine(BaseEngine):
                 omega_fwd, prefactor_fwd = self._forward_kernel(
                     math_utils, tau_step, alpha
                 )
-                rows = [p_out, p_in] + ([p_nt] if p_nt is not None else [])
+                rows = [p_out, p_in]
                 transported = self._diffuse_density(
                     np.vstack(rows), math_utils, omega_fwd, prefactor_fwd,
                     full_p_lr, full_p_ur, full_p0,
@@ -2144,9 +2029,7 @@ class SnowballQuadEngine(BaseEngine):
                         math_utils, band, tau_step, -alpha, denom,
                         log_ki, product.is_reverse,
                     )
-                    touch_rows = np.vstack(
-                        [p_out] + ([p_nt] if p_nt is not None else [])
-                    )
+                    touch_rows = np.vstack([p_out])
                     touched = np.zeros(
                         (touch_rows.shape[0], grid.size), dtype=float
                     )
@@ -2156,16 +2039,9 @@ class SnowballQuadEngine(BaseEngine):
                         )
                     p_out = transported[0] - touched[0]
                     p_in = transported[1] + touched[0]
-                    if p_nt is not None:
-                        p_nt = transported[2] - touched[1]
-                        ever_touched += self._density_integral(
-                            math_utils, touched[1]
-                        )
                 else:
                     p_out = transported[0]
                     p_in = transported[1]
-                    if p_nt is not None:
-                        p_nt = transported[2]
 
             obs_time = times[step_index - 1]
             ko_index, ko_record = None, None
@@ -2234,12 +2110,6 @@ class SnowballQuadEngine(BaseEngine):
                     transfer = ki_w * p_out
                     p_out = p_out - transfer
                     p_in = p_in + transfer
-                    if p_nt is not None:
-                        touched_nt = ki_w * p_nt
-                        ever_touched += self._density_integral(
-                            math_utils, touched_nt
-                        )
-                        p_nt = p_nt - touched_nt
 
         # --- Readouts ---
         ko_prob = absorbed.copy()
@@ -2257,24 +2127,6 @@ class SnowballQuadEngine(BaseEngine):
             cumulative += ko_prob[i]
             survival_prob[i] = max(0.0, 1.0 - cumulative)
 
-        ki_probability = 0.0
-        ki_ever_probability = 0.0
-        ki_survive_knocked_in_probability = 0.0
-        ki_times = np.array([], dtype=float)
-        ki_event_probability = np.array([], dtype=float)
-        ki_survival_probability = np.array([], dtype=float)
-        if knocked_in_at_valuation and want_ki:
-            ki_probability = self._density_integral(math_utils, p_in)
-            ki_ever_probability = 1.0
-            ki_survive_knocked_in_probability = ki_probability
-            ki_times = np.array([0.0], dtype=float)
-            ki_event_probability = np.array([1.0], dtype=float)
-            ki_survival_probability = np.array([0.0], dtype=float)
-        elif product.has_ki_barrier and want_ki:
-            ki_probability = self._density_integral(math_utils, p_in)
-            ki_survive_knocked_in_probability = ki_probability
-            ki_ever_probability = float(ever_touched)
-
         extra_fields = (
             self._forward_extra_fields(
                 extra_state, ko_records, product, pricing_env, rate, df_local
@@ -2284,15 +2136,13 @@ class SnowballQuadEngine(BaseEngine):
         )
         terminal_mass = self._density_integral(math_utils, p_out + p_in)
         return {
+            "terminal_out": p_out,
+            "terminal_in": p_in,
+            "terminal_out_mass": self._density_integral(math_utils, p_out),
+            "terminal_in_mass": self._density_integral(math_utils, p_in),
             "ko_prob": ko_prob,
             "ed_ko_cf": ed_ko_cf,
             "survival_prob": survival_prob,
-            "ki_probability": ki_probability,
-            "ki_ever_probability": ki_ever_probability,
-            "ki_survive_knocked_in_probability": ki_survive_knocked_in_probability,
-            "ki_times": ki_times,
-            "ki_event_probability": ki_event_probability,
-            "ki_survival_probability": ki_survival_probability,
             "extra_fields": extra_fields,
             "mass_diagnostic": float(terminal_mass + np.sum(absorbed)),
         }
@@ -2577,99 +2427,6 @@ class SnowballQuadEngine(BaseEngine):
         if product.is_reverse:
             return spot >= float(ki_record_0.barrier)
         return spot <= float(ki_record_0.barrier)
-
-    def _build_immediate_ko_event_stats(
-        self,
-        product: SnowballOption,
-        pricing_env: PricingEnvironment,
-        ko_records: Sequence,
-        ko_record_0: object,
-        knocked_in_at_valuation: bool,
-    ) -> AutocallableEventStats:
-        """Build deterministic event stats when KO is triggered at valuation."""
-        ko_times = np.array([float(rec.observation_time) for rec in ko_records], dtype=float)
-        ko_probability = np.zeros(len(ko_records), dtype=float)
-        expected_discounted_ko_cashflow = np.zeros(len(ko_records), dtype=float)
-        ko_index = 0
-        for idx, rec in enumerate(ko_records):
-            if rec is ko_record_0 or is_close(
-                rec.observation_time,
-                ko_record_0.observation_time,
-                abs_tol=Tolerance.PRECISION,
-            ):
-                ko_index = idx
-                break
-
-        pv = self._get_immediate_ko_payoff(ko_record_0, pricing_env)
-        ko_probability[ko_index] = 1.0
-        expected_discounted_ko_cashflow[ko_index] = pv
-
-        survival_probability = np.ones(len(ko_records), dtype=float)
-        cumulative = 0.0
-        for idx in range(len(ko_records)):
-            cumulative += ko_probability[idx]
-            survival_probability[idx] = max(0.0, 1.0 - cumulative)
-
-        ki_times = np.array([], dtype=float)
-        ki_event_probability = np.array([], dtype=float)
-        ki_survival_probability = np.array([], dtype=float)
-        if knocked_in_at_valuation:
-            ki_times = np.array([0.0], dtype=float)
-            ki_event_probability = np.array([1.0], dtype=float)
-            ki_survival_probability = np.array([0.0], dtype=float)
-
-        payment_timings = resolve_structured_payment_timings(
-            product,
-            pricing_env,
-            ko_records,
-        )
-        terminal = payment_timings.terminal
-        cashflow_fields = payment_aware_cashflow_fields(
-            pricing_env,
-            determination_times=np.concatenate(
-                [ko_times, [terminal.determination_time]]
-            ),
-            payment_times=np.concatenate(
-                [
-                    payment_timings.event_payment_times,
-                    [terminal.payment_time],
-                ]
-            ),
-            expected_discounted_cashflows=np.concatenate(
-                [expected_discounted_ko_cashflow, [0.0]]
-            ),
-            determination_dates=[
-                *(record.observation_date for record in ko_records),
-                terminal.determination_date,
-            ],
-            payment_dates=[
-                *(record.settlement_date for record in ko_records),
-                terminal.payment_date,
-            ],
-        )
-
-        ever = 1.0 if knocked_in_at_valuation else None
-        continuous = product.has_ki_barrier and (product.barrier_config.ki_continuous
-                     or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS)
-        if continuous:
-            from quantark.asset.equity.engine.continuous_ki_support import continuous_ki_ever
-            ever = continuous_ki_ever(product, pricing_env, self.params)
-        return self._make_event_stats(
-            pv=pv,
-            ko_times=ko_times,
-            ko_probability=ko_probability,
-            survival_probability=survival_probability,
-            expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=0.0,
-            ki_ever_probability=ever,
-            ki_survive_knocked_in_probability=0.0,
-            expected_discounted_maturity_cashflow=0.0,
-            reconciliation_error=0.0,
-            ki_times=ki_times,
-            ki_event_probability=ki_event_probability,
-            ki_survival_probability=ki_survival_probability,
-            **cashflow_fields,
-        )
 
     def _resolve_fft_padding_factor(self) -> int:
         factor = getattr(self.params, "fft_padding_factor", None)

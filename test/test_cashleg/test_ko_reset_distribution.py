@@ -51,23 +51,30 @@ def test_coincident_pre_and_post_dates_validate():
     assert abs(total - 1.0) <= Tolerance.PROBABILITY
 
 
-def test_legacy_quad_keeps_one_maturity_outcome_but_both_schedules():
+def test_quad_v1_absolute_converts_with_both_schedules():
+    """QUAD V1 (unified statistics since T17): both schedules' knock-out rows, each maturity outcome on its own
+    determination (the first schedule's end; the knocked-in settlement at maturity, F5)."""
     stats = KOResetSnowballQuadEngine(QuadParams(grid_points=301)).calculate_event_stats(make_ko_reset(KO_RESET), env())
-    d = EventDistribution.from_autocallable_stats(stats)
-    assert d.stream_times[EventType.KO].size == stats.pre_ko_times.size + stats.post_ko_times.size
-    # the legacy one-maturity outcome is determined at the last knock-out record, as before
-    last = float(d.stream_times[EventType.KO][-1])
-    assert d.determination_times == {EventType.MATURITY_NO_KO: last, EventType.MATURITY_WITH_KI: last}
+    d = EventDistribution.from_statistics(stats)
+    assert {"pre", "post"} <= set(stats.observations.schedule)
+    assert d.stream_times[EventType.KO].size == stats.observations.size
+    assert d.determination_times == {EventType.MATURITY_NO_KO: stats.maturity.time,
+                                     EventType.MATURITY_WITH_KI: stats.ki_settlement.time}
+    assert stats.maturity.time < stats.ki_settlement.time
 
 
 def test_rebased_offsets_are_refused():
-    """The transition refuses a legacy REBASED object (offsets): built from QUAD V1's legacy statistics, the PDE
-    (T12) and QUAD V2 (T16) returning ``EventStatistics``."""
-    import dataclasses
-    from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
-    stats = KOResetSnowballQuadEngine().calculate_event_stats(make_ko_reset(KO_RESET), env())
+    """The transition refuses a legacy REBASED object (offsets). Every producer returns ``EventStatistics`` since
+    T17, so the legacy object is built by hand."""
+    from quantark.asset.equity.engine.event_stats import KOResetEventStats
+
+    legacy = KOResetEventStats(
+        pv=100.0, ko_times=np.array([0.5, 1.0]), ko_probability=np.array([0.3, 0.2]),
+        survival_probability=np.array([0.7, 0.5]), expected_discounted_ko_cashflow=np.array([31.0, 21.0]),
+        ki_probability=0.1, expected_discounted_maturity_cashflow=48.0, post_ko_times_are_offsets=True,
+    )
     with pytest.raises(NotImplementedError, match="offsets"):
-        EventDistribution.from_autocallable_stats(dataclasses.replace(stats, post_ko_times_are_offsets=True))
+        EventDistribution.from_autocallable_stats(legacy)
 
 
 def _mc_stats(post_ko_mode):

@@ -58,7 +58,7 @@ def test_first_ko_probability_matches_analytic_digital():
     analytic = float(norm.cdf(d2))
 
     stats = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
-    ko0 = float(np.asarray(stats.ko_probability)[0])
+    ko0 = float(np.asarray(stats.observations.probability)[0])
     assert abs(ko0 - analytic) / analytic < 0.01, (ko0, analytic)  # measured +0.20%
 
 
@@ -67,7 +67,7 @@ def test_coupon_probability_matches_mc():
     ph = _ref_phoenix()
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
-    qc = np.asarray(q.coupon_probability, dtype=float)
+    qc = np.asarray(q.coupons.probability, dtype=float)
     mc = np.asarray(m.coupons.probability, dtype=float)
     # Measured: aggregate +0.59%, max per-obs +2.68%. Bounds carry MC-seed margin.
     assert abs(qc.sum() - mc.sum()) / mc.sum() < 0.015, (qc.sum(), mc.sum())
@@ -82,7 +82,7 @@ def test_ko_probability_matches_mc():
     ph = _ref_phoenix()
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
-    qk = np.asarray(q.ko_probability, dtype=float)
+    qk = np.asarray(q.observations.probability, dtype=float)
     mk = np.asarray(m.observations.probability, dtype=float)
     # Measured: max per-obs abs diff 0.0025 (KO[0]); bound carries MC-seed margin.
     assert np.max(np.abs(qk - mk)) < 0.008, (qk, mk)
@@ -93,30 +93,29 @@ def test_survival_matches_mc():
     ph = _ref_phoenix()
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
-    qsv = np.asarray(q.survival_probability, dtype=float)
+    qsv = np.asarray(q.observations.survival, dtype=float)
     msv = np.asarray(m.observations.survival, dtype=float)
     assert np.max(np.abs(qsv - msv)) < 0.01, (qsv, msv)  # measured 0.0025
 
 
 def test_maturity_cashflow_matches_mc():
-    """Validate the residual maturity field INDEPENDENTLY against MC, so an
-    over-smoothing error cannot hide in the residual. The total identity
-    (Sum(ko)+Sum(coupon)+maturity == PV) is only a wiring invariant (maturity is
-    the residual plug), so it is NOT used as the correctness signal here."""
+    """Validate the maturity cash INDEPENDENTLY against MC. Since T17 the maturity rows are their own marched
+    columns (never the residual plug), so the total identity (Sum(ko)+Sum(coupon)+maturity == PV) is the
+    reconciliation of directly computed outcomes; the MC check stays the correctness signal."""
     env = _env()
     ph = _ref_phoenix()
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
-    # Wiring invariant: streams sum to PV by construction.
+    # Reconciliation of the directly computed outcome cash.
     total = (
-        float(np.sum(q.expected_discounted_ko_cashflow))
-        + float(np.sum(q.expected_discounted_coupon_cashflow))
-        + float(q.expected_discounted_maturity_cashflow)
+        float(np.sum(q.observations.discounted_cash))
+        + float(np.sum(q.coupons.discounted_cash))
+        + float((q.maturity.discounted_cash + q.ki_settlement.discounted_cash))
     )
     assert abs(total - float(q.pv)) < 1e-6 * max(1.0, abs(float(q.pv)))
-    # Independent correctness check on the residual stream itself.
+    # Independent correctness check on the maturity stream itself.
     m_maturity = _mc_maturity_cash(m)
-    assert abs(q.expected_discounted_maturity_cashflow - m_maturity) < 0.08 * max(1.0, abs(m_maturity))
+    assert abs((q.maturity.discounted_cash + q.ki_settlement.discounted_cash) - m_maturity) < 0.08 * max(1.0, abs(m_maturity))
 
 
 def _overlap_phoenix(ko_barrier):
@@ -148,7 +147,7 @@ def test_simultaneous_ko_coupon_retained(cells):
         s = PhoenixQuadEngine(
             params=QuadParams(grid_points=401, event_smoothing_cells=cells)
         ).calculate_event_stats(_overlap_phoenix(ko_barrier), env)
-        return float(np.asarray(s.coupon_probability)[0])
+        return float(np.asarray(s.coupons.probability)[0])
 
     assert abs(c0(105.0) - c0(130.0)) < 0.05, (c0(105.0), c0(130.0))
 
@@ -166,7 +165,7 @@ def test_simultaneous_ko_coupon_matches_digital_smoothed():
     s = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(
         _overlap_phoenix(105.0), env
     )
-    c0 = float(np.asarray(s.coupon_probability)[0])
+    c0 = float(np.asarray(s.coupons.probability)[0])
     assert abs(c0 - digital) < 0.006, (c0, digital)
 
 
@@ -207,10 +206,10 @@ def test_cells_zero_reproduces_hard_mask_baseline():
         0.137756038844, 0.121182902483, 0.107678604857, 0.096503578694,
     ])
     np.testing.assert_allclose(
-        np.asarray(stats.ko_probability), ko_baseline, rtol=0, atol=1e-9
+        np.asarray(stats.observations.probability), ko_baseline, rtol=0, atol=1e-9
     )
     np.testing.assert_allclose(
-        np.asarray(stats.coupon_probability), coupon_baseline, rtol=0, atol=1e-9
+        np.asarray(stats.coupons.probability), coupon_baseline, rtol=0, atol=1e-9
     )
 
 
@@ -250,11 +249,11 @@ def test_discrete_ki_ko_stream_matches_mc(disable_ko_after_ki):
     ph = _discrete_ki_phoenix(disable_ko_after_ki=disable_ko_after_ki)
     q = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
     m = _mc_engine().calculate_event_stats(ph, env)
-    ko_q = float(np.sum(q.ko_probability))
+    ko_q = float(np.sum(q.observations.probability))
     ko_m = float(np.sum(m.observations.probability))
     assert abs(ko_q - ko_m) < 0.012, (ko_q, ko_m)
     m_maturity = _mc_maturity_cash(m)
-    assert abs(q.expected_discounted_maturity_cashflow - m_maturity) < 0.06 * max(1.0, abs(m_maturity))
+    assert abs((q.maturity.discounted_cash + q.ki_settlement.discounted_cash) - m_maturity) < 0.06 * max(1.0, abs(m_maturity))
 
 
 def test_discrete_ki_cells_zero_reduces_to_hard_mask():
@@ -280,17 +279,17 @@ def test_discrete_ki_cells_zero_reduces_to_hard_mask():
         0.266761879525, 0.219645023918, 0.184928740459, 0.158469343047,
         0.137756038844, 0.121182902483, 0.107678604857, 0.096503578694,
     ])
-    np.testing.assert_allclose(np.asarray(s.ko_probability), ko_baseline, rtol=0, atol=1e-9)
-    np.testing.assert_allclose(np.asarray(s.coupon_probability), coupon_baseline, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(np.asarray(s.observations.probability), ko_baseline, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(np.asarray(s.coupons.probability), coupon_baseline, rtol=0, atol=1e-9)
 
 
 def test_event_stat_streams_are_plausible():
     env = _env()
     ph = _ref_phoenix()
     s = PhoenixQuadEngine(params=QuadParams(grid_points=401)).calculate_event_stats(ph, env)
-    ko = np.asarray(s.ko_probability, dtype=float)
-    cp = np.asarray(s.coupon_probability, dtype=float)
-    sv = np.asarray(s.survival_probability, dtype=float)
+    ko = np.asarray(s.observations.probability, dtype=float)
+    cp = np.asarray(s.coupons.probability, dtype=float)
+    sv = np.asarray(s.observations.survival, dtype=float)
     assert np.all(ko >= -1e-9) and np.all(ko <= 1.0 + 1e-9)
     assert np.all(cp >= -1e-9) and np.all(cp <= 1.0 + 1e-9)
     assert float(np.sum(ko)) <= 1.0 + 1e-9

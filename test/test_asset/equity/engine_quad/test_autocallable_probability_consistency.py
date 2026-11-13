@@ -45,13 +45,14 @@ def assert_outcomes(engine, product, market, per_ko=False):
     base = engine.price(product, market)
     increments = {outcome: engine.price_folded(product, market, unit_overlay(product, market, outcome)) - base
                   for outcome in ('ko', 'ki', 'no_ki')}
-    ko = (stats.pre_ko_probability_total + stats.post_ko_probability_total
-          if hasattr(stats, 'pre_ko_probability_total') else stats.ko_probability.sum())
+    ko = stats.observations.probability.sum()
     assert ko == pytest.approx(increments['ko'], abs=2e-11)
-    assert stats.ki_survive_knocked_in_probability == pytest.approx(increments['ki'], abs=2e-11)
+    assert stats.ki_settlement.probability == pytest.approx(increments['ki'], abs=2e-11)
+    # T17: the maturity outcome is its own marched column, equal to the price's own increment (never 1 - ΣKO - ki)
+    assert stats.maturity.probability == pytest.approx(increments['no_ki'], abs=2e-11)
     assert sum(increments.values()) == pytest.approx(1., abs=2e-8)
     if per_ko:
-        for i, probability in enumerate(stats.ko_probability):
+        for i, probability in enumerate(stats.observations.probability):
             added = engine.price_folded(product, market, unit_overlay(product, market, 'ko', i)) - base
             assert probability == pytest.approx(added, abs=2e-11)
 
@@ -145,9 +146,11 @@ def test_v1_carried_ki_and_valuation_ko_has_zero_ki_survival(family):
     market = flat_env(date, spot=110.)
     cls = SnowballQuadEngine if family == 'snowball' else PhoenixQuadEngine
     stats = cls().calculate_event_stats(product, market)
-    assert stats.ki_ever_probability == 1.
-    assert stats.ki_survive_knocked_in_probability == 0.
-    assert stats.ki_probability == 0.
+    # a knock-out decided at valuation keeps only the carried knock-in (DESIGN 4.5): P(KI) = 1, one row at 0
+    assert stats.knock_in.probability == 1.
+    np.testing.assert_array_equal(stats.ki_table.times, [0.0])
+    assert stats.ki_settlement.probability == 0.
+    assert stats.maturity.probability == 0.
 
 
 def test_forward_density_declares_different_statistics_model():
@@ -156,7 +159,7 @@ def test_forward_density_declares_different_statistics_model():
     product._otc_lifecycle_knocked_in = True
     stats = cls(QuadParams(grid_points=301, event_stats_mode='forward_density')).calculate_event_stats(product, env())
     assert stats.provenance.surrogate
-    assert stats.ki_survive_knocked_in_probability == pytest.approx(1. - stats.ko_probability.sum(), abs=1e-8)
+    assert stats.ki_settlement.probability == pytest.approx(1. - stats.observations.probability.sum(), abs=1e-8)
 
 
 @pytest.mark.parametrize('family', CASES)
@@ -175,6 +178,6 @@ def test_v1_converged_statistics_use_the_accepted_price_grid(family):
     fixed = cls(replace(engine.params, auto_converge=False, grid_points=accepted))
     reference = fixed.calculate_event_stats(product, market)
     assert stats.pv == reference.pv
-    np.testing.assert_array_equal(stats.ko_probability, reference.ko_probability)
-    assert stats.ki_survive_knocked_in_probability == reference.ki_survive_knocked_in_probability
+    np.testing.assert_array_equal(stats.observations.probability, reference.observations.probability)
+    assert stats.ki_settlement == reference.ki_settlement and stats.maturity == reference.maturity
     assert_outcomes(fixed, product, market)

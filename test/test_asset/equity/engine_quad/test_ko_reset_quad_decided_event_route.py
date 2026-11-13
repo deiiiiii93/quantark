@@ -64,8 +64,8 @@ def test_the_decided_ledger_is_the_price(name):
     engine = KOResetSnowballQuadEngine()
     stats = engine.calculate_event_stats(product, env)
     assert stats.pv == engine.price(product, env)
-    assert stats.expected_discounted_maturity_cashflow == 0.0
-    assert stats.pv == pytest.approx(float(np.sum(stats.expected_discounted_cashflows)), rel=1e-14)
+    assert stats.maturity.discounted_cash == 0.0 and stats.ki_settlement.discounted_cash == 0.0
+    assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), rel=1e-14)
 
 
 @pytest.mark.parametrize("name", CASES)

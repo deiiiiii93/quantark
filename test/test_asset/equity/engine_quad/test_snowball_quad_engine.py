@@ -269,9 +269,9 @@ def test_quad_applies_immediate_ko_at_valuation_observation():
     stats = engine.calculate_event_stats(product, env)
     assert stats is not None
     assert stats.pv == pytest.approx(ko_record_0.payoff, abs=1e-10)
-    assert stats.ko_times[0] == pytest.approx(0.0)
-    assert stats.ko_probability[0] == pytest.approx(1.0)
-    assert stats.expected_discounted_maturity_cashflow == pytest.approx(0.0)
+    assert stats.observations.times[0] == pytest.approx(0.0)
+    assert stats.observations.probability[0] == pytest.approx(1.0)
+    assert stats.maturity.discounted_cash == 0.0 and stats.ki_settlement.discounted_cash == 0.0
 
 
 def test_quad_applies_immediate_ki_at_valuation_observation():
@@ -316,10 +316,11 @@ def test_quad_applies_immediate_ki_at_valuation_observation():
 
     stats = engine.calculate_event_stats(product, env)
     assert stats is not None
-    assert stats.ki_ever_probability == pytest.approx(1.0)
-    assert stats.ki_probability == pytest.approx(1.0 - stats.ko_probability.sum(), abs=1e-10)
-    assert stats.ki_survive_knocked_in_probability == stats.ki_probability
-    assert stats.ki_times[0] == pytest.approx(0.0)
+    assert stats.knock_in.probability == 1.0
+    # the march's discount on the knocked-in settlement column leaves a residual off 1 - ΣKO (AC8)
+    assert stats.ki_settlement.probability == pytest.approx(1.0 - stats.observations.probability.sum(), abs=1e-10)
+    assert stats.maturity.probability == pytest.approx(0.0, abs=1e-12)
+    assert stats.ki_table.times[0] == pytest.approx(0.0)
 
 
 def test_diffuse_fft_vectorized_matches_single_surface_path():
@@ -644,7 +645,10 @@ def test_bgk_mode_prices_as_shifted_continuous_with_discrete_valuation_state():
     assert bgk_price == pytest.approx(continuous_price, abs=1e-9)
 
     stats = bgk_engine.calculate_event_stats(product, env)
-    assert stats.ki_probability < 1.0
+    # the valuation state stays discrete (not knocked in at a spot between the shifted and the contractual level)
+    assert stats.ki_settlement.probability < 1.0
+    # BGK has no per-observation knock-in mass: the path statistics are refused with a reason (T17)
+    assert stats.unavailable["ki_table"].startswith("undefined: KnockInMonitoringMode.BGK_APPROXIMATION")
 
 
 def test_bgk_mode_rejects_alternating_spacing():

@@ -28,7 +28,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.quad import PhoenixQuadEngineV2
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
@@ -125,11 +125,7 @@ def _v1(grid_points: int = GRID_POINTS) -> PhoenixQuadEngine:
 
 
 def _coupon_cash(stats, n_rows: int = len(OBS)) -> np.ndarray:
-    # MC (T10) and QUAD V2 (T16) report EventStatistics; QUAD V1 the legacy object until T17
-    coupons = getattr(stats, "coupons", None)
-    legacy = coupons is None
-    cash = np.asarray(stats.expected_discounted_coupon_cashflow if legacy else coupons.discounted_cash,
-                      dtype=float)
+    cash = np.asarray(stats.coupons.discounted_cash, dtype=float)
     assert cash.shape == (n_rows,), "no per-row coupon cash"
     return cash
 
@@ -140,7 +136,7 @@ def test_v1_coupon_cash_matches_quad_v2(memory, pay_type):
     product = _phoenix(memory=memory, pay_type=pay_type)
     v1 = _v1().calculate_event_stats(product, env)
     v2 = PhoenixQuadEngineV2().calculate_event_stats(product, env)
-    assert isinstance(v1, PhoenixEventStats)
+    assert isinstance(v1, EventStatistics)
     gap = _coupon_cash(v1) - _coupon_cash(v2)
     assert np.max(np.abs(gap)) <= V2_ALLOWANCE, f"V1 - V2 per row: {gap}"
 
@@ -213,7 +209,7 @@ def test_expiry_coupon_paid_with_an_early_knock_out_is_discounted_at_its_settlem
     fractions = product.get_coupon_period_year_fractions(env)
     amounts = np.array([product.get_coupon_payoff(k, year_fraction=f) for k, f in enumerate(fractions)])
     # every coupon paid at the terminal payment (maturity 1.0 + the 0.1-year lag)
-    at_terminal = np.asarray(stats.coupon_probability) * amounts * env.get_discount_factor(1.1)
+    at_terminal = np.asarray(stats.coupons.probability) * amounts * env.get_discount_factor(1.1)
     # Rows 0 and 2: deferred, so worth less than paid at the observation; settled early on knock-out
     # paths, so worth more than paid at the terminal payment.
     for k in (0, 2):
@@ -240,7 +236,7 @@ def test_valuation_instant_observation_matches_quad_v2(first_barrier, pay_type):
     gap = _coupon_cash(v1, 5) - _coupon_cash(v2, 5)
     assert np.max(np.abs(gap)) <= V2_ALLOWANCE, f"V1 - V2 per row: {gap}"
     # the coupon decided now is paid with certainty (its amount is zero here: an empty period)
-    assert v1.coupon_probability[0] == v2.coupons.probability[0] == (1.0 if first_barrier == 85.0 else 0.0)
+    assert v1.coupons.probability[0] == v2.coupons.probability[0] == (1.0 if first_barrier == 85.0 else 0.0)
 
 
 @pytest.mark.parametrize("pay_type", [CouponPayType.INSTANT, CouponPayType.EXPIRY], ids=["instant", "expiry"])
@@ -266,10 +262,10 @@ def test_memory_arrears_carried_into_the_valuation_instant(first_barrier, pay_ty
     assert np.max(np.abs(gap)) <= V2_ALLOWANCE, f"V1 - V2 per row: {gap}"
     if first_barrier == 85.0:
         # released now with the (empty-period) coupon: settled 0.1 year later, or at the note's end
-        assert stats.coupon_probability[0] == 1.0
+        assert stats.coupons.probability[0] == 1.0
         if pay_type == CouponPayType.INSTANT:
             assert cash[0] == pytest.approx(arrears * env.get_discount_factor(0.1), rel=1e-12)
         else:
             assert arrears * env.get_discount_factor(1.1) < cash[0] < arrears * env.get_discount_factor(0.35)
     else:
-        assert cash[0] == 0.0 and stats.coupon_probability[0] == 0.0
+        assert cash[0] == 0.0 and stats.coupons.probability[0] == 0.0

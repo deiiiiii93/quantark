@@ -224,14 +224,15 @@ def test_the_mode_governs_the_event_decomposition_too():
     assert legacy is not None and transition is not None
 
     assert transition.pv != legacy.pv
-    assert float(np.sum(transition.expected_discounted_ko_cashflow)) != float(
-        np.sum(legacy.expected_discounted_ko_cashflow)
+    assert float(np.sum(transition.observations.discounted_cash)) != float(
+        np.sum(legacy.observations.discounted_cash)
     )
-    assert float(np.sum(transition.ko_probability)) != float(
-        np.sum(legacy.ko_probability)
+    assert float(np.sum(transition.observations.probability)) != float(
+        np.sum(legacy.observations.probability)
     )
-    # and the decomposition stays a probability distribution
-    assert 0.0 <= float(np.sum(transition.ko_probability)) <= 1.0
+    # and the decomposition stays a probability distribution that reconciles with its own pv
+    assert 0.0 <= float(np.sum(transition.observations.probability)) <= 1.0
+    assert abs(transition.reconciliation_error) <= 1e-12 * max(1.0, abs(transition.pv))
 
 
 @pytest.mark.parametrize(

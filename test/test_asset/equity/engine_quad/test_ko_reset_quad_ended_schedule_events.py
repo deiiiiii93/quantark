@@ -93,7 +93,7 @@ def test_the_ledger_is_the_price(name):
     engine = KOResetSnowballQuadEngine()
     stats = engine.calculate_event_stats(product, env)
     assert stats.pv == engine.price(product, env)
-    assert stats.pv == pytest.approx(float(np.sum(stats.expected_discounted_cashflows)), rel=1e-12)
+    assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), rel=1e-12)
 
 
 @pytest.mark.parametrize("trigger", [PaymentTrigger.AT_KO, PaymentTrigger.AT_MATURITY_NO_KO,

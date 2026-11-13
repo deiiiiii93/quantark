@@ -677,10 +677,10 @@ class TestPhoenixCellAverage:
             params=PDEParams(event_projection="cell_average")
         ).calculate_event_stats(phoenix_product, phoenix_env)
         ko_diff = np.max(
-            np.abs(pde_stats.observations.probability - np.asarray(quad_stats.ko_probability))
+            np.abs(pde_stats.observations.probability - quad_stats.observations.probability)
         )
         cp_diff = np.max(
-            np.abs(pde_stats.coupons.probability - np.asarray(quad_stats.coupon_probability))
+            np.abs(pde_stats.coupons.probability - quad_stats.coupons.probability)
         )
         assert ko_diff < 3e-3
         assert cp_diff < 3e-3

@@ -7,7 +7,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from quantark.asset.equity.engine.event_stats import EventStatistics, KOResetEventStats
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,
 )
@@ -98,20 +98,15 @@ def test_ko_reset_quad_event_stats_absolute():
 
     stats = engine.calculate_event_stats(product, pricing_env)
 
-    assert isinstance(stats, KOResetEventStats)
-    assert stats.pre_ko_times.shape == stats.pre_ko_probability.shape
-    assert stats.post_ko_times.shape == stats.post_ko_probability.shape
-    assert stats.ko_times.shape == stats.pre_ko_times.shape
-    assert stats.ko_probability.shape == stats.pre_ko_probability.shape
-    assert float(np.sum(stats.pre_ko_probability)) <= 1.0 + 1e-6
-    assert float(np.sum(stats.post_ko_probability)) <= 1.0 + 1e-6
-
-    pv_parts = (
-        float(np.sum(stats.expected_discounted_ko_cashflow))
-        + float(stats.expected_discounted_post_ko_cashflow)
-        + float(stats.expected_discounted_maturity_cashflow)
-    )
-    assert stats.pv == pytest.approx(pv_parts, abs=1e-8)
+    assert isinstance(stats, EventStatistics)
+    obs = stats.observations
+    pre, post = np.asarray(obs.schedule) == "pre", np.asarray(obs.schedule) == "post"
+    assert pre.any() and post.any() and obs.times.shape == obs.probability.shape
+    assert float(np.sum(obs.probability[pre])) <= 1.0 + 1e-6
+    assert float(np.sum(obs.probability[post])) <= 1.0 + 1e-6
+    # every outcome direct (T17): the cash identity closes to round-off, no residual plug
+    assert abs(stats.reconciliation_error) <= 1e-12 * stats.pv
+    assert abs(stats.probability_residual) <= 1e-12
 
 
 def test_ko_reset_pde_event_stats_absolute():

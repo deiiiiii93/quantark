@@ -167,21 +167,15 @@ def test_continuous_ki_monitoring_continues_after_valuation_ko(family):
     market = flat_env(date, spot=110.)
     _, _, v1, v2 = CASES[family]
     pde = {'snowball': SnowballPDESolver, 'phoenix': PhoenixPDESolver, 'ko_reset': KOResetSnowballPDESolver}[family]
-    stats = [cls().calculate_event_stats(product, market) for cls in (v1,)]
-    # PDE 1D (T12) and QUAD V2 (T16), DESIGN §4.5: a knock-out at valuation without a carried knock-in is no
-    # knock-in -- P(KI) = 0 and an empty knock-in table; QUAD V1 keeps its legacy KO-independent monitor until it
-    # migrates (T17)
-    for unified in (pde().calculate_event_stats(product, market), v2().calculate_event_stats(product, market)):
+    # PDE 1D (T12), QUAD V2 (T16) and QUAD V1 (T17), DESIGN §4.5: a knock-out at valuation without a carried
+    # knock-in is no knock-in -- P(KI) = 0 and an empty knock-in table (the legacy KO-independent monitor, which
+    # kept monitoring the barrier after the knock-out, is removed)
+    for unified in (pde().calculate_event_stats(product, market), v2().calculate_event_stats(product, market),
+                    v1().calculate_event_stats(product, market)):
         assert unified.knock_in.probability == 0. and unified.ki_table.size == 0
         assert unified.ki_settlement.probability == 0. and unified.maturity.probability == 0.
         assert float(unified.observations.probability.sum()) == 1.
         assert unified.knock_in.expected_loss == 0.
-    for result in stats:
-        expected = result.ki_ever_probability
-        assert 0 < expected < 1
-        assert result.ki_survive_knocked_in_probability == 0.
-        ko = result.pre_ko_probability_total + result.post_ko_probability_total if family == 'ko_reset' else result.ko_probability.sum()
-        assert ko == 1.
 
 
 def test_missing_dividend_input_is_exact_zero_carry():

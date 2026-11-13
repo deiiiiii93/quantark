@@ -158,11 +158,11 @@ def _no_ki_snowball():
 
 def test_forward_matches_stacked_no_ki_snowball():
     stacked, forward = _stats_pair(SnowballQuadEngine, _no_ki_snowball(), _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert np.max(np.abs(forward.survival_probability - stacked.survival_probability)) < KO_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert np.max(np.abs(forward.observations.survival - stacked.observations.survival)) < KO_PROB_ATOL
     np.testing.assert_allclose(
-        forward.expected_discounted_ko_cashflow,
-        stacked.expected_discounted_ko_cashflow,
+        forward.observations.discounted_cash,
+        stacked.observations.discounted_cash,
         rtol=CF_RTOL, atol=1e-4,
     )
     # npv path is shared: pv must be EXACTLY the backward price in both modes.
@@ -181,12 +181,24 @@ def _discrete_ki_snowball():
 
 def test_forward_matches_stacked_discrete_ki():
     stacked, forward = _stats_pair(SnowballQuadEngine, _discrete_ki_snowball(), _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
-    assert abs(forward.ki_ever_probability - stacked.ki_ever_probability) < KI_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_settlement.probability - stacked.ki_settlement.probability) < KI_PROB_ATOL
+    _forward_reports_no_knock_in_path(forward)
+
+
+def _forward_reports_no_knock_in_path(forward):
+    """T17: the forward-density mode tracks no first knock-in before a knock-out (its KI-ever counted knock-ins after
+    a knock-out, which the contract forbids), so the knock-in path statistics are unavailable with a reason."""
+    from quantark.asset.equity.engine.quad.v1_statistics import FORWARD_DENSITY_KI_REASON
+
+    assert forward.provenance.statistics_model == "quad_v1_forward_density"
+    for path in ("knock_in.probability", "knock_in.expected_time", "ki_table"):
+        assert forward.unavailable[path] == FORWARD_DENSITY_KI_REASON
 
 
 def test_forward_ki_ever_matches_analytic_first_passage():
+    """KO out of reach: P(KI before any KO) is the barrier's first passage. The forward mode no longer reports a
+    knock-in probability (T17); the stacked mode's forward adjoint pass matches the closed form."""
     product = create_standard_snowball(
         initial_price=100.0, strike=100.0, maturity=1.0,
         ko_barrier=1e6,  # unreachable: isolates the first-passage statistic
@@ -197,6 +209,8 @@ def test_forward_ki_ever_matches_analytic_first_passage():
     forward = SnowballQuadEngine(
         params=QuadParams(grid_points=2001, event_stats_mode="forward_density")
     ).calculate_event_stats(product, e)
+    _forward_reports_no_knock_in_path(forward)
+    stacked = SnowballQuadEngine(params=QuadParams(grid_points=2001)).calculate_event_stats(product, e)
     S, B, sig = 100.0, 80.0, 0.20
     m = 0.03 - 0.05 - 0.5 * sig * sig
     T_ = product.get_maturity(e)
@@ -204,8 +218,8 @@ def test_forward_ki_ever_matches_analytic_first_passage():
     p_touch = norm.cdf((x - m * T_) / (sig * math.sqrt(T_))) + (
         B / S
     ) ** (2.0 * m / (sig * sig)) * norm.cdf((x + m * T_) / (sig * math.sqrt(T_)))
-    # Banked: measured 1.11e-5 at grid 2001 (4.45e-5 @1001, 2.78e-6 @4001).
-    assert abs(forward.ki_ever_probability - p_touch) < 3e-5
+    # the stacked bridge recursion's own resolution at 2001 nodes (forward-density banked 1.11e-5)
+    assert abs(stacked.knock_in.probability - p_touch) < 1e-4
 
 
 def test_forward_matches_stacked_continuous_ki():
@@ -215,9 +229,9 @@ def test_forward_matches_stacked_continuous_ki():
         contract_multiplier=10_000.0,
     )
     stacked, forward = _stats_pair(SnowballQuadEngine, product, _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
-    assert abs(forward.ki_ever_probability - stacked.ki_ever_probability) < KI_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_settlement.probability - stacked.ki_settlement.probability) < KI_PROB_ATOL
+    _forward_reports_no_knock_in_path(forward)
     assert float(forward.pv).hex() == float(stacked.pv).hex()
 
 
@@ -234,32 +248,34 @@ def test_forward_matches_stacked_phoenix():
         num_observations=23, memory_coupon=False,
     )
     stacked, forward = _stats_pair(PhoenixQuadEngine, product, _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert np.max(np.abs(forward.coupon_probability - stacked.coupon_probability)) < KO_PROB_ATOL
-    assert np.asarray(forward.expected_discounted_coupon_cashflow).size == 23
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert np.max(np.abs(forward.coupons.probability - stacked.coupons.probability)) < KO_PROB_ATOL
+    assert np.asarray(forward.coupons.discounted_cash).size == 23
     np.testing.assert_allclose(
-        forward.expected_discounted_coupon_cashflow,
-        stacked.expected_discounted_coupon_cashflow,
+        forward.coupons.discounted_cash,
+        stacked.coupons.discounted_cash,
         rtol=CF_RTOL, atol=1e-4,
     )
     assert float(forward.pv).hex() == float(stacked.pv).hex()
 
 
 def test_forward_matches_stacked_phoenix_memory_coupon_probability():
+    from quantark.asset.equity.engine.event_stats import StatisticsRefused
     from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
     from quantark.asset.equity.product.option.phoenix_helpers import create_standard_phoenix
 
-    # The memory phoenix still exposes coupon_probability; only the cashflow
-    # conversion is suppressed (amount is path-dependent under memory).
+    # The memory coupon's cash is path-dependent (its arrears): the density alone has no number for it, and the
+    # unified statistics require the coupon cash (T17), so the forward mode refuses -- the stacked mode computes it.
     product = create_standard_phoenix(
         initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
         ki_barrier=75.0, coupon_barrier=85.0, coupon_rate=0.01,
         num_observations=23,
     )
-    stacked, forward = _stats_pair(PhoenixQuadEngine, product, _env())
-    assert np.max(np.abs(forward.coupon_probability - stacked.coupon_probability)) < KO_PROB_ATOL
-    assert np.asarray(forward.expected_discounted_coupon_cashflow).size == 0
-    assert float(forward.pv).hex() == float(stacked.pv).hex()
+    with pytest.raises(StatisticsRefused, match="forward_density"):
+        PhoenixQuadEngine(params=QuadParams(grid_points=2001, event_stats_mode="forward_density")
+                          ).calculate_event_stats(product, _env())
+    stacked = PhoenixQuadEngine(params=QuadParams(grid_points=2001)).calculate_event_stats(product, _env())
+    assert stacked.coupons.discounted_cash.size == 23
 
 
 def test_forward_mass_diagnostic_conserved():
@@ -291,8 +307,8 @@ def test_forward_reverse_snowball_parity():
         contract_multiplier=10_000.0, is_reverse=True,
     )
     stacked, forward = _stats_pair(SnowballQuadEngine, product, _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_settlement.probability - stacked.ki_settlement.probability) < KI_PROB_ATOL
 
 
 def test_forward_disable_ko_after_ki_parity():
@@ -302,8 +318,8 @@ def test_forward_disable_ko_after_ki_parity():
         contract_multiplier=10_000.0, disable_ko_after_ki=True,
     )
     stacked, forward = _stats_pair(SnowballQuadEngine, product, _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_settlement.probability - stacked.ki_settlement.probability) < KI_PROB_ATOL
 
 
 def test_forward_knocked_in_at_valuation_latches():
@@ -322,10 +338,10 @@ def test_forward_knocked_in_at_valuation_latches():
     stacked, forward = _stats_pair(SnowballQuadEngine, product, e)
     # Carried KI latches the monitoring state, not survival through future KO.
     for stats in (stacked, forward):
-        assert stats.ki_probability == pytest.approx(1.0 - stats.ko_probability.sum(), abs=1e-8)
-        assert stats.ki_survive_knocked_in_probability == stats.ki_probability
-    assert forward.ki_ever_probability == 1.0
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+        assert stats.ki_settlement.probability == pytest.approx(1.0 - stats.observations.probability.sum(), abs=1e-8)
+        assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability
+        assert stats.knock_in.probability == 1.0          # knocked in at valuation: the rule, no pass
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
 
 
 def test_forward_r_q_zero_bisection():
@@ -338,8 +354,8 @@ def test_forward_r_q_zero_bisection():
         valuation_date=datetime(2026, 6, 30),
     )
     stacked, forward = _stats_pair(SnowballQuadEngine, product, e)
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_settlement.probability - stacked.ki_settlement.probability) < KI_PROB_ATOL
 
 
 def test_forward_nodal_projection_parity():
@@ -353,8 +369,8 @@ def test_forward_nodal_projection_parity():
     stacked, forward = _stats_pair(
         SnowballQuadEngine, product, _env(), event_projection="nodal"
     )
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
-    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+    assert np.max(np.abs(forward.observations.probability - stacked.observations.probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_settlement.probability - stacked.ki_settlement.probability) < KI_PROB_ATOL
 
 
 def test_forward_streams_pruning_contract():
@@ -377,10 +393,10 @@ def test_forward_streams_pruning_contract():
         product, _env(), streams=ko_only
     )
     # Same-run exact equality on the surviving fields; pruned fields zero.
-    assert np.asarray(full.ko_probability).tobytes() == np.asarray(pruned.ko_probability).tobytes()
+    assert np.asarray(full.observations.probability).tobytes() == np.asarray(pruned.observations.probability).tobytes()
     assert float(full.pv).hex() == float(pruned.pv).hex()
-    assert pruned.ki_probability == 0.0
-    assert pruned.ki_ever_probability == 0.0
+    for path in ("knock_in.probability", "knock_in.expected_time", "ki_table"):
+        assert pruned.unavailable[path] == "not requested"
 
 
 def test_forward_pwe_npv_bit_equal_to_stacked():
@@ -418,17 +434,20 @@ def test_forward_matches_mc_event_stats():
     ).calculate_event_stats(product, e)
     # 131072 Sobol paths (500k peaked at 6-9 GB and killed a 16 GB CI runner running two workers; this is
     # 1.8 GB). Measured gaps 1.3e-3 (KO) and 1.6e-3 (KI) against the bands below.
-    assert np.max(np.abs(forward.ko_probability - mc.observations.probability)) < 4e-3
-    # MC reports P(KI before any KO) since T9 (spec DESIGN §4.5); the V1 forward pass still reports KI ever
-    # (a knock-in after a knock-out included) until T17 moves it, so KI ever bounds the MC number from above
-    assert mc.knock_in.probability < forward.ki_ever_probability + 6e-3
+    assert np.max(np.abs(forward.observations.probability - mc.observations.probability)) < 4e-3
+    # MC reports P(KI before any KO) since T9 (spec DESIGN §4.5); the V1 forward-density mode reports none since
+    # T17, the stacked mode's forward adjoint pass does
+    _forward_reports_no_knock_in_path(forward)
+    stacked = SnowballQuadEngine(params=QuadParams(grid_points=2001)).calculate_event_stats(product, e)
+    assert abs(mc.knock_in.probability - stacked.knock_in.probability) < 6e-3
+
+
+from dataclasses import fields as dc_fields  # noqa: E402
 
 
 def test_ko_reset_ignores_forward_flag():
     # KO-reset keeps its own stacked implementation; the flag is a
     # permission, not an obligation (same-run exact equality).
-    from dataclasses import fields as dc_fields
-
     from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
         KOResetSnowballQuadEngine,
     )
@@ -447,9 +466,13 @@ def test_ko_reset_ignores_forward_flag():
     b = KOResetSnowballQuadEngine(
         params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
     ).calculate_event_stats(product, e)
-    for f in dc_fields(a):
-        va, vb = getattr(a, f.name), getattr(b, f.name)
-        if isinstance(va, np.ndarray):
-            assert va.tobytes() == vb.tobytes(), f.name
-        else:
-            assert va == vb, f.name
+    assert a.provenance == b.provenance and a.pv == b.pv
+    for table in ("observations", "ki_table", "ledger"):
+        ta, tb = getattr(a, table), getattr(b, table)
+        for f in dc_fields(ta):
+            va, vb = getattr(ta, f.name), getattr(tb, f.name)
+            if isinstance(va, np.ndarray):
+                assert va.tobytes() == vb.tobytes(), (table, f.name)
+            else:
+                assert va == vb, (table, f.name)
+    assert a.maturity == b.maturity and a.ki_settlement == b.ki_settlement and a.knock_in == b.knock_in

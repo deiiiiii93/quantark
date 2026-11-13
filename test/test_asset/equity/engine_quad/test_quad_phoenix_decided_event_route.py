@@ -42,12 +42,12 @@ def test_the_decided_coupon_is_its_own_ledger_entry():
     stats = engine.calculate_event_stats(product, env)
     decision = product.decide_observations_at_valuation(env.spot, env, knocked_in=False)
     assert decision.knocked_out and decision.coupon > 0.0
-    i = int(np.argmax(stats.ko_probability))
+    i = int(np.argmax(stats.observations.probability))
     df = env.get_discount_factor(decision.ko_record.settlement_time) \
         if decision.ko_record.settlement_time and decision.ko_record.settlement_time > 0.0 else 1.0
-    assert stats.coupon_probability[i] == 1.0
-    assert stats.expected_discounted_coupon_cashflow[i] == pytest.approx(decision.coupon * df, rel=1e-14)
-    assert stats.pv == pytest.approx(float(np.sum(stats.expected_discounted_cashflows)), rel=1e-14)
+    assert stats.coupons.probability[i] == 1.0
+    assert stats.coupons.discounted_cash[i] == pytest.approx(decision.coupon * df, rel=1e-14)
+    assert stats.pv == pytest.approx(float(np.sum(stats.ledger.discounted_cash)), rel=1e-14)
     assert stats.pv == engine.price(product, env)
 
 

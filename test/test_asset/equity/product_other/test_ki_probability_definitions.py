@@ -14,10 +14,10 @@ cross-engine-consistent fields:
 These tests pin both engines to the same definitions and pin the decomposition
 identity ki_ever - ki_survive == P(KI AND KO) >= 0.
 
-Since the unified event statistics (T9 Snowball, T10 Phoenix) the MC engines report
-``knock_in.probability`` = P(KI before any KO) and ``knock_in.probability_no_ko`` =
-P(KI AND never KO) (== the knocked-in settlement row); QUAD/PDE keep the legacy
-fields until their producers migrate.
+Since the unified event statistics (T9 Snowball, T10 Phoenix MC; T12/T13 PDE; T17 QUAD V1) every engine reports
+``knock_in.probability`` = P(KI before any KO) (a knock-in after a knock-out is no knock-in, DESIGN §4.5) and
+``knock_in.probability_no_ko`` = P(KI AND never KO) (== the knocked-in settlement row); the legacy KI-ever field is
+gone. These tests pin the engines to the same two definitions.
 """
 
 from datetime import datetime
@@ -77,51 +77,44 @@ KI_SURVIVE_REF = 0.125
 
 
 def test_new_ki_fields_are_populated_by_both_engines():
-    """QUAD V1 (legacy object until T17): KI ever and KI-and-no-KO. Phoenix MC (unified statistics since T10):
-    P(KI before any KO) and P(KI and no KO) == the knocked-in settlement row."""
+    """QUAD V1 (unified statistics since T17) and Phoenix MC (since T10): P(KI before any KO) and P(KI and no KO)
+    == the knocked-in settlement row."""
     q, m = _quad_stats(), _mc_stats()
-    assert q.ki_ever_probability is not None
-    assert q.ki_survive_knocked_in_probability is not None
-    assert m.knock_in.probability is not None
-    assert m.knock_in.probability_no_ko == m.ki_settlement.probability
+    for stats in (q, m):
+        assert stats.knock_in.probability is not None
+        assert stats.knock_in.probability_no_ko == stats.ki_settlement.probability
 
 
-def test_mc_knock_in_before_ko_is_bounded_by_ki_ever():
-    """MC counts a knock-in only before any knock-out (DESIGN §4.5): between settles-knocked-in and QUAD's KI ever."""
+def test_quad_and_mc_agree_on_knock_in_before_ko():
+    """Both count a knock-in only before any knock-out (DESIGN §4.5): they agree, and both lie well below the
+    contract's KO-independent touch probability (KI_EVER_REF), which counted knock-ins after a knock-out."""
     q, m = _quad_stats(), _mc_stats()
-    assert m.knock_in.probability_no_ko <= m.knock_in.probability
-    assert m.knock_in.probability < float(q.ki_ever_probability) + 0.015, (
-        q.ki_ever_probability, m.knock_in.probability
-    )
-    assert abs(float(q.ki_ever_probability) - KI_EVER_REF) < 0.02
+    assert abs(q.knock_in.probability - m.knock_in.probability) < 0.015, (q.knock_in.probability,
+                                                                          m.knock_in.probability)
+    for stats in (q, m):
+        assert stats.knock_in.probability_no_ko <= stats.knock_in.probability < KI_EVER_REF - 0.02
 
 
 def test_ki_survive_agrees_across_engines():
     q, m = _quad_stats(), _mc_stats()
-    assert abs(float(q.ki_survive_knocked_in_probability) - m.knock_in.probability_no_ko) < 0.015, (
-        q.ki_survive_knocked_in_probability, m.knock_in.probability_no_ko,
+    assert abs(q.ki_settlement.probability - m.knock_in.probability_no_ko) < 0.015, (
+        q.ki_settlement.probability, m.knock_in.probability_no_ko,
     )
     assert abs(m.knock_in.probability_no_ko - KI_SURVIVE_REF) < 0.02
 
 
-def test_ki_survive_is_legacy_quad_value():
-    """QUAD's legacy ki_probability already means 'KI & never KO', so the new
-    precise field must equal it (the legacy semantics are preserved)."""
+def test_ki_survive_is_the_knocked_in_settlement():
+    """P(KI and never KO) is the knocked-in settlement row itself, exactly."""
     q = _quad_stats()
-    assert abs(
-        float(q.ki_survive_knocked_in_probability) - float(q.ki_probability)
-    ) < 1e-9
+    assert q.knock_in.probability_no_ko == q.ki_settlement.probability
 
 
-def test_decomposition_identity_ever_ge_survive():
-    """QUAD: ki_ever - ki_survive == P(KI AND KO) >= 0 (~0.05 for the reference contract). MC: P(KI before KO) -
-    P(KI, no KO) == P(KI, then KO) >= 0, measured ~0.003: almost all of the KI-and-KO mass is a knock-in AFTER the
-    knock-out, which is no knock-in (DESIGN §4.5), so QUAD's KI ever exceeds MC's KI before KO by that mass."""
+def test_decomposition_identity_before_ge_survive():
+    """P(KI before KO) - P(KI, no KO) == P(KI, then KO) >= 0 on both engines, and the two engines agree on it."""
     q, m = _quad_stats(), _mc_stats()
-    ever, survive = float(q.ki_ever_probability), float(q.ki_survive_knocked_in_probability)
-    assert ever - survive > 0.02, (ever, survive)
-    assert m.knock_in.probability >= m.knock_in.probability_no_ko
-    assert ever - m.knock_in.probability > 0.02, (ever, m.knock_in.probability)
+    gaps = [stats.knock_in.probability - stats.knock_in.probability_no_ko for stats in (q, m)]
+    assert min(gaps) >= -1e-12, gaps
+    assert abs(gaps[0] - gaps[1]) < 0.01, gaps
 
 
 def _discrete_ki_phoenix(ki_barrier=90.0):
@@ -150,9 +143,7 @@ def _discrete_ki_phoenix(ki_barrier=90.0):
 
 def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
     """All three autocallable engines (QUAD, PDE, MC) must agree on both KI
-    definitions for a discrete-KI contract. This closes the definitional gap the
-    barrier-smoothing spec had flagged as un-reconcilable (e.g. legacy QUAD 0.0995
-    vs MC 0.1389): ki_ever ~0.14 and ki_survive ~0.10 now agree across engines."""
+    definitions for a discrete-KI contract: P(KI before any KO) and P(KI and no KO)."""
     from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
     from quantark.asset.equity.param import PDEParams
 
@@ -166,28 +157,23 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
         params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)
     ).calculate_event_stats(ph, env)
 
-    # QUAD: legacy object (KI ever, KI-and-no-KO) until T17; PDE 1D (T12, T13) and MC: unified statistics --
-    # P(KI before any KO) (the PDE's from its forward adjoint pass) and P(KI and no KO)
-    assert p.knock_in.probability_no_ko == p.ki_settlement.probability
-    evers = [float(q.ki_ever_probability)]
-    survs = [float(q.ki_survive_knocked_in_probability), p.ki_settlement.probability, m.knock_in.probability_no_ko]
-    befores = [p.knock_in.probability, m.knock_in.probability]
+    # QUAD V1 (T17), PDE 1D (T12, T13) and MC: unified statistics -- P(KI before any KO) (the grid engines' from
+    # their forward adjoint passes) and P(KI and no KO)
+    for engine in (q, p):
+        assert engine.knock_in.probability_no_ko == engine.ki_settlement.probability
+    survs = [q.ki_settlement.probability, p.ki_settlement.probability, m.knock_in.probability_no_ko]
+    befores = [q.knock_in.probability, p.knock_in.probability, m.knock_in.probability]
     assert max(survs) - min(survs) < 0.015, survs
     assert max(befores) - min(befores) < 0.015, befores
-    # The two definitions genuinely differ (this is the whole point).
-    for ever, surv in zip(evers, survs):
-        assert ever > surv + 0.02, (ever, surv)
-    # KI before any KO lies between them, well below KI ever: a knock-in after a knock-out is no knock-in
-    # (DESIGN §4.5; measured 0.104 vs KI ever ~0.14, settles knocked in 0.103; PDE 0.1040 vs 0.1028)
-    for engine in (p, m):
-        assert engine.knock_in.probability_no_ko <= engine.knock_in.probability < min(evers) - 0.02
-    assert abs(float(q.ki_probability) - float(q.ki_survive_knocked_in_probability)) < 1e-9
+    # KI before any KO bounds settles-knocked-in from above (measured 0.104 vs 0.103: a knock-in after a knock-out
+    # is no knock-in, DESIGN §4.5)
+    for engine in (q, p, m):
+        assert engine.knock_in.probability_no_ko <= engine.knock_in.probability
 
 
 def test_snowball_mc_quad_agree_on_both_ki_definitions():
-    """Snowball MC reports the unified statistics since T9: P(KI before any KO) and P(KI and no KO)
-    (``knock_in.probability_no_ko == ki_settlement.probability``). The QUAD V1 legacy object still reports
-    KI ever and KI-and-no-KO (until T17): the settles-knocked-in numbers agree; KI ever bounds KI before KO."""
+    """Snowball MC (T9) and QUAD V1 (T17) report the unified statistics: P(KI before any KO) and P(KI and no KO)
+    (``knock_in.probability_no_ko == ki_settlement.probability``); both definitions agree across the engines."""
     from quantark.asset.equity.product.option.snowball_config import BarrierConfig
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -209,13 +195,12 @@ def test_snowball_mc_quad_agree_on_both_ki_definitions():
     q = SnowballQuadEngine(params=QuadParams(grid_points=801)).calculate_event_stats(sb, env)
     m = SnowballMCEngine(params=MCParams(num_paths=200_000, seed=7)).calculate_event_stats(sb, env)
 
-    assert q.ki_ever_probability is not None and q.ki_survive_knocked_in_probability is not None
-    assert m.knock_in.probability is not None
-    assert m.knock_in.probability_no_ko == m.ki_settlement.probability
-    assert abs(float(q.ki_survive_knocked_in_probability) - m.knock_in.probability_no_ko) < 0.02
-    assert m.knock_in.probability_no_ko <= m.knock_in.probability < float(q.ki_ever_probability) + 0.02
-    # Legacy QUAD meaning: ki_probability = ki_survive.
-    assert abs(float(q.ki_probability) - float(q.ki_survive_knocked_in_probability)) < 1e-9
+    for engine in (q, m):
+        assert engine.knock_in.probability is not None
+        assert engine.knock_in.probability_no_ko == engine.ki_settlement.probability
+    assert abs(q.ki_settlement.probability - m.knock_in.probability_no_ko) < 0.02
+    assert abs(q.knock_in.probability - m.knock_in.probability) < 0.02
+    assert q.knock_in.probability_no_ko <= q.knock_in.probability
 
 
 def test_event_distribution_uses_survive_definition_for_mc():

@@ -43,27 +43,11 @@ def test_phoenix_cashflow_decomposition_reconciles(kind, memory):
     env = make_env()
     ph = make_phoenix(memory=memory)
     s = make_engine(kind, "phoenix").calculate_event_stats(ph, env)
-    if kind in ("mc", "pde"):
-        # MC (T10) and PDE 1D (T12) report the unified EventStatistics: every outcome direct, the identity at
-        # round-off (the PDE's value and cash columns take the same linear stages)
-        assert s.coupons.probability.size == s.observations.size
-        assert abs(s.reconciliation_error) <= 1e-12 * max(1.0, abs(s.pv))
-        assert float(np.sum(s.coupons.discounted_cash)) > 0.0
-        return
-    assert s.coupon_probability.size == s.ko_times.size
-    recon = (
-        float(np.sum(s.expected_discounted_ko_cashflow))
-        + float(np.sum(s.expected_discounted_coupon_cashflow))
-        + float(s.expected_discounted_maturity_cashflow)
-    )
-    assert abs(s.pv - recon) <= 1e-6 * max(1.0, abs(s.pv))
-    if not memory:
-        # Non-memory PDE/QUAD classify the coupon PV separately.
-        if kind in ("pde", "quad"):
-            assert s.expected_discounted_coupon_cashflow.size == s.ko_times.size
-    elif kind in ("pde", "quad"):
-        assert s.expected_discounted_coupon_cashflow.size > 0
-        assert float(np.sum(s.expected_discounted_coupon_cashflow)) > 0.0
+    # MC (T10), PDE 1D (T12) and QUAD V1 (T17) report the unified EventStatistics: every outcome direct, the identity
+    # at round-off (the grid engines' value and cash columns take the same linear stages)
+    assert s.coupons.probability.size == s.observations.size
+    assert abs(s.reconciliation_error) <= 1e-12 * max(1.0, abs(s.pv))
+    assert float(np.sum(s.coupons.discounted_cash)) > 0.0
 
 
 @pytest.mark.parametrize("kind", ["mc", "pde", "quad"])

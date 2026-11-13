@@ -13,10 +13,7 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-from quantark.asset.equity.engine.event_stats import (
-    KOResetEventStats,
-    payment_aware_cashflow_fields,
-)
+from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
@@ -581,23 +578,36 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         pricing_env: PricingEnvironment,
         *,
         streams: Optional[frozenset] = None,
-    ) -> Optional[KOResetEventStats]:
-        # ``streams`` pruning [§11.1] is a permission, not an obligation: the
-        # KO-reset recursion has its own event-stats implementation and always
-        # computes the full distribution, and
-        # ``event_stats_mode='forward_density'`` is likewise ignored.
+    ) -> Optional[EventStatistics]:
+        """``EventStatistics`` of the price's own KO-reset recursion (unified event statistics spec T17).
+
+        Columns: per knock-out record of both schedules its discounted unit, the maturity unit and cash (the first
+        schedule's end, never knocked in), the knocked-in settlement unit and cash. The knock-in path statistics come
+        from the forward adjoint pass, run only when ``streams`` asks for the knock-in stream (spec D17);
+        ``event_stats_mode='forward_density'`` is ignored (this recursion has no forward-density mode).
+        """
         if not isinstance(product, KnockOutResetSnowballOption):
             return None
         if pricing_env is None:
             raise PricingError("PricingEnvironment is required for KOResetSnowballQuadEngine.")
-        return self._compute_event_stats(product, pricing_env)
+        return self._compute_event_stats(product, pricing_env, streams=streams)
+
+    _statistics_family = "ko_reset"
 
     def _compute_event_stats(
         self,
         product: KnockOutResetSnowballOption,
         pricing_env: PricingEnvironment,
-    ) -> Optional[KOResetEventStats]:
+        *,
+        streams: Optional[frozenset] = None,
+        pv: Optional[float] = None,
+    ) -> Optional[EventStatistics]:
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.quad import v1_statistics
+        from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, MarchLog
+
         self._validate_product(product)
+        want_ki = es.want_knock_in_path(streams)
         carried_knock_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         product.require_alive(pricing_env, carried_knock_in)
 
@@ -640,7 +650,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         if decision.knocked_out:
             return self._decided_ko_event_stats(
-                product, pricing_env, pre_ko_records, post_ko_records, decision
+                product, pricing_env, pre_ko_records, post_ko_records, decision, streams=streams
             )
         if not (
             product.barrier_config.ki_continuous
@@ -719,17 +729,32 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             vol_vec**4
         ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
+        # Columns: knock-out units of both schedules, then the maturity unit and cash (the first schedule's end:
+        # v_out is seeded there, as ``price`` seeds it) and the knocked-in settlement unit and cash.
         n_pre = len(pre_ko_records)
         n_post = len(post_ko_records)
         post_offset = n_pre
-        ki_col = n_pre + n_post
-        ki_ever_col = ki_col + 1
-        n_rows = ki_ever_col + 1
+        m_unit = n_pre + n_post
+        m_cash, kis_unit, kis_cash = m_unit + 1, m_unit + 2, m_unit + 3
+        n_rows = m_unit + 4
+
+        all_ko_records = [*pre_ko_records, *post_ko_records]
+        timings = resolve_structured_payment_timings(product, pricing_env, all_ko_records)
+        terminal = timings.terminal
+        v_in_cash = np.array(
+            [product.get_maturity_payoff_v1(s, pricing_env=pricing_env) for s in spot_grid], dtype=float
+        )
+        v_out_cash = np.array(
+            [product.get_maturity_payoff_v0(s, pricing_env=pricing_env) for s in spot_grid], dtype=float
+        )
+        terminal_in_cash = v_in_cash * terminal.delay_df
+        terminal_out_cash = v_out_cash * terminal.delay_df
 
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
-        v_in[ki_col] = 1.0
-        v_in[ki_ever_col] = 1.0
+        v_in[kis_unit] = 1.0
+        v_in[kis_cash] = terminal_in_cash
+        v_out_seeded = False
 
         log_ki_barrier = None
         if product.has_ki_barrier and ki_continuous:
@@ -748,9 +773,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
-        disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
         pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+        log = MarchLog(engine=self, math_utils=math_utils, readout_in=bool(knocked_in_at_valuation),
+                       terminal_out={"maturity_unit": np.ones(grid.size), "maturity_cash": terminal_out_cash},
+                       terminal_in={"ki_settlement_unit": np.ones(grid.size), "ki_settlement_cash": terminal_in_cash})
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
@@ -758,34 +785,32 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             out_live = obs_time < pre_maturity or is_close(
                 obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
             )
+            seed = out_live and not v_out_seeded
+            if seed:
+                v_out[m_unit] = 1.0
+                v_out[m_cash] = terminal_out_cash
+                v_out_seeded = True
 
             pre_record = self._match_record(obs_time, pre_ko_records)
             post_record = self._match_record(obs_time, post_ko_records)
             pre_value = np.zeros_like(v_out)
             post_value = np.zeros_like(v_in)
+            sources = []
+            pre_unit = post_unit = 0.0
             if pre_record is not None:
-                pre_value[pre_ko_records.index(pre_record)] = self._ko_discount(
-                    rate, obs_time, pre_record.settlement_time, df_fn=df_local,
-                )
+                pre_unit = self._ko_discount(rate, obs_time, pre_record.settlement_time, df_fn=df_local)
+                pre_value[pre_ko_records.index(pre_record)] = pre_unit
+                sources.append(("ko", pre_ko_records.index(pre_record)))
             if post_record is not None:
-                post_value[post_offset + post_ko_records.index(post_record)] = self._ko_discount(
-                    rate, obs_time, post_record.settlement_time, df_fn=df_local,
-                )
-            ever_out, ever_in = v_out[ki_ever_col].copy(), v_in[ki_ever_col].copy()
+                post_unit = self._ko_discount(rate, obs_time, post_record.settlement_time, df_fn=df_local)
+                post_value[post_offset + post_ko_records.index(post_record)] = post_unit
+                if not product.barrier_config.disable_ko_after_ki:
+                    sources.append(("ko", post_offset + post_ko_records.index(post_record)))
             v_out, v_in = self._apply_reset_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
                 ki_continuous, log_ki_barrier, pre_value, post_value,
             )
-            # Independent underlying-monitoring column: KO never absorbs it.
-            ki_record = self._match_record(obs_time, ki_records) if ki_records else None
-            ever_out, ever_in = SnowballQuadEngine._apply_observation(
-                self, product, grid, spot_grid, spot, smoothing_width,
-                ever_out, ever_in, ki_record=ki_record if out_live else None,
-                ki_barrier_continuous=(product.barrier_config.ki_barrier
-                                       if out_live and ki_continuous else None),
-            )
-            v_out[ki_ever_col], v_in[ki_ever_col] = ever_out, ever_in
 
             tau_step = float(tau[step_index])
             alpha = float(alpha_vec[step_index])
@@ -795,6 +820,21 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
+            log.steps.append(EventStep(
+                time=float(obs_time),
+                event=self._reset_statistics_event(
+                    product, grid, spot_grid, spot, smoothing_width, obs_time, out_live, pre_ko_records,
+                    post_ko_records, ki_records, ki_continuous, log_ki_barrier,
+                    pre_unit=float(pre_unit), post_unit=float(post_unit),
+                    pre_key=sources[0] if pre_record is not None else None,
+                ),
+                sources=tuple(sources),
+                diffusion=(tau_step, alpha, beta, prefactor, omega_array),
+                bridge=((log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
+                        if ki_continuous and log_ki_barrier is not None else None),
+                out_diffused=bool(out_live),
+                seed_out=bool(seed),
+            ))
 
             # The bridge correction below samples BOTH surfaces at this step's
             # slice, so retain the knocked-in surface before it is rolled back.
@@ -849,78 +889,108 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     tau_step,
                 )
 
+        if pv is None:
+            pv = float(self.price(product, pricing_env))
+        if not v_out_seeded and not knocked_in_at_valuation:
+            # the first schedule ended at the valuation instant (no step of its own): ``price`` decides the
+            # maturity on the known spot, so the whole price is the maturity row, certain
+            return self._matured_at_valuation_statistics(
+                product, pricing_env, pre_ko_records, post_ko_records, pv=pv, pre_maturity=pre_maturity,
+                streams=streams,
+            )
+
         initial_surface = v_in if knocked_in_at_valuation else v_out
-        pre_unit = np.array(
-            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_pre)],
-            dtype=float,
+        values_at_spot = np.array(
+            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_rows)], dtype=float
         )
-        post_unit = np.array(
-            [
-                math_utils.interpolate(initial_surface[post_offset + i], x=0.0)
-                for i in range(n_post)
-            ],
-            dtype=float,
+        unit = values_at_spot[:m_unit]
+        log.columns = {("ko", i): float(unit[i]) for i in range(m_unit)
+                       if not (i >= post_offset and product.barrier_config.disable_ko_after_ki)}
+        log.columns.update({
+            ("terminal", "maturity_unit"): float(values_at_spot[m_unit]),
+            ("terminal", "maturity_cash"): float(values_at_spot[m_cash]),
+            ("terminal", "ki_settlement_unit"): float(values_at_spot[kis_unit]),
+            ("terminal", "ki_settlement_cash"): float(values_at_spot[kis_cash]),
+        })
+        self._last_v1_march = log
+
+        observations, maturity_row, ki_settlement = self._reset_rows(
+            product, pricing_env, pre_ko_records, post_ko_records, unit, terminal,
+            maturity_unit=float(values_at_spot[m_unit]), maturity_cash=float(values_at_spot[m_cash]),
+            ki_unit=float(values_at_spot[kis_unit]), ki_cash=float(values_at_spot[kis_cash]),
+            pre_maturity=pre_maturity, maturity=float(maturity),
+        )
+        rule = es.knock_in_rule(product, knocked_out_now=False, knocked_in_now=bool(knocked_in_at_valuation))
+        product_ki_records = (product.resolve_ki_observations(pricing_env)
+                              if product.has_ki_barrier and not ki_continuous else [])
+        return v1_statistics.statistics(
+            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations, coupons=None,
+            maturity=maturity_row, ki_settlement=ki_settlement, rule=rule, want_knock_in=want_ki,
+            forward=lambda: v1_statistics.knock_in_table(
+                product, pricing_env, log, horizon=pre_maturity, continuous=bool(ki_continuous),
+                ki_records=product_ki_records,
+            ),
+            unavailable={},
         )
 
-        pre_probability = np.zeros(n_pre, dtype=float)
-        post_probability = np.zeros(n_post, dtype=float)
-        expected_discounted_pre_ko_cashflow = np.zeros(n_pre, dtype=float)
-        expected_discounted_post_ko_cashflows = np.zeros(
-            n_post,
-            dtype=float,
+    def _reset_statistics_event(self, product, grid, spot_grid, spot, width, obs_time, out_live, pre_ko_records,
+                                post_ko_records, ki_records, ki_continuous, log_ki_barrier, *, pre_unit, post_unit,
+                                pre_key):
+        """The observation's event map on the two note states, for the adjoint pass: ``_apply_reset_observation``
+        with every knock-out source zero (``source=None``) or one schedule's source alone."""
+
+        def event(v_out, v_in, source):
+            v_out = np.array(v_out, dtype=float)
+            v_in = np.array(v_in, dtype=float)
+            pre_value = np.zeros_like(v_out)
+            post_value = np.zeros_like(v_in)
+            if source is not None:
+                if source == pre_key:
+                    pre_value[...] = pre_unit
+                else:
+                    post_value[...] = post_unit
+            return self._apply_reset_observation(
+                product, grid, spot_grid, spot, width, v_out, v_in, obs_time, out_live, pre_ko_records,
+                post_ko_records, ki_records, ki_continuous, log_ki_barrier, pre_value, post_value,
+            )
+
+        return event
+
+    def _reset_rows(self, product, pricing_env, pre_ko_records, post_ko_records, unit, terminal, *, maturity_unit,
+                    maturity_cash, ki_unit, ki_cash, pre_maturity, maturity):
+        """``(observations, maturity, ki_settlement)``: both schedules' knock-out rows in time order (the first
+        schedule's record first at a tie), the maturity row at the first schedule's end (its mass leaves the survival
+        there, F5) and the knocked-in settlement at maturity."""
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+
+        records = [*pre_ko_records, *post_ko_records]
+        tags = ["pre"] * len(pre_ko_records) + ["post"] * len(post_ko_records)
+        times = np.array([float(r.observation_time) for r in records], dtype=float)
+        order = (np.lexsort((np.array([0 if t == "pre" else 1 for t in tags]), times)) if records
+                 else np.zeros(0, dtype=int))
+        observations = es.observation_table(pricing_env, records, unit, schedule=tags, order=order)
+        delay = float(terminal.payment_time) - float(terminal.determination_time)
+        last_pre = pre_ko_records[-1] if pre_ko_records else None
+        pre_date = (last_pre.observation_date if last_pre is not None
+                    and is_close(float(last_pre.observation_time), pre_maturity) else None)
+        df_pre = float(pricing_env.get_discount_factor(pre_maturity)) if pre_maturity > 0.0 else 1.0
+        maturity_row = es.outcome_row(
+            pricing_env, time=pre_maturity, payment_time=pre_maturity + delay, date=pre_date,
+            payment_date=pre_date if is_close(delay, 0.0) else None,
+            probability=maturity_unit / df_pre, discounted=maturity_cash,
         )
-
-        for i, rec in enumerate(pre_ko_records):
-            df_total = float(df_local(float(rec.observation_time))) * float(
-                self._ko_discount(
-                    rate, float(rec.observation_time), rec.settlement_time,
-                    df_fn=df_local,
-                )
-            )
-            if df_total > 0:
-                pre_probability[i] = float(pre_unit[i] / df_total)
-            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            expected_discounted_pre_ko_cashflow[i] = float(pre_unit[i] * payoff)
-
-        for i, rec in enumerate(post_ko_records):
-            df_total = float(df_local(float(rec.observation_time))) * float(
-                self._ko_discount(
-                    rate, float(rec.observation_time), rec.settlement_time,
-                    df_fn=df_local,
-                )
-            )
-            if df_total > 0:
-                post_probability[i] = float(post_unit[i] / df_total)
-            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            expected_discounted_post_ko_cashflows[i] = float(
-                post_unit[i] * payoff
-            )
-
-        df_maturity = float(df_local(maturity))
-        ki_survive = 0.0
-        ki_ever = 0.0
-        if df_maturity > 0.0:
-            ki_survive = float(
-                math_utils.interpolate(initial_surface[ki_col], x=0.0) / df_maturity
-            )
-            ki_ever = float(
-                math_utils.interpolate(initial_surface[ki_ever_col], x=0.0)
-                / df_maturity
-            )
-
-        return self._assemble_event_stats(
-            product,
-            pricing_env,
-            pre_ko_records,
-            post_ko_records,
-            pre_probability,
-            post_probability,
-            expected_discounted_pre_ko_cashflow,
-            expected_discounted_post_ko_cashflows,
-            ki_ever=ki_ever,
-            ki_survive=ki_survive,
-            pv=float(self.price(product, pricing_env)),
+        ki_settlement = es.outcome_row(
+            pricing_env, time=maturity, payment_time=float(terminal.payment_time), date=terminal.determination_date,
+            payment_date=terminal.payment_date,
+            probability=ki_unit / float(pricing_env.get_discount_factor(maturity)), discounted=ki_cash,
         )
+        if observations.size and maturity_row.time < float(observations.times[-1]) - Tolerance.ZERO:
+            from dataclasses import replace
+
+            # F5: the first schedule's maturity mass leaves the survival at its own determination
+            observations = replace(observations, survival=observations.survival - np.where(
+                observations.times >= maturity_row.time, maturity_row.probability, 0.0))
+        return observations, maturity_row, ki_settlement
 
     def _decided_ko_event_stats(
         self,
@@ -929,145 +999,69 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         pre_ko_records: Sequence,
         post_ko_records: Sequence,
         decision,
-    ) -> KOResetEventStats:
-        """A knock-out decided at valuation: certain, on its record of the schedule in force.
+        *,
+        streams=None,
+    ) -> EventStatistics:
+        """A knock-out decided at valuation: certain, on its record of the schedule in force (DESIGN §4.5).
 
-        ``price`` decides an observation at the valuation instant on the known spot; the recursion of
-        ``_compute_event_stats`` starts after time zero, so without this the decided record had no
-        probability and its value was booked as the maturity cash flow. The decided record carries
-        the whole price, so the ledger sums to it and nothing is left for maturity.
-        """
-        pre_probability = np.zeros(len(pre_ko_records), dtype=float)
-        post_probability = np.zeros(len(post_ko_records), dtype=float)
-        pre_cashflow = np.zeros(len(pre_ko_records), dtype=float)
-        post_cashflow = np.zeros(len(post_ko_records), dtype=float)
-        if decision.ko_regime == "pre":
-            records, probability, cashflow = pre_ko_records, pre_probability, pre_cashflow
-        else:
-            records, probability, cashflow = post_ko_records, post_probability, post_cashflow
+        ``price`` decides an observation at the valuation instant on the known spot: the decided record carries the
+        whole price, nothing is left to mature. No knock-in path statistics but a carried knock-in (the knock-out
+        wins a tie with a knock-in observed now)."""
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.quad import v1_statistics
+
+        records = pre_ko_records if decision.ko_regime == "pre" else post_ko_records
         decided = self._match_record(decision.ko_record.observation_time, records)
         if decided is None:
             raise PricingError("The knock-out decided at valuation has no record on the engine's schedule.")
         pv = float(self.price(product, pricing_env))
-        index = records.index(decided)
-        probability[index] = 1.0
-        cashflow[index] = pv
-        knocked_in = 1.0 if decision.knocked_in else 0.0
-        if product.barrier_config.ki_continuous or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS:
-            from quantark.asset.equity.engine.continuous_ki_support import continuous_ki_ever
-            knocked_in = continuous_ki_ever(product, pricing_env, self.params)
-        return self._assemble_event_stats(
-            product,
-            pricing_env,
-            pre_ko_records,
-            post_ko_records,
-            pre_probability,
-            post_probability,
-            pre_cashflow,
-            post_cashflow,
-            ki_ever=knocked_in,
-            ki_survive=0.0,
-            pv=pv,
-        )
-
-    def _assemble_event_stats(
-        self,
-        product: KnockOutResetSnowballOption,
-        pricing_env: PricingEnvironment,
-        pre_ko_records: Sequence,
-        post_ko_records: Sequence,
-        pre_probability: np.ndarray,
-        post_probability: np.ndarray,
-        expected_discounted_pre_ko_cashflow: np.ndarray,
-        expected_discounted_post_ko_cashflows: np.ndarray,
-        *,
-        ki_ever: float,
-        ki_survive: float,
-        pv: float,
-    ) -> KOResetEventStats:
-        """The event statistics from each knock-out record's probability and discounted cash flow.
-
-        The maturity cash flow is what the price leaves after the knock-outs.
-        """
-        n_pre = len(pre_ko_records)
-        pre_times = np.array([rec.observation_time for rec in pre_ko_records], dtype=float)
-        post_times = np.array([rec.observation_time for rec in post_ko_records], dtype=float)
-        expected_discounted_post_ko_cashflow = float(
-            np.sum(expected_discounted_post_ko_cashflows)
-        )
-
-        survival_probability = np.ones(n_pre, dtype=float)
-        cumulative_pre_ko = 0.0
-        for i in range(n_pre):
-            cumulative_pre_ko += pre_probability[i]
-            survival_probability[i] = max(0.0, 1.0 - cumulative_pre_ko)
-
-        expected_discounted_maturity_cashflow = float(
-            pv
-            - float(np.sum(expected_discounted_pre_ko_cashflow))
-            - expected_discounted_post_ko_cashflow
-        )
+        all_records = [*pre_ko_records, *post_ko_records]
+        unit = self._decided_ko_unit(pricing_env, all_records, decided)
         terminal = resolve_terminal_timing(product, pricing_env)
-        cashflow_fields = payment_aware_cashflow_fields(
-            pricing_env,
-            determination_times=np.concatenate(
-                [pre_times, post_times, [terminal.determination_time]]
-            ),
-            payment_times=np.concatenate(
-                [
-                    [record.settlement_time for record in pre_ko_records],
-                    [record.settlement_time for record in post_ko_records],
-                    [terminal.payment_time],
-                ]
-            ),
-            expected_discounted_cashflows=np.concatenate(
-                [
-                    expected_discounted_pre_ko_cashflow,
-                    expected_discounted_post_ko_cashflows,
-                    [expected_discounted_maturity_cashflow],
-                ]
-            ),
-            determination_dates=[
-                *(record.observation_date for record in pre_ko_records),
-                *(record.observation_date for record in post_ko_records),
-                terminal.determination_date,
-            ],
-            payment_dates=[
-                *(record.settlement_date for record in pre_ko_records),
-                *(record.settlement_date for record in post_ko_records),
-                terminal.payment_date,
-            ],
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+        observations, maturity_row, ki_settlement = self._reset_rows(
+            product, pricing_env, pre_ko_records, post_ko_records, unit, terminal, maturity_unit=0.0,
+            maturity_cash=0.0, ki_unit=0.0, ki_cash=0.0, pre_maturity=max(pre_maturity, 0.0),
+            maturity=float(product.get_maturity(pricing_env)),
+        )
+        carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        rule = es.knock_in_rule(product, knocked_out_now=True, knocked_in_now=carried)
+        return v1_statistics.statistics(
+            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations, coupons=None,
+            maturity=maturity_row, ki_settlement=ki_settlement, rule=rule,
+            want_knock_in=es.want_knock_in_path(streams), forward=None, unavailable={},
         )
 
-        return KOResetEventStats(
-            pv=pv,
-            ko_times=pre_times,
-            ko_probability=pre_probability,
-            survival_probability=survival_probability,
-            expected_discounted_ko_cashflow=expected_discounted_pre_ko_cashflow,
-            ki_probability=ki_ever,
-            expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
-            reconciliation_error=0.0,
-            ki_ever_probability=ki_ever,
-            ki_survive_knocked_in_probability=ki_survive,
-            pre_ko_times=pre_times,
-            pre_ko_probability=pre_probability,
-            post_ko_times=post_times,
-            post_ko_probability=post_probability,
-            pre_ko_probability_total=float(np.sum(pre_probability)),
-            post_ko_probability_total=float(np.sum(post_probability)),
-            expected_discounted_post_ko_cashflow=float(
-                expected_discounted_post_ko_cashflow
-            ),
-            pre_ko_payment_times=np.array([
-                float(r.settlement_time if r.settlement_time is not None else r.observation_time)
-                for r in pre_ko_records
-            ]),
-            post_ko_payment_times=np.array([
-                float(r.settlement_time if r.settlement_time is not None else r.observation_time)
-                for r in post_ko_records
-            ]),
-            **cashflow_fields,
+    def _matured_at_valuation_statistics(self, product, pricing_env, pre_ko_records, post_ko_records, *, pv,
+                                         pre_maturity, streams):
+        """The first schedule ended at the valuation instant without a knock-in: the maturity is decided on the
+        known spot (``price``'s rule), certain; the whole price is its cash."""
+        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.quad import v1_statistics
+        from quantark.asset.equity.settlement import CashflowKind, SettlementRequest, SettlementResolver
+
+        timing = SettlementResolver.resolve_contingent(
+            product,
+            SettlementRequest(kind=CashflowKind.TERMINAL, determination_time=pre_maturity,
+                              cashflow_id="ko_reset_v0_terminal"),
+            pricing_env,
+        )
+        all_records = [*pre_ko_records, *post_ko_records]
+        terminal = resolve_terminal_timing(product, pricing_env)
+        observations, _, ki_settlement = self._reset_rows(
+            product, pricing_env, pre_ko_records, post_ko_records, np.zeros(len(all_records)), terminal,
+            maturity_unit=0.0, maturity_cash=0.0, ki_unit=0.0, ki_cash=0.0, pre_maturity=max(pre_maturity, 0.0),
+            maturity=float(product.get_maturity(pricing_env)),
+        )
+        maturity_row = es.outcome_row(
+            pricing_env, time=max(pre_maturity, 0.0), payment_time=float(timing.payment_time),
+            date=None, payment_date=timing.payment_date, probability=1.0, discounted=pv,
+        )
+        rule = es.knock_in_rule(product, knocked_out_now=True, knocked_in_now=False)
+        return v1_statistics.statistics(
+            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations, coupons=None,
+            maturity=maturity_row, ki_settlement=ki_settlement, rule=rule,
+            want_knock_in=es.want_knock_in_path(streams), forward=None, unavailable={},
         )
 
     def _validate_product(self, product: KnockOutResetSnowballOption) -> None:

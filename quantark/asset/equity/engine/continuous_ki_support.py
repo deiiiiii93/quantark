@@ -74,30 +74,3 @@ def continuous_time_grid(env, times, params):
         raise NumericalError('continuous KI event count exceeds max_events')
     return sorted(nodes), 'piecewise_constant_exact' if exact else 'piecewise_constant_approximation'
 
-
-def continuous_ki_ever(product, env, params):
-    """Underlying monitoring after an immediate KO, without repricing the note."""
-    from types import SimpleNamespace
-    from quantark.asset.equity.param import QuadV2Params
-    from quantark.asset.equity.engine.quad.v2.basis import make_mesh
-    from quantark.asset.equity.engine.quad.v2.context import interval_moments
-    from quantark.asset.equity.engine.quad.v2.continuous import prepare_continuous_ki_monitor
-    from quantark.asset.equity.engine.quad.v2.operator import Operator
-
-    if bool(getattr(product, '_otc_lifecycle_knocked_in', False)):
-        return 1.0
-    horizon = float(product.get_pre_maturity_time(env) if hasattr(product, 'get_pre_maturity_time') else product.get_maturity(env))
-    barrier = float(product.barrier_config.ki_barrier)
-    if horizon <= 0:
-        return float(env.spot >= barrier if product.is_reverse else env.spot <= barrier)
-    settings = QuadV2Params(continuous_term_structure=params.continuous_term_structure,
-                            continuous_steps_per_year=max(1, params.continuous_steps_per_year))
-    times, _ = continuous_time_grid(env, [horizon], settings)
-    means, variances, discounts = interval_moments(env, product.strike, times)
-    mesh = make_mesh(np.log([env.spot]), means, variances, settings, align=np.log(barrier))
-    contract = SimpleNamespace(events=[SimpleNamespace(time=t) for t in times],
-                               metadata={'ki_monitoring_end': horizon},
-                               continuous_barrier=float(np.log(barrier)), reverse=product.is_reverse)
-    monitor = prepare_continuous_ki_monitor(contract, means, variances, discounts, mesh,
-                                           settings, None if mesh is None else Operator(mesh, settings))
-    return float(monitor.probability([env.spot])[0])

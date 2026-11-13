@@ -36,23 +36,21 @@ def test_snowball_quad_event_stats_shapes_and_mass():
     stats = engine.calculate_event_stats(product, env)
     assert stats is not None
 
-    assert stats.ko_times.shape == (6,)
-    assert stats.ko_probability.shape == (6,)
-    assert stats.survival_probability.shape == (6,)
-    assert stats.expected_discounted_ko_cashflow.shape == (6,)
-    assert stats.determination_times.shape == (7,)
-    assert stats.payment_times.shape == (7,)
+    obs = stats.observations
+    assert obs.times.shape == (6,)
+    assert obs.probability.shape == (6,)
+    assert obs.survival.shape == (6,)
+    assert obs.discounted_cash.shape == (6,)
+    # ledger: six knock-out rows, the maturity and the knocked-in settlement
+    assert stats.ledger.determination_times.shape == (8,)
+    assert stats.ledger.payment_times.shape == (8,)
 
-    assert float(np.sum(stats.ko_probability)) <= 1.0 + 1e-6
-    assert all(
-        stats.survival_probability[i] >= stats.survival_probability[i + 1] - 1e-8
-        for i in range(5)
-    )
+    assert float(np.sum(obs.probability)) <= 1.0 + 1e-6
+    assert all(obs.survival[i] >= obs.survival[i + 1] - 1e-8 for i in range(5))
 
-    # PV decomposition consistency (constructed as residual)
-    pv_parts = float(np.sum(stats.expected_discounted_ko_cashflow) + stats.expected_discounted_maturity_cashflow)
-    assert abs(stats.pv - pv_parts) < 1e-8
-    assert abs(stats.pv - stats.expected_discounted_cashflows.sum()) < 1e-8
+    # PV decomposition from directly computed outcomes (T17: the maturity is its own column, not a residual)
+    assert abs(stats.reconciliation_error) < 1e-8
+    assert abs(stats.pv - stats.ledger.discounted_cash.sum()) < 1e-8
 
 
 def test_snowball_pde_event_stats_delegates_to_quad():

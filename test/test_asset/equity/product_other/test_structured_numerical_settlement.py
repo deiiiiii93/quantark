@@ -275,13 +275,10 @@ def test_payment_lag_does_not_change_quad_event_probabilities():
         _snowball(_convention()), env
     )
 
-    assert delayed.ko_probability == pytest.approx(immediate.ko_probability)
-    assert delayed.survival_probability == pytest.approx(
-        immediate.survival_probability
-    )
-    assert delayed.ki_ever_probability == pytest.approx(
-        immediate.ki_ever_probability
-    )
+    assert delayed.observations.probability == pytest.approx(immediate.observations.probability)
+    assert delayed.observations.survival == pytest.approx(immediate.observations.survival)
+    assert delayed.knock_in.probability == pytest.approx(immediate.knock_in.probability)
+    assert delayed.ki_settlement.probability == pytest.approx(immediate.ki_settlement.probability)
 
 
 def test_delayed_snowball_mc_pde_quad_reconcile():

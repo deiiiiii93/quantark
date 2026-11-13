@@ -1,0 +1,331 @@
+"""The forward adjoint pass of the QUAD V1 recursion (unified event statistics spec T17, AC13, AC14).
+
+The V1 statistics recursion (``SnowballQuadEngine._compute_event_stats``, ``KOResetSnowballQuadEngine``) marches
+indicator and cash columns backward through the price's own operators: per step, the observation's event map on the
+two note states (not knocked in ``out``, knocked in ``in``) and then the diffusion back to the previous step (the
+Brownian-bridge correction on the ``out`` state under continuous knock-in). This module runs the exact transpose of
+that march forward from the readout at the spot, carrying a dual (a discounted density) on each state's nodes:
+
+* readout: the linear interpolation at the spot (``QuadratureMath.interpolate``), or the transition readout
+  (``_readout_at_spot``) as one row vector -- Simpson weights, the spectral filter and the tail term transposed;
+* diffusion (``_diffuse_fft``): the FFT convolution transposed as the convolution with the reversed kernel (the
+  spectral filter is real and symmetric, so it transposes to itself), the Simpson weights and the tail correction
+  transposed; the bridge correction (``_diffuse_with_bridge``) transposed kernel by kernel;
+* the event map: read off the engine's own event code (``_apply_observation`` / ``_apply_reset_observation``) by
+  coloured unit probes, which recover a local (banded) linear map exactly; every event is checked against a random
+  probe and refused (:class:`AdjointUnavailable`) if it is not local in the probe band. Its affine part (the
+  knock-out sources) is the event applied to zero surfaces.
+
+Masses (all discounted to the valuation; a probability divides by ``DF(t)``):
+
+* the knock-out source of a record: ``dual . source`` at its event (AC14 against the backward knock-out column);
+  the clean knock-out (of not-knocked-in paths) is the ``out`` part;
+* first knock-in at an event: the dual the event moves from the ``out`` state onto the ``in`` continuation -- a path
+  knocked out at the same instant is in the knock-out source, never in the continuation, so the knock-out wins a
+  tie exactly as the backward event decides it; under continuous knock-in also the bridge mass of each interval;
+* terminal: ``dual . terminal`` on each state (the maturity and knocked-in settlement columns, unit and cash).
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+from scipy.special import erfc
+
+from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnavailable
+from quantark.util.exceptions import PricingError
+
+__all__ = [
+    "AdjointUnavailable",
+    "EventStep",
+    "ForwardResult",
+    "MarchLog",
+    "forward_pass",
+]
+
+#: probe half band of the event maps: a dual-cell projection couples a node to its neighbours (one cell); the joint
+#: Phoenix projection to at most two
+_HALF_BAND = 4
+_COLOURS = 2 * _HALF_BAND + 1
+#: the random-probe check of an event map's band (relative to the probe's magnitude)
+_BAND_CHECK_RTOL = 1e-11
+
+
+@dataclass(eq=False)
+class EventStep:
+    """One step of the backward march: the event map at ``time`` and the diffusion back to the previous step.
+
+    ``event(v_out, v_in, source)`` applies the observation to stacked surfaces (rows x nodes); ``source`` is
+    ``None`` for the linear part, else the key of one knock-out source (``sources``), applied with every other source
+    zero. ``diffusion``: ``(tau, alpha, beta, prefactor, omega)`` of the step into this slice; ``bridge``:
+    ``(log_barrier, vol, dt, is_reverse)`` when the ``out`` state rolls back with the knock-in bridge;
+    ``out_diffused``: whether the ``out`` state rolls back at all (KO-reset: not after its first schedule ends);
+    ``seed_out``: the ``out`` state is seeded with its terminal value at this step, before its event (KO-reset).
+    """
+
+    time: float
+    event: Optional[Callable]
+    sources: Tuple = ()
+    diffusion: Tuple = ()
+    bridge: Optional[Tuple] = None
+    out_diffused: bool = True
+    seed_out: bool = False
+
+
+@dataclass(eq=False)
+class MarchLog:
+    """The operators of one statistics march, logged in backward order by the engine (``steps[0]`` is the last
+    step); ``engine`` and ``math_utils`` give the diffusion and bridge kernels."""
+
+    engine: object
+    math_utils: object
+    readout_in: bool
+    transition: Optional[Tuple] = None          # (prefactor, alpha, beta, tau) of the transition readout
+    steps: List[EventStep] = field(default_factory=list)
+    #: backward column readouts at the spot, by name (filled by the engine; AC14 compares against them)
+    columns: Dict[str, float] = field(default_factory=dict)
+    terminal_out: Dict[str, np.ndarray] = field(default_factory=dict)
+    terminal_in: Dict[str, np.ndarray] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ForwardResult:
+    """Per step in forward time (``times``): the first knock-in mass at the event (``first_knock_in``), the bridge
+    mass of the interval ending there (``interval_knock_in``), the clean knock-out mass (``clean_knock_out``); per
+    source key its mass; the ``out`` dual at each interval start (``interval_law``, the first-passage split's
+    weights); the terminal masses per name."""
+
+    times: np.ndarray
+    first_knock_in: np.ndarray
+    interval_knock_in: np.ndarray
+    clean_knock_out: np.ndarray
+    sources: Dict[object, float]
+    interval_start_dual: List[Optional[np.ndarray]]
+    terminal: Dict[str, float]
+
+
+# --- the transposed operators ---------------------------------------------------------------------------------------
+
+
+def _simpson_coefficients(math_utils) -> np.ndarray:
+    n = math_utils.grid.size
+    return math_utils.simpson_weights(np.ones(n), 0, n - 1, (n - 1) % 2)[:n]
+
+
+def _tail_vectors(math_utils, alpha: float, beta: float, tau: float):
+    grid = math_utils.grid
+    sqrt_tau = math.sqrt(tau)
+    u_left = (grid - grid[0] + 2.0 * tau * alpha) / (2.0 * sqrt_tau)
+    u_right = (grid - grid[-1] + 2.0 * tau * alpha) / (2.0 * sqrt_tau)
+    scale = 0.5 * math.exp(tau * (alpha * alpha - beta))
+    return scale * erfc(u_left), scale * erfc(-u_right)
+
+
+def diffuse_transpose(values: np.ndarray, math_utils, omega: np.ndarray, prefactor: float, alpha: float,
+                      beta: float, tau: float) -> np.ndarray:
+    """``D^T`` of ``SnowballQuadEngine._diffuse_fft`` on stacked duals (rows x nodes).
+
+    ``D v = prefactor * conv(omega, c v) + v_0 TL + v_last TR`` (``c`` the Simpson coefficients); the convolution's
+    output ``i`` pairs input ``j`` through the kernel at ``n - 1 + i - j`` (spectrally filtered, circular), so its
+    transpose is the same convolution with the kernel reversed (the filter is real and even)."""
+    values = np.atleast_2d(np.asarray(values, dtype=float))
+    n = math_utils.grid.size
+    padded = np.zeros((values.shape[0], 2 * n - 1), dtype=float)
+    padded[:, :n] = values
+    conv = math_utils.convolution_fft_many(np.ascontiguousarray(omega[::-1]), padded)
+    out = _simpson_coefficients(math_utils)[None, :] * (prefactor * conv)
+    left, right = _tail_vectors(math_utils, alpha, beta, tau)
+    out[:, 0] += values @ left
+    out[:, -1] += values @ right
+    return out
+
+
+def bridge_transpose(dual_out: np.ndarray, engine, math_utils, prefactor: float, alpha: float, tau: float,
+                     log_barrier: float, vol: float, dt: float, is_reverse: bool) -> np.ndarray:
+    """``B^T`` of the bridge correction of ``_diffuse_with_bridge`` (``correction[target] += P k work[source]``)."""
+    grid = math_utils.grid
+    band = engine._bridge_band(tau, math_utils.h, grid.size)
+    kernels = engine._bridge_kernels(math_utils, band, tau, alpha, vol * vol * dt, log_barrier, is_reverse)
+    out = np.zeros_like(dual_out)
+    for source, target, kernel in kernels:
+        out[source] += prefactor * kernel * dual_out[target]
+    return out
+
+
+def interpolation_weights(math_utils) -> np.ndarray:
+    """The row vector of ``np.interp(0, grid, v)`` (``QuadratureMath.interpolate`` at the spot)."""
+    grid = math_utils.grid
+    n = grid.size
+    k = int(np.searchsorted(grid, 0.0, side="right")) - 1
+    k = min(max(k, 0), n - 2)
+    w = (0.0 - grid[k]) / (grid[k + 1] - grid[k])
+    row = np.zeros(n, dtype=float)
+    row[k] += 1.0 - w
+    row[k + 1] += w
+    return row
+
+
+def transition_readout_weights(math_utils, prefactor: float, alpha: float, beta: float, tau: float) -> np.ndarray:
+    """The row vector of ``SnowballQuadEngine._readout_at_spot``: ``R v = P s (F c v) . omega(x_m) + tail(v)(0)``,
+    ``F`` the spectral filter on the padded lattice (real, even: ``F^T y = ifft(filter fft(y))``)."""
+    grid = math_utils.grid
+    n = grid.size
+    h = float(math_utils.h)
+    scale = h if math_utils.integration_rule == "trapezoid" else h / 3.0
+    base_len = 2 * n - 1
+    fft_len = base_len if math_utils.fft_padding_factor <= 1 else int(math_utils.fft_padding_factor * base_len)
+    fft_filter = math_utils._get_fft_filter(fft_len)
+    length = base_len if fft_filter is None else fft_len
+    offsets = grid[0] + np.arange(length, dtype=float) * h
+    omega = np.exp(-(offsets * offsets) / (4.0 * tau) + alpha * offsets)
+    if fft_filter is not None:
+        omega = np.fft.ifft(np.fft.fft(omega) * fft_filter).real
+    row = _simpson_coefficients(math_utils) * (prefactor * scale * omega[:n])
+    sqrt_tau = math.sqrt(tau)
+    u_left = (-grid[0] + 2.0 * tau * alpha) / (2.0 * sqrt_tau)
+    u_right = (-grid[-1] + 2.0 * tau * alpha) / (2.0 * sqrt_tau)
+    tail_scale = 0.5 * math.exp(tau * (alpha * alpha - beta))
+    row[0] += tail_scale * erfc(u_left)
+    row[-1] += tail_scale * erfc(-u_right)
+    return row
+
+
+class _BandedEvent:
+    """The linear part of one event map, read off the engine's event code by coloured unit probes.
+
+    Probe ``c`` puts a one on every node ``j = c (mod 2b + 1)`` of one state; for a map coupling each output node to
+    inputs within ``b`` nodes, output node ``i`` of probe ``c`` is exactly the entry ``A[i, j]`` of the one such
+    ``j`` within the band. The four state blocks (``out``/``in`` to ``out``/``in``) are kept as probe responses."""
+
+    def __init__(self, event: Callable, n: int, time: float):
+        self.n = n
+        index = np.arange(n)
+        colours = np.zeros((_COLOURS, n), dtype=float)
+        for c in range(_COLOURS):
+            colours[c, c::_COLOURS] = 1.0
+        rng = np.random.default_rng(12345)
+        check_out, check_in = rng.uniform(0.5, 1.5, n), rng.uniform(0.5, 1.5, n)
+        zero = np.zeros((_COLOURS, n))
+        v_out = np.vstack([colours, zero, check_out[None, :], np.zeros((1, n))])
+        v_in = np.vstack([zero, colours, np.zeros((1, n)), check_in[None, :]])
+        w_out, w_in = event(v_out, v_in, None)
+        w_out, w_in = np.asarray(w_out, dtype=float), np.asarray(w_in, dtype=float)
+        p = _COLOURS
+        self.blocks = {
+            ("out", "out"): w_out[:p], ("out", "in"): w_in[:p],
+            ("in", "out"): w_out[p:2 * p], ("in", "in"): w_in[p:2 * p],
+        }
+        self._offsets = np.array([((c - index + _HALF_BAND) % _COLOURS) - _HALF_BAND for c in range(p)])
+        # the band check: the recovered map applied to random surfaces against the event code itself
+        for state, check, row in (("out", check_out, 2 * p), ("in", check_in, 2 * p + 1)):
+            for target, response in (("out", w_out[row]), ("in", w_in[row])):
+                recovered = self._apply(self.blocks[(state, target)], check)
+                scale = max(1.0, float(np.max(np.abs(response))))
+                if not np.allclose(recovered, response, rtol=_BAND_CHECK_RTOL, atol=_BAND_CHECK_RTOL * scale):
+                    raise AdjointUnavailable(
+                        f"undefined: the QUAD V1 event map at t = {time!r} couples nodes beyond the adjoint's probe "
+                        f"band of {_HALF_BAND} nodes; no exact transpose is read off it"
+                    )
+
+    def _columns(self, c: int):
+        j = np.arange(self.n) + self._offsets[c]
+        valid = (j >= 0) & (j < self.n)
+        return j, valid
+
+    def _apply(self, responses: np.ndarray, v: np.ndarray) -> np.ndarray:
+        out = np.zeros(self.n, dtype=float)
+        for c in range(_COLOURS):
+            j, valid = self._columns(c)
+            out[valid] += responses[c][valid] * v[j[valid]]
+        return out
+
+    def transpose(self, state: str, target: str, dual: np.ndarray) -> np.ndarray:
+        """``A^T dual`` of the block from ``state`` (input) to ``target`` (output)."""
+        responses = self.blocks[(state, target)]
+        out = np.zeros(self.n, dtype=float)
+        for c in range(_COLOURS):
+            j, valid = self._columns(c)
+            out += np.bincount(j[valid], weights=responses[c][valid] * dual[valid], minlength=self.n)
+        return out
+
+
+def _source_vectors(event: Callable, n: int, key) -> Tuple[np.ndarray, np.ndarray]:
+    zero = np.zeros((1, n), dtype=float)
+    w_out, w_in = event(zero.copy(), zero.copy(), key)
+    return np.asarray(w_out, dtype=float)[0], np.asarray(w_in, dtype=float)[0]
+
+
+# --- the pass -------------------------------------------------------------------------------------------------------
+
+
+def forward_pass(log: MarchLog) -> ForwardResult:
+    """Run the transpose of the logged march forward from the readout (module docstring).
+
+    Raises:
+        AdjointUnavailable: an event map is not local in the probe band (reason given).
+    """
+    mu = log.math_utils
+    engine = log.engine
+    n = mu.grid.size
+    steps = list(reversed(log.steps))                       # forward time
+    K = len(steps)
+    zero = np.zeros(n, dtype=float)
+    first_ki = np.zeros(K, dtype=float)
+    interval_ki = np.zeros(K, dtype=float)
+    clean_ko = np.zeros(K, dtype=float)
+    sources: Dict[object, float] = {}
+    starts: List[Optional[np.ndarray]] = [None] * K
+    terminal: Dict[str, float] = {}
+
+    if log.transition is not None:
+        prefactor, alpha, beta, tau = log.transition
+        row = transition_readout_weights(mu, prefactor, alpha, beta, tau)
+    else:
+        row = interpolation_weights(mu)
+    beta_out, beta_in = (zero, row) if log.readout_in else (row, zero)
+    for k, step in enumerate(steps):
+        if k == 0 and log.transition is not None:
+            alpha_out, alpha_in = beta_out, beta_in         # the readout row is already the dual of the slice
+        else:
+            tau, alpha, beta, prefactor, omega = step.diffusion
+            stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau)
+            alpha_out = stacked[0] if step.out_diffused else zero
+            alpha_in = stacked[1]
+            if step.bridge is not None and step.out_diffused:
+                log_barrier, vol, dt, reverse = step.bridge
+                starts[k] = beta_out.copy()
+                moved = bridge_transpose(beta_out, engine, mu, prefactor, alpha, tau, log_barrier, vol, dt, reverse)
+                alpha_out = alpha_out - moved
+                alpha_in = alpha_in + moved
+                interval_ki[k] = float(np.sum(moved))
+        if step.event is None:
+            beta_out, beta_in = alpha_out, alpha_in
+        else:
+            banded = _BandedEvent(step.event, n, step.time)
+            for key in step.sources:
+                s_out, s_in = _source_vectors(step.event, n, key)
+                out_mass = float(alpha_out @ s_out)
+                sources[key] = out_mass + float(alpha_in @ s_in)
+                clean_ko[k] += out_mass
+            # blocks are (input state, output state): the knocked-in continuation feeds the not-knocked-in value
+            # (in -> out), so its transpose moves the out dual onto the in state
+            moved = banded.transpose("in", "out", alpha_out)
+            first_ki[k] = float(np.sum(moved))
+            beta_out = banded.transpose("out", "out", alpha_out) + banded.transpose("out", "in", alpha_in)
+            beta_in = moved + banded.transpose("in", "in", alpha_in)
+        if step.seed_out:
+            for name, value in log.terminal_out.items():
+                terminal[name] = float(beta_out @ value)
+            beta_out = zero
+    if not any(step.seed_out for step in steps):
+        for name, value in log.terminal_out.items():
+            terminal[name] = float(beta_out @ value)
+    for name, value in log.terminal_in.items():
+        terminal[name] = float(beta_in @ value)
+    times = np.array([float(step.time) for step in steps], dtype=float)
+    if np.any(np.diff(times) <= 0.0):
+        raise PricingError("the QUAD V1 march log is not in strictly increasing time")
+    return ForwardResult(times=times, first_knock_in=first_ki, interval_knock_in=interval_ki,
+                         clean_knock_out=clean_ko, sources=sources, interval_start_dual=starts, terminal=terminal)

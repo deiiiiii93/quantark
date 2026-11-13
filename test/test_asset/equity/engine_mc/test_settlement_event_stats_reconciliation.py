@@ -40,7 +40,7 @@ from test_asset.equity.product_other.test_structured_numerical_settlement import
 
 
 class _LedgerView:
-    """An ``EventStatistics`` (MC Snowball since T9, PDE 1D since T12) read through this module's legacy-named attributes: its
+    """An ``EventStatistics`` (MC Snowball since T9, PDE 1D since T12, QUAD V1 since T17) read through this module's legacy-named attributes: its
     ledger as the payment-aware cashflow fields, its observation table as the KO grid."""
 
     def __init__(self, stats):
@@ -253,13 +253,11 @@ def test_ko_reset_stats_align_pre_post_and_terminal_cashflows():
     ).calculate_event_stats(product, env)
 
     _assert_aligned_cashflow_ledger(stats, env)
-    assert len(stats.determination_times) == (
-        len(stats.pre_ko_times) + len(stats.post_ko_times) + 1
-    )
-    np.testing.assert_allclose(
-        stats.payment_times[:-1],
-        stats.determination_times[:-1] + LAG,
-    )
+    # QUAD V1 since T17: both schedules' knock-out rows, the maturity (the first schedule's end) and the knocked-in
+    # settlement (maturity), every one settling LAG after its determination
+    view = _view(stats)
+    assert len(view.determination_times) == stats.observations.size + 2
+    np.testing.assert_allclose(view.payment_times, view.determination_times + LAG)
 
 
 def test_dcn_stats_use_observation_life_and_explicit_payment_dates():
