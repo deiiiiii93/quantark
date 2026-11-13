@@ -6082,6 +6082,42 @@ def test_a_refusal_keeps_the_latest_sized_fill_ratio_and_nothing_held_keeps_the_
     assert solo[4]["im_lots"] == pytest.approx(_phi_im_lots(d[4], 24.0, 0.6, futures=1000.0), rel=1e-9)
 
 
+def test_a_closed_overlay_clears_the_carried_fill_ratio_so_a_residual_leg_covers_nothing_on_a_later_refusal():
+    from gpin.techniques import Target
+
+    n = 5
+    d = _weekdays(n)
+    last = d[0] + timedelta(days=60)
+    volumes = [6000, 6000, 500, 6000, 6000]                   # day 2: a close is cut to 50 desk lots = 1 lot per note
+    quotes = [{("C", 5000.0): (_px(d[i], last, "C", 5000.0, 0.2), None, volumes[i], 10000)} for i in range(n)]
+    (states, boards, chains), d = _leg_world(n, last, quotes)
+
+    class _Closing:
+        """Sizes an overlay on day 1, closes it on day 2, and on day 3 is refused a new one while a residual is held."""
+
+        clip = True
+        id, family, params = "closing", "test", {}
+
+        def target(self, ctx):
+            if ctx.day_index == 1:
+                return Target(700.0, {KEY_C5000: 40.0}, 1000.0)
+            if ctx.day_index == 3:
+                return Target(700.0, dict(ctx.held_legs), 1000.0, ("overlay_not_openable",))
+            return Target(700.0, {})
+
+    rows = _run(states, _Closing(), boards, chains).rows
+    assert rows[1]["legs"] == {STR_C5000: pytest.approx(12.0)} and rows[1]["phi"] == pytest.approx(0.3)
+    # day 2: the technique wants no leg (no refusal): the overlay is closed; the thin market leaves 11 lots on the book
+    assert rows[2]["legs"] == {STR_C5000: pytest.approx(11.0)} and "volume_cut" in rows[2]["flags"]
+    # day 3: a refusal with that residual held. It was sized for an overlay the technique has closed, so it covers
+    # nothing of the digital now: phi is 0 (not the stale 0.3, not 1) and the whole note follows the futures rule;
+    # the residual's own delta is still hedged
+    assert "overlay_not_openable" in rows[3]["flags"] and rows[3]["legs"] == {STR_C5000: pytest.approx(11.0)}
+    assert rows[3]["phi"] == 0.0
+    assert rows[3]["im_lots"] == pytest.approx((700.0 - _leg_delta(d[3], last, "C", 5000.0, 0.2, 11.0)) / 200.0, rel=1e-9)
+    _check_identity(_run(states, _Closing(), boards, chains))
+
+
 # ---- the flatten at the data end and at `until` is a mark, not a trade: it costs nothing ----
 
 @pytest.mark.parametrize("mode", ["close", "twap", "next_open"])

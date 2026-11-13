@@ -28,7 +28,9 @@ what a technique refused that day (``Target.flags``, an overlay it could not bui
 on such a refusal day with legs held the target asks for exactly the legs held, so ``phi`` is not recomputed (it would
 read 1): the day uses the ``phi`` of the last day on which an overlay was sized (legs desired, no refusal flag), the
 legs held being unchanged since but for expiries, and the row's ``phi`` carries the value used; with no such earlier
-day the recomputed value stands; the flatten on the last available day (data end, ``until``, the note's last record)
+day the recomputed value stands; a day on which the technique wants no leg (and reports no refusal) closes the
+overlay, after which a residual that a thin market left on the book covers nothing (``phi`` 0 on a later refusal day)
+until an overlay is sized again; the flatten on the last available day (data end, ``until``, the note's last record)
 is a mark, not a trade, and costs nothing (a dead note's own flat target on that day is a trade and does cost).
 
 Ledger-side code: no engine, no market data of its own, no file access.
@@ -367,14 +369,19 @@ def _execute(acc: _Acc, pos: _Positions, target: Target, spot: float, far_code: 
     ``sized_phi``: the fill ratio of the last day on which an overlay was sized. A target that carries an overlay
     refusal flag while legs are held asks for exactly the legs held, which says nothing about how much of the digital
     they cover: that day uses ``sized_phi`` (when there is one) instead of the ratio of held to "desired". Returns the
-    fill ratio to carry forward: today's when an overlay was sized today (legs desired, no refusal), else
-    ``sized_phi`` unchanged."""
+    fill ratio to carry forward: today's when an overlay was sized today (legs desired, no refusal); 0 when the
+    technique closed its overlay today (no leg desired, no refusal), because a residual that a thin market leaves on
+    the book was sized for an overlay that no longer exists and covers nothing of a later digital (its own delta is
+    still hedged); else ``sized_phi`` unchanged."""
     _fill_legs(acc, pos, target.legs, board, dc, rules, used)
     refused = is_refusal(target)
+    wants_legs = any(not is_zero(v) for v in target.legs.values())
     if refused and pos.held_legs() and sized_phi is not None:
         acc.phi = sized_phi
-    elif not refused and any(not is_zero(v) for v in target.legs.values()):
+    elif not refused and wants_legs:
         sized_phi = acc.phi
+    elif not refused:
+        sized_phi = 0.0
     filled = target.note_delta if target.note_delta_if_filled is None else target.note_delta_if_filled
     im_delta = acc.phi * filled + (1.0 - acc.phi) * target.note_delta - _legs_delta(pos, board, dc)
     new_im, clipped = _im_lots(im_delta, spot, far_code, far_close, clip, bounds)
