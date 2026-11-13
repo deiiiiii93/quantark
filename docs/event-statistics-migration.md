@@ -199,8 +199,13 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
 - REBASED KO-reset statistics exist on MC only.
 - Local-vol MC `estimator="one_step_survival"` has no statistics.
 - `PricingSession` `EVENT_STATS` is refused for `DCNPDEEngine` and `LocalVolDCNPDEEngine`.
-- QUAD V2 continuous `knock_in.expected_time` sits about half a trading day below MC (day-midpoint
-  convention vs MC step bucketing; QUAD V1 uses the same day-midpoint convention).
+- Continuous KI `knock_in.expected_time` sits about half a trading day below MC on the grid engines. The field
+  is E[first crossing time] (DESIGN §4.5); QUAD V1/V2 place each day's crossing mass at the day's midpoint and
+  PDE 1D / ADI at the crossing step's midpoint, while MC books a crossing at the end of its MC step (one trading
+  day). The table rows themselves sit at each trading day's end on every engine (spec D18). The gap is inside
+  spec AC13's continuous-KI tolerance (one trading day; plus one MC step on MC). On the flat continuous-KI
+  Snowball of the cross-engine smoke (`test/event_statistics`) the grid engines read 1.7e-3 years (0.43 trading
+  day) below the MC reference, whose standard error there is 1.7e-3 years.
 - QUAD V1 Phoenix EXPIRY `reconciliation_error` is about 7e-9 × pv at 401 nodes, shrinking under
   refinement (a pre-existing price-side projection difference).
 
