@@ -6105,3 +6105,42 @@ def test_a_bump_must_be_a_ladder_step_by_the_repos_comparison():
     for name in ("techniques.py", "ledger.py"):
         source = (STUDY_DIR / "gpin" / name).read_text(encoding="utf-8")
         assert re.findall(r"\b\d+(?:\.\d+)?[eE]-\d+\b", source) == [], name
+
+
+# ---------------------------------------------------------------------------
+# CP3 fix round — T6 findings
+# ---------------------------------------------------------------------------
+
+# ---- finding 4: the vectorised tie is the repo's symmetric is_close ----
+
+#: A pair found by search: |a - b| is inside 1e-9 x max(|a|, |b|) (the repo's is_close) and outside 1e-9 x |b|
+#: (numpy.isclose with b as its reference). The two bounds are 1e-18 relative apart, below the spacing of doubles, so
+#: such pairs are rare: about one in a hundred thousand candidates one ulp either side of the bound.
+CP3_PAIR = (1.9489436749377653, 1.9489436729888217)
+
+
+def test_the_vectorised_tie_is_the_repos_symmetric_is_close_element_by_element():
+    from quantark.util.numerical import is_close
+    from gpin.measures import close_array
+
+    a, b = CP3_PAIR
+    assert is_close(a, b) and is_close(b, a) and not bool(np.isclose(a, b, rtol=1e-9, atol=0.0))   # the forms differ here
+    left = np.array([a, b, 0.0, 0.0, 5.0, -3.0, 1.0e6, -250.0, 1.0, 1.0e-300])
+    right = np.array([b, a, 0.0, 1.0e-12, 5.0 * (1.0 + 5.0e-10), -3.0 * (1.0 + 2.0e-9), 1.0e6 + 1.0e-4, 250.0, 1.0 + 1.1e-9,
+                      0.0])
+    got = close_array(left, right)
+    assert got.dtype == bool and got.tolist() == [is_close(float(x), float(y)) for x, y in zip(left, right)]
+    assert got.tolist() == [True, True, True, False, True, False, True, False, False, False]
+    assert close_array(right, left).tolist() == got.tolist()                                    # symmetric
+
+
+def test_cluster_bootstrap_ties_with_the_symmetric_form():
+    """One event: every replicate is that event. The technique's ES is above the baseline's by less than the repo's
+    relative tolerance of the LARGER of the two: a tie, so no gain on any replicate."""
+    from gpin.measures import cluster_bootstrap
+
+    a, b = CP3_PAIR
+    weeks = {"e": "2025-W30"}
+    assert cluster_bootstrap({"e": a}, {"e": b}, weeks, n=50) == 1.0
+    assert cluster_bootstrap({"e": b}, {"e": a}, weeks, n=50) == 1.0
+    assert cluster_bootstrap({"e": a * (1.0 + 1.1e-9)}, {"e": a}, weeks, n=50) == 0.0            # beyond the tolerance: a gain

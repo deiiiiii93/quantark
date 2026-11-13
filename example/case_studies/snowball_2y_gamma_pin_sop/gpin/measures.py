@@ -132,6 +132,14 @@ def _es_weighted(values: np.ndarray, weights: np.ndarray, alpha: Fraction) -> np
     return (take * v).sum(axis=1) / k
 
 
+def close_array(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """``quantark.util.numerical.is_close`` element by element: ``|a - b| <= max(RELATIVE x max(|a|, |b|),
+    ABSOLUTE)`` with the repo's constants. Symmetric in its arguments, unlike ``numpy.isclose``, whose bound is
+    relative to its second argument alone."""
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    return np.abs(a - b) <= np.maximum(Tolerance.RELATIVE * np.maximum(np.abs(a), np.abs(b)), Tolerance.ABSOLUTE)
+
+
 def bootstrap_weights(week_by_event: Mapping[str, str], events: Sequence[str], n: int, seed: int) -> np.ndarray:
     """``(n, len(events))`` multiplicities of the cluster bootstrap: the clusters are the distinct weeks in sorted
     order (``C`` of them); replicate ``i`` takes the clusters ``default_rng(seed).integers(0, C, size=(n, C))[i]``,
@@ -154,7 +162,8 @@ def cluster_bootstrap(tech_by_event: Mapping[str, float], base_by_event: Mapping
                       alpha: Optional[float] = None) -> float:
     """The pre-registered p of the tail test: the share of ``n`` week-clustered resamples on which ``ES(technique) -
     ES(base) <= 0``, both arms on the same resampled events (``bootstrap_weights``). ``n`` and ``seed`` default to the
-    pre-registered 10,000 and 20261112. Two ES equal to the repo's relative tolerance are a tie and count as no gain
+    pre-registered 10,000 and 20261112. Two ES equal by the repo's ``is_close`` (``close_array``) are a tie and count
+    as no gain
     (a technique that never acts on the events differs from the baseline by rounding only). Fails closed when the
     arms are not on the same events."""
     if set(tech_by_event) != set(base_by_event):
@@ -167,8 +176,7 @@ def cluster_bootstrap(tech_by_event: Mapping[str, float], base_by_event: Mapping
     if not (np.isfinite(tech).all() and np.isfinite(base).all()):
         raise ValidationError("the bootstrap needs finite event P&L")
     es_tech, es_base = _es_weighted(tech, weights, alpha_frac), _es_weighted(base, weights, alpha_frac)
-    tie = np.isclose(es_tech, es_base, rtol=Tolerance.RELATIVE, atol=Tolerance.ABSOLUTE)
-    return float(np.mean((es_tech - es_base <= 0.0) | tie))
+    return float(np.mean((es_tech - es_base <= 0.0) | close_array(es_tech, es_base)))
 
 
 # ---------------------------------------------------------------------------
