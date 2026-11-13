@@ -7,6 +7,137 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-14
+
+> **Version numbering.** This release follows 0.5.5. It is numbered 0.11.0, not 0.6.0, because
+> 0.6.0 to 0.10.0 are the labels of the unpublished milestones shipped inside 0.5.5, and code
+> comments, tests and the README name behaviour changes by them.
+
+Unified event statistics (design: `docs/superpowers/specs/2026-11-11-unified-event-statistics-design.md`).
+One result type, `EventStatistics`, replaces the five event-statistics types for Snowball, Phoenix,
+KO-reset Snowball and DCN, with one definition per field on every engine (MC, QUAD V1, QUAD V2,
+PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
+`quantark/asset/equity/engine/docs/autocallable_event_stats_api.md`. Migration, field by field:
+`docs/event-statistics-migration.md`.
+
+### Breaking
+
+- `AutocallableEventStats`, `PhoenixEventStats`, `KOResetEventStats`, `DCNEventStats` and the path
+  analyzer's `RiskNeutralSnowballEventStats` are removed, with no aliases. `calculate_event_stats`
+  returns `Optional[EventStatistics]` on every engine.
+- `EventDistribution.from_autocallable_stats` and `from_dcn_stats` are removed;
+  `EventDistribution.from_statistics` is the one converter. `EventDistribution` is keyword-only and
+  has one axis per stream: `event_times` / `event_dates` become `stream_times` / `stream_dates`,
+  the survival curve gets its own `survival_times` axis starting at 0, and `mc_ko_times` is gone.
+- Removed fields with a definition change: `ki_ever_probability` (counted a breach after a
+  knock-out; the replacement `knock_in.probability` is P(KI before any KO)), the engine-dependent
+  `ki_probability`, and `ki_event_probability` / `ki_survival_probability` (now first KI before any
+  KO). `ki_survive_knocked_in_probability` is `ki_settlement.probability`.
+- KO cash excludes coupons: a Phoenix coupon and released memory arrears paid with a knock-out move
+  from KO cash to `coupons.discounted_cash`.
+- `price_with_events(...).npv == price()` bitwise on every engine. MC trade PVs move by MC noise to
+  the `price()` value; Heston ADI by 1–2 ULP.
+- Replay frames keep their column names; `ki_probability_to_maturity` is now
+  `ki_settlement.probability` and `expected_discounted_maturity_cashflow` is
+  `maturity.discounted_cash + ki_settlement.discounted_cash`. The KI row the replay used to invent at
+  the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
+  plus "P(matured knocked in)".
+
+### Changed: prices (three sanctioned moves; every other `price()` is bitwise unchanged)
+
+- **QUAD V2 memory Phoenix with `initial_coupon_arrears > 0`.** V2 ignored arrears owed at the
+  pricing date while QUAD V1, PDE and MC pay them. V2 now releases them at the first remaining
+  coupon observation (with a coupon hit or a knock-out there, else carried). The V2 price rises by
+  about the arrears times their discount factor: +1.00 to +1.49 on the test contracts (spot 100,
+  arrears 1.5). V2 now agrees with V1 (3.3e-6 at 16001 nodes) and with MC (within
+  2.6 SE over 8 seeds). Contracts without arrears are bitwise unchanged. V2 theta on a missed
+  first coupon without a lifecycle count moves with it (−1.77 to +0.033, in line with V1/PDE/MC).
+- **PDE knocked-in edge row, annualized knock-in** (PDE 1D flat and local vol, Heston/SLV ADI).
+  The far-edge row of the knocked-in surface (lower edge; upper on a reverse note; the max-loss
+  row) omitted the annualized-KI tenor multiplier that the maturity payoff applies (Snowball
+  `is_annualized_ki`, KO-reset post-KI tenor). The row now reads slope and intercept from
+  `get_maturity_payoff_v1`. Moves only annualized-KI contracts whose edge is reachable. Local-vol
+  KO-reset on the default grid: 96.16 → 94.10, confirmed by an independent CTMC QUAD (94.10). The
+  width-3 vs width-16 gap falls from 0.14 to 3e-4 (flat), 2.3–3.5 to ≤ 4.5e-3 (local vol) and
+  0.7–1.5 to ≤ 1.6e-3 (ADI); local-vol PDE and ADI agree with MC within 2.4 SE. No certified anchor
+  moved.
+- **PDE knocked-in edge row, airbag with partial protection** (PDE 1D flat and local vol,
+  Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). The closed-form max-loss edge row ignored
+  the airbag. Contracts with PARTIAL protection and an airbag that changes the knocked-in payoff on
+  the edge cell now use the payoff-read row; NONE and FULL protection, and partial contracts where
+  the airbag does not change the edge, are bitwise unchanged. The width-3 vs width-16 gap falls
+  from 2.9e-2–9.2e-2 to ≤ 9.3e-4 (flat), 1.65–1.76 to ≤ 1.4e-2 (local vol), up to 0.63 to
+  ≤ 2.3e-3 (Heston ADI) and up to 1.07 to ≤ 4.7e-3 (SLV ADI). Against MC these contracts sat 24 to
+  127 SE low; now within 2.9 SE. No certified anchor moved.
+
+### Changed: statistics
+
+- KI is never triggered after a knock-out, on every engine, and a knock-out wins a same-instant tie
+  with a discrete KI. Outcomes partition the paths: KO rows, `maturity` (never KO, never KI) and
+  `ki_settlement` (KI, no KO), each computed directly; the maturity is no longer `1 − ΣKO − ki`.
+- `probability_residual` and `reconciliation_error` are computed by the type and always reported,
+  never absorbed. `from_statistics` absorbs the probability residual into MATURITY_NO_KO and
+  carries it as `EventDistribution.probability_residual`.
+- `EventStatistics.pv` is `price()`'s value on every engine; MC statistics are recorded on
+  `price()`'s own paths.
+- The KI stream lives on the KI table's own axis (payment = KI observation; legs add their offset),
+  so it is never dropped; AT_KI legs that used to raise now value.
+- `cash_to_pay` is computed directly on path-dependent rows (EXPIRY coupons, memory arrears,
+  REBASED) instead of discounted / DF.
+- EXPIRY coupon rows are path-dependent on every engine.
+- MC `calculate_event_stats` on an expired note returns `None` (was `ValueError`).
+- QUAD V1 `event_stats_mode="forward_density"` reports no KI path statistics and raises
+  `StatisticsRefused` for memory or EXPIRY Phoenix (it returned empty coupon cash).
+- KO-reset ABSOLUTE on MC: the never-knocked-in maturity is determined at the first schedule's end
+  and leaves the survival there; probabilities unchanged.
+
+### Added
+
+- `EventStatistics` with `ObservationTable` (KO/coupon grid, KO-reset `pre`/`post` tags),
+  `CouponTable`, `OutcomeRow` (`maturity`, `ki_settlement`), `KnockInStatistics` (P(KI before any
+  KO), expected first KI time, expected loss), a per-date `KnockInTable` on the product's KI
+  schedule (continuous KI: one row per trading day, interpolated rows labelled), `ReceivablesTable`,
+  `CashLedger`, `expected_lifetime`, totals, `provenance` (required), `unavailable` with
+  `require(path)` / `flag(path)` and `StatisticUnavailable`, and MC `standard_errors` from
+  independent batches.
+- Forward (adjoint) passes on PDE 1D, Heston/SLV ADI, DCN PDE, QUAD V2 and QUAD V1, the exact
+  transpose of each engine's backward step, for the KI table, P(KI) and the expected KI time. The
+  price grid is unchanged; a request without the KI stream skips the pass.
+- REBASED KO-reset statistics on MC: `post_ki_offsets` and an absolute `termination` distribution
+  on a deterministic candidate axis. `EventDistribution.from_statistics` converts them (it raised
+  `NotImplementedError`) and the cash legs value them.
+- `calculate_event_stats` on all eight DCN engines, with `lifecycle_state`; receivables-only
+  statistics for a terminated note with unpaid cash, `None` when settled, and
+  `EventDistribution.ended()` / `ensure_live()` for event-dependent readers. QUAD V2 follows the
+  same rule (it raised on terminated states).
+- `EventDistribution.probability_residual`, `rebased`, `terminated`, `determination_time(event)`.
+- `AutocallablePathAnalyzer.analyze_snowball_risk_neutral` returns `EventStatistics`.
+
+### Fixed
+
+- Phoenix MC coupon cash: memory arrears released by a knock-out on a missed coupon barrier are
+  counted, and EXPIRY coupons are discounted at the actual knock-out or maturity settlement.
+- QUAD V1 Phoenix: memory coupon cash is computed (it was missing) and EXPIRY coupons are
+  discounted at the knock-out settlement.
+- MC exact-affine routes reported KI from a biased Z = 0 slice (off by about 0.06); they now use the
+  exact conditional outcome probabilities.
+- PDE statistics labelled the not-knocked-in far edge as knocked-in settlement after the last
+  discrete KI observation, so P(KI settlement) could exceed P(KI); edge rows now follow the price's
+  own edge-row rule.
+
+### Known issues
+
+- DCN prices and statistics discount the DCN's ACT/365F grid times on the environment curve, which
+  is wrong under `BUSINESS_DAYS` or `ACT_360` environments; the fix moves prices and is left to a
+  separate release.
+- REBASED KO-reset statistics are MC-only; local-vol MC `estimator="one_step_survival"` has no
+  statistics; `PricingSession` `EVENT_STATS` is refused for `DCNPDEEngine` and
+  `LocalVolDCNPDEEngine`.
+- Tracked study outputs computed before this release still show the old KI-ever and maturity
+  numbers; see section 11 of the migration note.
+
+Other changes in this release:
+
 ### Added
 
 - `CarryExtrapolation.FLAT_CARRY_YIELD`: a third carry long-end rule that holds the zero carry yield `B(T)/T` at the
