@@ -152,6 +152,9 @@ class _Assembly:
         if reason is not None:
             unavailable["standard_errors"] = reason
         else:
+            # the "fewer than two knock-in paths" gate (spec AC21): ``ki_before_ko_count`` is a path count on native
+            # records and the summed knock-in probability mass on conditional / control-corrected records, so there
+            # it compares the effective number of knock-in paths
             if expected_time is not None and knocked_in >= 2.0:
                 errors["knock_in.expected_time"] = ratio_standard_error(
                     [float(r["ki_time_sum"]) for r in records], [float(r["ki_before_ko_count"]) for r in records])

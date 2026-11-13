@@ -164,8 +164,11 @@ def test_knock_in_counts_only_before_the_knock_out(name):
         expected = np.bincount(first, minlength=stats.ki_table.size) / n
     np.testing.assert_allclose(stats.ki_table.probability, expected, rtol=0, atol=1e-14)
     assert math.isclose(stats.knock_in.expected_time, float(ref["ki_time"][ref["ki_first"]].mean()), rel_tol=1e-12)
-    if not product.barrier_config.disable_ko_after_ki:
-        assert stats.ki_settlement.probability == (ref["ki_first"] & ~ref["is_ko"]).sum() / n
+    # disable_ko_after_ki: the reference voids a knock-out after the knock-in itself (T22)
+    assert stats.ki_settlement.probability == (ref["ki_first"] & ~ref["is_ko"]).sum() / n
+    np.testing.assert_allclose(stats.observations.probability,
+                               np.bincount(ref["ko_row"][ref["is_ko"]], minlength=stats.observations.size) / n,
+                               rtol=0, atol=1e-15)
 
 
 # --- AC10 ------------------------------------------------------------------------------------------------------
@@ -238,6 +241,20 @@ def test_deterministic_payment_rows_are_df_consistent(name):
     for row in (stats.maturity, stats.ki_settlement):
         assert math.isclose(row.discounted_cash, row.cash_to_pay * env.get_discount_factor(row.payment_time),
                             rel_tol=1e-12, abs_tol=1e-13)
+
+
+@pytest.mark.parametrize("name", ["kr_abs_pseudo", "kr_abs_cki_pseudo", "kr_rebased_pseudo"])
+def test_ko_reset_reference_decides_the_outcome_from_the_paths(name, monkeypatch):
+    """The KO-reset same-path reference classifies every path itself (CP3): it agrees with the kernel on the real
+    engine and refuses a kernel whose first-schedule knock-out ignores a knock-in before it."""
+    from quantark.asset.equity.engine.mc import snowball_mc_engine
+
+    route = ROUTES[name]
+    ref = reference.ko_reset_paths(route.engine(), route.product(), route.env())
+    assert ref["v1"].any() and ref["is_pre"].any()
+    monkeypatch.setattr(snowball_mc_engine, "_knock_out_first", lambda ko, ki, continuous: np.ones(ko.shape, bool))
+    with pytest.raises(AssertionError, match="disagrees with the kernel"):
+        reference.ko_reset_paths(route.engine(), route.product(), route.env())
 
 
 @pytest.mark.parametrize("name", ["kr_rebased_pseudo", "kr_rebased_expiry"])
