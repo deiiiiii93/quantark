@@ -215,6 +215,29 @@ def test_full_request_fills_every_number_and_pv_is_price(name):
     assert EventType.KI in result.event_distribution.stream_times
 
 
+FFT_CASES = {
+    "snowball_cki": (SnowballQuadEngineV2, lambda: snowball("cki")),
+    "phoenix_mem_expiry_cki": (PhoenixQuadEngineV2, lambda: phoenix(True, CouponPayType.EXPIRY)),
+    "ko_reset_dki": (KOResetSnowballQuadEngineV2, lambda: ko_reset("dki")),
+}
+
+
+@pytest.mark.parametrize("name", list(FFT_CASES))
+def test_pv_is_price_bitwise_on_the_forced_fft_backend(name):
+    """D23 on the FFT backend: the statistics context batches 13-31 channels through one FFT einsum where ``price()``
+    batches one, so a channel-count-dependent reduction order (the x86_64 CI's BLAS) would break ``pv == price()``
+    here first (CP6). Both runs really take the FFT path."""
+    cls, make = FFT_CASES[name]
+    pricer = cls(QuadV2Params(backend="fft"))
+    price = pricer.price(make(), env())
+    engine = cls(QuadV2Params(backend="fft"))
+    stats = engine.calculate_event_stats(make(), env())
+    assert "fft" in pricer._prepared.diagnostics["backends"] and "fft" in engine._prepared.diagnostics["backends"]
+    assert len(engine._prepared.channels) > 10 * len(pricer._prepared.channels)
+    assert stats.pv == price
+    assert cls(QuadV2Params(backend="fft")).price_with_events(make(), env()).npv == price
+
+
 # --- AC8 ------------------------------------------------------------------------------------------------------------
 
 

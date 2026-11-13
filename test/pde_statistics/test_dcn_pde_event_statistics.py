@@ -156,6 +156,12 @@ ENGINES["flat_nodal"] = lambda: DCNPDEEngine(PDEParams(accuracy="fast", event_pr
 ENGINES["flat_narrow"] = lambda: DCNPDEEngine(PDEParams(accuracy="fast", grid=GridConfig(num_std=1.0)))
 CASES["flat_narrow"] = ("flat_narrow", lambda: make_dcn(DCN_A, valuation_date=DAY), lambda: env_on(DAY), None)
 ENGINES["heston_nodal"] = lambda: HestonDCNPDESolver(HESTON, n_x=61, n_v=21, event_projection="nodal")
+# the ADI options the adjoint transposes beside the default (Craig-Sneyd, degenerate v = 0 row): Douglas splitting and
+# a Neumann v = 0 boundary (CP5)
+ENGINES["heston_douglas"] = lambda: HestonDCNPDESolver(HESTON, n_x=61, n_v=21, scheme="DOUGLAS")
+ENGINES["heston_neumann"] = lambda: HestonDCNPDESolver(HESTON, n_x=61, n_v=21, v0_boundary="neumann")
+CASES["heston_douglas"] = ("heston_douglas", lambda: make_dcn(DCN_A, valuation_date=DAY), lambda: env_on(DAY), None)
+CASES["heston_neumann"] = ("heston_neumann", lambda: make_dcn(DCN_A, valuation_date=DAY), lambda: env_on(DAY), None)
 
 TERMINATED = {
     "flat_ko_unpaid": ("flat", lambda: make_dcn(DCN_A, valuation_date=AGED), lambda: env_on(AGED),
@@ -293,7 +299,8 @@ def test_forward_pass_reproduces_the_backward_unit_claims_1d(name):
         stats)
 
 
-@pytest.mark.parametrize("name", ["heston_day", "heston_carried", "heston_closed_holiday", "heston_nodal"])
+@pytest.mark.parametrize("name", ["heston_day", "heston_carried", "heston_closed_holiday", "heston_nodal",
+                                  "heston_douglas", "heston_neumann"])
 def test_forward_pass_reproduces_the_backward_unit_claims_adi(name):
     engine, product, env = _fresh(name)
     stats = _stats(name)

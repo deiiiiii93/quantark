@@ -205,15 +205,17 @@ def test_full_request_fills_every_number_and_pv_is_price(name):
 #: columns ride the price's own linear operators, so the partition and the cash identity close to round-off
 #: (probability residual <= 1.4e-14, reconciliation <= 6e-16 x pv) -- except EXPIRY Phoenix coupons, whose discount in
 #: ``price`` is the termination surface W knocked out by the nodal weight while the statistics columns take the
-#: observation's joint projection: 6.7e-9 x pv at 401 nodes, 1.1e-9 at 1001, 6.8e-11 at 4001 (it shrinks)
+#: observation's joint projection (a pre-existing price-side difference). That gap is a per-grid bound (D16, banked in
+#: T22), measured on the three EXPIRY routes (ph_mem_expiry_cki / ph_nomem_expiry_dki / ph_mem_expiry_dki), |recon|/pv:
+#: 401 nodes 6.72e-9 / 6.68e-9 / 6.66e-9; 1001: 1.08e-9 / 1.07e-9 / 1.07e-9; 4001: 6.77e-11 / 6.72e-11 / 6.71e-11.
 RESIDUAL_BOUND = 1e-12
 RECONCILIATION_BOUND = 1e-12
-EXPIRY_RECONCILIATION_BOUND = 1e-8
+EXPIRY_RECONCILIATION_BOUND = {401: 1e-8, 1001: 2e-9, 4001: 1.5e-10}
 
 
-def _reconciliation_bound(product):
+def _reconciliation_bound(product, grid_points):
     expiry = isinstance(product, PhoenixOption) and product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-    return EXPIRY_RECONCILIATION_BOUND if expiry else RECONCILIATION_BOUND
+    return EXPIRY_RECONCILIATION_BOUND[grid_points] if expiry else RECONCILIATION_BOUND
 
 
 @pytest.mark.parametrize("name", IDS)
@@ -221,17 +223,23 @@ def test_partition_residuals_are_bounded(name):
     engine, product, market = route(name)
     stats = engine.calculate_event_stats(product, market)
     assert abs(stats.probability_residual) <= RESIDUAL_BOUND
-    assert abs(stats.reconciliation_error) <= _reconciliation_bound(product) * max(1.0, abs(stats.pv))
+    assert abs(stats.reconciliation_error) <= _reconciliation_bound(product, engine.params.grid_points) * max(
+        1.0, abs(stats.pv))
     obs = stats.observations
     df = np.array([market.get_discount_factor(t) for t in obs.payment_times])
     np.testing.assert_allclose(obs.cash_to_pay * df, obs.discounted_cash, rtol=1e-12, atol=1e-14)   # AC12
 
 
-def test_expiry_reconciliation_shrinks_under_refinement():
-    _, product, market = route("ph_mem_expiry_cki")
-    gaps = [abs(PhoenixQuadEngine(QuadParams(grid_points=points)).calculate_event_stats(product, market)
-                .reconciliation_error) for points in (401, 1001, 4001)]
-    assert gaps[0] > gaps[1] > gaps[2] and gaps[2] <= 1e-10 * 100.0
+@pytest.mark.parametrize("name", ["ph_mem_expiry_cki", "ph_nomem_expiry_dki"])
+def test_expiry_reconciliation_shrinks_under_refinement(name):
+    """The EXPIRY gap is within its banked bound on every banked grid and shrinks as the grid refines."""
+    _, product, market = route(name)
+    gaps = []
+    for points in sorted(EXPIRY_RECONCILIATION_BOUND):
+        stats = PhoenixQuadEngine(QuadParams(grid_points=points)).calculate_event_stats(product, market)
+        gaps.append(abs(stats.reconciliation_error) / max(1.0, abs(stats.pv)))
+        assert gaps[-1] <= EXPIRY_RECONCILIATION_BOUND[points], (points, gaps[-1])
+    assert gaps[0] > gaps[1] > gaps[2]
 
 
 def test_maturity_is_its_own_column_not_the_price_residual(monkeypatch):
