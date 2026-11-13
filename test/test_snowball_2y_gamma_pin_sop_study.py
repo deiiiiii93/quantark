@@ -3372,3 +3372,1144 @@ def test_a_held_leg_with_any_other_failed_inversion_still_fails_closed():
     states, boards, chains, tech, _, _ = _itm_leg_world(lambda info: info.discount * 5000.0 + 5.0)
     with pytest.raises(StudyDataError, match="implied vol"):
         _run(states, tech, boards, chains, desk_notional=NOTIONAL_)
+
+
+# ---- the registry (C6): one technique per pre-registered grid point, composites from a selection ----
+
+#: every registered id without the composites, hand-written from the spec's registry table and its grids
+T5_IDS = [
+    "base", "base_noclip",
+    "ko_shift@0.01", "ko_shift@0.02", "ko_shift@0.03",
+    "ko_spread@0.015", "ko_spread@0.03",
+    "ko_bend@0.015,3", "ko_bend@0.03,3", "ko_bend@0.03,5",
+    "ki_shift@-0.01", "ki_shift@-0.02",
+    "ko_wrong", "ki_wrong",
+    "secant@0.03", "secant@0.05",
+    "ki_cap@1.0", "ki_cap@1.25",
+    "surv_hold@1", "surv_hold@3",
+    "derisk@3", "derisk@5",
+    "freeze@1", "freeze@2",
+    "mo_ko@1,payoff", "mo_ko@2,payoff", "mo_ko@1,scenario",
+    "mo_ki@2,payoff", "mo_ki@2,scenario",
+    "band@0.02", "band@0.05",
+]
+T5_SELECTION = {"sop_futures": {"ko": "derisk@5", "ki": "ki_cap@1.25"},
+                "sop_overlay": {"ko": "mo_ko@1,scenario", "ki": "mo_ki@2,payoff"}}
+T5_ALL_IDS = T5_IDS + ["sop_futures", "sop_overlay"]
+
+
+def _registry(selection=T5_SELECTION):
+    from gpin.techniques import build_registry
+
+    return build_registry(load_prereg(), selection)
+
+
+def test_registry_has_one_technique_per_grid_point_with_stable_ids():
+    from gpin.techniques import Base, BaseNoClip, Technique, build_registry
+
+    reg = build_registry(load_prereg())
+    assert list(reg) == T5_IDS                                  # the pre-registration's order; no composite without a selection
+    assert all(isinstance(t, Technique) and t.id == key for key, t in reg.items())
+    assert type(reg["base"]) is Base and type(reg["base_noclip"]) is BaseNoClip
+    assert [k for k, t in reg.items() if not t.clip] == ["base_noclip"]
+    # id, row, family and the grid point as params
+    rows = {t["id"]: t for t in load_prereg()["techniques"]}
+    for key, tech in reg.items():
+        row = rows[tech.row]
+        assert key.split("@")[0] == tech.row and tech.family == row["family"] and tech.params in row["grid"]
+    assert reg["ko_bend@0.03,5"].params == {"e": 0.03, "n_b": 5} and reg["ko_bend@0.03,5"].family == "1 barrier bending"
+    assert reg["mo_ko@1,scenario"].params == {"steps": 1, "sizing": "scenario"}
+    assert reg["ki_shift@-0.02"].params == {"x": -0.02} and reg["ki_cap@1.0"].params == {"c": 1.0}
+    assert reg["ko_wrong"].params == {} and reg["ko_wrong"].family == "control"
+    # the number of grid points per row is the pre-registration's
+    for row_id, (_, _, n_points) in EXPECTED_TECHNIQUES.items():
+        if row_id not in ("sop_futures", "sop_overlay"):
+            assert sum(1 for t in reg.values() if t.row == row_id) == n_points, row_id
+
+
+def test_grid_ids_are_the_values_in_the_grids_key_order():
+    from gpin.techniques import grid_id
+
+    assert grid_id("base", {}) == "base"
+    assert grid_id("ko_shift", {"size": 0.02}) == "ko_shift@0.02"
+    assert grid_id("ko_bend", {"e": 0.015, "n_b": 3}) == "ko_bend@0.015,3"
+    assert grid_id("mo_ko", {"steps": 2, "sizing": "payoff"}) == "mo_ko@2,payoff"
+    assert grid_id("ki_cap", {"c": 1.0}) == "ki_cap@1.0" and grid_id("ki_shift", {"x": -0.01}) == "ki_shift@-0.01"
+
+
+def test_composites_exist_only_with_a_selection_and_a_selection_must_name_registered_members():
+    from gpin.techniques import build_registry
+
+    prereg = load_prereg()
+    assert "sop_futures" not in build_registry(prereg) and "sop_overlay" not in build_registry(prereg)
+    reg = build_registry(prereg, T5_SELECTION)
+    assert list(reg) == T5_ALL_IDS
+    assert reg["sop_futures"].family == "SOP composite" and reg["sop_overlay"].row == "sop_overlay"
+    assert reg["sop_futures"].params == {"ko": "derisk@5", "ki": "ki_cap@1.25"}
+    assert reg["sop_overlay"].params == {"futures": "sop_futures", "ko": "mo_ko@1,scenario", "ki": "mo_ki@2,payoff"}
+    bad = [
+        {"sop_futures": {"ko": "derisk@5"}, "sop_overlay": T5_SELECTION["sop_overlay"]},                    # a slot missing
+        {"sop_futures": T5_SELECTION["sop_futures"]},                                                         # a composite missing
+        {"sop_futures": {"ko": "derisk@4", "ki": "ki_cap@1.25"}, "sop_overlay": T5_SELECTION["sop_overlay"]},   # not a grid point
+        {"sop_futures": {"ko": "ki_cap@1.0", "ki": "ki_cap@1.25"}, "sop_overlay": T5_SELECTION["sop_overlay"]},  # not a KO row
+        {"sop_futures": {"ko": "mo_ko@1,payoff", "ki": "ki_cap@1.25"}, "sop_overlay": T5_SELECTION["sop_overlay"]},
+        {"sop_futures": T5_SELECTION["sop_futures"], "sop_overlay": {"ko": "mo_ki@2,payoff", "ki": "mo_ki@2,payoff"}},
+        {"sop_futures": T5_SELECTION["sop_futures"], "sop_overlay": {"ko": "mo_ko@1,payoff", "ki": "ki_shift@-0.01"}},
+    ]
+    for selection in bad:
+        with pytest.raises(ValidationError):
+            build_registry(prereg, selection)
+
+
+def test_module_registry_follows_the_selection_file(tmp_path):
+    from gpin import techniques as tq
+
+    # no results/selection.json yet: the composites are undefined, not defaulted
+    assert tq.SELECTION_PATH == gpin.RESULTS_DIR / "selection.json"
+    expected = T5_ALL_IDS if tq.SELECTION_PATH.exists() else T5_IDS
+    assert list(tq.REGISTRY) == expected
+    assert tq.composite_selection(tmp_path / "selection.json") is None
+    path = tmp_path / "selection.json"
+    path.write_text(json.dumps({"composites": T5_SELECTION, "hashes": {}}), encoding="utf-8")
+    assert tq.composite_selection(path) == T5_SELECTION
+    assert list(tq.build_registry(load_prereg(), tq.composite_selection(path))) == T5_ALL_IDS
+    path.write_text(json.dumps({"picks": {}}), encoding="utf-8")
+    with pytest.raises(StudyDataError):                          # a selection file without the composites' members
+        tq.composite_selection(path)
+
+
+def test_an_unknown_row_or_an_unpriced_shift_fails_closed():
+    from gpin.techniques import build_registry
+
+    prereg = json.loads(json.dumps(load_prereg()))
+    prereg["techniques"].append({"id": "magic", "family": "x", "role": "candidate", "barrier": "ko", "grid": [{}]})
+    with pytest.raises(ValidationError, match="magic"):
+        build_registry(prereg)
+    prereg = json.loads(json.dumps(load_prereg()))
+    next(t for t in prereg["techniques"] if t["id"] == "ko_shift")["grid"].append({"size": 0.025})   # no ko_s250 model
+    with pytest.raises(ValidationError, match="0.025"):
+        build_registry(prereg)
+    prereg = json.loads(json.dumps(load_prereg()))
+    next(t for t in prereg["techniques"] if t["id"] == "secant")["grid"].append({"h": 0.035})       # not a ladder point
+    with pytest.raises(ValidationError):
+        build_registry(prereg)
+
+
+# ---- hand-computed targets, one family at a time, on hand-made day contexts ----
+
+T5_DAYS = _weekdays(12)            # 2024-01-02 .. 2024-01-17: also consecutive SSE trading days
+T5_DAY = T5_DAYS[4]                # 2024-01-08
+
+
+def _t5_note(*, book="ki75", s0=5000.0, strike=5000.0, ko=5000.0, ki=3750.0):
+    from gpin.techniques import NoteInfo
+
+    return NoteInfo(book, WORLD_START, 0.1, 0.75, 1.0, s0, strike, ko, ki)
+
+
+def _t5_record(day, spot, deltas, *, n=None, gap_ko=None, ko_dir=None, knocked_in=False, prices=None, ladders=None):
+    """A day record with a linear ladder of slope ``deltas[model]`` (level ``prices[model]`` at the spot) per model;
+    ``ladders`` replaces whole ladders. ``n``: trading days to the next KO observation (dated ``n`` weekdays ahead)."""
+    prices = prices or {}
+    states = {m: _ladder_state(prices.get(m, 0.0), d, 0.0, spot) for m, d in deltas.items()}
+    states.update(ladders or {})
+    next_ko = None if n is None else _weekdays(n + 1, day)[-1]
+    return {"date": day.isoformat(), "spot": spot, "alive": True, "knocked_in": knocked_in, "engine_note_cash": 0.0,
+            "end_reason": None, "next_ko": None if next_ko is None else next_ko.isoformat(), "days_to_ko": n,
+            "gap_ko": gap_ko, "ko_dir": ko_dir, "states": states}
+
+
+def _t5_board(day, spot, *, im=None, mo=None):
+    """``im``: ``{code: close}``; ``mo``: ``{series: dict(last, forward, quotes={(cp, strike): (settle, volume, oi)})}``."""
+    from gpin.board import DayBoard, ImBar, OptionQuote
+
+    bars = {code: ImBar(None, close, close, None, 0) for code, close in (im or {}).items()}
+    quotes, infos = {}, {}
+    for series, s in (mo or {}).items():
+        infos[series] = _series_info(day, s["last"], s["forward"])
+        quotes[series] = {k: OptionQuote(q[0], None, None, None, q[1], q[2]) for k, q in s["quotes"].items()}
+    return DayBoard(day, spot, bars, quotes, infos)
+
+
+def _t5_ctx(record, *, vol=0.2, board=None, note=None, held_im=None, held_legs=None, prev=None, index=5):
+    from gpin.techniques import DayContext
+
+    day = date.fromisoformat(record["date"])
+    board = board if board is not None else _t5_board(day, record["spot"])
+    return DayContext.build(day, index, record["spot"], vol, record, board, note or _t5_note(), held_im or {},
+                            held_legs or {}, prev)
+
+
+#: hedge deltas of the hand-made KO-window day: the true note and every KO model
+KO_DELTAS = {"true": 1000.0, "surv": 450.0, "ko_s050": 960.0, "ko_s100": 900.0, "ko_s150": 800.0, "ko_s200": 700.0,
+             "ko_s300": 600.0, "ko_w100": 1100.0}
+#: of the hand-made KI-window day
+KI_DELTAS = {"true": 2000.0, "ki_m100": 1700.0, "ki_m200": 1500.0, "ki_p100": 2300.0, "kin": 1200.0}
+
+
+def _ko_ctx(n=3, spot=5100.0, deltas=None, *, ko_dir=-1, gap_ko=400000.0, **kw):
+    """A KO-window day: barrier 5000, flat vol 20%; z = ln(S / 5000) / (0.2 / sqrt(244) x sqrt(n))."""
+    return _t5_ctx(_t5_record(T5_DAY, spot, KO_DELTAS if deltas is None else deltas, n=n, gap_ko=gap_ko, ko_dir=ko_dir), **kw)
+
+
+def _ki_ctx(spot=3900.0, deltas=None, *, n=40, knocked_in=False, **kw):
+    """A KI-window day: KI barrier 3750, spot 4% above it; the next KO observation is far."""
+    return _t5_ctx(_t5_record(T5_DAY, spot, KI_DELTAS if deltas is None else deltas, n=n, knocked_in=knocked_in), **kw)
+
+
+def _far_ctx(spot=4400.0, delta=1000.0, **kw):
+    """A day outside both windows (spot 12% below the KO barrier and 17% above the KI barrier): only the true state."""
+    return _t5_ctx(_t5_record(T5_DAY, spot, {"true": delta}, n=3), **kw)
+
+
+def _delta_only(target, value):
+    assert target.note_delta == pytest.approx(value, rel=1e-12)
+    assert dict(target.legs) == {} and target.note_delta_if_filled is None and tuple(target.flags) == ()
+
+
+def test_window_and_trigger_predicates_use_the_pre_registered_numbers_and_agree_with_the_pricing_pass():
+    from gpin import pricing
+    from gpin import techniques as tq
+
+    s = tq.Settings.from_prereg(load_prereg())
+    assert (s.ko_days, s.ko_band, s.ki_band, s.trigger_z, s.days_per_year) == (10, 0.10, 0.05, 2.0, 244)
+    assert (s.overlay_ko_days, s.overlay_ki_min_days_left, s.bump, s.scenario_cap) == (5, 3, 0.01, 3.0)
+    assert (s.min_volume, s.min_open_interest) == (100, 500)
+    # KO window: at most 10 trading days ahead and within 10% of the barrier (inclusive)
+    for n, spot, expect in [(10, 5000.0, True), (11, 5000.0, False), (3, 5500.0, True), (3, 5500.5, False),
+                            (3, 4500.0, True), (3, 4499.0, False), (None, 5000.0, False)]:
+        ctx = _t5_ctx(_t5_record(T5_DAY, spot, {"true": 1.0}, n=n))
+        assert tq.in_ko_window(ctx, s) is expect, (n, spot)
+        assert pricing.in_ko_window(spot, 5000.0, n, book="ki75") is expect
+    # KI window: not knocked in and at most 5% above the KI barrier 3750 (inclusive)
+    for spot, ki, expect in [(3937.5, False, True), (3938.0, False, False), (3700.0, False, True), (3800.0, True, False)]:
+        ctx = _t5_ctx(_t5_record(T5_DAY, spot, {"true": 1.0}, n=40, knocked_in=ki))
+        assert tq.in_ki_window(ctx, s) is expect, (spot, ki)
+        assert pricing.in_ki_window(spot, 5000.0, ki, book="ki75") is expect
+    # z = ln(S / B) / (vol / sqrt(244) x sqrt(max(n, 1))); the trigger is |z| <= 2 inside the KO window
+    ctx = _ko_ctx(n=3, spot=5200.0)
+    z = math.log(5200.0 / 5000.0) / (0.2 / math.sqrt(244.0) * math.sqrt(3.0))
+    assert z == pytest.approx(1.7686, abs=1e-4) and tq.ko_z(ctx, s) == pytest.approx(z, rel=1e-12)
+    assert tq.ko_trigger(ctx, s) is True
+    assert tq.ko_trigger(_ko_ctx(n=3, spot=5250.0), s) is False            # z = 2.20: in the window, outside the trigger
+    assert tq.ko_trigger(_ko_ctx(n=3, spot=4800.0), s) is True             # z = -1.84
+    assert tq.ko_trigger(_ko_ctx(n=3, spot=4750.0), s) is False            # z = -2.31
+    assert tq.ko_trigger(_ko_ctx(n=11, spot=5000.0), s) is False           # z = 0 but outside the window
+    with pytest.raises(ValidationError):
+        tq.ko_z(_ko_ctx(n=3, spot=5200.0, vol=0.0), s)
+
+
+def test_family_1_barrier_shift_and_spread_hand_computed():
+    reg = _registry()
+    ctx = _ko_ctx(n=8)
+    _delta_only(reg["base"].target(ctx), 1000.0)
+    _delta_only(reg["ko_shift@0.01"].target(ctx), 900.0)                   # d(ko_s100)
+    _delta_only(reg["ko_shift@0.02"].target(ctx), 700.0)                   # d(ko_s200)
+    _delta_only(reg["ko_shift@0.03"].target(ctx), 600.0)                   # d(ko_s300)
+    _delta_only(reg["ko_wrong"].target(ctx), 1100.0)                       # d(ko_w100)
+    # the digital booked as a spread of width e: the mean over the shifts 0, e/3, 2e/3, e (shift 0 is the true note)
+    _delta_only(reg["ko_spread@0.015"].target(ctx), (1000.0 + 960.0 + 900.0 + 800.0) / 4.0)       # 915
+    _delta_only(reg["ko_spread@0.03"].target(ctx), (1000.0 + 900.0 + 700.0 + 600.0) / 4.0)        # 800
+    ki = _ki_ctx()
+    _delta_only(reg["ki_shift@-0.01"].target(ki), 1700.0)                  # d(ki_m100)
+    _delta_only(reg["ki_shift@-0.02"].target(ki), 1500.0)                  # d(ki_m200)
+    _delta_only(reg["ki_wrong"].target(ki), 2300.0)                        # d(ki_p100)
+
+
+def test_family_1_bending_is_the_spread_only_near_the_observation_and_under_the_trigger():
+    reg = _registry()
+    spread3, spread15 = 800.0, 915.0
+    _delta_only(reg["ko_bend@0.03,3"].target(_ko_ctx(n=3)), spread3)
+    _delta_only(reg["ko_bend@0.03,3"].target(_ko_ctx(n=4)), 1000.0)        # n > n_b: the baseline
+    _delta_only(reg["ko_bend@0.03,5"].target(_ko_ctx(n=5)), spread3)
+    _delta_only(reg["ko_bend@0.03,5"].target(_ko_ctx(n=6)), 1000.0)
+    _delta_only(reg["ko_bend@0.015,3"].target(_ko_ctx(n=1, spot=5050.0)), spread15)
+    _delta_only(reg["ko_bend@0.03,3"].target(_ko_ctx(n=3, spot=5250.0)), 1000.0)   # z = 2.20: outside the trigger
+    _delta_only(reg["ko_bend@0.03,3"].target(_ko_ctx(n=3, spot=5200.0)), spread3)  # z = 1.77
+    # the plain spread and the shift do not look at the trigger
+    _delta_only(reg["ko_spread@0.03"].target(_ko_ctx(n=3, spot=5250.0)), spread3)
+    _delta_only(reg["ko_shift@0.02"].target(_ko_ctx(n=3, spot=5250.0)), 700.0)
+
+
+def test_family_2_futures_only_rules_hand_computed():
+    reg = _registry()
+    # secant: (V(S(1+h)) - V(S(1-h))) / (2hS) on the true ladder. Lift the +3% point by 30,000 CNY: the 3% secant
+    # gains 30,000 / (2 x 0.03 x 5100) = 98.04 per point, the 1% bump delta and the 5% secant are unchanged
+    lifted = _ladder_state(0.0, 1000.0, 0.0, 5100.0)
+    lifted["engine_price"][15] += 30000.0
+    rec = _t5_record(T5_DAY, 5100.0, KO_DELTAS, n=8, gap_ko=1.0, ko_dir=-1, ladders={"true": lifted})
+    _delta_only(reg["base"].target(_t5_ctx(rec)), 1000.0)
+    _delta_only(reg["secant@0.03"].target(_t5_ctx(rec)), 1000.0 + 30000.0 / (2 * 0.03 * 5100.0))
+    _delta_only(reg["secant@0.05"].target(_t5_ctx(rec)), 1000.0)
+    # the same in the KI window, and outside both windows (the baseline)
+    lifted_ki = _ladder_state(0.0, 2000.0, 0.0, 3900.0)
+    lifted_ki["engine_price"][17] -= 39000.0                                # the +5% point
+    rec = _t5_record(T5_DAY, 3900.0, KI_DELTAS, n=40, ladders={"true": lifted_ki})
+    _delta_only(reg["secant@0.05"].target(_t5_ctx(rec)), 2000.0 - 39000.0 / (2 * 0.05 * 3900.0))    # 1900
+    _delta_only(reg["secant@0.03"].target(_t5_ctx(rec)), 2000.0)
+    far = _ladder_state(0.0, 1000.0, 0.0, 4400.0)
+    far["engine_price"][15] += 30000.0
+    _delta_only(reg["secant@0.03"].target(_t5_ctx(_t5_record(T5_DAY, 4400.0, {}, n=3, ladders={"true": far}))), 1000.0)
+    # ki_cap: min(d(true), c x d(kin)) in the KI window
+    _delta_only(reg["ki_cap@1.0"].target(_ki_ctx()), 1200.0)               # min(2000, 1200)
+    _delta_only(reg["ki_cap@1.25"].target(_ki_ctx()), 1500.0)              # min(2000, 1.25 x 1200)
+    low = dict(KI_DELTAS, true=1100.0)
+    _delta_only(reg["ki_cap@1.0"].target(_ki_ctx(deltas=low)), 1100.0)     # the cap does not bind
+    # surv_hold: d(surv) on the last n_s closes before the observation under the trigger
+    _delta_only(reg["surv_hold@1"].target(_ko_ctx(n=1, spot=5050.0)), 450.0)
+    _delta_only(reg["surv_hold@1"].target(_ko_ctx(n=2, spot=5050.0)), 1000.0)
+    _delta_only(reg["surv_hold@3"].target(_ko_ctx(n=3)), 450.0)
+    _delta_only(reg["surv_hold@3"].target(_ko_ctx(n=4)), 1000.0)
+    _delta_only(reg["surv_hold@3"].target(_ko_ctx(n=3, spot=5250.0)), 1000.0)      # outside the trigger
+
+
+def test_family_4_derisk_is_a_linear_blend_to_the_survived_branch():
+    reg = _registry()
+    # n_d = 5: weight on d(surv) = (5 - n) / 4: n = 5 -> 1000, 4 -> 862.5, 3 -> 725, 2 -> 587.5, 1 -> 450
+    for n, expect in [(6, 1000.0), (5, 1000.0), (4, 862.5), (3, 725.0), (2, 587.5), (1, 450.0)]:
+        _delta_only(reg["derisk@5"].target(_ko_ctx(n=n, spot=5020.0)), expect)
+    # n_d = 3: 3 -> 1000, 2 -> 725, 1 -> 450
+    for n, expect in [(4, 1000.0), (3, 1000.0), (2, 725.0), (1, 450.0)]:
+        _delta_only(reg["derisk@3"].target(_ko_ctx(n=n, spot=5020.0)), expect)
+    _delta_only(reg["derisk@5"].target(_ko_ctx(n=2, spot=5250.0)), 1000.0)         # z = 2.7 at n = 2: no trigger
+
+
+# ---- settled rules: the baseline when a model state is missing, when ko_dir is 0, on a knock-in day ----
+
+NEEDS_KO_MODEL = ["ko_shift@0.01", "ko_shift@0.02", "ko_shift@0.03", "ko_spread@0.015", "ko_spread@0.03",
+                  "ko_bend@0.015,3", "ko_bend@0.03,3", "ko_bend@0.03,5", "ko_wrong", "surv_hold@1", "surv_hold@3",
+                  "derisk@3", "derisk@5", "mo_ko@1,payoff", "mo_ko@2,payoff", "mo_ko@1,scenario"]
+NEEDS_KI_MODEL = ["ki_shift@-0.01", "ki_shift@-0.02", "ki_wrong", "ki_cap@1.0", "ki_cap@1.25", "mo_ki@2,payoff",
+                  "mo_ki@2,scenario"]
+SHIFT_IDS = ["ko_shift@0.01", "ko_shift@0.02", "ko_shift@0.03", "ko_spread@0.015", "ko_spread@0.03", "ko_bend@0.015,3",
+             "ko_bend@0.03,3", "ko_bend@0.03,5", "ko_wrong"]
+
+
+@pytest.mark.parametrize("tid", NEEDS_KO_MODEL)
+def test_a_ko_technique_returns_the_baseline_when_its_model_has_no_state(tid):
+    # one day before the observation, at the barrier, under the trigger: yet only the true model was recorded
+    ctx = _t5_ctx(_t5_record(T5_DAY, 5010.0, {"true": 1000.0}, n=1))
+    _delta_only(_registry()[tid].target(ctx), 1000.0)
+
+
+@pytest.mark.parametrize("tid", NEEDS_KI_MODEL)
+def test_a_ki_technique_returns_the_baseline_when_its_model_has_no_state_and_on_a_knock_in_day(tid):
+    tech = _registry()[tid]
+    _delta_only(tech.target(_t5_ctx(_t5_record(T5_DAY, 3900.0, {"true": 2000.0}, n=40))), 2000.0)
+    # the knock-in day: the close is below the barrier, the note is knocked in, no KI model is priced
+    _delta_only(tech.target(_t5_ctx(_t5_record(T5_DAY, 3700.0, {"true": 2000.0}, n=40, knocked_in=True))), 2000.0)
+    # even a (contradictory) record that still carries KI states is not used once the note is knocked in
+    _delta_only(tech.target(_ki_ctx(spot=3700.0, knocked_in=True)), 2000.0)
+
+
+@pytest.mark.parametrize("tid", SHIFT_IDS)
+def test_a_shift_technique_returns_the_baseline_when_ko_dir_is_zero(tid):
+    tech = _registry()[tid]
+    # ko_dir = 0: no shift model was priced for this observation (surv is)
+    ctx = _t5_ctx(_t5_record(T5_DAY, 5010.0, {"true": 1000.0, "surv": 450.0}, n=1, gap_ko=0.0, ko_dir=0))
+    _delta_only(tech.target(ctx), 1000.0)
+    _delta_only(tech.target(_ko_ctx(n=1, spot=5010.0, ko_dir=0, gap_ko=0.0)), 1000.0)   # even if shift states were there
+
+
+@pytest.mark.parametrize("tid", T5_ALL_IDS)
+def test_every_technique_returns_the_baseline_outside_both_windows(tid):
+    _delta_only(_registry()[tid].target(_far_ctx()), 1000.0)
+
+
+def test_techniques_read_only_models_the_pricing_pass_prices():
+    from gpin.models import MODELS
+
+    reg = _registry()
+    for tech in reg.values():
+        assert set(tech.models) <= set(MODELS), tech.id
+    assert reg["ko_shift@0.02"].models == ("ko_s200",) and reg["ko_wrong"].models == ("ko_w100",)
+    assert reg["ko_spread@0.015"].models == ("true", "ko_s050", "ko_s100", "ko_s150")
+    assert reg["ko_bend@0.03,5"].models == ("true", "ko_s100", "ko_s200", "ko_s300")
+    assert reg["ki_shift@-0.01"].models == ("ki_m100",) and reg["ki_wrong"].models == ("ki_p100",)
+    assert reg["ki_cap@1.0"].models == ("kin",) and reg["surv_hold@1"].models == ("surv",) == reg["derisk@3"].models
+    assert reg["mo_ki@2,payoff"].models == ("ki_m200", "kin")
+    assert reg["base"].models == () == reg["freeze@1"].models == reg["band@0.02"].models == reg["mo_ko@1,payoff"].models
+
+
+# ---- the delta carried (freeze, band): the IM held at the board's closes plus the legs held ----
+
+def _t5_world(specs, *, strike=5000.0, ki=3750.0, book="ki75"):
+    """``(states, boards, chains)`` from day specs ``dict(day, spot, deltas, n, gap_ko, ko_dir, knocked_in, prices, vol,
+    im={code: close}, mo)``: records by ``_t5_record``, boards by ``_t5_board``, one chain row per day whose IM quotes
+    are the board's closes (the last one is the far contract the ledger hedges with)."""
+    from s2ts.chain import DayChain, ImQuote, MoPillar
+
+    records, boards, chains = [], {}, []
+    for sp in specs:
+        d, spot = sp["day"], sp["spot"]
+        records.append(_t5_record(d, spot, sp["deltas"], n=sp.get("n"), gap_ko=sp.get("gap_ko"), ko_dir=sp.get("ko_dir"),
+                                  knocked_in=sp.get("knocked_in", False), prices=sp.get("prices")))
+        boards[d] = _t5_board(d, spot, im=sp["im"], mo=sp.get("mo"))
+        quotes = tuple(ImQuote(code, d + timedelta(days=60), 60 / 365.0, close, close) for code, close in sp["im"].items())
+        pillar = MoPillar("MO0000", d + timedelta(days=60), 60 / 365.0, spot, 1.0, 1.0, spot, sp.get("vol", 0.2), ())
+        chains.append(DayChain(d, spot, quotes, pillar, {}, 0.0))
+    states = {"book": book, "ki_pct": 0.75, "inception": specs[0]["day"].isoformat(), "coupon": 0.1, "days": records,
+              "meta": {}, "spot0": specs[0]["spot"], "strike": strike, "ko_level": strike, "ki_level": ki}
+    return states, boards, chains
+
+
+def _ov_mo(day, lasts, strikes, forward, vol_of=lambda k: 0.2, volume=5000, oi=10000):
+    """A hand-made MO board: per series (``lasts``: name -> last trading day) the call and the put of every strike, settled
+    at the Black-76 price of ``vol_of(strike)`` on ``forward``, with ``volume`` lots traded and ``oi`` lots open."""
+    return {name: dict(last=last, forward=forward,
+                       quotes={(cp, k): (_px(day, last, cp, k, vol_of(k), forward), volume, oi)
+                               for k in strikes for cp in "CP"})
+            for name, last in lasts.items()}
+
+
+def test_the_delta_carried_is_the_im_held_at_the_boards_closes_plus_the_legs_held():
+    from gpin import techniques as tq
+
+    # 7 lots of IM2403 at 5080 and 2 lots of IM2406 at 5050, spot 5100: (7 x 5080 + 2 x 5050) x 200 / 5100 per index point
+    board = _t5_board(T5_DAY, 5100.0, im={"IM2403": 5080.0, "IM2406": 5050.0, "IM2409": 5000.0})
+    ctx = _ko_ctx(n=3, spot=5100.0, board=board, held_im={"IM2403": 7.0})
+    assert tq.carried_delta(ctx) == pytest.approx(7.0 * 200.0 * 5080.0 / 5100.0, rel=1e-12)
+    ctx = _ko_ctx(n=3, spot=5100.0, board=board, held_im={"IM2403": 7.0, "IM2406": 2.0})
+    assert tq.carried_delta(ctx) == pytest.approx((7.0 * 5080.0 + 2.0 * 5050.0) * 200.0 / 5100.0, rel=1e-12)
+    assert tq.carried_delta(_ko_ctx(n=3, spot=5100.0, board=board)) == 0.0
+    with pytest.raises(StudyDataError, match="IM2412"):                    # a held contract the board cannot mark
+        tq.carried_delta(_ko_ctx(n=3, spot=5100.0, board=board, held_im={"IM2412": 1.0}))
+    # a leg held: 3 calls of 100 CNY per point at their Black-76 index delta (discount x N(d1) x forward / spot)
+    last = date(2024, 2, 16)
+    mo = _ov_mo(T5_DAY, {"MO2402": last}, [5000.0, 5100.0], 5090.0, lambda k: 0.22)
+    board = _t5_board(T5_DAY, 5100.0, im={"IM2403": 5080.0}, mo=mo)
+    info = _series_info(T5_DAY, last, 5090.0)
+    leg = 3.0 * 100.0 * info.discount * _bs(info, 5100.0, 0.22, True)[1] * 5090.0 / 5100.0
+    ctx = _ko_ctx(n=3, spot=5100.0, board=board, held_im={"IM2403": 7.0}, held_legs={("MO2402", "C", 5100.0): 3.0})
+    assert tq.carried_delta(ctx) == pytest.approx(7.0 * 200.0 * 5080.0 / 5100.0 + leg, rel=1e-9)
+    # d1 = (ln(5090 / 5100) + 0.5 x 0.0719 ^ 2) / 0.0719 = 0.0087, N(d1) = 0.5035, x discount 0.9985 x 5090 / 5100
+    assert leg == pytest.approx(150.5, abs=0.1)
+    with pytest.raises(StudyDataError, match="MO2402:C:5200"):              # a held leg the board cannot mark
+        tq.carried_delta(_ko_ctx(n=3, spot=5100.0, board=board, held_legs={("MO2402", "C", 5200.0): 1.0}))
+
+
+def test_family_4_freeze_holds_the_delta_carried_on_the_last_closes_before_the_observation():
+    reg = _registry()
+    board = _t5_board(T5_DAY, 5050.0, im={"IM2403": 5030.0})
+    held = {"IM2403": 5.2}
+    carried = 5.2 * 200.0 * 5030.0 / 5050.0                                # 1035.88 per index point
+    assert carried == pytest.approx(1035.88, abs=0.01)
+    kw = dict(spot=5050.0, board=board, held_im=held)
+    _delta_only(reg["freeze@1"].target(_ko_ctx(n=1, **kw)), carried)       # the last close before the observation
+    _delta_only(reg["freeze@1"].target(_ko_ctx(n=2, **kw)), 1000.0)
+    _delta_only(reg["freeze@2"].target(_ko_ctx(n=2, **kw)), carried)
+    _delta_only(reg["freeze@2"].target(_ko_ctx(n=1, **kw)), carried)
+    _delta_only(reg["freeze@2"].target(_ko_ctx(n=3, **kw)), 1000.0)
+    # outside the trigger (n = 1, spot 5200: z = ln(1.04) / 0.0128 = 3.06): the baseline
+    far = _t5_board(T5_DAY, 5200.0, im={"IM2403": 5180.0})
+    _delta_only(reg["freeze@1"].target(_ko_ctx(n=1, spot=5200.0, board=far, held_im=held)), 1000.0)
+    # nothing held: nothing is traded
+    _delta_only(reg["freeze@1"].target(_ko_ctx(n=1, spot=5050.0)), 0.0)
+    # it needs no hedge model
+    ctx = _t5_ctx(_t5_record(T5_DAY, 5050.0, {"true": 1000.0}, n=1), board=board, held_im=held)
+    _delta_only(reg["freeze@1"].target(ctx), carried)
+
+
+def _im_only_world(deltas, ns, closes, spot=5000.0):
+    days = _weekdays(len(deltas))
+    return _t5_world([dict(day=days[i], spot=spot, deltas={"true": deltas[i]}, n=ns[i], im={"IM2403": closes[i]})
+                      for i in range(len(deltas))])
+
+
+def test_freeze_makes_no_im_trade_in_the_ledger_on_the_last_closes_before_the_observation():
+    reg = _registry()
+    # spot 5000 = the barrier every day; the observation is day 4; the hedge delta and the IM close move every day
+    deltas = [1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0]
+    closes = [5000.0, 5010.0, 5030.0, 4990.0, 5000.0, 5000.0]
+    states, boards, chains = _im_only_world(deltas, [4, 3, 2, 1, 20, 19], closes)
+    lots = [deltas[i] * 5000.0 / (200.0 * closes[i]) for i in range(6)]    # the baseline's lots: delta x S / (200 x F)
+    base = _run(states, reg["base"], boards, chains)
+    assert [r["im_lots"] for r in base.rows] == pytest.approx(lots[:5] + [0.0])
+    two = _run(states, reg["freeze@2"], boards, chains)
+    assert [r["im_lots"] for r in two.rows] == pytest.approx([lots[0], lots[1], lots[1], lots[1], lots[4], 0.0])
+    assert two.rows[2]["cost"] == 0.0 and two.rows[3]["cost"] == 0.0       # no trade on the two frozen closes
+    assert two.rows[1]["cost"] > 0.0 and two.rows[4]["cost"] > 0.0
+    one = _run(states, reg["freeze@1"], boards, chains)
+    assert [r["im_lots"] for r in one.rows] == pytest.approx([lots[0], lots[1], lots[2], lots[2], lots[4], 0.0])
+    assert one.rows[3]["cost"] == 0.0 and one.rows[2]["cost"] > 0.0
+    _check_identity(two)
+
+
+def test_band_trades_im_only_beyond_the_band_outside_the_windows_and_never_inside_one():
+    reg = _registry()
+    # outside both windows at spot 4400: notional delta = 10 mio / 4400 = 2272.7 per point; 2% of it 45.5, 5% of it 113.6
+    board = _t5_board(T5_DAY, 4400.0, im={"IM2403": 4400.0})
+
+    def far(lots):
+        return _far_ctx(board=board, held_im={"IM2403": lots})
+
+    # 4.7 lots carry 940: the baseline 1000 is 60 away, beyond the 2% band and inside the 5% band
+    _delta_only(reg["band@0.02"].target(far(4.7)), 1000.0)
+    _delta_only(reg["band@0.05"].target(far(4.7)), 940.0)
+    # 4.8 lots carry 960 (40 away): no trade under either; 4.4 lots carry 880 (120 away): both trade; so does 5.3 (60 above)
+    _delta_only(reg["band@0.02"].target(far(4.8)), 960.0)
+    _delta_only(reg["band@0.05"].target(far(4.8)), 960.0)
+    _delta_only(reg["band@0.02"].target(far(4.4)), 1000.0)
+    _delta_only(reg["band@0.05"].target(far(4.4)), 1000.0)
+    _delta_only(reg["band@0.02"].target(far(5.3)), 1000.0)
+    _delta_only(reg["band@0.05"].target(far(5.3)), 1060.0)
+    # no band inside the KO window nor inside the KI window: the baseline, however close the hedge carried is
+    ko_board = _t5_board(T5_DAY, 5100.0, im={"IM2403": 5100.0})
+    _delta_only(reg["band@0.05"].target(_ko_ctx(n=8, board=ko_board, held_im={"IM2403": 4.99})), 1000.0)
+    ki_board = _t5_board(T5_DAY, 3900.0, im={"IM2403": 3900.0})
+    _delta_only(reg["band@0.05"].target(_ki_ctx(board=ki_board, held_im={"IM2403": 9.99})), 2000.0)
+
+
+def test_band_makes_no_im_trade_in_the_ledger_inside_the_band():
+    reg = _registry()
+    # no observation ahead and far from the KI barrier; spot and IM at 5000: 2% of the notional delta 2000 is 40
+    deltas = [1000.0, 1010.0, 1099.0, 1090.0, 1095.0]
+    states, boards, chains = _im_only_world(deltas, [None] * 5, [5000.0] * 5)
+    narrow = _run(states, reg["band@0.02"], boards, chains)
+    assert [r["im_lots"] for r in narrow.rows] == pytest.approx([5.0, 5.0, 5.495, 5.495, 0.0])
+    assert narrow.rows[1]["cost"] == 0.0 and narrow.rows[3]["cost"] == 0.0 and narrow.rows[2]["cost"] > 0.0
+    wide = _run(states, reg["band@0.05"], boards, chains)                  # 5% is 100: the 99 move is inside it
+    assert [r["im_lots"] for r in wide.rows] == pytest.approx([5.0, 5.0, 5.0, 5.0, 0.0])
+    assert [r["cost"] for r in wide.rows[1:4]] == [0.0, 0.0, 0.0]
+    # IM cost before the final flatten, 1 bp of 200 x 5000 per lot traded: the baseline trades 0.05 + 0.445 + 0.045 lots
+    base = _run(states, reg["base"], boards, chains)
+    cost = [sum(r["cost"] for r in run.rows[1:4]) for run in (wide, narrow, base)]
+    assert cost == pytest.approx([0.0, 49.5, 54.0])
+
+
+# ---- overlay construction (AC13) on a hand-made board: legs, signs, the expiry payoff across the barrier ----
+
+OV_STRIKES = [4700.0 + 100.0 * i for i in range(7)]                        # 4700 .. 5300, 100 points apart
+#: MO2401 ends before the observation of 2024-01-11 (three trading days after 2024-01-08); MO2402 is the first that does not
+OV_LASTS = {"MO2401": date(2024, 1, 10), "MO2402": date(2024, 2, 16), "MO2403": date(2024, 3, 15)}
+OV = "MO2402"
+OV_FORWARD = 4940.0
+
+
+def _ov_vol(k):
+    """A mild skew: 21.2% at 4700, 20% at 5000, 18.8% at 5300."""
+    return 0.20 + 0.00004 * (5000.0 - k)
+
+
+def _ov_board_mo(lasts=None, strikes=None, forward=OV_FORWARD):
+    return _ov_mo(T5_DAY, lasts or OV_LASTS, strikes or OV_STRIKES, forward, _ov_vol)
+
+
+def _mo_ko_ctx(spot, gap_ko, *, n=3, mo=None, **kw):
+    """A KO-window day (barrier 5000 unless ``note`` says otherwise, flat vol 20%) with the hand-made MO board."""
+    mo = _ov_board_mo() if mo is None else mo
+    return _ko_ctx(n=n, spot=spot, gap_ko=gap_ko, board=_t5_board(T5_DAY, spot, mo=mo), **kw)
+
+
+def _expiry_payoff(legs, s):
+    """CNY paid at expiry by ``legs`` (lots per 10 mio, 100 CNY per index point) with the index at ``s``."""
+    return sum(lots * 100.0 * (max(s - k, 0.0) if cp == "C" else max(k - s, 0.0)) for (_, cp, k), lots in legs.items())
+
+
+def _assert_payoff_steps(legs, lo, hi, amount):
+    """The expiry payoff is flat below ``lo``, moves by ``amount`` between ``lo`` and ``hi`` monotonically, and is flat
+    beyond ``hi`` (the spread pays its full width between its strikes and nothing beyond them)."""
+    assert _expiry_payoff(legs, lo - 700.0) == pytest.approx(_expiry_payoff(legs, lo), abs=1e-6)
+    assert _expiry_payoff(legs, hi + 700.0) == pytest.approx(_expiry_payoff(legs, hi), abs=1e-6)
+    assert _expiry_payoff(legs, hi) - _expiry_payoff(legs, lo) == pytest.approx(amount, rel=1e-12)
+    grid = [lo + (hi - lo) * i / 10.0 for i in range(11)]
+    steps = [_expiry_payoff(legs, b) - _expiry_payoff(legs, a) for a, b in zip(grid, grid[1:])]
+    assert all(x * amount > 0.0 for x in steps)
+
+
+def _overlay(target, legs, base=1000.0):
+    """An overlay target: the legs, both note deltas = d(true), nothing refused."""
+    assert dict(target.legs) == {k: pytest.approx(v, rel=1e-12) for k, v in legs.items()}
+    assert target.note_delta == pytest.approx(base, rel=1e-12)
+    assert target.note_delta_if_filled == pytest.approx(base, rel=1e-12) and tuple(target.flags) == ()
+
+
+def test_mo_ko_for_a_positive_gap_is_a_spread_rising_across_the_barrier_from_below():
+    reg = _registry()
+    one, two = reg["mo_ko@1,payoff"], reg["mo_ko@2,payoff"]
+    gap = 400000.0                                                          # the seller loses 400 bp on redemption
+    # K2 = 5000 (the highest listed strike at or below B = 5000), K1 = 4900; lots = 400000 / (100 points x 100) = 40.
+    # spot 4950 between the strikes: long the call spread
+    calls = {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0}
+    t = one.target(_mo_ko_ctx(4950.0, gap))
+    _overlay(t, calls)
+    _assert_payoff_steps(t.legs, 4900.0, 5000.0, gap)                      # full width paid by B, nothing beyond it
+    assert _expiry_payoff(t.legs, 4900.0) == 0.0 and _expiry_payoff(t.legs, 5000.0) == pytest.approx(gap)
+    _overlay(one.target(_mo_ko_ctx(4850.0, gap)), calls)                   # both strikes above spot
+    _overlay(one.target(_mo_ko_ctx(5000.0, gap)), calls)                   # spot on K2 is "between them"
+    # spot 5050, both strikes below it: short the put spread on the same strikes (short the 5000 put, long the 4900 put)
+    puts = {(OV, "P", 5000.0): -40.0, (OV, "P", 4900.0): 40.0}
+    t = one.target(_mo_ko_ctx(5050.0, gap))
+    _overlay(t, puts)
+    _assert_payoff_steps(t.legs, 4900.0, 5000.0, gap)
+    assert _expiry_payoff(t.legs, 5000.0) == 0.0 and _expiry_payoff(t.legs, 4900.0) == pytest.approx(-gap)
+    # two steps: K1 = 4800, width 200, 20 lots
+    t = two.target(_mo_ko_ctx(4950.0, gap))
+    _overlay(t, {(OV, "C", 4800.0): 20.0, (OV, "C", 5000.0): -20.0})
+    _assert_payoff_steps(t.legs, 4800.0, 5000.0, gap)
+    # a barrier between two strikes (5030): K2 is still 5000, so the width is paid before the barrier
+    _overlay(one.target(_mo_ko_ctx(4950.0, gap, note=_t5_note(ko=5030.0))), calls)
+    # the series: the first whose last trading day is on or after the observation (here the observation day itself)
+    mo = _ov_board_mo({"MO2401": date(2024, 1, 11), "MO2402": date(2024, 2, 16)})
+    _overlay(one.target(_mo_ko_ctx(4950.0, gap, mo=mo)), {("MO2401", "C", 4900.0): 40.0, ("MO2401", "C", 5000.0): -40.0})
+    # the strike step is the listed spacing AT the barrier: 100 between 5000 and 5100, though 50 below 5000
+    uneven = [4800.0, 4850.0, 4900.0, 4950.0, 5000.0, 5100.0, 5200.0]
+    _overlay(one.target(_mo_ko_ctx(4925.0, gap, mo=_ov_board_mo(strikes=uneven))), calls)
+    # ... and 50 for a barrier at 4980: K2 = 4950, K1 = 4900, 80 lots
+    t = one.target(_mo_ko_ctx(4925.0, gap, mo=_ov_board_mo(strikes=uneven), note=_t5_note(ko=4980.0)))
+    _overlay(t, {(OV, "C", 4900.0): 80.0, (OV, "C", 4950.0): -80.0})
+    _assert_payoff_steps(t.legs, 4900.0, 4950.0, gap)
+
+
+def test_mo_ko_for_a_negative_gap_is_the_mirrored_spread_falling_across_the_barrier_from_above():
+    reg = _registry()
+    one, two = reg["mo_ko@1,payoff"], reg["mo_ko@2,payoff"]
+    gap = -300000.0                                                         # the seller GAINS 300 bp on redemption
+    # K1 = 5000 (the lowest listed strike at or above B), K2 = 5100; 30 lots. Spot 4950, both strikes above it: short
+    # the call spread
+    calls = {(OV, "C", 5000.0): -30.0, (OV, "C", 5100.0): 30.0}
+    t = one.target(_mo_ko_ctx(4950.0, gap))
+    _overlay(t, calls)
+    _assert_payoff_steps(t.legs, 5000.0, 5100.0, gap)                      # nothing below B, the full width lost by K2
+    assert _expiry_payoff(t.legs, 5000.0) == 0.0 and _expiry_payoff(t.legs, 5100.0) == pytest.approx(gap)
+    _overlay(one.target(_mo_ko_ctx(5000.0, gap)), calls)                   # spot on K1: both strikes at or above spot
+    # spot 5050 between the strikes, and 5150 above both: long the put spread (long the 5100 put, short the 5000 put)
+    puts = {(OV, "P", 5100.0): 30.0, (OV, "P", 5000.0): -30.0}
+    t = one.target(_mo_ko_ctx(5050.0, gap))
+    _overlay(t, puts)
+    _assert_payoff_steps(t.legs, 5000.0, 5100.0, gap)
+    assert _expiry_payoff(t.legs, 5100.0) == 0.0 and _expiry_payoff(t.legs, 5000.0) == pytest.approx(-gap)
+    _overlay(one.target(_mo_ko_ctx(5150.0, gap)), puts)
+    t = two.target(_mo_ko_ctx(4950.0, gap))
+    _overlay(t, {(OV, "C", 5000.0): -15.0, (OV, "C", 5200.0): 15.0})
+    _assert_payoff_steps(t.legs, 5000.0, 5200.0, gap)
+    # a barrier between two strikes (5030): K1 = 5100, the width is lost only above the barrier
+    _overlay(one.target(_mo_ko_ctx(5050.0, gap, note=_t5_note(ko=5030.0))),
+             {(OV, "C", 5100.0): -30.0, (OV, "C", 5200.0): 30.0})
+    # the day's gap decides the direction, not the observation's fixed ko_dir
+    _overlay(one.target(_mo_ko_ctx(4950.0, gap, ko_dir=-1)), calls)
+    _overlay(one.target(_mo_ko_ctx(4950.0, gap, ko_dir=0)), calls)
+    _overlay(one.target(_mo_ko_ctx(4950.0, 400000.0, ko_dir=1)), {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0})
+
+
+def test_a_barrier_beyond_the_listing_uses_the_last_listed_interval_or_has_no_strike():
+    from gpin import techniques as tq
+
+    tech = _registry()["mo_ko@1,payoff"]
+    top = [4700.0, 4800.0, 4900.0, 5000.0]                                  # nothing listed above 5000
+    calls = {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0}
+    # gap > 0 needs only strikes at or below B: K2 = 5000 is the highest of them, the spacing is the last interval's
+    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=_ov_board_mo(strikes=top))), calls)
+    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=_ov_board_mo(strikes=top), note=_t5_note(ko=5060.0))), calls)
+    # gap < 0 needs K1 at or above B and K2 above it: with B = 5000 on the last strike K2 = 5100 is not listed; with B
+    # above the last strike there is no K1
+    for note in (_t5_note(), _t5_note(ko=5060.0)):
+        t = tech.target(_mo_ko_ctx(4950.0, -300000.0, mo=_ov_board_mo(strikes=top), note=note))
+        assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == {}
+    # mirrored at the bottom of the listing: B = 5000 below every strike
+    bottom = [5100.0, 5200.0, 5300.0]
+    note = _t5_note(ko=5060.0)
+    t = tech.target(_mo_ko_ctx(5080.0, -300000.0, mo=_ov_board_mo(strikes=bottom), note=note))
+    _overlay(t, {(OV, "C", 5100.0): -30.0, (OV, "C", 5200.0): 30.0})
+    t = tech.target(_mo_ko_ctx(5080.0, 400000.0, mo=_ov_board_mo(strikes=bottom), note=note))
+    assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == {}
+    # the function itself: (cp, K1, K2, sign of the K1 leg)
+    assert tq.spread_strikes(1.0, 5060.0, 4950.0, top, 2) == ("C", 4800.0, 5000.0, 1.0)
+    assert tq.spread_strikes(-1.0, 5060.0, 5080.0, bottom, 2) == ("C", 5100.0, 5300.0, -1.0)
+    assert tq.spread_strikes(-1.0, 5060.0, 4950.0, top, 1) is None and tq.spread_strikes(1.0, 5060.0, 5080.0, bottom, 1) is None
+    assert tq.spread_strikes(1.0, 5000.0, 4950.0, [5000.0], 1) is None and tq.spread_strikes(1.0, 5000.0, 4950.0, [], 1) is None
+
+
+def test_mo_ko_holds_legs_only_on_the_last_five_closes_under_the_trigger_and_is_flat_otherwise():
+    tech = _registry()["mo_ko@1,payoff"]
+    held = {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0}
+    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, n=5)), held)
+    # one close before the observation of 2024-01-09: MO2401 (ending 2024-01-10) is now the first series that reaches it
+    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, n=1)),
+             {("MO2401", "C", 4900.0): 40.0, ("MO2401", "C", 5000.0): -40.0})
+    _delta_only(tech.target(_mo_ko_ctx(4950.0, 400000.0, n=6, held_legs=held)), 1000.0)           # too early
+    _delta_only(tech.target(_mo_ko_ctx(5250.0, 400000.0, n=3, held_legs=held)), 1000.0)           # z = 2.2: no trigger
+    _delta_only(tech.target(_mo_ko_ctx(4950.0, 0.0, n=3, held_legs=held)), 1000.0)                # no gap, no overlay
+    # the observation day itself (the note survived): the next observation is a month away, the target is flat
+    _delta_only(tech.target(_mo_ko_ctx(4950.0, None, n=21, held_legs=held)), 1000.0)
+
+
+def test_an_overlay_is_refused_and_recorded_and_the_legs_held_stay_when_a_leg_cannot_be_opened():
+    tech = _registry()["mo_ko@1,payoff"]
+    held = {(OV, "C", 4900.0): 12.0, (OV, "C", 5000.0): -12.0}
+    other = {(OV, "P", 5100.0): 7.0}
+
+    def refused(mo, flag, held_legs):
+        t = tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=mo, held_legs=held_legs))
+        assert tuple(t.flags) == (flag,) and dict(t.legs) == dict(held_legs or {})         # nothing new, what is held stays
+        assert t.note_delta == pytest.approx(1000.0)
+        assert t.note_delta_if_filled == (pytest.approx(1000.0) if held_legs else None)
+
+    def quotes(mo):
+        return mo[OV]["quotes"]
+
+    # no series whose last trading day is on or after the observation
+    for held_legs in (None, other):
+        refused(_ov_board_mo({"MO2401": date(2024, 1, 10)}), "overlay_no_series", held_legs)
+    # a missing strike: K1 = 4900 is not listed at all; only its call is missing; no strike is listed at or below B
+    mo = _ov_board_mo(strikes=[4700.0, 4800.0, 5000.0, 5100.0])
+    refused(mo, "overlay_no_strike", None)
+    refused(mo, "overlay_no_strike", other)
+    mo = _ov_board_mo()
+    del quotes(mo)[("C", 4900.0)]
+    refused(mo, "overlay_no_strike", other)
+    refused(_ov_board_mo(strikes=[5100.0, 5200.0, 5300.0]), "overlay_no_strike", other)
+    refused(_ov_board_mo(strikes=[5000.0]), "overlay_no_strike", other)    # one strike: no spacing, no K1
+    # a leg without an implied vol: the 4900 call settles under its intrinsic value (forward 4940)
+    mo = _ov_board_mo()
+    quotes(mo)[("C", 4900.0)] = (1.0, 5000, 10000)
+    refused(mo, "overlay_no_vol", held)
+    # a leg that may not be opened under D8: volume below 100 lots, open interest below 500 lots or unknown
+    for volume, oi in [(99, 10000), (5000, 499), (5000, None)]:
+        mo = _ov_board_mo()
+        quotes(mo)[("C", 5000.0)] = (quotes(mo)[("C", 5000.0)][0], volume, oi)
+        refused(mo, "overlay_not_openable", held)
+        refused(mo, "overlay_not_openable", None)
+    # the thresholds are inclusive
+    mo = _ov_board_mo()
+    for key in (("C", 4900.0), ("C", 5000.0)):
+        quotes(mo)[key] = (quotes(mo)[key][0], 100, 500)
+    want = {(OV, "C", 4900.0): 40.0, (OV, "C", 5000.0): -40.0}
+    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=mo, held_legs=held)), want)
+    # a leg held at or beyond the wanted size is only reduced, which needs a settlement and nothing else
+    for key in (("C", 4900.0), ("C", 5000.0)):
+        quotes(mo)[key] = (quotes(mo)[key][0], 0, 0)
+    big = {(OV, "C", 4900.0): 50.0, (OV, "C", 5000.0): -50.0}
+    _overlay(tech.target(_mo_ko_ctx(4950.0, 400000.0, mo=mo, held_legs=big)), want)
+    # ... but one leg short of it must be increased, and may not be: everything stays
+    lopsided = {(OV, "C", 4900.0): 50.0, (OV, "C", 5000.0): -30.0}
+    refused(mo, "overlay_not_openable", lopsided)
+    # a leg held on the other side counts as an opening
+    refused(mo, "overlay_not_openable", {(OV, "C", 4900.0): -50.0, (OV, "C", 5000.0): -50.0})
+
+
+def _scenario_lots(gap, level, sd, legs, info, spot, left):
+    """Lots for which the spread's value at ``left`` years to its last trading day moves by ``gap`` between ``level x
+    (1 - sd)`` and ``level x (1 + sd)``; ``legs``: ``{(cp, strike): sign}``, each at its skew vol of the day, the forward
+    moved in proportion to spot, discounted at 1.4%. Written here from the Black-76 formula, not with ``gpin.black``."""
+    def value(s):
+        forward = info.forward * s / spot
+        total = 0.0
+        for (cp, k), sign in legs.items():
+            if left == 0.0:
+                px = max(forward - k, 0.0) if cp == "C" else max(k - forward, 0.0)
+            else:
+                moved = type(info)(info.last_trading_day, left, forward, math.exp(-0.014 * left))
+                px = _bs(moved, k, _ov_vol(k), cp == "C")[0]
+            total += sign * px
+        return total
+
+    return abs(gap) / (abs(value(level * (1.0 + sd)) - value(level * (1.0 - sd))) * 100.0)
+
+
+def test_scenario_sizing_matches_a_hand_computed_lot_count_and_the_three_times_cap():
+    tech = _registry()["mo_ko@1,scenario"]
+    gap, spot = 400000.0, 4950.0
+    sd = 0.2 / math.sqrt(244.0)                                            # one daily sigma: 1.28%
+    spread = {("C", 4900.0): 1.0, ("C", 5000.0): -1.0}
+
+    def lots_of(lasts):
+        t = tech.target(_mo_ko_ctx(spot, gap, mo=_ov_board_mo(lasts)))
+        (series,) = {k[0] for k in t.legs}
+        assert t.legs[(series, "C", 4900.0)] == pytest.approx(-t.legs[(series, "C", 5000.0)], rel=1e-12)
+        assert tuple(t.flags) == () and t.note_delta_if_filled == pytest.approx(1000.0)
+        return t.legs[(series, "C", 4900.0)]
+
+    # 1. the series ends on the observation day: the scenario values are payoffs. The forward moves with spot:
+    #    B(1 - sd) = 4935.98 -> forward 4926.01, 26.01 points in the money on the 4900 call; B(1 + sd) = 5064.02 ->
+    #    forward 5053.79, above both strikes: the full 100. lots = 400000 / ((100 - 26.01) x 100) = 54.06
+    f_dn = OV_FORWARD * 5000.0 * (1.0 - sd) / spot
+    f_up = OV_FORWARD * 5000.0 * (1.0 + sd) / spot
+    assert f_dn == pytest.approx(4926.01, abs=0.01) and f_up > 5000.0
+    by_hand = gap / ((100.0 - (f_dn - 4900.0)) * 100.0)
+    assert by_hand == pytest.approx(54.06, abs=0.01)
+    assert lots_of({"MO2401": date(2024, 1, 11)}) == pytest.approx(by_hand, rel=1e-9)
+    # 2. the series ends four days after the observation: Black-76 values with 4 days left at each leg's vol of today
+    last = date(2024, 1, 15)
+    expect = _scenario_lots(gap, 5000.0, sd, spread, _series_info(T5_DAY, last, OV_FORWARD), spot, 4 / 365.0)
+    assert expect == pytest.approx(96.5, abs=0.1)                           # more than the payoff's 40 lots, under the cap
+    assert lots_of({"MO2401": last}) == pytest.approx(expect, rel=1e-6)
+    # 3. a series ending 36 days after the observation moves too little (254 lots): capped at 3 x the payoff lots
+    last = date(2024, 2, 16)
+    assert _scenario_lots(gap, 5000.0, sd, spread, _series_info(T5_DAY, last, OV_FORWARD), spot, 36 / 365.0) > 120.0
+    assert lots_of({"MO2402": last}) == pytest.approx(120.0, rel=1e-12)
+    # the mirrored spread of a negative gap is sized the same way
+    last = date(2024, 1, 15)
+    t = tech.target(_mo_ko_ctx(spot, -300000.0, mo=_ov_board_mo({"MO2401": last})))
+    mirrored = {("C", 5000.0): -1.0, ("C", 5100.0): 1.0}
+    expect = _scenario_lots(300000.0, 5000.0, sd, mirrored, _series_info(T5_DAY, last, OV_FORWARD), spot, 4 / 365.0)
+    assert expect == pytest.approx(76.6, abs=0.1)                           # under the cap of 3 x 30
+    assert dict(t.legs) == {("MO2401", "C", 5000.0): pytest.approx(-expect, rel=1e-6),
+                            ("MO2401", "C", 5100.0): pytest.approx(expect, rel=1e-6)}
+    assert t.note_delta_if_filled == pytest.approx(1000.0) and tuple(t.flags) == ()
+
+
+# ---- the knock-in overlay: the same construction across K, the gap between the not-knocked-in and the knocked-in note ----
+
+KI_STRIKES = [3500.0 + 50.0 * i for i in range(11)]                        # 3500 .. 4000, 50 points apart
+KI_LASTS = {"MO2401": date(2024, 1, 19), "MO2402": date(2024, 2, 16)}
+KI_FORWARD = 3890.0
+
+
+def _mo_ki_ctx(spot=3900.0, *, lasts=None, mo=None, knocked_in=False, deltas=None, **kw):
+    """A KI-window day (KI barrier 3750). The ``ki_m200`` ladder is 100,000 at spot with slope 1500 and its -4% point
+    lifted by 39,000; the ``kin`` ladder is -300,000 at spot with slope 1200. At K = 3750 (150 below the spot 3900,
+    between the ladder points 3744 and 3783): ki_m200 = 100000 - 1500 x 150 + 39000 x 33 / 39 = -92000, kin = -300000
+    - 1200 x 150 = -480000: the gap is 388,000."""
+    lifted = _ladder_state(100000.0, 1500.0, 0.0, spot)
+    lifted["engine_price"][8] += 39000.0
+    rec = _t5_record(T5_DAY, spot, KI_DELTAS if deltas is None else deltas, n=40, knocked_in=knocked_in,
+                     prices={"kin": -300000.0}, ladders=None if deltas is not None else {"ki_m200": lifted})
+    mo = _ov_mo(T5_DAY, lasts or KI_LASTS, KI_STRIKES, KI_FORWARD, _ov_vol) if mo is None else mo
+    return _t5_ctx(rec, board=_t5_board(T5_DAY, spot, mo=mo), **kw)
+
+
+def test_mo_ki_is_the_rising_spread_below_the_knock_in_barrier_sized_to_the_knock_in_gap():
+    reg = _registry()
+    tech = reg["mo_ki@2,payoff"]
+    gap = 388000.0
+    # K2 = 3750 (the highest listed strike at or below K), two steps of 50 down: K1 = 3650; both below spot: short the
+    # put spread; lots = 388000 / (100 points x 100) = 38.8
+    legs = {("MO2401", "P", 3750.0): -38.8, ("MO2401", "P", 3650.0): 38.8}
+    t = tech.target(_mo_ki_ctx())
+    _overlay(t, legs, base=2000.0)
+    _assert_payoff_steps(t.legs, 3650.0, 3750.0, gap)                      # the seller gives the knock-in gain back below K
+    assert _expiry_payoff(t.legs, 3750.0) == 0.0 and _expiry_payoff(t.legs, 3650.0) == pytest.approx(-gap)
+    # the hedge it also follows is the baseline's (the bump delta of the unlifted true ladder)
+    assert t.note_delta == pytest.approx(2000.0)
+    # the front series needs three trading days left (2024-01-09, -10, -11): with two it is rolled to the next series
+    _overlay(tech.target(_mo_ki_ctx(lasts={"MO2401": date(2024, 1, 11), "MO2402": date(2024, 2, 16)})), legs, base=2000.0)
+    rolled = {("MO2402", "P", 3750.0): -38.8, ("MO2402", "P", 3650.0): 38.8}
+    t = tech.target(_mo_ki_ctx(lasts={"MO2401": date(2024, 1, 10), "MO2402": date(2024, 2, 16)}, held_legs=legs))
+    _overlay(t, rolled, base=2000.0)                                       # the old series' legs are not wanted any more
+    # flat on a knock-in and on leaving the window (5.3% above the barrier), whatever is held
+    _delta_only(tech.target(_mo_ki_ctx(spot=3700.0, knocked_in=True, held_legs=legs)), 2000.0)
+    _delta_only(tech.target(_mo_ki_ctx(spot=3950.0, held_legs=legs)), 2000.0)
+    # refused and recorded, the legs held stay: no series with three trading days left; the rolled series not listed at K1
+    t = tech.target(_mo_ki_ctx(lasts={"MO2401": date(2024, 1, 10)}, held_legs=legs))
+    assert tuple(t.flags) == ("overlay_no_series",) and dict(t.legs) == legs and t.note_delta_if_filled == pytest.approx(2000.0)
+    mo = _ov_mo(T5_DAY, {"MO2401": date(2024, 1, 10), "MO2402": date(2024, 2, 16)}, KI_STRIKES, KI_FORWARD, _ov_vol)
+    del mo["MO2402"]["quotes"][("P", 3650.0)]
+    t = tech.target(_mo_ki_ctx(mo=mo, held_legs=legs))
+    assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == legs
+
+
+def test_mo_ki_scenario_sizing_values_the_spread_at_the_next_daily_observation():
+    tech = _registry()["mo_ki@2,scenario"]
+    sd = 0.2 / math.sqrt(244.0)
+    spread = {("P", 3750.0): -1.0, ("P", 3650.0): 1.0}
+    # the next knock-in observation is the next trading day, 2024-01-09. A front series ending 2024-01-12 (four trading
+    # days left today) has 3 days left then
+    last = date(2024, 1, 12)
+    info = _series_info(T5_DAY, last, KI_FORWARD)
+    expect = _scenario_lots(388000.0, 3750.0, sd, spread, info, 3900.0, 3 / 365.0)
+    assert expect == pytest.approx(105.2, abs=0.1)                          # between the payoff's 38.8 lots and the cap 116.4
+    t = tech.target(_mo_ki_ctx(lasts={"MO2401": last, "MO2402": date(2024, 2, 16)}))
+    assert dict(t.legs) == {("MO2401", "P", 3750.0): pytest.approx(-expect, rel=1e-6),
+                            ("MO2401", "P", 3650.0): pytest.approx(expect, rel=1e-6)}
+    assert t.note_delta_if_filled == pytest.approx(2000.0) and tuple(t.flags) == ()
+    # with 10 days left then (MO2401 ending 2024-01-19) the spread moves too little (169 lots): capped at 3 x 38.8
+    info = _series_info(T5_DAY, date(2024, 1, 19), KI_FORWARD)
+    assert _scenario_lots(388000.0, 3750.0, sd, spread, info, 3900.0, 10 / 365.0) > 3.0 * 38.8
+    _overlay(tech.target(_mo_ki_ctx()), {("MO2401", "P", 3750.0): -116.4, ("MO2401", "P", 3650.0): 116.4}, base=2000.0)
+
+
+def test_the_knock_in_gap_is_interpolated_on_the_ladder_at_the_barrier():
+    from gpin import techniques as tq
+
+    # ki_m200 minus kin, each read at K = 3750 by linear interpolation between the ladder points 3744 and 3783
+    assert tq.ki_gap(_mo_ki_ctx()) == pytest.approx(388000.0, rel=1e-12)
+    # straight ladders: (0 - 1500 x 150) - (-300000 - 1200 x 150) = 255000
+    assert tq.ki_gap(_mo_ki_ctx(deltas=dict(KI_DELTAS))) == pytest.approx(255000.0, rel=1e-12)
+    # the sign is the ladders': both at 0 at spot gives -1500 x 150 + 1200 x 150 = -45000
+    assert tq.ki_gap(_ki_ctx()) == pytest.approx(-45000.0, rel=1e-12)
+    assert tq.ki_gap(_t5_ctx(_t5_record(T5_DAY, 3900.0, {"true": 2000.0}, n=40))) is None      # no KI state
+    with pytest.raises(StudyDataError):                                     # a barrier off the ladder (15% above spot)
+        tq.ki_gap(_ki_ctx(note=_t5_note(ki=4485.0)))
+
+
+# ---- composites: the futures rule by window, the overlay on top of it ----
+
+def test_sop_futures_applies_the_ko_member_in_the_ko_window_and_the_ki_member_in_the_ki_window():
+    sop = _registry()["sop_futures"]                                        # derisk@5 at KO, ki_cap@1.25 at KI
+    _delta_only(sop.target(_ko_ctx(n=3, spot=5020.0)), 725.0)              # derisk@5 at n = 3
+    _delta_only(sop.target(_ko_ctx(n=8, spot=5020.0)), 1000.0)             # derisk@5 before n_d: the baseline
+    _delta_only(sop.target(_ki_ctx()), 1500.0)                             # min(2000, 1.25 x 1200)
+    _delta_only(sop.target(_far_ctx()), 1000.0)
+    # both windows active (a note with its KI barrier at 4800, spot 5020): the KO rule applies, the KI rule does not
+    both = dict(KO_DELTAS, kin=600.0, ki_m100=900.0, ki_m200=800.0, ki_p100=1200.0)
+    note = _t5_note(ki=4800.0)
+    reg = _registry()
+    ctx = _ko_ctx(n=3, spot=5020.0, deltas=both, note=note)
+    _delta_only(reg["ki_cap@1.25"].target(ctx), 750.0)                     # what the KI rule alone would do
+    _delta_only(sop.target(ctx), 725.0)
+    ctx = _ko_ctx(n=8, spot=5020.0, deltas=both, note=note)
+    _delta_only(sop.target(ctx), 1000.0)                                   # the KO rule's baseline, not the KI cap
+    # the secant with one bump per barrier type
+    sec = _registry({"sop_futures": {"ko": "secant@0.03", "ki": "secant@0.05"},
+                     "sop_overlay": T5_SELECTION["sop_overlay"]})["sop_futures"]
+    lifted = _ladder_state(0.0, 1000.0, 0.0, 5100.0)
+    lifted["engine_price"][15] += 30000.0                                   # the +3% point
+    lifted["engine_price"][17] += 51000.0                                   # the +5% point
+    rec = _t5_record(T5_DAY, 5100.0, KO_DELTAS, n=8, gap_ko=1.0, ko_dir=-1, ladders={"true": lifted})
+    _delta_only(sec.target(_t5_ctx(rec)), 1000.0 + 30000.0 / (2 * 0.03 * 5100.0))
+    lifted = _ladder_state(0.0, 2000.0, 0.0, 3900.0)
+    lifted["engine_price"][15] += 30000.0
+    lifted["engine_price"][17] -= 39000.0
+    rec = _t5_record(T5_DAY, 3900.0, KI_DELTAS, n=40, ladders={"true": lifted})
+    _delta_only(sec.target(_t5_ctx(rec)), 2000.0 - 39000.0 / (2 * 0.05 * 3900.0))
+    # a member that holds the hedge carried
+    frz = _registry({"sop_futures": {"ko": "freeze@1", "ki": "ki_shift@-0.01"},
+                     "sop_overlay": T5_SELECTION["sop_overlay"]})["sop_futures"]
+    board = _t5_board(T5_DAY, 5050.0, im={"IM2403": 5030.0})
+    _delta_only(frz.target(_ko_ctx(n=1, spot=5050.0, board=board, held_im={"IM2403": 5.2})), 5.2 * 200.0 * 5030.0 / 5050.0)
+    _delta_only(frz.target(_ki_ctx()), 1700.0)
+
+
+def test_sop_overlay_takes_the_futures_rule_as_note_delta_and_the_true_delta_for_the_filled_overlay():
+    reg = _registry()                                                       # mo_ko@1,scenario and mo_ki@2,payoff
+    sop = reg["sop_overlay"]
+    # KO trigger day, n = 3: the futures rule is derisk@5 (725), the legs are mo_ko@1,scenario's, the filled part is
+    # hedged at d(true) = 1000
+    ctx = _mo_ko_ctx(4950.0, 400000.0, mo=_ov_board_mo({"MO2401": date(2024, 1, 11)}))
+    t = sop.target(ctx)
+    assert t.note_delta == pytest.approx(725.0, rel=1e-12) and t.note_delta_if_filled == pytest.approx(1000.0, rel=1e-12)
+    assert dict(t.legs) == dict(reg["mo_ko@1,scenario"].target(ctx).legs) and len(t.legs) == 2 and tuple(t.flags) == ()
+    assert t.legs[("MO2401", "C", 4900.0)] == pytest.approx(54.06, abs=0.01)
+    # KI window day: ki_cap@1.25 (1500), mo_ki@2,payoff's legs, d(true) = 2000
+    t = sop.target(_mo_ki_ctx())
+    assert t.note_delta == pytest.approx(1500.0, rel=1e-12) and t.note_delta_if_filled == pytest.approx(2000.0, rel=1e-12)
+    assert dict(t.legs) == {("MO2401", "P", 3750.0): pytest.approx(-38.8), ("MO2401", "P", 3650.0): pytest.approx(38.8)}
+    # no overlay wanted (KO window, six closes ahead): nothing is covered, so the futures rule is the whole target
+    shift = _registry({"sop_futures": {"ko": "ko_shift@0.02", "ki": "ki_cap@1.25"},
+                       "sop_overlay": T5_SELECTION["sop_overlay"]})["sop_overlay"]
+    _delta_only(shift.target(_mo_ko_ctx(4950.0, 400000.0, n=6)), 700.0)
+    t = shift.target(_mo_ko_ctx(4950.0, 400000.0, n=5))
+    assert t.note_delta == pytest.approx(700.0) and t.note_delta_if_filled == pytest.approx(1000.0) and len(t.legs) == 2
+    # a refused overlay: recorded, the legs held stay and are hedged at d(true); with none held the futures rule is all
+    held = {(OV, "C", 4900.0): 12.0, (OV, "C", 5000.0): -12.0}
+    mo = _ov_board_mo(strikes=[4700.0, 4800.0, 5000.0, 5100.0])
+    t = shift.target(_mo_ko_ctx(4950.0, 400000.0, mo=mo, held_legs=held))
+    assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == held
+    assert t.note_delta == pytest.approx(700.0) and t.note_delta_if_filled == pytest.approx(1000.0)
+    t = shift.target(_mo_ko_ctx(4950.0, 400000.0, mo=mo))
+    assert tuple(t.flags) == ("overlay_no_strike",) and dict(t.legs) == {} and t.note_delta_if_filled is None
+    assert t.note_delta == pytest.approx(700.0)
+
+
+# ---- the techniques through the ledger: refusals in the row, no look-ahead for every registered id (AC8) ----
+
+AC8_SPOTS = {
+    "ko": [5000.0, 4980.0, 5020.0, 5040.0, 4990.0, 4960.0, 5010.0, 4985.0, 4990.0, 4970.0, 4950.0, 4940.0],
+    "ki": [4100.0, 3980.0, 3930.0, 3900.0, 3880.0, 3920.0, 3950.0, 3890.0, 3800.0, 3760.0, 3740.0, 3700.0],
+}
+#: the day's gap_ko of the KO world's first eight days (the observation is day 8); the sign flips on day 6
+AC8_GAPS = [400e3, 410e3, 395e3, 405e3, 400e3, 380e3, -60e3, 390e3]
+AC8_KO_LASTS = {"MO2401": date(2024, 1, 19), "MO2402": date(2024, 2, 16)}
+
+
+def _ac8_specs(kind, alt_from=None, drop=None):
+    """Twelve day specs of a hand-made note (strike and KO level 5000, KI level 3750).
+
+    ``ko``: the note sits at its KO barrier, the observation is day 8 (survived), every KO model is recorded on days
+    0..7 and only the true model after. ``ki``: the note falls into its KI window on day 2, leaves it on day 6, comes
+    back and knocks in on day 10; the KI models are recorded on the window days. From day ``alt_from`` on every number
+    is different (spot, flat vol, every ladder, the gap and its sign, IM closes, option settlements and volumes).
+    ``drop``: ``(day index, (cp, strike))`` of an option taken off the front series' board that day."""
+    days, specs = T5_DAYS, []
+    for i, day in enumerate(days):
+        alt = alt_from is not None and i >= alt_from
+        spot = AC8_SPOTS[kind][i] * (1.012 if alt else 1.0)
+        scale = (1.0 + 0.01 * i) * (1.6 if alt else 1.0)
+        sp = dict(day=day, spot=spot, vol=0.31 if alt else 0.2, im={"IM2403": spot - (53.0 if alt else 20.0)})
+        opt_vol = 0.26 if alt else 0.2
+        volume = 700 if alt else 5000
+        if kind == "ko":
+            in_window = i < 8
+            sp.update(n=8 - i if in_window else 28 - i, ko_dir=-1 if in_window else None,
+                      gap_ko=(AC8_GAPS[i] * (-1.3 if alt else 1.0)) if in_window else None,
+                      deltas={m: d * scale for m, d in KO_DELTAS.items()} if in_window else {"true": 1000.0 * scale},
+                      mo=_ov_mo(day, AC8_KO_LASTS, OV_STRIKES, spot - 10.0, lambda k: opt_vol, volume))
+        else:
+            in_window = i in (2, 3, 4, 5, 7, 8, 9)
+            sp.update(n=40 - i, knocked_in=i >= 10,
+                      deltas={m: d * scale for m, d in KI_DELTAS.items()} if in_window else {"true": 2000.0 * scale},
+                      prices={"ki_m200": 100000.0 * scale, "kin": -300000.0 * scale},
+                      mo=_ov_mo(day, KI_LASTS, KI_STRIKES, spot - 8.0, lambda k: opt_vol, volume))
+        if drop is not None and drop[0] == i:
+            del sp["mo"]["MO2401"]["quotes"][drop[1]]
+        specs.append(sp)
+    return specs
+
+
+class _Recording:
+    """A technique wrapped to record every target it returns."""
+
+    def __init__(self, tech):
+        self.tech, self.id, self.family, self.params, self.clip = tech, tech.id, tech.family, tech.params, tech.clip
+        self.seen = []
+
+    def target(self, ctx):
+        t = self.tech.target(ctx)
+        self.seen.append((ctx.day, t.note_delta, dict(t.legs), t.note_delta_if_filled, tuple(t.flags)))
+        return t
+
+
+@pytest.fixture(scope="module")
+def ac8_worlds():
+    """``{(kind, alt_from): (states, boards, chains)}``: the two worlds and their variants altered from a day on."""
+    out = {}
+    for kind in ("ko", "ki"):
+        for alt_from in (None, 3, 5, 7, 9, 11):
+            out[(kind, alt_from)] = _t5_world(_ac8_specs(kind, alt_from))
+    return out
+
+
+def _recorded(tid, world):
+    rec = _Recording(_registry()[tid])
+    run = _run(*([world[0], rec] + list(world[1:])))
+    return rec.seen, run.rows
+
+
+@pytest.mark.parametrize("tid", T5_ALL_IDS)
+def test_no_look_ahead_for_every_registered_technique(tid, ac8_worlds):
+    acted = False
+    for kind in ("ko", "ki"):
+        seen, rows = _recorded(tid, ac8_worlds[(kind, None)])
+        base_seen, _ = _recorded("base", ac8_worlds[(kind, None)])
+        assert [s[0] for s in seen] == T5_DAYS[:11]                        # a decision on every day but the last (flattened)
+        acted = acted or seen != base_seen
+        for alt_from in (3, 5, 7, 9, 11):
+            alt_seen, alt_rows = _recorded(tid, ac8_worlds[(kind, alt_from)])
+            # everything dated from ``alt_from`` on differs; the targets and the rows before it do not
+            assert alt_seen[:alt_from] == seen[:alt_from] and alt_rows[:alt_from] == rows[:alt_from], (kind, alt_from)
+            assert alt_seen[alt_from:] != seen[alt_from:] or alt_from == 11
+            assert alt_rows[alt_from:] != rows[alt_from:]
+    assert acted or tid in ("base", "base_noclip")                          # the worlds do exercise the technique
+
+
+def test_the_ac8_worlds_exercise_the_overlays_with_cut_fills_and_both_gap_signs(ac8_worlds):
+    seen, rows = _recorded("mo_ko@1,payoff", ac8_worlds[("ko", None)])
+    legs = [s[2] for s in seen]
+    assert legs[2] == {} and legs[8] == {}                                  # six closes ahead; the observation day
+    # day 3, spot 5040 above both strikes, gap 405,000: the short put spread, 40.5 lots
+    assert legs[3] == {("MO2401", "P", 5000.0): pytest.approx(-40.5), ("MO2401", "P", 4900.0): pytest.approx(40.5)}
+    # day 4, spot 4990 between the strikes: the call spread
+    assert legs[4] == {("MO2401", "C", 4900.0): pytest.approx(40.0), ("MO2401", "C", 5000.0): pytest.approx(-40.0)}
+    # day 6, the gap is -60,000 and spot 5010 is between K1 = 5000 and K2 = 5100: the long put spread, 6 lots
+    assert legs[6] == {("MO2401", "P", 5100.0): pytest.approx(6.0), ("MO2401", "P", 5000.0): pytest.approx(-6.0)}
+    # at the 500 mio desk a fill is cut to a tenth of the day's 5000 lots (10 lots per 10 mio): phi = 10 / 40.5
+    assert rows[3]["phi"] == pytest.approx(10.0 / 40.5) and "volume_cut" in rows[3]["flags"]
+    assert rows[3]["legs"] == {"MO2401:P:5000": pytest.approx(-10.0), "MO2401:P:4900": pytest.approx(10.0)}
+    seen, rows = _recorded("mo_ki@2,payoff", ac8_worlds[("ki", None)])
+    legs = [s[2] for s in seen]
+    assert [bool(x) for x in legs] == [False, False, True, True, True, True, False, True, True, True, False]
+    assert set(legs[3]) == {("MO2401", "P", 3750.0), ("MO2401", "P", 3650.0)}
+    assert rows[10]["legs"] != {} and rows[11]["legs"] == {}                # a cut close stays on the book after the knock-in
+
+
+def test_a_refused_overlay_is_recorded_in_the_ledger_row_and_the_legs_held_stay():
+    tech = _registry()["mo_ko@1,payoff"]
+    # day 3 (spot 5040) wants the short put spread, but the 4900 put is not on the board: refused, recorded, nothing asked
+    states, boards, chains = _t5_world(_ac8_specs("ko", drop=(3, ("P", 4900.0))))
+    run = _run(states, tech, boards, chains, desk_notional=NOTIONAL_)
+    assert "overlay_no_strike" in run.rows[3]["flags"] and run.rows[3]["legs"] == {}
+    assert run.rows[3]["unfilled"] == {} and run.rows[3]["phi"] == 1.0
+    assert "overlay_no_strike" not in run.rows[4]["flags"] and len(run.rows[4]["legs"]) == 2      # the next day it is bought
+    assert all("overlay_no_strike" not in r["flags"] for i, r in enumerate(run.rows) if i != 3)
+    # legs held stay through a refusal. Days 4..6 at spot 4990 want the 4900 / 5000 call spread (40, 38, 38 lots: bought,
+    # then reduced); day 7 wants 39, an increase, and the 5000 call trades only 50 lots that day
+    specs = _ac8_specs("ko")
+    for i in (5, 6):
+        specs[i]["spot"], specs[i]["gap_ko"], specs[i]["im"] = specs[4]["spot"], 380e3, dict(specs[4]["im"])
+        specs[i]["mo"] = _ov_mo(specs[i]["day"], AC8_KO_LASTS, OV_STRIKES, specs[4]["spot"] - 10.0)
+    q = specs[7]["mo"]["MO2401"]["quotes"]
+    q[("C", 5000.0)] = (q[("C", 5000.0)][0], 50, 10000)
+    states, boards, chains = _t5_world(specs)
+    run = _run(states, tech, boards, chains, desk_notional=NOTIONAL_)
+    spread = {"MO2401:C:4900": pytest.approx(38.0), "MO2401:C:5000": pytest.approx(-38.0)}
+    assert run.rows[6]["legs"] == spread and run.rows[6]["flags"] == []
+    assert "overlay_not_openable" in run.rows[7]["flags"] and run.rows[7]["legs"] == spread
+    assert run.rows[7]["unfilled"] == {} and run.rows[7]["phi"] == 1.0
+    assert run.rows[8]["legs"] == {} and "overlay_not_openable" not in run.rows[8]["flags"]     # flat after the observation
+    _check_identity(run)
+
+
+def test_the_no_look_ahead_check_catches_a_technique_that_reads_tomorrow(ac8_worlds):
+    """A negative control: a technique handed the whole recorded note (which no registered technique is) and hedging
+    with TOMORROW's delta fails the comparison the AC8 test makes."""
+    from gpin.techniques import Target, hedge_delta
+
+    class Cheat:
+        id, family, params, clip = "cheat", "test", {}, True
+
+        def __init__(self, states):
+            self.days = states["days"]
+
+        def target(self, ctx):
+            nxt = self.days[min(ctx.day_index + 1, len(self.days) - 1)]
+            return Target(hedge_delta(nxt["states"]["true"], nxt["spot"]))
+
+    def seen(world):
+        rec = _Recording(Cheat(world[0]))
+        _run(world[0], rec, *world[1:])
+        return rec.seen
+
+    whole, altered = seen(ac8_worlds[("ko", None)]), seen(ac8_worlds[("ko", 5)])
+    assert whole[:4] == altered[:4] and whole[:5] != altered[:5]           # day 4's target already carries day 5
+
+
+def test_trading_day_helpers_follow_the_sse_calendar():
+    from gpin import techniques as tq
+
+    assert tq.trading_days_between(date(2024, 1, 8), date(2024, 1, 11)) == 3       # the 9th, 10th and 11th
+    assert tq.trading_days_between(date(2024, 1, 8), date(2024, 1, 8)) == 0
+    assert tq.trading_days_between(date(2023, 12, 28), date(2024, 1, 3)) == 3      # across the year end: New Year's Day is closed
+    assert tq.trading_days_between(date(2024, 2, 8), date(2024, 2, 19)) == 1       # the Spring Festival week is closed
+    assert tq.next_trading_day(date(2024, 1, 5)) == date(2024, 1, 8)
+    assert tq.next_trading_day(date(2023, 12, 29)) == date(2024, 1, 2)
+    assert tq.next_trading_day(date(2024, 2, 8)) == date(2024, 2, 19)
+
+
+def test_target_flags_default_to_none_and_reach_the_ledger_row_on_the_decision_day():
+    from gpin.techniques import Target
+
+    assert Target(1.0).flags == () and Target(1.0, {}, None, ("overlay_no_strike",)).flags == ("overlay_no_strike",)
+
+    class Flagging(_Scripted):
+        def target(self, ctx):
+            return Target(1000.0, {}, None, ("overlay_no_vol", "overlay_no_vol") if ctx.day_index == 1 else ())
+
+    states, boards, chains = _world_a()
+    run = _run(states, Flagging(lambda ctx: {}), boards, chains)
+    assert [r["flags"] for r in run.rows[:2]] == [[], ["overlay_no_vol"]]          # written once, on its day
+
+
+def test_windows_and_overlays_use_the_notes_levels_not_its_booking_spot():
+    """A seasoned note booked at 6420: KI level 6000, strike and KO level 8000 (the state file's levels)."""
+    reg = _registry()
+    note = _t5_note(book="seas6", s0=6420.0, strike=8000.0, ko=8000.0, ki=6000.0)
+    # at the booking spot, three closes before an observation: 20% below the KO level and 7% above the KI level. Neither
+    # window is open, whatever states the record carries
+    every = {**KI_DELTAS, **KO_DELTAS}                                      # the true delta is the KO fixture's 1000
+    ctx = _t5_ctx(_t5_record(T5_DAY, 6420.0, every, n=3, gap_ko=4e5, ko_dir=-1), note=note)
+    for tid in ("ko_shift@0.02", "surv_hold@3", "derisk@5", "ki_shift@-0.01", "ki_cap@1.0", "secant@0.03", "sop_futures"):
+        _delta_only(reg[tid].target(ctx), 1000.0)
+    # 4% above the KI level 6000: the KI rules act
+    ctx = _t5_ctx(_t5_record(T5_DAY, 6240.0, KI_DELTAS, n=3), note=note)
+    _delta_only(reg["ki_shift@-0.01"].target(ctx), 1700.0)
+    _delta_only(reg["ki_cap@1.0"].target(ctx), 1200.0)
+    # 1% below the KO level 8000: the KO rules act, and the overlay is struck around 8000
+    strikes = [7700.0 + 100.0 * i for i in range(7)]
+    mo = _ov_mo(T5_DAY, {"MO2402": date(2024, 2, 16)}, strikes, 7910.0)
+    ctx = _t5_ctx(_t5_record(T5_DAY, 7920.0, KO_DELTAS, n=3, gap_ko=6.4e6, ko_dir=-1), note=note,
+                  board=_t5_board(T5_DAY, 7920.0, mo=mo))
+    _delta_only(reg["ko_shift@0.02"].target(ctx), 700.0)
+    _delta_only(reg["surv_hold@3"].target(ctx), 450.0)
+    # a knocked-in seasoned note back at its KO level: the whole accrued coupon is the digital, 6.4 mio / (100 x 100)
+    _overlay(reg["mo_ko@1,payoff"].target(ctx), {("MO2402", "C", 7900.0): 640.0, ("MO2402", "C", 8000.0): -640.0})

@@ -23,7 +23,8 @@ Choices the contract leaves open (each is also in a test): ``phi`` is the covere
 ``sum over desired legs of min(|desired|, held on the desired side) / sum |desired|``; option fills are at the
 settlement under every clock; a leg exits uncut on its last trading day (at the close if it traded, else
 cash-settled at the settlement, which costs nothing) and is flattened uncut on the last day; a held leg without a
-mark, an implied vol or a series fails closed; the day's volume cap is shared by every trade of a contract that day.
+mark, an implied vol or a series fails closed; the day's volume cap is shared by every trade of a contract that day;
+what a technique refused that day (``Target.flags``, an overlay it could not build) is written to the row's flags.
 
 Ledger-side code: no engine, no market data of its own, no file access.
 """
@@ -479,6 +480,8 @@ def run_technique(states: Any, technique: Technique, boards: Mapping[date, DayBo
                 target = technique.target(ctx)
                 if not isinstance(target, Target):
                     raise ValidationError(f"{technique.id}: target() must return a Target, got {type(target).__name__}")
+                for name in target.flags:                    # what the technique refused today (an overlay)
+                    acc.flag(name)
                 prev_ctx = ctx
             else:
                 target = Target(0.0, {})
