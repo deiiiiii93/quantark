@@ -489,7 +489,7 @@ def _knocked_out_at_valuation_has_no_knock_in_row(live: dict, banked: dict, reco
     from quantark.cashleg import EventType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
-    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv"), record["engine_kind"]
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "quad_v2"), record["engine_kind"]
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     _, product, env = _case(record["case"]).fresh()
@@ -583,9 +583,11 @@ def _ki_schedule_cut(product, k, env):
 
 
 def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: dict) -> None:
-    """Cause (e), PDE 1D (T13) and native Heston / SLV ADI (T14). Base carried no KI stream (the legacy PDE / ADI table
-    was empty and the converter dropped it), so the AT_KI leg raised. Now the forward adjoint pass fills the KI table
-    (the PDE 1D pass; the ADI pass, ``pde/vol_model_adjoint.py``). Pinned without the statistics object it checks:
+    """Cause (e), PDE 1D (T13), native Heston / SLV ADI (T14) and QUAD V2 (T16). Base carried no KI stream (the legacy
+    PDE / ADI table was empty and the converter dropped it; QUAD V2's legacy statistics had no table), so the AT_KI leg
+    raised. Now the forward adjoint pass fills the KI table (the PDE 1D pass; the ADI pass,
+    ``pde/vol_model_adjoint.py``; the QUAD V2 pass, ``quad/v2/adjoint.py``). Pinned without the statistics object it
+    checks:
 
     * the axis is the product's own: its KI observations up to the knock-in horizon (discrete), or one numeric
       trading day ``k / bus_days_in_year`` per row up to the horizon (continuous, AC13);
@@ -607,7 +609,7 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
     from quantark.util.enum import ObservationType
 
     assert banked.get("raises") == "ValidationError" and "requires knock_in" in banked.get("message", ""), banked
-    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "pde_adi", "pde_adi_slv"), record["engine_kind"]
+    assert record["engine_kind"] in ("pde_1d", "pde_1d_lv", "pde_adi", "pde_adi_slv", "quad_v2"), record["engine_kind"]
     base = BANKED["cases"][record["case"]]["event_distribution"]
     assert "KI" not in base["streams"], f"{record['id']}: base had a KI stream; the move is not cause (e)"
     assert "value" in live, f"{record['id']}: still raises {live}"
@@ -645,7 +647,7 @@ def _pde_knock_in_before_ko_on_its_own_axis(live: dict, banked: dict, record: di
             assert abs(cumulative[k - 1] - settles_k) <= 1e-8, (
                 f"{record['id']}: Σ first {k} KI rows {cumulative[k - 1]!r} != the cut twin's KI settlement "
                 f"{settles_k!r}")
-    if record["engine_kind"] == "pde_1d" and not continuous:
+    if record["engine_kind"] in ("pde_1d", "quad_v2") and not continuous:
         # and against MC on the same product: a row moved to another date fails. Flat vol only: on this skewed
         # market the LV PDE and LV MC disagree on every outcome (first KO 0.426 vs 0.387, measured, backward columns
         # included -- not the forward pass), so the LV record is pinned by the cut twins above
@@ -972,6 +974,71 @@ _T14B_EDGE_ROW = (
 )
 
 _T12_KO_AT_VALUATION = ("pde_snowball__snowball_cki_ko_at_valuation", "pde_phoenix__phoenix_mem_instant_ko_at_valuation")
+
+# --- moves (T16: QUAD V2 EventStatistics, its forward adjoint pass, terminated lifecycle states) --------------------
+
+
+def _v2_terminated_state_has_no_event(live: dict, banked: dict, record: dict) -> None:
+    """Cause (h), AC17, QUAD V2. Base refused any statistics of a terminated lifecycle state (``NotImplementedError``),
+    so its whole event route raised. Now the statistics are the receivables alone (unpaid: the ledger's pending
+    flows) or ``None`` (settled), the distribution is the ended note's: ``event_npv`` is ``price()`` (its own banked
+    record, bitwise unchanged), a leg that reads events refuses the ended note, a leg that reads none is its value on
+    any distribution (the maturity-only trivial one here)."""
+    from quantark.cashleg import EventDistribution
+
+    assert banked.get("raises") == "NotImplementedError" and "terminated V2" in banked.get("message", ""), banked
+    assert record["engine_kind"] == "quad_v2", record["engine_kind"]
+    assert record["features"].get("lifecycle", "").startswith("terminated_"), record["id"]
+    case = _case(record["case"])
+    engine, product, env = case.fresh()
+    state = case.kwargs()["lifecycle_state"]
+    dist, _ = _live_distribution(record)
+    assert dist.terminated and dist.probabilities == {}
+    stats = case.fresh()[0].calculate_event_stats(product, env, lifecycle_state=state)
+    pending = state.ledger.pending(state.valuation_point)
+    price = engine.price(product, env, lifecycle_state=state)
+    if not pending:
+        assert stats is None
+    else:
+        assert stats.terminated and stats.receivables.cash_to_pay.tolist() == [f.amount for f in pending]
+        assert stats.receivables.payment_dates == tuple(f.payment_date for f in pending)
+        assert stats.pv == price and abs(stats.reconciliation_error) <= 1e-12 * max(1.0, abs(price))
+    if record["route"] == "event_npv":
+        banked_price = RECORDS[f"{record['case']}__-__price"]["outcome"]["value"]
+        assert float(live["value"]) == price, f"{record['id']}: live {live['value']!r} != price() {price!r}"
+        assert close(price, float(banked_price), rel_tol=GOLDEN_REL_TOL, abs_tol=GOLDEN_ABS_TOL)
+        return
+    leg = _leg(record)
+    trivial = EventDistribution.trivial(max(float(product.get_maturity(env)), 0.0))
+    try:
+        leg.value(EventDistribution.ended(), env, cases.UNIT)
+    except Exception as refused:    # noqa: BLE001 -- the leg reads events: it must refuse the ended note
+        assert "terminated note" in str(refused), refused
+        assert live.get("raises") == "ValidationError" and "terminated note" in live.get("message", ""), live
+        return
+    expected = leg.value(trivial, env, cases.UNIT)
+    assert float(live["value"]) == expected, f"{record['id']}: a leg reading no event {live!r} != {expected!r}"
+
+
+_T16_KI_AXIS = ("quad_v2_snowball__snowball_cki", "quad_v2_snowball__snowball_dki", "quad_v2_snowball__snowball_reverse",
+                "quad_v2_phoenix__phoenix_mem_instant", "quad_v2_phoenix__phoenix_nomem_instant",
+                "quad_v2_phoenix__phoenix_mem_expiry", "quad_v2_phoenix__phoenix_nomem_expiry",
+                "quad_v2_ko_reset__ko_reset_absolute", "quad_v2_ko_reset__ko_reset_absolute_cki",
+                "quad_v2_snowball__snowball_cki_receivable_alive")
+_T16_CARRIED = ("quad_v2_snowball__snowball_cki_knocked_in", "quad_v2_phoenix__phoenix_mem_instant_knocked_in",
+                "quad_v2_snowball__snowball_cki_knocked_in_ko_at_valuation",
+                "quad_v2_phoenix__phoenix_mem_instant_knocked_in_ko_at_valuation")
+_T16_KO_AT_VALUATION = ("quad_v2_snowball__snowball_cki_ko_at_valuation",
+                        "quad_v2_phoenix__phoenix_mem_instant_ko_at_valuation")
+_T16_TERMINATED = tuple(
+    f"quad_v2_snowball__{case}__{leg}"
+    for case in ("snowball_cki_ko_unpaid", "snowball_cki_ko_settled")
+    for leg in ("-__event_npv", *(f"{name}__event" for name in (
+        "deterministic", "accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity",
+        "accrual_full_schedule", "fixed_at_ko", "fixed_at_ki", "fixed_at_maturity_no_ko", "fixed_at_maturity_with_ki",
+        "fixed_at_maturity_any", "autocallable_margin_nmp_both", "autocallable_backend_premium_no_ko",
+        "autocallable_rebate_with_ki", "autocallable_backend_interest_coupon")))
+)
 _T12_KNOCKED_IN_SETTLEMENT = tuple(
     f"{case}__{leg}__event"
     for case in ("pde_snowball__snowball_cki_knocked_in", "pde_snowball__snowball_cki_knocked_in_no_ko_after_ki",
@@ -1011,6 +1078,12 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__autocallable_backend_interest_coupon__event": MovedBy("h", _dcn_pde_coupon_stream_by_backward_claims)
        for case in _T15_DCN_CASES},
     **{rid: MovedBy("h", _dcn_terminated_state_has_no_event) for rid in _T15_TERMINATED},
+    # T16: QUAD V2 statistics (the forward adjoint of its recursion; terminated lifecycle states, AC17)
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _pde_knock_in_before_ko_on_its_own_axis) for case in _T16_KI_AXIS},
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_on_its_own_axis) for case in _T16_CARRIED},
+    **{f"{case}__fixed_at_ki__event": MovedBy("e", _knocked_out_at_valuation_has_no_knock_in_row)
+       for case in _T16_KO_AT_VALUATION},
+    **{rid: MovedBy("h", _v2_terminated_state_has_no_event) for rid in _T16_TERMINATED},
 }
 
 
