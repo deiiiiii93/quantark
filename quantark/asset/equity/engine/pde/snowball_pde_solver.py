@@ -1754,7 +1754,6 @@ class SnowballPDESolver(BasePDESolver):
             principal_per_contract if product.payoff_config.include_principal else 0.0
         )
         strike = product.strike
-        initial_price = product.initial_price
         participation = product.payoff_config.participation_rate
 
         # Lower boundary (S -> 0)
@@ -1783,16 +1782,8 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 lower = EdgeRow(v, "v1_lower_none_slope", (RowTerm("M", v),))
             else:
-                # Standard: embedded put, S=0 means maximum loss
-                # Loss = participation × (-K/S0) × N
-                max_loss = participation * (-strike / initial_price) * principal_per_contract
-                # Apply protection floor if applicable
-                if product.payoff_config.protection_type.name == "FULL":
-                    max_loss = 0.0
-                elif product.payoff_config.protection_type.name == "PARTIAL":
-                    floor = -product.payoff_config.protection_rate * principal_per_contract
-                    max_loss = max(max_loss, floor)
-                v = (principal + max_loss) * df_to_maturity
+                # Standard: embedded put, S=0 means maximum loss (floored by the protection)
+                v = self._closed_form_knock_in_edge_payoff(product) * df_to_maturity
                 lower = EdgeRow(v, "v1_lower_max_loss", (RowTerm("M", v),))
 
         # Upper boundary (S -> ∞)
@@ -1818,17 +1809,10 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 upper = EdgeRow(v, "v1_upper_reverse_none", (RowTerm("M", v),))
             else:
-                if protection == ProtectionType.PARTIAL:
-                    floor = (
-                        product.payoff_config.protection_rate
-                        * product.initial_price
-                        * product.contract_multiplier
-                    )
-                    v = (principal - floor) * df_to_maturity
-                    upper = EdgeRow(v, "v1_upper_reverse_partial", (RowTerm("M", v),))
-                else:
-                    v = principal * df_to_maturity
-                    upper = EdgeRow(v, "v1_upper_reverse_full", (RowTerm("M", v),))
+                # The loss is floored: principal less the floor (partial), or principal (full)
+                v = self._closed_form_knock_in_edge_payoff(product) * df_to_maturity
+                branch = "v1_upper_reverse_partial" if protection == ProtectionType.PARTIAL else "v1_upper_reverse_full"
+                upper = EdgeRow(v, branch, (RowTerm("M", v),))
         else:
             # Put is worthless at high S
             v = principal * df_to_maturity
@@ -1837,9 +1821,11 @@ class SnowballPDESolver(BasePDESolver):
         if edge_terms is not None:
             # D26: an annualized knock-in leg scales the knocked-in downside by a tenor only the payoff resolves
             # (Snowball: the contract tenor; KO-reset: the post-KI tenor). D27: under partial protection the
-            # closed forms ignore an airbag that changes the payoff on the knock-in edge cell. In both cases the
-            # knock-in edge's row is read off the payoff itself. Every other contract keeps the closed forms: D26 /
-            # D27 move those classes only, every other price stays bit for bit.
+            # closed forms ignore an airbag that changes the payoff on the knock-in edge cell. D28: the protected
+            # closed forms write a constant, which is the payoff only where the floor binds; where it does not bind
+            # on the edge cell they are wrong. In each case the knock-in edge's row is read off the payoff itself
+            # (``_knock_in_edge_reads_payoff``). Every other contract keeps the closed forms: D26 / D27 / D28 move
+            # those classes only, every other price stays bit for bit.
             if product.is_reverse:
                 upper = self._payoff_v1_edge_row(edge_terms, tau, pricing_env, upper.branch)
             else:
@@ -1879,12 +1865,61 @@ class SnowballPDESolver(BasePDESolver):
             for s in cell
         )
 
+    @staticmethod
+    def _closed_form_knock_in_edge_payoff(product) -> float:
+        """The constant knocked-in payoff the protected closed-form knock-in-edge rows discount: a standard product's
+        maximum loss at S = 0 (``participation x K x multiplier``) floored by the protection, a reverse product's
+        principal less the partial floor (full protection: the principal). Only for protected contracts (a standard
+        product's unprotected row is ``v1_lower_none_slope``)."""
+        principal_per_contract = product.initial_price * product.contract_multiplier
+        principal = principal_per_contract if product.payoff_config.include_principal else 0.0
+        protection = product.payoff_config.protection_type
+        if product.is_reverse:
+            if protection == ProtectionType.PARTIAL:
+                floor = product.payoff_config.protection_rate * product.initial_price * product.contract_multiplier
+                return principal - floor
+            return principal
+        participation = product.payoff_config.participation_rate
+        max_loss = participation * (-product.strike / product.initial_price) * principal_per_contract
+        if protection.name == "FULL":
+            max_loss = 0.0
+        elif protection.name == "PARTIAL":
+            floor = -product.payoff_config.protection_rate * principal_per_contract
+            max_loss = max(max_loss, floor)
+        return principal + max_loss
+
+    @staticmethod
+    def _partial_floor_unbound_on_knock_in_edge(product, pricing_env, s_vec) -> bool:
+        """Whether a partially protected contract's floor fails to bind on the knock-in edge cell (D28): the knocked-in
+        payoff at the edge node or its neighbour (lower on a standard product, upper on a reverse one) is not the
+        closed-form rows' constant (``_closed_form_knock_in_edge_payoff``). The closed form is then wrong there (it
+        writes the floor, or a standard product's maximum loss at S = 0, where the payoff still follows the spot).
+        Where the floor binds on the whole cell the constant IS the payoff, and the row stays bit for bit."""
+        if product.payoff_config.protection_type != ProtectionType.PARTIAL:
+            return False
+        constant = SnowballPDESolver._closed_form_knock_in_edge_payoff(product)
+        cell = (s_vec[-1], s_vec[-2]) if product.is_reverse else (s_vec[0], s_vec[1])
+        return any(not is_close(float(product.get_maturity_payoff_v1(float(s), pricing_env)), constant)
+                   for s in cell)
+
+    @staticmethod
+    def _knock_in_edge_reads_payoff(product, pricing_env, s_vec) -> bool:
+        """Whether the knocked-in knock-in-edge row is read off the payoff (``_payoff_v1_edge_row``) instead of its
+        closed form: an annualized knock-in leg (D26), an airbag that changes the partially protected payoff on the
+        edge cell (D27, ``_airbag_moves_knock_in_edge``), or a partial floor that does not bind on the edge cell
+        (D28, ``_partial_floor_unbound_on_knock_in_edge``). D27 stays a gate of its own: an airbag can make the floor
+        bind on the cell, where D28 alone would keep the closed form and D27's chord (the same value, other bits)
+        has been the row since T14c."""
+        return (leg_annualized(product, "knock_in")
+                or SnowballPDESolver._airbag_moves_knock_in_edge(product, pricing_env, s_vec)
+                or SnowballPDESolver._partial_floor_unbound_on_knock_in_edge(product, pricing_env, s_vec))
+
     def _knock_in_edge_terms(self, product, pricing_env, s_vec):
         """``None`` where the knocked-in knock-in-edge row keeps its closed form, else the payoff chord's terms
         ``(s_edge, slope, intercept)`` of that edge ("upper" on a reverse product, else "lower"), read off
-        ``get_maturity_payoff_v1`` (D26 / D27; ``_payoff_v1_edge_row``).
+        ``get_maturity_payoff_v1`` (D26 / D27 / D28; ``_payoff_v1_edge_row``).
 
-        Neither depends on the step: the rule (an annualized knock-in leg, or ``_airbag_moves_knock_in_edge``) and
+        Neither depends on the step: the rule (``_knock_in_edge_reads_payoff``) and
         the chord read the contract, the market and the edge cell only. They are computed once per solve (T25) and
         reused by every row the solve builds -- the same floats, so every row stays bit for bit. The memo is keyed
         on the product and environment objects and the edge cell's nodes, and cleared at each solve's state
@@ -1894,7 +1929,7 @@ class SnowballPDESolver(BasePDESolver):
         if memo is not None and memo[0] is product and memo[1] is pricing_env and memo[2] == cell:
             return memo[3]
         terms = None
-        if leg_annualized(product, "knock_in") or self._airbag_moves_knock_in_edge(product, pricing_env, s_vec):
+        if self._knock_in_edge_reads_payoff(product, pricing_env, s_vec):
             i, j = (-1, -2) if product.is_reverse else (0, 1)
             s_edge, s_next = float(s_vec[i]), float(s_vec[j])
             p_edge = float(product.get_maturity_payoff_v1(s_edge, pricing_env))

@@ -12,7 +12,8 @@ D27: those contracts take T14b's payoff-read row (``_payoff_v1_edge_row``). The 
 * protection NONE: the closed form already reads the airbag's participation and strike -- unchanged, bit for bit;
 * protection FULL: the floor at principal binds everywhere, the airbag cannot change the payoff -- unchanged;
 * partial protection where the airbag does not change the payoff on the edge cell (the floor binds with and without
-  it, or the airbag is not in force there) -- the closed form is what the contract without an airbag gets: unchanged.
+  it, or the airbag is not in force there) -- the closed form is what the contract without an airbag gets: unchanged
+  by D27 (D28 then reads the payoff where that floor does not bind on the cell: test_partial_protection_edge_row).
 
 Gates (AC31): the row is ``E_fwd`` of the payoff's affine piece at the edge, from the contract terms; the price no
 longer depends on the domain width (num_std 3 == 16 within the PDE's discretisation allowance) on PDE 1D (flat and
@@ -209,13 +210,15 @@ UNCHANGED = {
                                                lambda: ko_reset(rate=0.3, airbag=AirbagConfig(
                                                    airbag_barrier=80.0, airbag_participation_rate=1.5)),
                                                _legacy_rows),
-    # the airbag barrier (40) lies below the width-3 edge (~52): not in force on the edge cell
+    # the airbag barrier (40) lies below the width-3 edge (~52): not in force on the edge cell. A 30% floor (binding
+    # below 70) keeps the cell on the floor: with the 60% floor the payoff there follows the spot and the row is D28's
+    # (test_partial_protection_edge_row), not the closed form
     "partial_airbag_below_edge": (SnowballPDESolver,
-                                  lambda: snowball(airbag=AirbagConfig(airbag_barrier=40.0,
-                                                                       airbag_participation_rate=0.5)),
+                                  lambda: snowball(rate=0.3, airbag=AirbagConfig(airbag_barrier=40.0,
+                                                                                 airbag_participation_rate=0.5)),
                                   _legacy_rows),
-    # no airbag at all
-    "partial_no_airbag": (SnowballPDESolver, lambda: snowball(airbag=None), _legacy_rows),
+    # no airbag at all (the 30% floor binds on the cell; see above)
+    "partial_no_airbag": (SnowballPDESolver, lambda: snowball(rate=0.3, airbag=None), _legacy_rows),
     "reverse_partial_no_airbag": (SnowballPDESolver, lambda: reverse_snowball(airbag=None), _legacy_rows),
 }
 
