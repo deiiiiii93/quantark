@@ -1222,6 +1222,13 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             "ki_record_indices": ki_record_indices,
             # the not-knocked-in contract matures HERE: its rebate is read off this node
             "pre_maturity_idx": int(indices_for([pre_maturity])[0]) if len(pre_times) else None,
+            # ABSOLUTE (a carried knock-in included): the knocked-in contract matures at schedule 2's end, before
+            # the grid's last node when schedule 1 runs on past it; its V1 is read off this node (spec D31)
+            "post_maturity_idx": (
+                int(indices_for([float(product.get_post_maturity_time(pricing_env))])[0])
+                if post_mode == PostKOScheduleMode.ABSOLUTE
+                else None
+            ),
             "all_times": all_times,
             "dt_array": dt_array,
             "pre_times": pre_times,
@@ -2226,7 +2233,20 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
 
         if is_v1.any():
             tenors = None
-            if post_mode == PostKOScheduleMode.ABSOLUTE or len(post_times) == 0 or carried_knock_in:
+            if post_mode == PostKOScheduleMode.ABSOLUTE:
+                # a knocked-in snowball on schedule 2 (a carried knock-in is ABSOLUTE): decided at schedule 2's end,
+                # where it settles below -- not the grid's last node, schedule 1's end when that runs on past it
+                # (spec D31; the never-knocked-in readout above reads its own schedule's end likewise). Schedule 2
+                # is in force only from the knock-in (the knock-out test above), so this holds for a knock-in at or
+                # before schedule 2's end.
+                # TODO(D31 open item): a native ABSOLUTE contract whose knock-in can fall AFTER schedule 2's end
+                # has no rule yet for that path (no schedule 2 left in force); it keeps the grid's last node.
+                v1_paths = np.flatnonzero(is_v1)
+                within = ki_time[v1_paths] - float(post_maturity_abs) <= Tolerance.ZERO
+                columns = np.where(within, grid["post_maturity_idx"] + 1, paths.shape[1] - 1)
+                terminal_spots = paths[v1_paths, columns]
+            elif len(post_times) == 0:
+                # (a carried knock-in never reaches here: the grid refuses a REBASED one)
                 terminal_spots = paths[is_v1, -1]
             else:
                 # REBASED: each path matures at its own ki_time + max(offset), before the grid's last node when

@@ -78,6 +78,10 @@ D9_CAUSES: Dict[str, str] = {
     "o": "D28 partial-protection edge row: partially protected PDE / ADI contracts whose floor does not bind on the "
          "knocked-in knock-in edge cell read that row off the payoff (no banked case is partially protected: "
          "test_no_banked_case_is_in_the_d28_partial_protection_class)",
+    "p": "D31 MC knocked-in spot at schedule-2 end: the KO-reset MC kernel (BSM, LocalVol, Heston, Heston-SLV MC) "
+         "reads an ABSOLUTE (carried knock-in included) knocked-in payoff's spot at schedule 2's end node, where it "
+         "settles, not the grid's last node (schedule 1's end when that runs on past schedule 2) (no banked case is "
+         "one: test_no_banked_case_is_in_the_d31_schedule_two_readout_class)",
     "q": "D33 settlement precedence: a KO-reset note that ends with schedule 1 (the never-knocked-in maturity; under "
          "EXPIRY also a schedule-1 knock-out) is paid on the product's explicit settlement_date when booked, the "
          "settlement delay only without one, on PDE 1D / LV PDE / ADI, QUAD V1, QUAD V2 and the fold structure (no "
@@ -1603,6 +1607,41 @@ def test_no_banked_case_is_in_the_d30_ko_reset_expiry_class():
             in_class.append(case_id)
     assert ko_resets, "the bank holds KO-reset cases: the census must see them"
     assert in_class == [], f"in the D30 class, pin under cause (n): {in_class}"
+
+
+def test_no_banked_case_is_in_the_d31_schedule_two_readout_class():
+    """Cause (p), D31, pins no record, because no banked case is in its class: an ABSOLUTE KO-reset (a carried knock-in
+    included) whose schedule 2 ends before the contract's last time, so the MC grid runs on past schedule 2's end and
+    the knocked-in payoff used to read the spot of a later node (only MC engines move; PDE / QUAD already read schedule
+    2's end). The class is read off each case's contract; on every banked MC KO-reset the engine's own grid is checked
+    to end on schedule 2's last node (the two readouts are one column, so each record reproduces bitwise). A case added
+    to the bank in that class would have to be pinned here under (p), its expected value recomputed from the price's
+    paths with V1 read at the schedule-2 end node (``mc_same_path_reference.ko_reset_paths`` + the product's
+    ``get_maturity_payoff_v1``), never from the value under test."""
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.util.enum.option_enums import PostKOScheduleMode
+    from quantark.util.numerical import is_close
+
+    assert BANKED is not None, "baseline.json is not banked"
+    assert not any(move.cause == "p" for move in EXPECTED_MOVES.values())
+    ko_resets, mc_ko_resets, in_class = [], [], []
+    for case_id in BANKED["cases"]:
+        engine, product, env = _case(case_id).fresh()
+        if not isinstance(product, KnockOutResetSnowballOption):
+            continue
+        ko_resets.append(case_id)
+        if product.post_ko_mode != PostKOScheduleMode.ABSOLUTE:
+            continue
+        end = float(product.get_post_maturity_time(env))
+        last = float(product.get_max_maturity_time(env))
+        if end < last and not is_close(end, last):
+            in_class.append(case_id)
+        if _case(case_id).engine.kind.startswith("mc"):
+            mc_ko_resets.append(case_id)
+            grid = engine._build_time_grid_ko_reset(product, env, last)
+            assert is_close(float(grid["all_times"][-1]), end), (case_id, grid["all_times"][-1], end)
+    assert ko_resets and mc_ko_resets, "the bank holds (MC) ABSOLUTE KO-reset cases: the census must see them"
+    assert in_class == [], f"in the D31 class, pin under cause (p): {in_class}"
 
 
 def test_no_banked_case_is_in_the_d33_settlement_precedence_class():
