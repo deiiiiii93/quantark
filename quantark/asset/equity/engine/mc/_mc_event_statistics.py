@@ -26,7 +26,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.knock_in_days import STEP_OVERLAP, knock_in_day_axis, step_overlap
 from quantark.asset.equity.engine.knock_in_days import not_a_grid_time as _not_a_grid_time
-from quantark.util.numerical import Tolerance
+from quantark.util.numerical import Tolerance, is_close
 
 __all__ = [
     "DEPENDENT_BATCHES",
@@ -105,6 +105,10 @@ def knock_in_rows(
         clean_ko_times, clean_ko_counts: knock-outs with no knock-in before them, by time (survival).
     """
     empty = np.zeros(0, dtype=float)
+    if layout.kind == "discrete" and _every_path_knocked_in_at_valuation(layout.row_times, first_counts, n):
+        # a discrete KI observed at valuation with the spot through it: a knock-in at time 0 (DESIGN §4.5), one row
+        # at 0 as for a continuous breach or a carried knock-in (the spot at t = 0 is every path's)
+        knocked_in_now = True
     if layout.kind == "none" or (knocked_out_now and layout.kind != "carried"):
         return empty, None, empty, empty, np.zeros(0, dtype=bool)
     if layout.kind == "carried" or knocked_in_now:
@@ -124,6 +128,14 @@ def knock_in_rows(
     ko_by_row = cumulative_ko[np.searchsorted(clean_ko_times[order], times + Tolerance.ZERO, side="right")] / n
     survival = 1.0 - np.cumsum(probability) - ko_by_row
     return times, layout.row_dates, probability, survival, interpolated
+
+
+def _every_path_knocked_in_at_valuation(row_times: np.ndarray, first_counts: np.ndarray, n: float) -> bool:
+    """The first discrete KI row is the valuation instant and every path's first knock-in is there."""
+    rows = np.asarray(row_times, dtype=float)
+    counts = np.asarray(first_counts, dtype=float)
+    return bool(rows.size and counts.size and n > 0.0 and rows[0] <= Tolerance.ZERO
+                and is_close(float(counts[0]), float(n), rel_tol=Tolerance.RELATIVE, abs_tol=0.0))
 
 
 # --- batch-mean standard errors (spec AC21) -----------------------------------------------------------------

@@ -495,6 +495,39 @@ def test_a_knock_in_at_valuation_is_a_knock_in_at_zero(engine_name):
     _assert_knock_in_at_zero(_stats(engine_name, "ki_at_valuation"))
 
 
+def _discrete_knock_in_observed_at_valuation(family: str):
+    """A discrete KI with an observation at t = 0 and the spot below it (DESIGN §4.5: a knock-in at time 0), the
+    knock-out out of reach at 0; the table must be the single row at 0 as for a continuous breach or a carried
+    knock-in (T24 matrix finding: MC listed every schedule row with zeros after the first)."""
+    ki_times = (0.0, *routes.KO_DATES)
+    if family in ("snowball", "phoenix"):
+        product = routes.snowball("discrete") if family == "snowball" else routes.phoenix(ki="discrete")
+        old = product.barrier_config
+        product.barrier_config = BarrierConfig(
+            ko_barrier=old.ko_barrier, ko_rate=old.ko_rate, ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=list(routes.KO_DATES), ki_barrier=old.ki_barrier,
+            ki_observation_type=ObservationType.DISCRETE, ki_observation_dates=list(ki_times))
+    else:
+        product = routes.ko_reset()
+        product.barrier_config = replace(product.barrier_config, ki_observation_schedule=_schedule(ki_times, 80.0))
+    product.validate()
+    # just below the KI level (snowball 75, phoenix 70, KO-reset 80): a far-down spot puts the coarse ADI mesh's
+    # non-monotone splitting outside the type's slack (T14 open item), unrelated to the table
+    return product, {"snowball": 73.0, "phoenix": 68.0, "ko_reset": 78.0}[family]
+
+
+@pytest.mark.parametrize("engine_name", NON_DCN)
+def test_a_discrete_knock_in_observed_at_valuation_is_one_row_at_zero(engine_name):
+    engine = ENGINES[engine_name]
+    product, spot = _discrete_knock_in_observed_at_valuation(engine.family)
+    # the Phoenix ADI below its KI level needs the finer mesh, as for a continuous breach (ADI_MESH_PHOENIX)
+    make = OVERRIDES.get((engine_name, "ki_at_valuation"), engine.make)
+    stats = make().calculate_event_stats(product, _env(engine, spot))
+    _assert_knock_in_at_zero(stats)
+    np.testing.assert_array_equal(stats.ki_table.times, [0.0])
+    np.testing.assert_array_equal(stats.ki_table.survival, [0.0])
+
+
 @pytest.mark.parametrize("engine_name", [e for e in NON_DCN if ENGINES[e].family in NO_KI_BARRIER_FAMILIES])
 def test_no_knock_in_barrier_reports_computed_zeros(engine_name):
     _assert_no_knock_in(_stats(engine_name, "no_ki_barrier"))
