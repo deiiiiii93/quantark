@@ -512,6 +512,12 @@ class EventDistribution:
         leaves as a step right after its own time (a settled note is never interpolated back to life). A strictly
         past time reads 1. A time at the valuation instant (``is_zero``) reads the post-observation survival of an
         event the grid keeps at 0 — a theta-shifted contract keeps the observation landing on its new origin — else 1.
+
+        "Gone after" counts from the termination's DETERMINATION time, never its payment time (CP8 ruling I1), as a
+        knock-out leaves at its observation row although its cash settles later: a note whose maturity is determined
+        at T and settles at T + lag reads 0 for every t > T. A COMPLETE_PERIOD leg whose last period ends on such a
+        later settlement date therefore pays nothing on the matured mass (pinned by
+        ``test/cashleg/test_d29_determination_time.py``).
         """
 
         self.ensure_live("survival_at")
@@ -532,7 +538,8 @@ class EventDistribution:
 
     def survival_after(self, t: float) -> float:
         """Survival just after ``t``: ``survival_at(t)`` less the maturity-type terminations determined at ``t``
-        (spec D29: a note settled at ``t`` does not enter a period starting at ``t``)."""
+        (spec D29: a note settled at ``t`` does not enter a period starting at ``t``). ``t`` is compared with the
+        terminations' determination times, not their payment times (CP8 ruling I1; see ``survival_at``)."""
         settled_now = 0.0
         if self.terminal_times.size and float(t) > 0.0:
             hit = np.abs(self.terminal_times - float(t)) <= Tolerance.ZERO

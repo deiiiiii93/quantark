@@ -127,6 +127,8 @@ dates, `cash_to_pay`), `knock_in.expected_time`, `knock_in.expected_loss`, `expe
 | `survival_probability` (n + 1 values with a leading 1) | `survival_times`, `survival_probability` | Own axis starting at 0. Values are unchanged when the first observation is after 0; an observation at 0 gives its post-event survival as the first value. |
 | positional construction | keyword-only | |
 | — | `probability_residual`, `rebased`, `terminated`, `determination_time(event)`, `ended()`, `ensure_live()` | New. |
+| — | `survival_after(t)` | New. Survival just after `t`: `survival_at(t)` less the maturity-type terminations determined at `t`. |
+| — | `knock_in_carried` (field and `from_statistics(..., knock_in_carried=)`), `knock_in_was_carried(product, lifecycle_state)` | New. A carried knock-in is a past event: empty KI stream. |
 
 ## 8. Replay schema (product replay frames)
 
@@ -189,6 +191,19 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     (`knock_in.probability`) and "P(matured knocked in)" (`ki_settlement.probability`). The MC
     "PV ± SE, paths" line is replaced by "PV (event statistics; statistics: <model>)"; unavailable
     statistics are listed by path.
+18. **Settled notes leave the survival at their determination time (D29).** A knock-out leaves at
+    its observation row. A maturity-type termination (never-knocked-in maturity, knocked-in
+    settlement, each REBASED path's own settlement) is alive at its determination time and gone right
+    after it, even while its redemption is still unpaid. Interpolation never revives it, and it stays
+    gone past the last node. Accrual legs running past a settled note's end now pay nothing on it
+    (aged DCN quarterly ENTER leg to 2.0: MC 6598.93 → 3453.33). A KO-reset ABSOLUTE COMPLETE_PERIOD
+    leg pays its period ending at the first schedule's maturity on the notes that mature there. A
+    COMPLETE_PERIOD leg whose last period ends on a later settlement date pays nothing on the matured
+    mass (`test/cashleg/test_d29_determination_time.py`).
+19. **A carried knock-in has no KI stream (R1).** Build the distribution with
+    `from_statistics(stats, knock_in_carried=knock_in_was_carried(product, lifecycle_state))`; the
+    engine facades do. An AT_KI leg on an already-knocked-in note values 0, and an unpaid past KI
+    leg payment has no engine-side value.
 
 ## 10. Known limitations in 0.11.0
 
@@ -208,6 +223,22 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   day) below the MC reference, whose standard error there is 1.7e-3 years.
 - QUAD V1 Phoenix EXPIRY `reconciliation_error` is about 7e-9 × pv at 401 nodes, shrinking under
   refinement (a pre-existing price-side projection difference).
+- KO-reset with EXPIRY coupon pay: MC pays a first-schedule knock-out at the first schedule's
+  maturity (1.0), PDE 1D / QUAD V2 / QUAD V1 at the product maturity (2.0); `price()` differs by
+  about 2.1 (MC 93.45 ± 0.09 vs 91.34). Owner decision; pinned as a strict expected failure in the
+  slow matrix (`test/event_statistics/test_cross_engine_matrix.py`, `FINDINGS`).
+- No KI after a certain KO (AC9) holds on grid engines up to truncated-domain edge mass: with the KO
+  barrier below the grid, the knocked-in far-edge row counts edge-reaching mass as knocked in (LV
+  PDE 1.07e-5 at width 4, 4.9e-9 at 6, 2.6e-13 at 8; ADI ≤ 5e-9). P(KI) = 1 − ΣP(KO) holds.
+  Recorded deviation.
+- Local-vol MC default stepping is biased on skewed surfaces; references use
+  `max_sde_step_days=1`.
+- PDE partial protection without an airbag is wrong at narrow widths (LV Snowball partial 0.9:
+  width 3 vs 16 differs by 2.05); owner decision (candidate D28).
+- REBASED vs ABSOLUTE KO-reset annualized-KI knocked-in tenor differs (0.5 vs about 0.501), a 0.0252
+  price gap; owner decision.
+- D29's determination-time rule: a COMPLETE_PERIOD funding leg ending on a settlement date after the
+  determination pays nothing on the matured mass.
 
 ## 11. Tracked study outputs still on the old definitions
 

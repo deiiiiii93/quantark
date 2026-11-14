@@ -90,6 +90,20 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   `StatisticsRefused` for memory or EXPIRY Phoenix (it returned empty coupon cash).
 - KO-reset ABSOLUTE on MC: the never-knocked-in maturity is determined at the first schedule's end
   and leaves the survival there; probabilities unchanged.
+- Settled notes leave the survival at their DETERMINATION time (D29). A knock-out leaves at its
+  observation row. A maturity-type termination (never-knocked-in maturity, knocked-in settlement,
+  each REBASED path's own settlement) is alive at its determination time and gone right after it,
+  even while its cash is still unpaid. `survival_at` steps there, interpolation between nodes never
+  revives a settled note, and past the last node a settled note stays gone. Cash legs move with it:
+  - accrual legs pay nothing past a settled note's end (aged DCN, quarterly ENTER leg running to
+    2.0: MC 6598.93 → 3453.33);
+  - a KO-reset ABSOLUTE COMPLETE_PERIOD leg now pays its period ending at the first schedule's
+    maturity on the notes that mature there;
+  - a COMPLETE_PERIOD leg whose last period ends on a settlement date after the determination pays
+    nothing on the matured mass (see Known issues).
+- A carried knock-in (R1): `EventDistribution.from_statistics(stats, knock_in_carried=True)` gives
+  an empty KI stream and `knock_in_carried=True`, so an AT_KI leg on an already-knocked-in note
+  values 0. The knock-in is a past event.
 
 ### Added
 
@@ -111,6 +125,12 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   `EventDistribution.ended()` / `ensure_live()` for event-dependent readers. QUAD V2 follows the
   same rule (it raised on terminated states).
 - `EventDistribution.probability_residual`, `rebased`, `terminated`, `determination_time(event)`.
+- `EventDistribution.survival_after(t)`: survival just after `t`, less the maturity-type terminations
+  determined at `t` (a note settled at `t` does not enter a period starting at `t`); ENTER-basis
+  accrual legs read it.
+- `knock_in_was_carried(product, lifecycle_state=None)` (`quantark.cashleg.event_distribution`): the
+  carried-KI flag from the product's lifecycle marker or the state's `knocked_in`, feeding
+  `from_statistics(..., knock_in_carried=...)`.
 - `AutocallablePathAnalyzer.analyze_snowball_risk_neutral` returns `EventStatistics`.
 
 ### Fixed
@@ -135,6 +155,23 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   `LocalVolDCNPDEEngine`.
 - Tracked study outputs computed before this release still show the old KI-ever and maturity
   numbers; see section 11 of the migration note.
+- KO-reset with EXPIRY coupon pay: the engines disagree on when a first-schedule knock-out pays.
+  MC pays at the first schedule's maturity (1.0); PDE 1D, QUAD V2 and QUAD V1 pay at the product
+  maturity (2.0). `price()` differs by about 2.1 on the matrix contract (MC 93.45 ± 0.09 vs
+  91.34). Owner decision pending; the slow cross-engine matrix pins it as a strict expected failure.
+- No KI after a certain KO on grid engines holds up to truncated-domain edge mass. When the KO
+  barrier lies below the grid (the AC9 test contract), the knocked-in far-edge row counts the
+  edge-reaching mass as knocked in. LV PDE: 1.07e-5 at the default width 4, 4.9e-9 at 6, 2.6e-13 at
+  8; ADI ≤ 5e-9. P(KI) = 1 − ΣP(KO) in every case. Accepted as a recorded deviation.
+- Local-vol MC default stepping (one log-Euler step per contractual interval) is biased on skewed
+  surfaces; references and the cross-engine tests use `max_sde_step_days=1`. Defaults unchanged.
+- PDE partial protection without an airbag is wrong at narrow grid widths (LV Snowball, partial
+  0.9: width 3 vs 16 differs by 2.05). Pre-existing; owner decision (candidate D28).
+- REBASED vs ABSOLUTE KO-reset: the annualized-KI knocked-in redemption uses a different tenor
+  (ABSOLUTE 0.5 vs REBASED about 0.501), a 0.0252 price gap on the pair test. Owner decision.
+- D29 counts a settled note as gone from its determination time, not its payment time. A
+  COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
+  matured mass.
 
 Other changes in this release:
 
