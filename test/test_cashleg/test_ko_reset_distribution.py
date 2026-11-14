@@ -31,11 +31,14 @@ def test_both_schedules_and_both_maturities():
     assert d.determination_times[EventType.MATURITY_NO_KO] == stats.maturity.time
     assert d.payment_times_for(EventType.MATURITY_NO_KO) == stats.maturity.payment_time
     assert d.payment_times_for(EventType.MATURITY_WITH_KI) == stats.ki_settlement.payment_time
-    # F5: the pre-maturity mass leaves the survival at its determination, the last node keeps today's convention
-    i_pre = int(np.searchsorted(d.stream_times[EventType.KO], stats.maturity.time, side="right"))
+    # spec D29: the pre-maturity mass is alive at its determination and gone right after; the knocked-in
+    # settlement at the last node is alive there
+    ko_t = d.stream_times[EventType.KO]
     ko_cum = np.cumsum(d.probabilities[EventType.KO])
-    assert d.survival_probability[i_pre] == pytest.approx(
-        1.0 - ko_cum[i_pre - 1] - stats.maturity.probability, abs=1e-12)
+    t_m = stats.maturity.time
+    at_m = ko_cum[np.searchsorted(ko_t, t_m, side="right") - 1]
+    assert d.survival_at(t_m) == pytest.approx(1.0 - at_m, abs=1e-12)
+    assert d.survival_after(t_m) == pytest.approx(1.0 - at_m - stats.maturity.probability, abs=1e-12)
     assert d.survival_probability[-1] == pytest.approx(
         1.0 - ko_cum[-1] - stats.maturity.probability, abs=1e-12)
     assert d.provenance == stats.provenance

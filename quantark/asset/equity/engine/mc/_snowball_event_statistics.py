@@ -444,16 +444,18 @@ class _KOResetAssembly(_Assembly):
             fields["termination.probability"] = probability
             fields["termination.discounted_cash"] = discounted / n
             fields["termination.cash_to_pay"] = cash / n
-            # survival counts a termination at t as the ABSOLUTE layout counts the same kind at the same t
-            # (``ObservationTable.survival`` with F5), so the two layouts of one contract value legs alike: a knock-out
-            # leaves at its row; the never-knocked-in maturity leaves at its determination when that precedes the
-            # axis' last time; the knocked-in settlement never leaves
+            # survival by spec D29 (as the ABSOLUTE layout's distribution reads it): a knock-out leaves at its own
+            # row; a maturity-type termination (maturity, knocked-in settlement) is alive at its determination and
+            # gone at every later node
             events = np.asarray(self.term_event, dtype=object)
-            last = float(self.survival_times[-1]) if self.survival_times.size else 0.0
-            leaves = np.isin(events, ("ko_pre", "ko_post")) | ((events == "maturity") & (self.term_times < last))
-            by_time = np.array([probability[(self.term_times == t) & leaves].sum() for t in self.survival_times])
-            fields["termination.survival"] = 1.0 - np.cumsum(by_time)
-            ended = np.concatenate([[0.0], np.cumsum(by_time)])
+            knocks_out = np.isin(events, ("ko_pre", "ko_post"))
+            ko_by_time = np.array([probability[(self.term_times == t) & knocks_out].sum() for t in self.survival_times])
+            settled_by_time = np.array([probability[(self.term_times == t) & ~knocks_out].sum()
+                                        for t in self.survival_times])
+            settled_before = np.concatenate([[0.0], np.cumsum(settled_by_time)[:-1]])
+            survival = 1.0 - np.cumsum(ko_by_time) - settled_before
+            fields["termination.survival"] = survival
+            ended = np.concatenate([[0.0], 1.0 - survival])
             fields["observations.probability"] = pre_count / n
             fields["observations.survival"] = 1.0 - ended[np.searchsorted(self.survival_times, self.pre_times,
                                                                            side="right")]

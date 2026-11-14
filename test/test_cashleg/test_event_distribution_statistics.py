@@ -320,13 +320,17 @@ def test_ko_reset_absolute_keeps_both_schedules_and_its_survival():
     schedule = ("pre", "post", "pre", "post", "post", "post")
     p = np.array([0.3, 0.0, 0.1, 0.02, 0.03, 0.02])
     survival = 1.0 - np.cumsum(p)
-    survival[2:] -= 0.33            # F5: the pre-maturity mass leaves at its determination (t = 1.0)
+    survival[2:] -= 0.33            # F5: the tables drop the pre-maturity mass at its determination (t = 1.0)
     obs = _observations(times, p, survival=survival, schedule=schedule)
     stats = _stats(family="ko_reset", observations=obs, maturity=_row(1.0, 0.33), ki_settlement=_row(2.0, 0.20),
                    ki_table=None, unavailable={"ki_table": "not requested"})
     dist = EventDistribution.from_statistics(stats)
     np.testing.assert_array_equal(dist.stream_times[EventType.KO], np.asarray(times))
-    np.testing.assert_array_equal(dist.survival_probability, np.r_[1.0, survival])
+    # spec D29: one node per time (the value after its last row); the matured notes are alive at 1.0 and gone after
+    np.testing.assert_array_equal(dist.survival_times, [0.0, 0.5, 1.0, 1.5, 2.0])
+    np.testing.assert_allclose(dist.survival_probability, [1.0, 0.7, 0.58, 0.22, 0.20], rtol=0, atol=1e-15)
+    assert dist.survival_after(1.0) == pytest.approx(0.25, abs=1e-15)
+    assert dist.survival_at(2.5) == pytest.approx(0.0, abs=1e-15)    # the knocked-in notes settled at 2.0
     assert dist.determination_times == {EventType.MATURITY_NO_KO: 1.0, EventType.MATURITY_WITH_KI: 2.0}
     assert dist.payment_times_for(EventType.MATURITY_WITH_KI) == pytest.approx(2.02)
 
@@ -352,7 +356,9 @@ def _rebased() -> EventStatistics:
     termination = TerminationDistribution(
         times=times, payment_times=times + 0.01, event=tuple(r[1] for r in REBASED_ROWS),
         probability=probability, discounted_cash=probability * 99.0, cash_to_pay=probability * 100.0,
-        survival_times=[0.25, 0.5, 0.75, 1.0, 1.25, 1.5], survival=[0.70, 0.55, 0.51, 0.20, 0.08, 0.0],
+        survival_times=[0.25, 0.5, 0.75, 1.0, 1.25, 1.5],
+        # spec D29: a knock-out leaves at its row, maturity / knocked-in settlement right after their time
+        survival=[0.70, 0.55, 0.51, 0.48, 0.20, 0.08],
     )
     offsets = PostKIOffsetTable(offsets=[0.25, 0.5, 0.75, 1.0], kind=("ko_post", "ko_post", "ko_post", "ki_settlement"),
                                 probability=[0.05, 0.04, 0.03, 0.20], discounted_cash=[4.9, 3.9, 2.9, 19.0],
@@ -383,8 +389,9 @@ def test_rebased_maps_the_termination_distribution_to_array_streams():
     np.testing.assert_array_equal(dist.payment_times_for(EventType.MATURITY_WITH_KI), [1.26, 1.51])
     assert dist.probabilities[EventType.MATURITY_NO_KO] == pytest.approx(0.28, abs=1e-15)
     assert dist.payment_times_for(EventType.MATURITY_NO_KO) == pytest.approx(1.01)
-    # survival is the termination distribution's absolute curve
-    assert dist.survival_at(1.25) == pytest.approx(0.08)
+    # survival is the termination distribution's absolute curve (D29: the 1.25 settlement alive at 1.25, gone after)
+    assert dist.survival_at(1.25) == pytest.approx(0.20)
+    assert dist.survival_after(1.25) == pytest.approx(0.08)
     assert dist.survival_at(0.125) == pytest.approx(0.85)
 
 

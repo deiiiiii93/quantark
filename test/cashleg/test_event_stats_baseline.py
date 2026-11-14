@@ -69,6 +69,8 @@ D9_CAUSES: Dict[str, str] = {
     "l": "PDE knocked-in edge row honours the airbag (D27): partially protected PDE / ADI contracts whose airbag "
          "changes the knocked-in payoff on the knock-in edge cell (no banked case is one: "
          "test_no_banked_case_is_in_the_d27_airbag_class)",
+    "m": "D29 termination survival: settled notes leave after their settlement (a maturity-type termination is alive "
+         "at its determination and gone right after, past the note's last node too)",
 }
 
 
@@ -318,6 +320,7 @@ def _ko_reset_maturity_on_its_own_date(live: dict, banked: dict, record: dict) -
         payment_times={**dist.payment_times,
                        EventType.MATURITY_NO_KO: dist.payment_times[EventType.MATURITY_WITH_KI]},
         determination_times={EventType.MATURITY_NO_KO: last, EventType.MATURITY_WITH_KI: last},
+        terminal_times=np.zeros(0), terminal_probability=np.zeros(0),       # base had no D29 terminal steps
     )
     leg = _leg(record)
     assert leg.value(dist, env, cases.UNIT) == float(live["value"])
@@ -325,6 +328,12 @@ def _ko_reset_maturity_on_its_own_date(live: dict, banked: dict, record: dict) -
     assert close(leg.value(undone, env, cases.UNIT), float(banked["value"]), rel_tol=0.0, abs_tol=tol), (
         f"{record['id']}: undoing the one-maturity layout does not give back the banked value")
     assert abs(float(live["value"]) - float(banked["value"])) > tol, f"{record['id']}: the move is round-off"
+    if record["id"] in _D29_MOVES:
+        # D29 moves this leg too (T23 follow-up 2): live is D29's leg from probabilities alone (MC: the paths)
+        expected = _leg_by_rule(record["case"], record["leg"], d29=True)
+        bound = (1e-12 * float(record["scale"]) if "mc" in record["engine_kind"]
+                 else max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * float(record["scale"])))
+        assert abs(float(live["value"]) - expected) <= bound, f"{record['id']}: != D29 leg {expected!r}"
 
 
 def _rebased_distribution_on_the_same_paths(record: dict):
@@ -353,13 +362,11 @@ def _rebased_distribution_on_the_same_paths(record: dict):
             assert abs(float(probability[rows].sum()) - count / n) <= 1e-15, (event_type, t, p)
         assert covered == np.count_nonzero(in_event), f"{event_type}: a path off the axis"
     assert abs(float(dist.probabilities[EventType.MATURITY_NO_KO]) - np.count_nonzero(ref["v0"]) / n) <= 1e-15
-    # survival as the ABSOLUTE layout counts it (T23 follow-up): a knock-out leaves at its row, the never-knocked-in
-    # maturity at its determination when that precedes the axis' last time, the knocked-in settlement never
-    last = float(dist.survival_times[-1])
+    # survival by spec D29: a knock-out leaves at its row; a maturity-type termination (maturity, knocked-in
+    # settlement) is alive at its determination and gone after it
     knocked_out = np.isin(ref["event"], ("ko_pre", "ko_post"))
-    matured_early = (ref["event"] == "maturity") & (ref["det"] < last)
     for t, survival in zip(dist.survival_times, dist.survival_probability):
-        gone = (knocked_out | matured_early) & (ref["det"] <= t)
+        gone = (knocked_out & (ref["det"] <= t)) | (~knocked_out & (ref["det"] < t))
         assert abs(survival - (1.0 - np.count_nonzero(gone) / n)) <= 1e-14, (t, survival)
     grid = ref["grid"]
     candidates = set(np.asarray(grid["pre_times"], dtype=float).tolist())
@@ -1119,6 +1126,196 @@ _T17_KO_RESET_MATURITY = tuple(
 )
 
 
+
+# --- moves (T23 follow-up 2, spec D29: termination survival) ------------------------------------------------------
+#
+# A maturity-type termination (the never-knocked-in maturity, the knocked-in settlement) is alive at its own
+# determination and gone right after it, past the note's last node too; a knock-out leaves at its own row. Two
+# classes move: KO-reset ABSOLUTE, whose first schedule's maturity (1.0) the tables dropped AT its time (F5) -- a
+# COMPLETE_PERIOD period ending there now counts the matured notes; and the aged DCN, whose legs run past the note's
+# end (0.58y) -- base held the survival flat there and paid ~1.4y of accrual on a matured note.
+#
+# Each check recomputes the leg from probabilities alone -- the engine's own KO rows and terminal rows (grid
+# engines) or the price's own paths (MC: ``ko_reset_paths``, ``dcn_paths``) -- never from a survival column or the
+# EventDistribution under test, under both rules: base's (F5 drop at the maturity, survival flat past the last node)
+# and D29's. The banked value must be base's leg, the move must be D29 less base, and on MC the path oracle gives
+# the live value itself.
+
+#: the ABSOLUTE KO-reset F5 class and the aged DCN, by case: the accrual legs whose survival reads move
+_D29_LEGS = {
+    **{case: ("accrual_truncate_complete",) for case in (
+        "mc_snowball__ko_reset_absolute", "mc_snowball__ko_reset_absolute_cki", "quad_v1_ko_reset__ko_reset_absolute",
+        "quad_v2_ko_reset__ko_reset_absolute", "quad_v2_ko_reset__ko_reset_absolute_cki",
+        "pde_ko_reset__ko_reset_absolute", "pde_ko_reset__ko_reset_absolute_cki", "pde_lv_ko_reset__ko_reset_absolute",
+        "adi_heston_ko_reset__ko_reset_absolute")},
+    **{case: ("accrual_truncate_enter", "accrual_truncate_complete", "accrual_truncate_at_maturity")
+       for case in ("mc_dcn__dcn_receivable_alive", "pde_dcn__dcn_receivable_alive")},
+}
+
+
+@lru_cache(maxsize=None)
+def _d29_sources(case_id: str):
+    """(node times, KO mass per node, maturity-type terminations [(time, mass)], maturity payment time, F5) from
+    probabilities only: the engine's own statistics rows (grid), the price's own paths (MC)."""
+    case = _case(case_id)
+    engine, product, env = case.fresh()
+    stats = engine.calculate_event_stats(product, env, **case.kwargs())
+    obs = stats.observations
+    nodes = np.unique(np.asarray(obs.times, dtype=float))
+    maturity_pay = float(stats.maturity.payment_time)
+    kind = BANKED["cases"][case_id]["engine_kind"]
+    if kind == "dcn_mc":
+        ref = _same_path().dcn_paths(case.fresh()[0], product, env, **case.kwargs())
+        ctx, n = ref["ctx"], ref["n"]
+        ko_t = np.asarray(ctx.times[ctx.obs_cols], dtype=float)[ref["ko_row"][ref["ko_row"] >= 0]]
+        ko_mass = np.array([np.count_nonzero(ko_t == t) for t in nodes]) / n
+        end = float(ctx.times[int(ctx.obs_cols[-1])])
+        terminals = [(end, np.count_nonzero(ref["maturity"]) / n), (end, np.count_nonzero(ref["ki_settlement"]) / n)]
+        source = "dcn_paths"
+    elif kind == "mc":
+        ref = _same_path().ko_reset_paths(case.fresh()[0], product, env)
+        n, det, event = ref["n"], ref["det"], ref["event"]
+        knocked = np.isin(event, ("ko_pre", "ko_post"))
+        ko_mass = np.array([np.count_nonzero(knocked & (det == t)) for t in nodes]) / n
+        terminals = [(float(t), np.count_nonzero((event == e) & (det == t)) / n)
+                     for e in ("maturity", "ki_settlement") for t in np.unique(det[event == e])]
+        source = "ko_reset_paths"
+    else:
+        times = np.asarray(obs.times, dtype=float)
+        ko_mass = np.array([float(np.sum(obs.probability[times == t])) for t in nodes])
+        terminals = [(float(stats.maturity.time), float(stats.maturity.probability)),
+                     (float(stats.ki_settlement.time), float(stats.ki_settlement.probability))]
+        source = "statistics rows"
+    f5 = (stats.product_family == "ko_reset" and nodes.size > 0
+          and float(stats.maturity.time) < float(nodes[-1]) - 1e-10)
+    return nodes, ko_mass, tuple(terminals), maturity_pay, float(stats.maturity.time) if f5 else None, source, env
+
+
+def _survival_by_rule(nodes, ko_mass, terminals, f5_time, t: float, *, d29: bool, entering: bool) -> float:
+    """Survival at ``t`` from probabilities alone: the knock-out part linear between nodes (the distribution's
+    interpolation), flat past the last node; base drops the F5 maturity mass AT its time and holds the rest past the
+    end; D29 drops every maturity-type mass right after its time (``entering``: at it), past the end too."""
+    if t <= 0.0:
+        return 1.0
+    grid = np.r_[0.0, nodes] if nodes.size == 0 or nodes[0] > 1e-10 else nodes
+    mass = np.r_[0.0, ko_mass] if grid.size != nodes.size else ko_mass
+    ko_part = np.interp(t, grid, 1.0 - np.cumsum(mass))
+    if not d29:
+        if f5_time is None:
+            return float(ko_part)
+        f5_mass = sum(m for tt, m in terminals if tt == f5_time)
+        node_t = grid[min(np.searchsorted(grid, t - 1e-12), grid.size - 1)]
+        dropped = np.where(grid >= f5_time - 1e-12, f5_mass, 0.0)
+        return float(ko_part - np.interp(t, grid, dropped)) if node_t != t else float(
+            ko_part - (f5_mass if t >= f5_time - 1e-12 else 0.0))
+    gone = sum(m for tt, m in terminals if (tt <= t + 1e-10 if entering else tt < t - 1e-10))
+    return float(ko_part - gone)
+
+
+def _leg_by_rule(case_id: str, leg_name: str, *, d29: bool) -> float:
+    nodes, ko_mass, terminals, maturity_pay, f5_time, _, env = _d29_sources(case_id)
+    leg = next(spec.leg for spec in _case(case_id).legs() if spec.name == leg_name)
+    starts, ends = np.asarray(leg.schedule.period_starts), np.asarray(leg.schedule.period_ends)
+    from quantark.cashleg import PaymentConvention, SurvivalBasis
+
+    entering = leg.survival_basis is SurvivalBasis.ENTER_PERIOD
+    reads = starts if entering else ends
+    alive = np.array([_survival_by_rule(nodes, ko_mass, terminals, f5_time, float(t), d29=d29,
+                                        entering=entering and d29) for t in reads])
+    pays = (np.full(starts.size, maturity_pay) if leg.payment_convention is PaymentConvention.AT_MATURITY
+            else np.asarray(leg.schedule.payment_times, dtype=float))
+    dfs = np.array([env.get_discount_factor(float(t)) for t in pays])
+    return leg.sign() * leg.rate * leg.base.resolve(cases.UNIT) * float(np.sum((ends - starts) * alive * dfs))
+
+
+def _settled_notes_leave_after_their_settlement(live: dict, banked: dict, record: dict) -> None:
+    """Cause (m), D29. From probabilities alone (``_d29_sources``): the banked value is base's rule and the live
+    value moved by exactly D29 less base -- a fold record by its leg's move, a drilldown total by the sum of its
+    moved legs' moves; an event record (and an MC fold leg) is D29's leg itself."""
+    assert "value" in banked and "value" in live, (live, banked)
+    case_id, route = record["case"], record["route"]
+    legs = (_D29_LEGS[case_id] if route == "fold_drilldown_total"
+            else (record["leg"],))
+    assert all(leg in _D29_LEGS[case_id] for leg in legs), record["id"]
+    delta = _d29_delta(record)
+    abs_tol = max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * float(record["scale"]))
+    move = float(live["value"]) - float(banked["value"])
+    assert abs(move - delta) <= _d29_tol(record, delta), (
+        f"{record['id']}: moved {move!r}, D29 less base from probabilities {delta!r}")
+    if route in ("event", "fold_drilldown") or (route == "fold_total" and "mc" in record["engine_kind"]):
+        leg = record["leg"]
+        expected = _leg_by_rule(case_id, leg, d29=True)
+        value = float(live["value"])
+        if route == "fold_total":
+            value -= float(_event(case_id)["event_npv"]["value"])
+        # MC: the price's own paths give the same numbers as the distribution (round-off); grid: the statistics
+        # rows' KO part, within the bank tolerance (the table's survival column is the march's own)
+        tol = 1e-12 * float(record["scale"]) if "mc" in record["engine_kind"] else _d29_tol(record, expected)
+        assert abs(value - expected) <= tol, f"{record['id']}: {value!r} != D29 leg {expected!r}"
+        base = _leg_by_rule(case_id, leg, d29=False)
+        if route != "event" or "mc" in record["engine_kind"]:
+            assert abs((value - move) - base) <= tol, f"{record['id']}: banked is not base's leg {base!r}"
+
+
+#: a grid engine's folded solve marches the leg's cash with its own probabilities, not the statistics rows': the
+#: two agree to <= 4.2e-8 relative (measured, DCN PDE; KO-reset PDE 4e-9); the bank tolerance is the floor
+_D29_FOLD_REL = 1e-6
+
+
+def _d29_delta(record: dict) -> float:
+    """D29 less base, from probabilities alone, for ``record``'s leg (a drilldown total: every moved leg)."""
+    legs = _D29_LEGS[record["case"]] if record["route"] == "fold_drilldown_total" else (record["leg"],)
+    return sum(_leg_by_rule(record["case"], leg, d29=True) - _leg_by_rule(record["case"], leg, d29=False)
+               for leg in legs)
+
+
+def _d29_tol(record: dict, size: float) -> float:
+    abs_tol = max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * float(record["scale"]))
+    if "mc" in record["engine_kind"] or record["route"] == "event":
+        return abs_tol
+    return abs_tol + _D29_FOLD_REL * abs(size)
+
+
+def _edge_row_and_settled_notes(live: dict, banked: dict, record: dict) -> None:
+    """Causes (k) and (m) on one folded record (a T14b edge-row record whose accrual leg D29 also moves): with base's
+    knocked-in edge row written back the route gives the banked value plus the D29 move alone, and the live record
+    moved by its case's price move (k) plus that D29 move (m), the D29 move from probabilities alone."""
+    assert "value" in banked and "value" in live, (live, banked)
+    case = _case(record["case"])
+    delta = _d29_delta(record)
+    with _BaseKnockInRow():
+        base_row = float(_route_on(case, record)["value"])
+    tol = _d29_tol(record, delta)
+    assert abs(base_row - delta - float(banked["value"])) <= tol, (
+        f"{record['id']}: base's row gives {base_row!r}, banked {banked['value']!r}, D29 move {delta!r}")
+    price = RECORDS[f"{record['case']}__-__price"]
+    price_move = float(_event(record["case"])["price"]["value"]) - float(price["outcome"]["value"])
+    move = float(live["value"]) - float(banked["value"])
+    assert abs(move - price_move - delta) <= tol + _MOVE_IS_THE_PRICE_MOVE * float(record["scale"]), (
+        f"{record['id']}: moved {move!r} = price move {price_move!r} + D29 {delta!r}?")
+    assert abs(delta) > tol, f"{record['id']}: no D29 move"
+
+
+def _dcn_pde_event_is_the_folded_leg_after_d29(live: dict, banked: dict, record: dict) -> None:
+    """Causes (h) and (m): the aged DCN's event-route leg (no native statistics at base, cause h) equals the folded
+    leg live -- the folded record itself moved by D29 and is pinned under (m) by probabilities -- and is D29's leg
+    from the statistics rows."""
+    _dcn_pde_base_was_trivial(banked, record, raised="raises" in banked)
+    folded = _drilldown(record["case"])["per_leg"][record["leg"]]
+    abs_tol = max(GOLDEN_ABS_TOL, GOLDEN_REL_TOL * float(record["scale"]))
+    assert close(float(live["value"]), float(folded["value"]), rel_tol=GOLDEN_REL_TOL,
+                 abs_tol=abs_tol + _D29_FOLD_REL * abs(float(folded["value"]))), (
+        f"{record['id']}: live {live['value']!r} != the folded leg {folded['value']!r}")
+    expected = _leg_by_rule(record["case"], record["leg"], d29=True)
+    assert abs(float(live["value"]) - expected) <= abs_tol, f"{record['id']}: != D29 leg {expected!r}"
+
+
+_D29_MOVES = tuple(
+    rid for case, legs in _D29_LEGS.items() for rid in (
+        f"{case}__-__fold_drilldown_total",
+        *(f"{case}__{leg}__{route}" for leg in legs for route in ("event", "fold_total", "fold_drilldown")))
+)
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_is_past) for case in _KI_AXIS_MOVES},
@@ -1164,7 +1361,15 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
        for case in _T17_KO_AT_VALUATION},
     **{rid: MovedBy("h", _v1_decided_coupon_stream) for rid in _T17_DECIDED_COUPON},
     **{rid: MovedBy("d", _ko_reset_maturity_on_its_own_date) for rid in _T17_KO_RESET_MATURITY},
+    # T23 follow-up 2: D29 termination survival (event records already moved by cause d keep cause d)
+    **{rid: MovedBy("m", _settled_notes_leave_after_their_settlement) for rid in _D29_MOVES
+       if rid not in _T9_KO_RESET_MATURITY and rid not in _T17_KO_RESET_MATURITY and rid not in _T14B_EDGE_ROW
+       and rid not in _T15_FOLDED},
+    **{rid: MovedBy("k", _edge_row_and_settled_notes) for rid in _D29_MOVES if rid in _T14B_EDGE_ROW},
+    **{rid: MovedBy("h", _dcn_pde_event_is_the_folded_leg_after_d29) for rid in _D29_MOVES if rid in _T15_FOLDED},
 }
+#: T23 census: records D29 moves on top of an earlier cause (their checks pin both)
+D29_ALSO = frozenset(rid for rid in _D29_MOVES if rid in EXPECTED_MOVES and EXPECTED_MOVES[rid].cause != "m")
 
 
 # --- live recomputation (cached per worker: one event route / one drilldown per case) -------------

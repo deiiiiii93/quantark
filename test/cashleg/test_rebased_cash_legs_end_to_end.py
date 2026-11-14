@@ -211,19 +211,17 @@ def _df(env, times) -> np.ndarray:
     return np.array([env.get_discount_factor(float(t)) for t in np.atleast_1d(times)], dtype=float)
 
 
-def _alive(state: str, ref, t: float) -> float:
-    """P(alive at t) on the paths, by the ABSOLUTE layout's survival definition (``ObservationTable.survival``,
-    P(alive after the row); spec Contracts / F5), which a REBASED note follows too (T23 follow-up: a termination at
-    t counts exactly as the ABSOLUTE layout counts the same kind at the same t). At the valuation every path is
-    alive; a knock-out leaves at its row; the never-knocked-in maturity leaves at its determination only when that
-    precedes the last row of the axis; the knocked-in settlement never leaves."""
+def _alive(ref, t: float, *, entering: bool = False) -> float:
+    """P(alive at t) on the paths by spec D29, on both layouts. A knock-out at t leaves at its own row (not alive at
+    t). A maturity-type termination (the never-knocked-in maturity, the knocked-in settlement -- each REBASED path's
+    own date) is alive at its determination and gone immediately after: a period ending there is complete, nothing
+    after it is paid. ``entering``: alive going into a period that starts at t, so a note settled at t is gone."""
     if t <= 0.0:
         return 1.0
     event, det = ref["event"], ref["det"]
-    last_row = float(candidate_axis(state)[-1])
-    gone = (np.isin(event, ("ko_pre", "ko_post")) & (det <= t)) | (
-        (event == "maturity") & (det <= t) & (det < last_row))
-    return float(np.count_nonzero(~gone)) / ref["n"]
+    knocked_out = np.isin(event, ("ko_pre", "ko_post")) & (det <= t)
+    settled = ~np.isin(event, ("ko_pre", "ko_post")) & ((det <= t) if entering else (det < t))
+    return float(np.count_nonzero(~(knocked_out | settled))) / ref["n"]
 
 
 def direct_value(state: str, name: str) -> float:
@@ -240,9 +238,9 @@ def direct_value(state: str, name: str) -> float:
         if leg.ko_behavior is KOBehavior.PAY_FULL_SCHEDULE:
             alive = np.ones(frac.size)
         else:
-            reference = (leg.schedule.period_starts if leg.survival_basis is SurvivalBasis.ENTER_PERIOD
-                         else leg.schedule.period_ends)
-            alive = np.array([_alive(state, ref, float(t)) for t in reference])
+            entering = leg.survival_basis is SurvivalBasis.ENTER_PERIOD
+            reference = leg.schedule.period_starts if entering else leg.schedule.period_ends
+            alive = np.array([_alive(ref, float(t), entering=entering) for t in reference])
         if leg.payment_convention is PaymentConvention.AT_MATURITY:
             # the leg's own definition: every period settles at the never-knocked-in maturity settlement, the
             # contract's first-schedule end (this contract settles with no lag: every matured path says so)
@@ -515,9 +513,9 @@ def test_the_pair_is_one_contract_on_the_same_paths(kind):
 def test_rebased_survival_is_the_absolute_survival(kind):
     a, _ = _pair_route(kind, "absolute")
     r, _ = _pair_route(kind, "rebased")
-    # at every survival node of either axis and past the end; between nodes the two axes interpolate differently
-    # (the ABSOLUTE axis repeats a tied time for its zero-mass first-schedule row), so off-node reads are not compared
-    for t in np.union1d(np.union1d(a.survival_times, r.survival_times), [1.2]):
+    # at every survival node of either axis, between nodes (D29: one stepping on both layouts) and past the end
+    nodes = np.union1d(a.survival_times, r.survival_times)
+    for t in np.union1d(np.union1d(nodes, [0.05, 0.3, 0.49, 0.51, 0.6, 0.99, 1.2]), nodes + 1e-9):
         assert abs(r.survival_at(float(t)) - a.survival_at(float(t))) <= 1e-15, (kind, t)
 
 
@@ -530,3 +528,103 @@ def test_every_leg_has_one_value_on_the_two_layouts(kind, name):
         values[layout] = _pair_legs(kind, layout)[name].value(dist, env, cases.UNIT)
     leg = _pair_legs(kind, "absolute")[name]
     assert abs(values["rebased"] - values["absolute"]) <= ROUND_OFF * _scale(leg), (kind, name, values)
+
+
+# --- D29: a settled note is alive at its settlement and gone right after (both layouts) ----------------------------
+
+
+def _expected_survival(ref, nodes, t: float) -> float:
+    """The D29 reading on the paths: at a node, ``_alive``; between nodes, the knock-out part linear (the existing
+    interpolation) from just after the node before -- a note settled there already gone -- to the next node."""
+    nodes = np.asarray(nodes, dtype=float)
+    if np.any(np.abs(nodes - t) <= 1e-12) or t >= nodes[-1]:
+        return _alive(ref, t)
+    i = int(np.searchsorted(nodes, t)) - 1
+    left, right = _alive(ref, float(nodes[i]), entering=True), _alive(ref, float(nodes[i + 1]))
+    return float(np.interp(t, [nodes[i], nodes[i + 1]], [left, right]))
+
+
+def _pair_paths(kind: str, layout: str) -> dict:
+    from test_asset.equity.engine_mc import mc_same_path_reference
+
+    return mc_same_path_reference.ko_reset_paths(_engine(), _pair(kind, layout), cases.flat_env(PAIR_SPOT))
+
+
+@pytest.mark.parametrize("layout", ("rebased", "absolute"))
+def test_a_note_settled_inside_the_axis_is_alive_at_its_settlement_and_gone_after(layout):
+    """D29 on the pair settling knocked in at 0.5 (schedule-1 dates running on to 1.0): survival at 0.5 still holds the
+    settled note, at 0.75 and between nodes after 0.5 it does not, and ``survival_after(0.5)`` (going into a period
+    that starts there) excludes it -- each value a path count."""
+    dist, _ = _pair_route("settles_inside", layout)
+    ref = _pair_paths("settles_inside", layout)
+    settled = np.count_nonzero(ref["event"] == "ki_settlement") / ref["n"]
+    assert settled > 0.5
+    for t in (0.25, 0.5, 0.75, 1.0, 0.3, 0.6, 0.5 + 1e-9, 0.9):
+        assert abs(dist.survival_at(t) - _expected_survival(ref, dist.survival_times, t)) <= 1e-15, (layout, t)
+    assert abs(dist.survival_after(0.5) - _alive(ref, 0.5, entering=True)) <= 1e-15
+    assert dist.survival_at(0.75) == 0.0 and dist.survival_at(0.5) >= settled
+
+
+def test_the_unknocked_rebased_note_settled_at_1_25_is_gone_at_1_5():
+    """D29 on the AC16 note: paths settling knocked in at 1.25 are alive at 1.25 and gone at 1.5 and in between; the
+    accrual legs (COMPLETE and ENTER) pay them nothing after 1.25 (``test_event_route_leg_equals_the_same_path_valuation``
+    checks the legs against the same oracle)."""
+    _, dist, _, _ = event_route("unknocked")
+    ref = paths("unknocked")
+    at = (ref["event"] == "ki_settlement") & (ref["det"] == 1.25)
+    assert np.count_nonzero(at) > 0
+    for t in (1.25, 1.3, 1.5, 1.25 + 1e-9):
+        assert abs(dist.survival_at(t) - _expected_survival(ref, dist.survival_times, t)) <= 1e-15, t
+    assert dist.survival_at(1.25 + 1e-9) <= dist.survival_after(1.25) + 1e-15     # never interpolated back to life
+    assert abs(dist.survival_after(1.25) - _alive(ref, 1.25, entering=True)) <= 1e-15
+    assert dist.survival_at(1.25) - dist.survival_after(1.25) >= np.count_nonzero(at) / ref["n"] - 1e-15
+
+
+def _accrual_over(starts, *, basis):
+    starts = np.asarray(starts, dtype=float)
+    return AccrualLeg(direction=LegDirection.BUYER_RECEIVES, rate=0.04,
+                      base=BaseAmount(value=200_000.0, mode=BaseAmountMode.ABSOLUTE),
+                      schedule=LegSchedule(period_starts=starts, period_ends=starts + 0.25,
+                                           payment_times=starts + 0.25),
+                      ko_behavior=KOBehavior.TRUNCATE_AT_KO, survival_basis=basis)
+
+
+_PAST_THE_END = (
+    # (case, note's end): the bank's KO-reset ends at 2.0; the aged DCN at 0.5836 (its last close)
+    ("mc_snowball__ko_reset_absolute", 2.0), ("pde_ko_reset__ko_reset_absolute", 2.0),
+    ("mc_dcn__dcn_receivable_alive", None), ("pde_dcn__dcn_receivable_alive", None),
+)
+
+
+@pytest.mark.parametrize("basis", (SurvivalBasis.ENTER_PERIOD, SurvivalBasis.COMPLETE_PERIOD))
+@pytest.mark.parametrize("case_id,end", _PAST_THE_END)
+def test_a_leg_running_past_a_settled_note_pays_nothing_after_its_end(case_id, end, basis):
+    """D29: whatever the leg's schedule says, a note that has ended -- knocked out or settled at its end -- accrues
+    nothing for a period starting after that end (ENTER) or ending after it (COMPLETE), on KO-reset and on DCN. MC
+    exactly; a grid engine keeps only its own probability residual (D16: 1 - ΣKO - maturity - KI settlement, the
+    march's, not a note) past the end."""
+    meta = case_id.split("__")
+    case = cases.Case(meta[0], meta[1])
+    engine, product, env = case.fresh()
+    dist = engine.price_with_events(product, env, **case.kwargs()).event_distribution
+    if end is None:
+        end = float(dist.survival_times[-1])
+    starts = end + np.array([0.0, 0.25, 0.5]) if basis is SurvivalBasis.ENTER_PERIOD else end + np.array([0.01, 0.3])
+    leg = _accrual_over(starts, basis=basis)
+    gross = leg.rate * 200_000.0 * 0.25 * starts.size
+    assert abs(leg.value(dist, env, cases.UNIT)) <= abs(dist.probability_residual) * gross + 1e-12 * gross
+    if case_id.startswith("mc_"):
+        assert leg.value(dist, env, cases.UNIT) == 0.0
+    # and the period ending at the end is complete for the notes that settle there
+    if basis is SurvivalBasis.COMPLETE_PERIOD:
+        assert _accrual_over([end - 0.25], basis=basis).value(dist, env, cases.UNIT) > 0.0
+
+
+@pytest.mark.parametrize("layout", ("rebased", "absolute"))
+def test_a_leg_after_the_pair_settles_inside_the_axis_pays_nothing(layout):
+    """The pair settling at 0.5 with schedule-1 dates running on to 1.0: every note has ended by 0.5 (knocked out or
+    settled), so periods from 0.5 on pay nothing on either layout, though the axis goes on."""
+    dist, env = _pair_route("settles_inside", layout)
+    assert float(dist.survival_times[-1]) == 1.0
+    for basis in (SurvivalBasis.ENTER_PERIOD, SurvivalBasis.COMPLETE_PERIOD):
+        assert _accrual_over([0.5, 0.75], basis=basis).value(dist, env, cases.UNIT) == 0.0

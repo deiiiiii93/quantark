@@ -91,6 +91,11 @@ class EventDistribution:
         terminated: the note ended before the valuation (receivables only, spec §4.9c): no event is left, every
             reader of events refuses (a leg riding an ended note settles with it; its value is not derivable
             from events).
+        terminal_times, terminal_probability: the maturity-type terminations (the never-knocked-in maturity, the
+            knocked-in settlement; on a REBASED KO-reset every knocked-in settlement date) by determination time and
+            mass. Spec D29: such a termination is alive at its determination and gone immediately after, so
+            ``survival_at`` steps it out right after its time (never interpolated back) and ``survival_after`` reads
+            past it; a knock-out leaves at its own row (``survival_probability`` at a node already excludes it).
         knock_in_carried: the note was already knocked in at the valuation. The knock-in is a past event (DESIGN
             §4.9c): the KI stream is empty -- nothing of the remaining life triggers a knock-in leg; cash a past
             knock-in decided is paid, or a receivable where the producer emits one. The statistics keep DESIGN
@@ -114,6 +119,8 @@ class EventDistribution:
     flagged_streams: Dict[EventType, str] = field(default_factory=dict)
     terminated: bool = False
     knock_in_carried: bool = False
+    terminal_times: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    terminal_probability: np.ndarray = field(default_factory=lambda: np.zeros(0))
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "survival_times", np.asarray(self.survival_times, dtype=float))
@@ -174,6 +181,8 @@ class EventDistribution:
         object.__setattr__(self, "flagged_streams", dict(self.flagged_streams))
         object.__setattr__(self, "terminated", bool(self.terminated))
         object.__setattr__(self, "knock_in_carried", bool(self.knock_in_carried))
+        object.__setattr__(self, "terminal_times", np.asarray(self.terminal_times, dtype=float))
+        object.__setattr__(self, "terminal_probability", np.asarray(self.terminal_probability, dtype=float))
         self._validate_invariants()
 
     # --- construction ---------------------------------------------------------------------------------
@@ -270,7 +279,10 @@ class EventDistribution:
                          probabilities, payment_times, payment_dates)
         cls._add_outcome(EventType.MATURITY_WITH_KI, stats.ki_settlement, stats.ki_settlement.probability,
                          probabilities, payment_times, payment_dates)
-        survival_times, survival = cls._survival_axis(obs.times, obs.survival, stats.maturity.time)
+        terminals = ((stats.maturity.time, stats.maturity.probability),
+                     (stats.ki_settlement.time, stats.ki_settlement.probability))
+        node_survival = cls._d29_absolute_survival(stats, obs.times, obs.survival, terminals)
+        survival_times, survival = cls._survival_axis(obs.times, node_survival, stats.maturity.time)
         return cls(
             probabilities=probabilities,
             survival_times=survival_times,
@@ -286,6 +298,8 @@ class EventDistribution:
             probability_residual=stats.probability_residual,
             flagged_streams=cls._flags(stats, probabilities, _STREAM_SOURCES),
             knock_in_carried=knock_in_carried,
+            terminal_times=np.array([t for t, _ in terminals], dtype=float),
+            terminal_probability=np.array([max(float(p), 0.0) for _, p in terminals], dtype=float),
         )
 
     @staticmethod
@@ -354,6 +368,7 @@ class EventDistribution:
         cls._add_ki_stream(stats, probabilities, stream_times, stream_dates, payment_times, payment_dates,
                            knock_in_carried=knock_in_carried)
         survival_times, survival = cls._survival_axis(term.survival_times, term.survival, maturity_time)
+        settles = np.isin(events, ("maturity", "ki_settlement"))
         return cls(
             probabilities=probabilities,
             survival_times=survival_times,
@@ -368,6 +383,8 @@ class EventDistribution:
             rebased=True,
             flagged_streams=cls._flags(stats, probabilities, _REBASED_SOURCES),
             knock_in_carried=knock_in_carried,
+            terminal_times=term.times[settles],
+            terminal_probability=term.probability[settles],
         )
 
     @staticmethod
@@ -405,10 +422,42 @@ class EventDistribution:
             payment_dates[event_type] = row.payment_date
 
     @staticmethod
+    def _d29_absolute_survival(stats, times, survival, terminals) -> np.ndarray:
+        """``ObservationTable.survival`` restated by spec D29 at each row: a maturity-type termination counts alive at
+        its own determination and leaves after it. The tables drop the first schedule's maturity mass of a KO-reset
+        AT its determination (F5, when it precedes the last row): that mass is added back on the rows at its time;
+        a termination before the last row that the tables never drop (a knocked-in settlement inside the axis)
+        leaves on the rows after it. Rows that need neither keep the table's value bit for bit."""
+        times = np.asarray(times, dtype=float)
+        survival = np.asarray(survival, dtype=float)
+        if times.size == 0:
+            return survival
+        last = float(times[-1])
+        out = survival.copy()
+        maturity = stats.maturity
+        f5 = (stats.product_family == "ko_reset" and stats.termination is None
+              and float(maturity.time) < last - Tolerance.ZERO)
+        if f5:
+            at = (times >= float(maturity.time)) & (times <= float(maturity.time) + Tolerance.ZERO)
+            out[at] = out[at] + float(maturity.probability)
+        for k, (t_end, mass) in enumerate(terminals):
+            if f5 and k == 0:
+                continue                                   # the tables already drop it after its time
+            after = times > float(t_end) + Tolerance.ZERO
+            if np.any(after) and float(mass) != 0.0:
+                out[after] = out[after] - float(mass)
+        return out
+
+    @staticmethod
     def _survival_axis(times, survival, terminal_time: float) -> tuple[np.ndarray, np.ndarray]:
         """Survival from the valuation on: 1 at 0 unless an observation sits at 0 (its post-event survival)."""
         times = np.asarray(times, dtype=float)
         survival = np.asarray(survival, dtype=float)
+        if times.size > 1:
+            # one node per time, holding the value after its last row (a tied first-schedule row repeats a time):
+            # the same nodes on every layout of one contract, so reads between nodes agree (spec D29)
+            keep = np.r_[np.abs(np.diff(times)) > Tolerance.ZERO, True]
+            times, survival = times[keep], survival[keep]
         if times.size == 0:
             end = max(float(terminal_time), 0.0)
             if almost_equal(end, 0.0, tol=Tolerance.PROBABILITY):
@@ -456,11 +505,13 @@ class EventDistribution:
         return float(self.determination_times.get(event_type, self.survival_times[-1]))
 
     def survival_at(self, t: float) -> float:
-        """Linearly interpolate survival probability at a year fraction.
+        """Survival probability at a year fraction (spec D29).
 
-        A strictly past time reads 1. A time at the valuation instant (``is_zero``) reads the post-observation
-        survival of an event the grid keeps at 0 — a theta-shifted contract keeps the observation landing on its
-        new origin — else 1.
+        At a node it is the node's value: knock-outs at that time excluded, maturity-type terminations at that time
+        still alive. Between nodes the knock-out part is interpolated linearly, while a maturity-type termination
+        leaves as a step right after its own time (a settled note is never interpolated back to life). A strictly
+        past time reads 1. A time at the valuation instant (``is_zero``) reads the post-observation survival of an
+        event the grid keeps at 0 — a theta-shifted contract keeps the observation landing on its new origin — else 1.
         """
 
         self.ensure_live("survival_at")
@@ -472,11 +523,33 @@ class EventDistribution:
             return 1.0
         if t < 0.0:
             return 1.0
+        if self.terminal_times.size:
+            # the knock-out part: every node with the maturity-type mass determined before it put back
+            settled_before = np.array([self._settled_before(float(u)) for u in time_grid])
+            base = survival_grid + settled_before
+            return float(self._interpolate(t, time_grid, base)) - self._settled_before(t)
+        return float(self._interpolate(t, time_grid, survival_grid))
+
+    def survival_after(self, t: float) -> float:
+        """Survival just after ``t``: ``survival_at(t)`` less the maturity-type terminations determined at ``t``
+        (spec D29: a note settled at ``t`` does not enter a period starting at ``t``)."""
+        settled_now = 0.0
+        if self.terminal_times.size and float(t) > 0.0:
+            hit = np.abs(self.terminal_times - float(t)) <= Tolerance.ZERO
+            settled_now = float(np.sum(self.terminal_probability[hit]))
+        return self.survival_at(t) - settled_now
+
+    def _settled_before(self, t: float) -> float:
+        """Maturity-type mass determined strictly before ``t`` (beyond ``Tolerance.ZERO``)."""
+        return float(np.sum(self.terminal_probability[self.terminal_times < t - Tolerance.ZERO]))
+
+    @staticmethod
+    def _interpolate(t: float, time_grid: np.ndarray, values: np.ndarray) -> float:
         if t <= time_grid[0]:
-            return float(survival_grid[0])
+            return float(values[0])
         if t >= time_grid[-1]:
-            return float(survival_grid[-1])
-        return float(np.interp(t, time_grid, survival_grid))
+            return float(values[-1])
+        return float(np.interp(t, time_grid, values))
 
     def normalized(self) -> "EventDistribution":
         """Return a copy with tiny termination-probability drift normalized."""
@@ -517,6 +590,8 @@ class EventDistribution:
             rebased=self.rebased,
             flagged_streams=self.flagged_streams,
             knock_in_carried=self.knock_in_carried,
+            terminal_times=self.terminal_times,
+            terminal_probability=self.terminal_probability,
         )
 
     # --- invariants -------------------------------------------------------------------------------------
@@ -555,6 +630,12 @@ class EventDistribution:
                         f"EventDistribution stream_dates[{event_type.value}] is not aligned to its axis"
                     )
         self._validate_payment_times()
+        if self.terminal_times.shape != self.terminal_probability.shape or self.terminal_times.ndim != 1:
+            raise NumericalError("EventDistribution terminal_times / terminal_probability must align (1D)")
+        if np.any(~np.isfinite(self.terminal_times)) or np.any(~np.isfinite(self.terminal_probability)):
+            raise NumericalError("EventDistribution terminal steps contain non-finite values")
+        if np.any(self.terminal_probability < -Tolerance.PROBABILITY):
+            raise NumericalError("EventDistribution terminal_probability is negative")
         if not np.isfinite(self.probability_residual):
             raise NumericalError("EventDistribution.probability_residual must be finite")
 

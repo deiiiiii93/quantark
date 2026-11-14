@@ -163,15 +163,16 @@ class AccrualLeg(CashLeg):
         if self.ko_behavior is KOBehavior.PAY_FULL_SCHEDULE:
             survival = np.ones(n_periods, dtype=float)
         else:
-            reference_times = (
-                self.schedule.period_starts
-                if self.survival_basis is SurvivalBasis.ENTER_PERIOD
-                else self.schedule.period_ends
-            )
-            survival = np.array(
-                [event_dist.survival_at(float(t)) for t in reference_times],
-                dtype=float,
-            )
+            # spec D29: a note settled at a period's start does not enter it (``survival_after``); a period ending
+            # at a settlement is complete (``survival_at`` holds the settled note at its own time)
+            if self.survival_basis is SurvivalBasis.ENTER_PERIOD:
+                survival = np.array(
+                    [event_dist.survival_after(float(t)) for t in self.schedule.period_starts], dtype=float
+                )
+            else:
+                survival = np.array(
+                    [event_dist.survival_at(float(t)) for t in self.schedule.period_ends], dtype=float
+                )
 
         payment_times = self._payment_times(event_dist)
         dfs = np.array([env.get_discount_factor(float(t)) for t in payment_times])
