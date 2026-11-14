@@ -531,3 +531,21 @@ def test_a_discrete_knock_in_observed_at_valuation_is_one_row_at_zero(engine_nam
 @pytest.mark.parametrize("engine_name", [e for e in NON_DCN if ENGINES[e].family in NO_KI_BARRIER_FAMILIES])
 def test_no_knock_in_barrier_reports_computed_zeros(engine_name):
     _assert_no_knock_in(_stats(engine_name, "no_ki_barrier"))
+
+
+def test_the_mc_discrete_knock_in_row_at_valuation_carries_the_valuation_date():
+    """A dated note valued on a discrete KI observation date with the spot through the barrier: the single row at 0
+    carries that date (CP8 minor ii; the dates a dated table's rows carry elsewhere)."""
+    from intraday.conftest import dated_snowball
+    from quantark.util.calendar import CalendarType, create_calendar
+
+    calendar = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+    product = dated_snowball(calendar, datetime(2026, 3, 16))
+    first = product.barrier_config.ki_observation_schedule.records[0].observation_date
+    env = PricingEnvironment(spot_quote=SpotQuote(spot=70.0), vol_surface=FlatVolSurface(volatility=0.22),
+                             rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(div_yield=0.01),
+                             valuation_date=first, calendar=calendar)
+    stats = SnowballMCEngine(params=_mc()).calculate_event_stats(product, env)
+    _assert_knock_in_at_zero(stats)
+    np.testing.assert_array_equal(stats.ki_table.times, [0.0])
+    assert stats.ki_table.dates == (first,)
