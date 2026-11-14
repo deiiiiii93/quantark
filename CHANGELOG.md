@@ -43,11 +43,14 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
   plus "P(matured knocked in)".
 
-### Changed: prices (five sanctioned moves; every other `price()` is bitwise unchanged)
+### Changed: prices (six sanctioned moves; every other `price()` is bitwise unchanged)
 
 - **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
   maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
   rule and the moves in price units.
+- **KO-reset with an explicit `settlement_date`: a note that ends with the first schedule is paid on
+  the settlement date** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed
+  below for the rule and the moves in price units.
 
 - **QUAD V2 memory Phoenix with `initial_coupon_arrears > 0`.** V2 ignored arrears owed at the
   pricing date while QUAD V1, PDE and MC pay them. V2 now releases them at the first remaining
@@ -172,6 +175,49 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 
   The Monte Carlo fold route on these contracts, which raised (the fold structure assumed payment at
   the product maturity), now values.
+- **KO-reset settlement precedence: an explicit `settlement_date` comes first** (owner ruling
+  2026-11-14). The settlement delay applies only when no `settlement_date` is booked. A KO-reset note
+  that ends with the first schedule -- the never-knocked-in maturity and, under EXPIRY pay, a
+  first-schedule knock-out -- is paid on the product's `settlement_date` when one is booked, else at
+  the first schedule's maturity plus the settlement delay. Monte Carlo already paid it there. The grid
+  engines paid it at the first schedule's maturity plus (settlement date − product maturity), a year
+  too early on a two-year note whose first schedule ends at one year. PDE 1D (flat and local vol),
+  Heston/SLV ADI, QUAD V1, QUAD V2, the KO-reset fold structure, the statistics' `payment_times` and
+  theta's schedule-1 end now follow it, on INSTANT and EXPIRY pay. One rule in one place:
+  `settlement_support.first_schedule_settlement` (dated: `first_schedule_terminal_timing`).
+  - Moves only KO-reset contracts with a `settlement_date` whose first schedule ends before the
+    product maturity; a numeric contract cannot carry a `settlement_date` (clock rule), so only dated
+    notes move.
+  - Contracts without a `settlement_date`, or whose first schedule runs to the product maturity, are
+    bitwise unchanged, and so is every other `price()`.
+  - Probabilities and cash amounts are unchanged; only the payment time and its discount factor move.
+
+  Moves on the default engines (PDE 1D / QUAD V1 / QUAD V2), with a Monte Carlo reference of
+  8 × 65,536 paths:
+  - the matrix KO-reset on dates (two years, first schedule to one year, discrete KI 80, settled 20
+    days after the exercise date), EXPIRY: 93.14 → 90.67 (−2.47); MC 90.723 ± 0.030, from +82 SE to
+    −1.9 SE. INSTANT: 94.50 → 93.98 (−0.52), from +14 SE to −1.9 SE;
+  - the same aged 100 days: EXPIRY −2.69 (+109 SE → −1.2 to −1.3 SE), INSTANT −0.80 (+28 SE → −1.1 SE);
+    continuous KI: EXPIRY −2.21 (+61 SE → ≤ 0.4 SE), INSTANT −0.30 (+8 SE → ≤ 0.4 SE);
+  - local-vol PDE −2.49 (EXPIRY) and −0.37 (INSTANT); Heston ADI −2.57 and −0.55; SLV ADI −2.65 and
+    −0.63;
+  - the one-year monthly note (first schedule to six months, settled two days after the exercise
+    date), EXPIRY: 99.43 → 98.03 (−1.41); MC 98.036 ± 0.010, from +140 SE to −1.1 SE. INSTANT:
+    100.07 → 99.65 (−0.42), from +41 SE to −0.9 SE;
+  - a first-schedule knock-out decided at valuation (EXPIRY), and a note whose first schedule ends at
+    the valuation instant: now equal to MC to 1e-14 (−3.12 and −3.10 on the matrix note on dates).
+
+  The Monte Carlo fold route on these contracts, which raised a binding mismatch on both pay types
+  (the fold structure assumed the grid's payment), now values and equals the MC event route on the
+  same paths. On a carried knock-in, only the zero-probability maturity row's `payment_times` move;
+  the price is bitwise.
+- **Booking follows the KO-reset payment rule (D30, D33).** The lifecycle tracker and the intraday
+  timeline book a first-schedule knock-out under EXPIRY pay, and the never-knocked-in maturity, on the
+  payment of the note that ends with the first schedule: the explicit `settlement_date` when booked,
+  else the first schedule's maturity plus the settlement convention. The tracker booked such a
+  knock-out on its record's own settlement date, and the intraday timeline at the product terminal's
+  payment. The simulated-path calendar schedule places the same settlement day and delay, and exact
+  mode still equals the replay. Booking only: no price moves (intraday prices are bitwise).
 - **PDE knocked-in edge row honours partial protection without an airbag** (owner ruling
   2026-11-14; PDE 1D flat and local vol, Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). The
   protected closed-form rows of the knocked-in surface write a constant at the knock-in edge: a
@@ -211,10 +257,6 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   `LocalVolDCNPDEEngine`.
 - Tracked study outputs computed before this release still show the old KI-ever and maturity
   numbers; see section 11 of the migration note.
-- KO-reset with an explicit `settlement_date`: Monte Carlo pays the never-knocked-in maturity (and,
-  under EXPIRY pay, a first-schedule knock-out with it) on the product's `settlement_date`, the grid
-  engines at the first schedule's maturity plus the product's terminal delay. Pre-existing on the
-  maturity row; owner decision.
 - No KI after a certain KO on grid engines holds up to truncated-domain edge mass. When the KO
   barrier lies below the grid (the AC9 test contract), the knocked-in far-edge row counts the
   edge-reaching mass as knocked in. LV PDE: 1.07e-5 at the default width 4, 4.9e-9 at 6, 2.6e-13 at

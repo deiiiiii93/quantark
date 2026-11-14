@@ -219,6 +219,26 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     grid +0.63 to +0.70 on the 90% test notes (from −19 to −25 SE to within 1 SE of MC), flat vol and
     Heston ADI below 2e-3. Notes whose floor binds there (e.g. 10–30% maximum loss) are bitwise
     unchanged (see the CHANGELOG).
+22. **KO-reset settlement precedence: an explicit `settlement_date` comes first (D33).** A KO-reset
+    note that ends with the first schedule (the never-knocked-in maturity; under EXPIRY pay also a
+    first-schedule knock-out) is paid on the product's `settlement_date` when one is booked, else at
+    the first schedule's maturity plus the settlement delay. MC already paid it there; PDE 1D,
+    local-vol PDE, Heston/SLV ADI, QUAD V1, QUAD V2 and the fold structure paid it at the first
+    schedule's maturity plus (settlement date − product maturity). Dated notes with a
+    `settlement_date` and a first schedule shorter than the product price lower on the grid engines
+    (−2.47 EXPIRY / −0.52 INSTANT on the 2-year matrix note on dates, now within 1.9 SE of MC; see the
+    CHANGELOG), the `maturity` row's `payment_time` / `payment_date` become the settlement date's (and
+    the EXPIRY `pre` rows' with it), and the MC fold route on these notes values instead of raising a
+    binding mismatch. Notes without a `settlement_date`, numeric notes (they cannot carry one) and
+    notes whose first schedule runs to the product maturity are bitwise unchanged. The rule lives in
+    `settlement_support.first_schedule_settlement` (dated: `first_schedule_terminal_timing`).
+23. **Booking of a KO-reset note that ends with the first schedule (D30, D33).** The lifecycle
+    tracker books a first-schedule knock-out under EXPIRY pay on that note's payment (the
+    `settlement_date` when booked, else the first schedule's maturity plus the settlement
+    convention), as it books the never-knocked-in maturity; it used to book the record's own
+    settlement date. Its calendar schedule (simulated paths) places the same settlement day and
+    delay. The intraday timeline's pre-KI KO events under EXPIRY pay carry that payment instant
+    instead of the product terminal's. Booking only; no price moves.
 
 ## 10. Known limitations in 0.11.0
 
@@ -238,10 +258,6 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   day) below the MC reference, whose standard error there is 1.7e-3 years.
 - QUAD V1 Phoenix EXPIRY `reconciliation_error` is about 7e-9 × pv at 401 nodes, shrinking under
   refinement (a pre-existing price-side projection difference).
-- KO-reset with an explicit `settlement_date`: MC pays the never-knocked-in maturity (and, under
-  EXPIRY pay, a first-schedule knock-out with it) on the product's `settlement_date`; the grid
-  engines pay it at the first schedule's maturity plus the product's terminal delay. Pre-existing on
-  the maturity row; owner decision.
 - No KI after a certain KO (AC9) holds on grid engines up to truncated-domain edge mass: with the KO
   barrier below the grid, the knocked-in far-edge row counts edge-reaching mass as knocked in (LV
   PDE 1.07e-5 at width 4, 4.9e-9 at 6, 2.6e-13 at 8; ADI ≤ 5e-9). P(KI) = 1 − ΣP(KO) holds.
