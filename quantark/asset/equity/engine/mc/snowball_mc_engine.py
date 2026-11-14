@@ -24,7 +24,7 @@ from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import EventStatistics
-from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing
+from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time, first_schedule_terminal_timing
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
 )
@@ -493,7 +493,11 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
 
     def _ko_reset_decided_knock_out(self, product, pricing_env, decision, maturity: float) -> float:
         """A KO-reset knock-out decided at the valuation instant, paid as ``_compute_ko_schedule_payoffs``
-        pays it: at the record's own settlement under INSTANT, else with the terminal payment."""
+        pays it: at the record's own settlement under INSTANT, else with the note it ends -- a first-schedule
+        knock-out with the note that ends with schedule 1 (spec D30, D33), a
+        second-schedule one with the terminal payment. The first-schedule payment is the grid engines'
+        (``first_schedule_payment_time``): reached only at zero time to maturity, where schedule 1 ends at the
+        product terminal, it is that terminal's payment."""
         profile = (
             product.get_pre_ko_observation_profile(pricing_env)
             if decision.ko_regime == "pre"
@@ -508,6 +512,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                 record=profile["records"][decision.ko_index],
                 cashflow_id=f"ko_reset[{decision.ko_index}]",
             )
+        elif decision.ko_regime == "pre":
+            payment_time = float(first_schedule_payment_time(product, pricing_env))
         else:
             payment_time = self._resolve_payment_time(
                 product,
@@ -2247,15 +2253,10 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             if post_mode == PostKOScheduleMode.ABSOLUTE:
                 # a knocked-in snowball on schedule 2 (a carried knock-in is ABSOLUTE): decided at schedule 2's end,
                 # where it settles below -- not the grid's last node, schedule 1's end when that runs on past it
-                # (spec D31; the never-knocked-in readout above reads its own schedule's end likewise). Schedule 2
-                # is in force only from the knock-in (the knock-out test above), so this holds for a knock-in at or
-                # before schedule 2's end.
-                # TODO(D31 open item): a native ABSOLUTE contract whose knock-in can fall AFTER schedule 2's end
-                # has no rule yet for that path (no schedule 2 left in force); it keeps the grid's last node.
-                v1_paths = np.flatnonzero(is_v1)
-                within = ki_time[v1_paths] - float(post_maturity_abs) <= Tolerance.ZERO
-                columns = np.where(within, grid["post_maturity_idx"] + 1, paths.shape[1] - 1)
-                terminal_spots = paths[v1_paths, columns]
+                # (spec D31; the never-knocked-in readout above reads its own schedule's end likewise). Every knock-in
+                # meets schedule 2 in force: a knock-in is tested only during schedule 1, which ends no later than
+                # schedule 2 (spec D35, refused at construction otherwise), so no path knocks in after schedule 2's end.
+                terminal_spots = paths[is_v1, grid["post_maturity_idx"] + 1]
             elif len(post_times) == 0:
                 # (a carried knock-in never reaches here: the grid refuses a REBASED one)
                 terminal_spots = paths[is_v1, -1]

@@ -47,16 +47,9 @@ CASES = [("snowball", NO_KI, False), ("snowball", NO_KO, False), ("phoenix", NO_
          ("ko_reset", NO_KO, True)]
 
 
-def test_legacy_quad_prices_a_ko_reset_whose_post_knock_in_schedule_has_ended():
-    """Schedule 2 ended first: a knock-in now replaces schedule 1 by nothing, so a knocked-in contract runs to maturity."""
-    times = ((0.5, 0.75, 1.0), (0.5, 0.75, 1.0), (0.1, 0.2))
-
-    gap = abs(price("ko_reset", "pde", make("ko_reset", *times), SPOT)
-              - price("ko_reset", "quad_v1", make("ko_reset", *times), SPOT))
-    aged = make("ko_reset", *times)
-    aged.time_shift(AGE, None, env(SPOT), keep_landing=True)
-    assert not aged.post_barrier_config.ko_observation_schedule.records
-    assert price("ko_reset", "quad_v1", aged, SPOT) == pytest.approx(price("ko_reset", "pde", aged, SPOT), abs=2.0 * gap)
+# Retired (T25h): "legacy QUAD prices a KO-reset whose post-knock-in schedule has ended" (schedule 2 at 0.1, 0.2 aged
+# out while schedule 1 ran to 1.0). Schedule 2 ends last (spec D35): that contract is refused at construction, and an
+# aged valid contract whose schedule 2 has ended has ended schedule 1 too (the knocked-in ``NO_KO`` case above).
 
 
 @pytest.mark.parametrize("family, times, knocked_in", CASES,

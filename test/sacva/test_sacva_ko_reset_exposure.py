@@ -109,8 +109,9 @@ def test_ko_reset_post_barrier_certain_oracle():
     # samples node 0), so all follow the POST leg. pre-KO 500 is unreachable, post-KO 1.0
     # is certain at the first post observation -> closed-form exposure using the POST
     # payoff, which only matches if the regime-conditional KO uses the post barrier+payoff.
+    # schedule 2 ends last (spec D35): a second post record at 1.0, never reached (the first is certain)
     product = _ko_reset(pre_ko=500.0, post_ko=1.0, ki=101.0,
-                        ko_dates=(0.5, 1.0), post_dates=(0.5,))
+                        ko_dates=(0.5, 1.0), post_dates=(0.5, 1.0))
     trade = _trade(product, quantity=4.0)
     env = trade.env
     post_recs = trade.engine._resolve_ko_records(

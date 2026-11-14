@@ -443,9 +443,14 @@ def test_the_fold_binder_refuses_knock_in_and_coupon_legs_on_the_knocked_in_note
 # must agree to round-off. Oracle: the ABSOLUTE layout (banked, cross-engine checked).
 
 PAIR_SPOT = 78.0
-#: schedule-2 offsets: to the first schedule's end (the knocked-in settlement on the axis' last time) or ending before
-#: it (the settlement in the middle of the axis, the first schedule's dates running on past it)
-PAIR_OFFSETS = {"settles_last": (0.25, 0.5, 0.75, 1.0), "settles_inside": (0.25, 0.5)}
+#: schedule-2 offsets: to the first schedule's end (the knocked-in settlement on the axis' last time). The T23
+#: ``settles_inside`` shape (offsets (0.25, 0.5): settling in the middle of the axis, schedule 1's dates running on past
+#: it) breaks "schedule 2 ends last" and is refused at construction (spec D35, T25h): on a valid pair the event axis
+#: ends at the knocked-in settlement (a product maturity past it does not extend the axis), so a settlement inside
+#: the axis cannot occur on it. Its two layout-equivalence tests run on ``settles_last``; its two D29 tests are retired
+#: (D29 inside the axis stays pinned on the unknocked REBASED note whose early knock-ins settle before the later ones,
+#: ``test_the_unknocked_rebased_note_settled_at_1_25_is_gone_at_1_5``).
+PAIR_OFFSETS = {"settles_last": (0.25, 0.5, 0.75, 1.0)}
 
 
 def _pair(kind: str, layout: str):
@@ -544,27 +549,6 @@ def _expected_survival(ref, nodes, t: float) -> float:
     return float(np.interp(t, [nodes[i], nodes[i + 1]], [left, right]))
 
 
-def _pair_paths(kind: str, layout: str) -> dict:
-    from test_asset.equity.engine_mc import mc_same_path_reference
-
-    return mc_same_path_reference.ko_reset_paths(_engine(), _pair(kind, layout), cases.flat_env(PAIR_SPOT))
-
-
-@pytest.mark.parametrize("layout", ("rebased", "absolute"))
-def test_a_note_settled_inside_the_axis_is_alive_at_its_settlement_and_gone_after(layout):
-    """D29 on the pair settling knocked in at 0.5 (schedule-1 dates running on to 1.0): survival at 0.5 still holds the
-    settled note, at 0.75 and between nodes after 0.5 it does not, and ``survival_after(0.5)`` (going into a period
-    that starts there) excludes it -- each value a path count."""
-    dist, _ = _pair_route("settles_inside", layout)
-    ref = _pair_paths("settles_inside", layout)
-    settled = np.count_nonzero(ref["event"] == "ki_settlement") / ref["n"]
-    assert settled > 0.5
-    for t in (0.25, 0.5, 0.75, 1.0, 0.3, 0.6, 0.5 + 1e-9, 0.9):
-        assert abs(dist.survival_at(t) - _expected_survival(ref, dist.survival_times, t)) <= 1e-15, (layout, t)
-    assert abs(dist.survival_after(0.5) - _alive(ref, 0.5, entering=True)) <= 1e-15
-    assert dist.survival_at(0.75) == 0.0 and dist.survival_at(0.5) >= settled
-
-
 def test_the_unknocked_rebased_note_settled_at_1_25_is_gone_at_1_5():
     """D29 on the AC16 note: paths settling knocked in at 1.25 are alive at 1.25 and gone at 1.5 and in between; the
     accrual legs (COMPLETE and ENTER) pay them nothing after 1.25 (``test_event_route_leg_equals_the_same_path_valuation``
@@ -618,13 +602,3 @@ def test_a_leg_running_past_a_settled_note_pays_nothing_after_its_end(case_id, e
     # and the period ending at the end is complete for the notes that settle there
     if basis is SurvivalBasis.COMPLETE_PERIOD:
         assert _accrual_over([end - 0.25], basis=basis).value(dist, env, cases.UNIT) > 0.0
-
-
-@pytest.mark.parametrize("layout", ("rebased", "absolute"))
-def test_a_leg_after_the_pair_settles_inside_the_axis_pays_nothing(layout):
-    """The pair settling at 0.5 with schedule-1 dates running on to 1.0: every note has ended by 0.5 (knocked out or
-    settled), so periods from 0.5 on pay nothing on either layout, though the axis goes on."""
-    dist, env = _pair_route("settles_inside", layout)
-    assert float(dist.survival_times[-1]) == 1.0
-    for basis in (SurvivalBasis.ENTER_PERIOD, SurvivalBasis.COMPLETE_PERIOD):
-        assert _accrual_over([0.5, 0.75], basis=basis).value(dist, env, cases.UNIT) == 0.0

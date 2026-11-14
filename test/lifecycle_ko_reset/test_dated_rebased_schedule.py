@@ -27,15 +27,16 @@ from .conftest import START, env
 from .test_tracker_rules import run, tracker
 
 KI_DATES = [datetime(2026, 4, 6), datetime(2026, 7, 6)]                 # also schedule 1 (both follow ki_dates)
-GENERATED = {0: (datetime(2026, 5, 6), datetime(2026, 6, 6)), 1: (datetime(2026, 8, 6), datetime(2026, 9, 6))}
-LATEST_END = datetime(2026, 9, 6)
+# offsets (1, 3) months: a knock-in on the first record ends with schedule 1 (2026-07-06; schedule 2 ends last, D35)
+GENERATED = {0: (datetime(2026, 5, 6), datetime(2026, 7, 6)), 1: (datetime(2026, 8, 6), datetime(2026, 10, 6))}
+LATEST_END = datetime(2026, 10, 6)
 
 
 def _dated(dates, level):
     return ObservationSchedule(records=[ObservationRecord(observation_date=d, barrier=level) for d in dates])
 
 
-def dated_rebased(*, months=(1, 2), ki_dates=KI_DATES, exercise_date=LATEST_END, post=None, mode=M.REBASED,
+def dated_rebased(*, months=(1, 3), ki_dates=KI_DATES, exercise_date=LATEST_END, post=None, mode=M.REBASED,
                   **kw):
     post = post or ObservationSchedule(records=[ObservationRecord(observation_time=m / 12, barrier=95.0)
                                                 for m in months])
@@ -62,21 +63,21 @@ def test_a_dated_rebased_contract_generates_its_extended_schedule():
 
 
 def test_the_generated_dates_keep_the_day_and_clamp_at_the_month_end():
-    note = dated_rebased(ki_dates=[datetime(2026, 1, 31), datetime(2026, 7, 6)])
-    assert note.rebased_extended_schedule[0] == (datetime(2026, 2, 28), datetime(2026, 3, 31))
+    note = dated_rebased(ki_dates=[datetime(2026, 1, 31), datetime(2026, 4, 30)])
+    assert note.rebased_extended_schedule[0] == (datetime(2026, 2, 28), datetime(2026, 4, 30))
 
 
 def test_an_exercise_date_before_the_latest_end_is_refused():
     with pytest.raises(ValidationError, match="latest"):
-        dated_rebased(exercise_date=datetime(2026, 9, 5))
-    assert dated_rebased(exercise_date=datetime(2026, 10, 1)).exercise_date == datetime(2026, 10, 1)
+        dated_rebased(exercise_date=datetime(2026, 10, 5))
+    assert dated_rebased(exercise_date=datetime(2026, 11, 1)).exercise_date == datetime(2026, 11, 1)
 
 
 def test_a_maturity_date_booking_supplies_the_exercise_date_floored_at_the_latest_end():
     assert dated_rebased(exercise_date=None, maturity_date=LATEST_END).exercise_date == LATEST_END
-    assert dated_rebased(exercise_date=None, maturity_date=datetime(2026, 10, 1)).exercise_date == datetime(2026, 10, 1)
+    assert dated_rebased(exercise_date=None, maturity_date=datetime(2026, 11, 1)).exercise_date == datetime(2026, 11, 1)
     with pytest.raises(ValidationError, match="latest"):
-        dated_rebased(exercise_date=None, maturity_date=datetime(2026, 9, 5))
+        dated_rebased(exercise_date=None, maturity_date=datetime(2026, 10, 5))
 
 
 def test_an_offset_that_is_not_a_whole_month_is_refused():

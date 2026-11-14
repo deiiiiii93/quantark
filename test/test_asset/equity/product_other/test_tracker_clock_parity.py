@@ -108,21 +108,22 @@ def phoenix(annualized: bool, memory: bool = True) -> Callable:
 
 def _rebased_gaps(initial: pd.Timestamp) -> List[float]:
     """The dated REBASED twin's schedule 2 after a knock-in on its last knock-in record (day 182, the record the
-    knock-in path fires), as offsets in years: the day gaps of ``add_months(knock-in date, k)``, k = 1..3."""
+    knock-in path fires), as offsets in years: the day gaps of ``add_months(knock-in date, k)``, k = 1..6."""
     knock_in = on(initial, round(TIMES[5] * 365))
-    return [(add_months(knock_in, k) - knock_in).days / 365.0 for k in (1, 2, 3)]
+    return [(add_months(knock_in, k) - knock_in).days / 365.0 for k in (1, 2, 3, 4, 5, 6)]
 
 
 def ko_reset(mode: M) -> Callable:
     """Schedule 1 (KO 103, flat 15%) and the discrete KI (75) at k/12 for k = 1..6; schedule 2 (KO 95, flat 3%) at
-    k/12 for k = 7..12 (ABSOLUTE) or k = 1..3 months after the knock-in (REBASED); 5% rebate.
+    k/12 for k = 7..12 (ABSOLUTE) or k = 1..6 months after the knock-in (REBASED: a knock-in on the first record,
+    day 30, plus 6 calendar months ends after schedule 1 (day 182) -- schedule 2 ends last, spec D35); 5% rebate.
 
     REBASED (clock rule 2026-10-26): the dated form books its offsets as whole months (k/12 years) and generates its
     schedule 2 as the knock-in date + k calendar months; the numeric form cannot vary its offsets by knock-in, so it
     books the dated twin's day gaps for the knock-in the path fires (``_rebased_gaps``) -- the same contract on every
     path this module walks."""
     pre = TIMES[:6]
-    post = TIMES[6:] if mode == M.ABSOLUTE else TIMES[:3]
+    post = TIMES[6:] if mode == M.ABSOLUTE else TIMES[:6]
 
     def build(form: str, initial: pd.Timestamp):
         dated = form == "dated"
@@ -134,7 +135,7 @@ def ko_reset(mode: M) -> Callable:
             offsets = post if dated else _rebased_gaps(initial)
             post_sched = numeric_schedule(offsets, 95.0)
             maturity = pre[-1] + offsets[-1]
-            exercise = add_months(on(initial, round(pre[-1] * 365)), 3) if dated else None
+            exercise = add_months(on(initial, round(pre[-1] * 365)), 6) if dated else None
         p = KnockOutResetSnowballOption(
             initial_price=100.0, strike=100.0, maturity=None if exercise is not None else maturity,
             initial_date=initial.to_pydatetime() if dated else None, exercise_date=exercise,

@@ -1,7 +1,8 @@
 """QUAD v1 knock-out-reset: the event route keeps working once a knock-out schedule has ended.
 
-Both ends are legal states: past its first schedule only a knocked-in contract is alive, and its second schedule
-alone can knock it out; an aged-out second schedule leaves a knock-in no knock-out before maturity. The event
+Past its first schedule only a knocked-in contract is alive, and its second schedule alone can knock it out. (An
+aged-out second schedule with the first still live was the other end; schedule 2 ends last, spec D35, so it cannot
+occur any more.) The event
 statistics returned nothing when either schedule had no record left, so ``price_with_events`` fell back to a
 maturity-only distribution: a knocked-in note past its first schedule had P(maturity, no knock-out) = 1, its
 knock-out legs raised and its no-knock-out legs were paid in full, every day for the rest of its life. QUAD v2 is
@@ -15,7 +16,6 @@ import pytest
 
 from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
 from quantark.asset.equity.engine.quad.v2 import KOResetSnowballQuadEngineV2
-from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
 from quantark.cashleg import EventType, LegDirection
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.portfolio import EquityPosition
@@ -45,23 +45,15 @@ def _first_ended(ki="discrete"):
     return product, flat_env(last + timedelta(days=10), spot=90.0)
 
 
-def _second_ended(knocked_in):
-    """The second schedule's two dates are behind the valuation date; the first schedule is still live."""
-    product = dated_ko_reset(CAL, T0)
-    post = product.post_barrier_config
-    early = post.ko_observation_schedule.records[:2]
-    product.post_barrier_config = replace(post, ko_observation_schedule=ObservationSchedule(records=list(early)))
-    product.validate()
-    if knocked_in:
-        product._otc_lifecycle_knocked_in = True
-    return product, flat_env(early[-1].observation_date + timedelta(days=5), spot=90.0)
+# The other end -- the second schedule aged out while the first is still live (its two early dates behind the
+# valuation date) -- is no longer a contract: schedule 2 ends last (spec D35, T25h), so once schedule 2 has ended so has
+# schedule 1. Its two cases ("second ended, not knocked in / knocked in") are retired; the contract is refused at
+# construction (``test_ko_reset_schedule_two_ends_last``).
 
 
 CASES = {
     "first ended, discrete knock-in": lambda: _first_ended(),
     "first ended, continuous knock-in": lambda: _first_ended("continuous"),
-    "second ended, not knocked in": lambda: _second_ended(False),
-    "second ended, knocked in": lambda: _second_ended(True),
 }
 
 

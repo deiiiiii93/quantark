@@ -80,7 +80,7 @@ def _autocallable_outcome(product, env, env_t1, time_bump, state):
     carried = bool(getattr(state, "knocked_in", False) or getattr(product, "_otc_lifecycle_knocked_in", False))
     decision = product.decide_observations_at_valuation(env.spot, env, knocked_in=carried)
     if decision.knocked_out:
-        return carried, 0.0, float(decision.ko_record.settlement_time), None
+        return carried, 0.0, _knock_out_payment_time(product, env, decision), None
     fixed_pv = 0.0
     coupon = float(getattr(decision, "coupon", 0.0) or 0.0)
     if coupon:
@@ -134,6 +134,20 @@ def _memory_count_at_t0(product, env, state):
     if hasattr(released, "missed_coupon_indices"):
         released.missed_coupon_indices = set()
     return decided_on, released
+
+
+def _knock_out_payment_time(product, env, decision) -> float:
+    """When a knock-out decided at ``t0`` is paid: its record's settlement, except a KO-reset first-schedule knock-out
+    under EXPIRY coupon pay, paid with the note that ends with schedule 1 -- the first-schedule payment (spec D30, D33),
+    as every engine pays it (``first_schedule_payment_time``)."""
+    from quantark.asset.equity.product.option import KnockOutResetSnowballOption
+    from quantark.util.enum import CouponPayType
+
+    if (isinstance(product, KnockOutResetSnowballOption) and getattr(decision, "ko_regime", None) == "pre"
+            and product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY):
+        from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time
+        return float(first_schedule_payment_time(product, env))
+    return float(decision.ko_record.settlement_time)
 
 
 def _ko_reset_schedule_1_end(product, env, time_bump):

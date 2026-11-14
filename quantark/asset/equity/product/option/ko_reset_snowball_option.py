@@ -28,7 +28,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close, is_valid_number
+from quantark.util.numerical import Tolerance, is_close, is_valid_number
 
 from .observation_schedule import (
     at_valuation_instant,
@@ -75,6 +75,10 @@ class KnockOutResetSnowballOption(SnowballOption):
     2. The second schedule only becomes effective through a knock-in DURING the first one. A
        contract not knocked in when the first schedule ends matures there, so a knock-in is never
        tested after that (``first_schedule_ended``, ``require_alive``).
+    3. Schedule 2 ends last (spec D35): its last date is on or after schedule 1's last date, so every
+       knock-in meets a schedule 2 in force until the note ends. ABSOLUTE checks the booked dates; REBASED
+       checks the earliest possible knock-in (the first knock-in observation) plus schedule 2's last offset.
+       A contract that breaks it is refused at construction (``ValidationError``, on both clocks).
 
     Two rules fix what one instant decides:
 
@@ -153,6 +157,77 @@ class KnockOutResetSnowballOption(SnowballOption):
         self._validate_first_schedule_settlement_time()
         super().validate(allow_zero_maturity=allow_zero_maturity)
         self._validate_dated_rebased_end()
+        self._validate_schedule_two_ends_last()
+
+    # ------------------------------------------------------------------
+    # Validity: schedule 2 ends last (spec D35, owner ruling 2026-11-14)
+    # ------------------------------------------------------------------
+
+    def _validate_schedule_two_ends_last(self) -> None:
+        """Schedule 2's last date must be on or after schedule 1's last date (equality allowed).
+
+        A knock-in replaces schedule 1 by schedule 2 and the knocked-in note lives until schedule 2 ends; a schedule 2
+        that could end before schedule 1 leaves a knock-in with no schedule 2 in force, which no contract means. Checked
+        on the booked records (passed ones included), so an aged contract is held to the rule it was booked under:
+
+        - ABSOLUTE: schedule 2's last booked date (numeric: time) against schedule 1's;
+        - REBASED: schedule 2 hangs from the knock-in, and any path could knock in on the first knock-in observation,
+          so that observation plus schedule 2's last offset (dated: ``rebased_dates_after``, calendar months) must not
+          fall before schedule 1's last date. A REBASED contract monitors its knock-in discretely
+          (``_validate_post_observation_parameters``), so the earliest possible knock-in is always that observation.
+          Every later knock-in ends later, so each knocked-in copy (``with_absolute_schedule_2``) is valid too.
+
+        Numeric times compare with ``is_close`` (round-off is equality). Raises ``ValidationError`` naming the dates.
+        """
+        pre = self.barrier_config.ko_observation_schedule
+        post = self.post_barrier_config.ko_observation_schedule
+        if pre is None or post is None or not pre.records or not post.records:
+            return
+        from quantark.asset.clock import ProductClock, product_clock
+
+        dated = product_clock(self) is ProductClock.DATE
+
+        def last(records):
+            if dated:
+                return max(r.observation_date for r in records)
+            return max(float(r.observation_time) for r in records)
+
+        def show(value) -> str:
+            return f"{value:%Y-%m-%d}" if dated else f"{value!r}"
+
+        def before(end, pre_end) -> bool:
+            if dated:
+                return end < pre_end
+            return end < pre_end and not is_close(end, pre_end, abs_tol=Tolerance.ZERO)
+
+        pre_end = last(pre.records)
+        if self.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
+            end = last(post.records)
+            if before(end, pre_end):
+                raise ValidationError(
+                    f"KO-reset snowball (ABSOLUTE): schedule 2 must end on or after schedule 1 (spec D35): schedule 2's "
+                    f"last observation {show(end)} precedes schedule 1's last observation {show(pre_end)}"
+                )
+            return
+        ki = self.barrier_config.ki_observation_schedule
+        records = [] if ki is None else ki.records
+        if not records:
+            return
+        if dated:
+            first = min(r.observation_date for r in records)
+            end = max(self.rebased_dates_after(first))
+            offset = f"{max(self._rebased_offset_months())} months"
+        else:
+            first = min(float(r.observation_time) for r in records)
+            last_offset = max(float(r.observation_time) for r in post.records)
+            end = first + last_offset
+            offset = f"{last_offset!r}"
+        if before(end, pre_end):
+            raise ValidationError(
+                f"KO-reset snowball (REBASED): schedule 2 must end on or after schedule 1 (spec D35): a knock-in on the "
+                f"first knock-in observation {show(first)} plus schedule 2's last offset ({offset}) ends {show(end)}, "
+                f"before schedule 1's last observation {show(pre_end)}"
+            )
 
     def _validate_first_schedule_settlement_time(self) -> None:
         """A finite time on the numeric clock (spec D34): a dated contract states the payment as its

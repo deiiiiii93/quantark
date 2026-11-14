@@ -103,6 +103,46 @@ def _snap_config(config):
     return replace(config, **changes)
 
 
+def _keep_schedule_two_last(contract) -> None:
+    """A numeric REBASED KO-reset keeps "schedule 2 ends last" (spec D35) on the day grid.
+
+    Rounding is monotone, so snapped ABSOLUTE dates keep their order; a REBASED end is a SUM, the first knock-in plus
+    the last offset, and two rounded terms can fall one day short of the rounded schedule-1 end on a contract booked
+    exactly on the boundary with off-day times (91.4 + 273.4 = 364.8 days rounds to 91 + 273 < 365). The rule holds on
+    the booked times; on the day grid the last offset then moves to the next day, the one day ``round`` took off, so the
+    snapped contract -- and every knocked-in copy built from it -- stays valid. Never more than one day; a contract whose
+    snapped end already reaches schedule 1's is unchanged.
+    """
+    from quantark.util.enum import PostKOScheduleMode
+    from quantark.util.numerical import is_close
+
+    if getattr(contract, "post_ko_mode", None) != PostKOScheduleMode.REBASED:
+        return
+    pre = contract.barrier_config.ko_observation_schedule
+    ki = contract.barrier_config.ki_observation_schedule
+    post = contract.post_barrier_config.ko_observation_schedule
+    if any(s is None or not s.records for s in (pre, ki, post)):
+        return
+    times = [r.observation_time for s in (pre, ki, post) for r in s.records]
+    if any(t is None for t in times):
+        return
+    first = min(float(r.observation_time) for r in ki.records)
+    last_index = max(range(len(post.records)), key=lambda i: float(post.records[i].observation_time))
+    last = float(post.records[last_index].observation_time)
+    pre_end = max(float(r.observation_time) for r in pre.records)
+    if first + last >= pre_end or is_close(first + last, pre_end, abs_tol=Tolerance.ZERO):
+        return
+    moved_to = (round(last * DAYS_PER_YEAR) + 1) / DAYS_PER_YEAR
+    record = post.records[last_index]
+    settlement = record.settlement_time
+    if settlement is not None:
+        settlement = moved_to + (float(settlement) - last)              # the lag is kept
+    records = list(post.records)
+    records[last_index] = replace(record, observation_time=moved_to, settlement_time=settlement)
+    contract.post_barrier_config = replace(contract.post_barrier_config,
+                                           ko_observation_schedule=replace(post, records=records))
+
+
 def snap_contract(product):
     """A deep copy of ``product`` with every numeric observation time and a numeric maturity snapped."""
     contract = deepcopy(product)
@@ -117,6 +157,8 @@ def snap_contract(product):
             snapped = _snap_config(config)
             moved = moved or snapped is not config
             setattr(contract, name, snapped)
+    if moved and not dated_rebased:
+        _keep_schedule_two_last(contract)
     maturity = getattr(contract, "maturity", None)
     if getattr(contract, "exercise_date", None) is None and isinstance(maturity, (int, float)) and is_off_day(maturity):
         contract.maturity = snap_time(float(maturity))
