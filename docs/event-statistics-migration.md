@@ -205,6 +205,14 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     engine facades do. An AT_KI leg on an already-knocked-in note values 0, and an unpaid past KI
     leg payment has no engine-side value.
 
+20. **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
+    maturity** (plus the terminal delay, with the never-knocked-in maturity) on every engine. PDE 1D,
+    local-vol PDE, Heston/SLV ADI, QUAD V1 and QUAD V2 paid it at the product maturity; MC already
+    paid it there. Prices of those contracts rise (+1.957 on the 2-year matrix contract, 91.34 →
+    93.29, now within 0.3 SE of MC; see the CHANGELOG), and `observations.payment_times` /
+    `payment_dates` of the `pre` rows move to the maturity row's. Probabilities and cash amounts do
+    not move.
+
 ## 10. Known limitations in 0.11.0
 
 - DCN statistics stay on the DCN's own ACT/365F axis, like DCN `price()`. Under `BUSINESS_DAYS` or
@@ -223,11 +231,10 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   day) below the MC reference, whose standard error there is 1.7e-3 years.
 - QUAD V1 Phoenix EXPIRY `reconciliation_error` is about 7e-9 × pv at 401 nodes, shrinking under
   refinement (a pre-existing price-side projection difference).
-- KO-reset with EXPIRY coupon pay: MC pays a first-schedule knock-out at the first schedule's
-  maturity (1.0), PDE 1D / QUAD V2 / QUAD V1 at the product maturity (2.0); `price()` differs by
-  about 2.1 (MC 93.45 ± 0.09 vs 91.34). Owner decision; pinned as a strict expected failure (`FINDINGS` in
-  `test/event_statistics/test_cross_engine_matrix.py`) by the slow matrix and by the default-suite
-  gate of the refined level against the banked MC reference.
+- KO-reset with an explicit `settlement_date`: MC pays the never-knocked-in maturity (and, under
+  EXPIRY pay, a first-schedule knock-out with it) on the product's `settlement_date`; the grid
+  engines pay it at the first schedule's maturity plus the product's terminal delay. Pre-existing on
+  the maturity row; owner decision.
 - No KI after a certain KO (AC9) holds on grid engines up to truncated-domain edge mass: with the KO
   barrier below the grid, the knocked-in far-edge row counts edge-reaching mass as knocked in (LV
   PDE 1.07e-5 at width 4, 4.9e-9 at 6, 2.6e-13 at 8; ADI ≤ 5e-9). P(KI) = 1 − ΣP(KO) holds.

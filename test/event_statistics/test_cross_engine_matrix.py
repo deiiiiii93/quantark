@@ -54,16 +54,11 @@ K = 4.0
 #: round-off floor relative to the cash scale (max(1, |pv|))
 FLOOR = 1e-10
 
-#: engine discrepancies the matrix found (T24): (entry, engine) -> (fields expected to fail, finding). Not absorbed
-#: into an allowance; price() unchanged. A field listed here that passes fails the test (the finding is resolved).
-FINDINGS = {
-    ("kr_abs_expiry|bs", engine): (
-        ("pv", "total_discounted_cash", "observations.discounted_cash"),
-        "KO-reset EXPIRY coupon pay: the MC pays a first-schedule knock-out at the first schedule's maturity (1.0, "
-        "the note's end under the KO-reset rule 2), PDE 1D / QUAD V2 / QUAD V1 at the product maturity (2.0); "
-        "price() differs by ~2.1 (MC 93.45 +- 0.09 vs 91.34)")
-    for engine in ("pde_1d", "quad_v2", "quad_v1")
-}
+#: engine discrepancies the matrix finds: (entry, engine) -> (fields expected to fail, finding). Not absorbed into an
+#: allowance. A field listed here that passes fails the test (the finding is resolved). Empty: T24's one finding (the
+#: KO-reset EXPIRY schedule-1 pay date, kr_abs_expiry|bs on PDE 1D / QUAD V2 / QUAD V1) was fixed by D30 (T25b) and
+#: its entry re-banked; it is a passing gate on both the slow matrix and the default-suite L2-vs-MC gate.
+FINDINGS: dict = {}
 
 PROBABILITY_LIKE = ("probability", "survival", "ki_cdf", "ki_survival", "probability_no_ko")
 

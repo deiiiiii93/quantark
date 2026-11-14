@@ -43,7 +43,11 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
   plus "P(matured knocked in)".
 
-### Changed: prices (three sanctioned moves; every other `price()` is bitwise unchanged)
+### Changed: prices (four sanctioned moves; every other `price()` is bitwise unchanged)
+
+- **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
+  maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
+  rule and the moves in price units.
 
 - **QUAD V2 memory Phoenix with `initial_coupon_arrears > 0`.** V2 ignored arrears owed at the
   pricing date while QUAD V1, PDE and MC pay them. V2 now releases them at the first remaining
@@ -144,6 +148,27 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 - PDE statistics labelled the not-knocked-in far edge as knocked-in settlement after the last
   discrete KI observation, so P(KI settlement) could exceed P(KI); edge rows now follow the price's
   own edge-row rule.
+- **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
+  maturity** (owner ruling 2026-11-14). A knock-out on schedule 1 happens only on a path never
+  knocked in, and that note ends at schedule 1's maturity, so EXPIRY pay means that date plus the
+  terminal settlement delay -- the never-knocked-in maturity's own payment -- not the product
+  (schedule-2) maturity. Monte Carlo already paid it there; PDE 1D (flat and local vol), Heston/SLV
+  ADI, QUAD V1, QUAD V2 and the KO-reset fold structure now do too, including a schedule-1
+  knock-out decided at valuation. Schedule-2 knock-outs, INSTANT pay, carried knock-ins and
+  contracts whose schedule 1 runs to the product maturity are bitwise unchanged; probabilities and
+  cash amounts are unchanged, only the payment time and its discount factor move (statistics'
+  schedule-1 `payment_times` move with the price). Moves on the default engines, with a Monte Carlo
+  reference of 8 × 65,536 paths:
+  - matrix contract (2-year, schedule 1 to 1 year, discrete KI): PDE / V1 / V2 91.34 → 93.29
+    (+1.957); MC 93.288 ± 0.033, from about −59 SE to within 0.3 SE. Local-vol PDE +2.13, Heston
+    ADI +2.04;
+  - 2-year monthly KO-reset (schedule 1 months 3–12 at KO 100 / 20% p.a., continuous KI 75):
+    96.10 → 98.42 (+2.32); MC 98.440 ± 0.014, from −170 SE to −1.1 SE;
+  - 1-year quarterly KO-reset (schedule 1 to 6 months): 98.20 → 99.00 (+0.80); MC 98.999 ± 0.011;
+  - a schedule-1 knock-out decided at valuation (spot 110): 94.18 → 97.04, equal to MC.
+
+  The Monte Carlo fold route on these contracts, which raised (the fold structure assumed payment at
+  the product maturity), now values.
 
 ### Known issues
 
@@ -155,12 +180,10 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   `LocalVolDCNPDEEngine`.
 - Tracked study outputs computed before this release still show the old KI-ever and maturity
   numbers; see section 11 of the migration note.
-- KO-reset with EXPIRY coupon pay: the engines disagree on when a first-schedule knock-out pays.
-  MC pays at the first schedule's maturity (1.0); PDE 1D, QUAD V2 and QUAD V1 pay at the product
-  maturity (2.0). `price()` differs by about 2.1 on the matrix contract (MC 93.45 ± 0.09 vs
-  91.34). Owner decision pending. It is pinned as a strict expected failure twice: by the slow
-  cross-engine matrix and by the default-suite gate of the refined level against the banked MC
-  reference (`test_the_refined_level_agrees_with_the_mc_reference_on_banked_numbers`).
+- KO-reset with an explicit `settlement_date`: Monte Carlo pays the never-knocked-in maturity (and,
+  under EXPIRY pay, a first-schedule knock-out with it) on the product's `settlement_date`, the grid
+  engines at the first schedule's maturity plus the product's terminal delay. Pre-existing on the
+  maturity row; owner decision.
 - No KI after a certain KO on grid engines holds up to truncated-domain edge mass. When the KO
   barrier lies below the grid (the AC9 test contract), the knocked-in far-edge row counts the
   edge-reaching mass as knocked in. LV PDE: 1.07e-5 at the default width 4, 4.9e-9 at 6, 2.6e-13 at
