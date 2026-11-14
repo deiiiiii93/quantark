@@ -37,6 +37,20 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   from KO cash to `coupons.discounted_cash`.
 - `price_with_events(...).npv == price()` bitwise on every engine. MC trade PVs move by MC noise to
   the `price()` value; Heston ADI by 1–2 ULP.
+- **KO-reset validity: the second schedule ends last (D35, owner ruling 2026-11-14).**
+  `KnockOutResetSnowballOption` raises `ValidationError` at construction, on the numeric and the
+  dated clock, when the second schedule's last date falls before the first schedule's last date.
+  ABSOLUTE: checked on the booked dates (times). REBASED: the second schedule is placed from the
+  knock-in, so the earliest possible knock-in -- the first knock-in observation (a REBASED contract
+  monitors its knock-in discretely) -- plus the second schedule's last offset (dated: calendar months,
+  `add_months`) must not fall before the first schedule's last date. Equality is allowed; the message
+  names the dates. Such a contract left a knock-in with no second schedule in force, which no rule
+  covered. A valid REBASED note always converts to a valid ABSOLUTE copy (`with_absolute_schedule_2`,
+  the lifecycle tracker; on the tracker's day grid a boundary note booked on off-day times keeps its
+  last offset on the next day when rounding would put it one day short). No banked cash-leg case,
+  golden, certified case, cross-engine matrix contract or example is affected (census); test
+  contracts of that shape were rebuilt or retired. Every valid contract's `price()` is bitwise
+  unchanged.
 - Replay frames keep their column names; `ki_probability_to_maturity` is now
   `ki_settlement.probability` and `expected_discounted_maturity_cashflow` is
   `maturity.discounted_cash + ki_settlement.discounted_cash`. The KI row the replay used to invent at
@@ -230,6 +244,20 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   payment. The simulated-path calendar schedule places the same settlement day and delay, and exact
   mode still equals the replay. Booking only: no price moves (the intraday price follows in the next
   entry).
+- **Theta of a KO-reset knocked out at the as-of date under EXPIRY pay (D30 completion).** Theta
+  carries a contract ended at `t0` as its `t0` value re-discounted from its payment, and drops it when
+  that payment falls within the bump. A first-schedule knock-out under EXPIRY pay is paid with the
+  note that ends with the first schedule (`first_schedule_payment_time`: the `settlement_date` when
+  booked, else the first schedule's maturity plus the delay), as every engine prices it; theta read
+  the knock-out record's own settlement (the observation plus its lag). With no lag, or a
+  `settlement_date` the record does not carry, a note whose first schedule runs on past the knock-out
+  was booked as paid within the bump: theta was minus the whole value (on a 1-year principal note
+  knocked out at `t0` with the first schedule to 6 months, −113.29 → +0.0093 numeric, −113.29 → +0.0093
+  dated, −111.54 → +0.0092 with a `settlement_date`; annualized −98.51 → +0.0081). Same move on QUAD
+  V1, QUAD V2, PDE 1D and MC. With a positive lag the moves are round-off (2.8e-14). INSTANT pay,
+  second-schedule knock-outs and every `price()` are unchanged. Monte Carlo's knock-out decided at zero
+  time to maturity now reads the same first-schedule payment; there the first schedule ends at the
+  product terminal, so its price is bitwise unchanged.
 - **The intraday twin of a dated KO-reset note pays its first schedule on the settlement date
   (D34)** (owner ruling 2026-11-14). The float-time twin clears the contract's dates, so it booked
   the settlement date only as the terminal's year-fraction lag (settlement − maturity), and its
@@ -269,8 +297,11 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   unchanged. Price moves are confined to MC on ABSOLUTE contracts whose second schedule ends before
   the grid does: chiefly the ABSOLUTE copy that the lifecycle tracker prices for a REBASED note knocked
   in early. REBASED MC, PDE, QUAD, and contracts whose second schedule runs to the end are bitwise
-  unchanged; a knock-in after the second schedule's end keeps its old readout (see Known issues). Moves
-  with a Monte Carlo reference of 16 × 262,144 paths:
+  unchanged. The contracts measured below (the pair and the tracker copies) have a second schedule
+  ending before the first and are refused since D35 (see Breaking); on valid contracts the readout
+  moves only where the product `maturity` runs past the second schedule's end, and since D35 no path
+  knocks in after the second schedule's end, so every knocked-in path reads there. Moves with a Monte
+  Carlo reference of 16 × 262,144 paths:
   - the pair test (REBASED knocked in at valuation, second schedule 0.25/0.5, first schedule to 1.0),
     ABSOLUTE: 88.211 → 88.180 (−0.031), from +6.9 SE to −0.6 SE against PDE 88.182. It now equals
     REBASED to round-off on all four MC engines (on the 4,096-path test engines, BSM −0.0252, local
@@ -336,17 +367,11 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   (2-year monthly Snowball, default grid vs width 16: up to −0.14 on either row; at 70% the
   payoff-read row leaves −0.133, 3.7 SE below MC, down from −0.167). Flat vol and the Heston/SLV
   ADI default grids are within 2e-3. Pre-existing; a wider domain removes it.
-- KO-reset ABSOLUTE contracts whose knock-in can fall after the second schedule's end. These are
-  native contracts with knock-in dates past the second schedule; tracker copies carry their knock-in
-  and are not affected. No rule covers a knock-in after the second schedule's end. MC keeps reading
-  that path's redemption at the grid's last node, and the grid engines price it differently. On a
-  1-year monthly note with the second schedule to 6 months, MC sits 0.17 above PDE. Pre-existing;
-  owner question.
 - KO-reset ABSOLUTE contracts whose second schedule ends before the product `maturity`. PDE 1D,
-  QUAD V1 and QUAD V2 depend on the product maturity for a carried knock-in, which MC does not. On
-  the 1-year monthly note with the second schedule to 6 months and a carried knock-in, the price is
-  98.24 with maturity 1.0 and 98.37 with maturity at the second schedule's end; MC gives 98.37.
-  Tracker copies agree across engines. Pre-existing; not investigated.
+  QUAD V1 and QUAD V2 depend on the product maturity for a carried knock-in, which MC does not. On a
+  valid note (both schedules monthly to 6 months, KI 80, spot 90, carried knock-in) the grid engines
+  give 94.43 with maturity 1.0 and 95.06 with maturity 0.5; MC gives 95.07 either way. Tracker
+  copies end with their second schedule and agree across engines. Pre-existing; not investigated.
 - D29 counts a settled note as gone from its determination time, not its payment time. A
   COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
   matured mass.

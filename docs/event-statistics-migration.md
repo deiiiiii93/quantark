@@ -248,7 +248,10 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     tracker's ABSOLUTE copy of a REBASED note knocked in early: −0.085 on a 2-year note knocked in on
     0.25 and aged 0.3, moving from +8 SE to −1 SE against PDE. The `ki_settlement` cash moves with
     them. The REBASED/ABSOLUTE pair now prices the same (the former 0.0252 "tenor" gap was this
-    readout). A knock-in after the second schedule's end keeps the old readout (see §10).
+    readout). Those two examples are contract shapes refused since item 26 (the second schedule ends
+    before the first); on valid contracts the readout moves only where the product `maturity` runs past
+    the second schedule's end. A knock-in after the second schedule's end can no longer occur (item 26):
+    every knocked-in path reads at the second schedule's end.
 25. **KO-reset intraday twin: the first schedule is paid on the settlement date (D34).** The float-time
     twin of a dated KO-reset note now carries the payment of a note that ends with the first schedule
     as `first_schedule_settlement_time`, a new numeric-clock argument of
@@ -263,6 +266,27 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     on the same engine on the twin's clock, to the bit. Every other intraday price and every
     non-intraday price is bitwise unchanged. A numeric contract may set the argument itself; a dated
     contract that sets it is refused (clock rule).
+26. **KO-reset validity: the second schedule ends last (D35, breaking).** `KnockOutResetSnowballOption`
+    refuses at construction (`ValidationError`, on the numeric and the dated clock) a contract whose
+    second schedule's last date falls before the first schedule's last date. ABSOLUTE: the booked
+    dates (times). REBASED: the second schedule hangs from the knock-in, so the first knock-in
+    observation plus the second schedule's last offset (dated: `add_months`) must not fall before the
+    first schedule's last date. Equality is allowed. The message names the dates. Such a contract had
+    a knock-in with no second schedule in force (the late knock-in left open in 0.11.0 development);
+    callers holding one must rebook it with a second schedule that reaches the first schedule's end.
+    A valid REBASED note always converts (`with_absolute_schedule_2`, the lifecycle tracker) to a valid
+    ABSOLUTE copy; on the tracker's day grid a REBASED note booked exactly on the boundary with off-day
+    times keeps its last offset on the next day when rounding would put it a day short
+    (`snapping._keep_schedule_two_last`). The builder `create_ko_reset_snowball` follows the product.
+27. **Theta of a KO-reset knocked out at the as-of date under EXPIRY pay (D30 completion).** Theta
+    decides an observation at `t0` and carries a contract ended there as its `t0` value re-discounted
+    from its payment. A first-schedule knock-out under EXPIRY pay is paid with the note that ends with
+    the first schedule (D30, D33: `first_schedule_payment_time`), as every engine prices it; theta used
+    the record's own settlement (the observation day plus its lag), so a note whose first schedule runs
+    on past the knock-out was booked as paid within the bump and its theta was minus its whole value
+    (−113.29 on a principal note, now +0.0093). INSTANT pay and second-schedule knock-outs are
+    unchanged. Monte Carlo's knock-out decided at zero time to maturity reads the same rule; there the
+    first schedule ends at the product terminal, so its price is unchanged.
 
 ## 10. Known limitations in 0.11.0
 
@@ -292,12 +316,10 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   edge row, closed-form or payoff-read; on skewed local vol at maximum losses of about 50–78% the
   default-grid price keeps up to about 0.14 of domain-width dependence (2-year monthly Snowball).
   Pre-existing; a wider domain removes it.
-- KO-reset ABSOLUTE contracts whose knock-in can fall after the second schedule's end have no rule
-  for that path. MC keeps its pre-0.11.0 readout at the grid's last node, and the grid engines differ:
-  MC is 0.17 above PDE on a 1-year monthly note with the second schedule to 6 months. Owner question.
 - PDE 1D and QUAD V1/V2 depend on the product `maturity` for a carried-knock-in ABSOLUTE contract
-  whose second schedule ends before it; MC does not. The gap is 0.13 on the note above. Tracker copies
-  agree across engines.
+  whose second schedule ends before it; MC does not. On a valid note (both schedules monthly to 6
+  months, KI 80, spot 90) the grid engines give 94.43 with maturity 1.0 and 95.06 with maturity 0.5;
+  MC gives 95.07 either way. Tracker copies end with their second schedule and agree across engines.
 - D29's determination-time rule: a COMPLETE_PERIOD funding leg ending on a settlement date after the
   determination pays nothing on the matured mass.
 
