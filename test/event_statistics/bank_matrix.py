@@ -53,10 +53,11 @@ def _lists(fields):
 
 
 def _commit() -> str:
-    """The banked library's git commit (``+dirty`` when ``quantark/`` differs from it): a later D22 diff's base."""
+    """The banked git commit (``+dirty`` when ``quantark/`` or ``test/event_statistics/`` -- the library or the
+    matrix's levels and contracts -- differs from it): a later D22 diff's base."""
     root = HERE.parent.parent
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
-    dirty = subprocess.run(["git", "status", "--porcelain", "--", "quantark"], cwd=root,
+    dirty = subprocess.run(["git", "status", "--porcelain", "--", "quantark", "test/event_statistics"], cwd=root,
                            capture_output=True, text=True).stdout.strip()
     return head + ("+dirty" if dirty else "")
 

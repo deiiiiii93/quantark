@@ -225,8 +225,9 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   refinement (a pre-existing price-side projection difference).
 - KO-reset with EXPIRY coupon pay: MC pays a first-schedule knock-out at the first schedule's
   maturity (1.0), PDE 1D / QUAD V2 / QUAD V1 at the product maturity (2.0); `price()` differs by
-  about 2.1 (MC 93.45 ± 0.09 vs 91.34). Owner decision; pinned as a strict expected failure in the
-  slow matrix (`test/event_statistics/test_cross_engine_matrix.py`, `FINDINGS`).
+  about 2.1 (MC 93.45 ± 0.09 vs 91.34). Owner decision; pinned as a strict expected failure (`FINDINGS` in
+  `test/event_statistics/test_cross_engine_matrix.py`) by the slow matrix and by the default-suite
+  gate of the refined level against the banked MC reference.
 - No KI after a certain KO (AC9) holds on grid engines up to truncated-domain edge mass: with the KO
   barrier below the grid, the knocked-in far-edge row counts edge-reaching mass as knocked in (LV
   PDE 1.07e-5 at width 4, 4.9e-9 at 6, 2.6e-13 at 8; ADI ≤ 5e-9). P(KI) = 1 − ΣP(KO) holds.

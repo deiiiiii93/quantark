@@ -41,6 +41,7 @@ from quantark.asset.equity.engine.event_stats import (
     StatisticsProvenance,
     build_cash_ledger,
 )
+from quantark.asset.equity.engine.knock_in_days import at_valuation_dates
 from quantark.asset.equity.engine.mc._mc_event_statistics import (
     FEW_KNOCK_IN_PATHS,
     NO_KNOCK_IN,
@@ -152,10 +153,8 @@ class _DCNAssembly:
             knocked_in_now=self.knocked_in_now, knocked_out_now=knocked_out_now,
             knock_in_count=float(sums["ki_count"]),
             clean_ko_times=self.times, clean_ko_counts=np.asarray(sums["ko_clean_count"], dtype=float),
-            valuation_dates=(self.valuation_date,),
+            valuation_dates=at_valuation_dates(self.product, self.env),
         )
-        if times.size == 1 and (self.carried or self.knocked_in_now):
-            dates = (self.valuation_date,)          # the one row at t = 0 is the valuation date
         fields["ki_table.probability"] = ki_probability
         fields["ki_table.survival"] = ki_survival
         fields["_ki_rows"] = (times, dates, interpolated)

@@ -31,6 +31,10 @@ def at_valuation_dates(product, pricing_env) -> Optional[tuple]:
     already breached. One rule on every engine (CP8: a unified table does not differ by engine on dates)."""
     from quantark.asset.clock import ProductClock, product_clock
 
+    schedule_valuation = getattr(getattr(product, "schedule", None), "valuation_date", None)
+    if schedule_valuation is not None:
+        # a DCN: always dated, its rows on its own schedule's valuation date
+        return (schedule_valuation,)
     valuation = getattr(pricing_env, "valuation_date", None)
     if valuation is not None and product_clock(product) is ProductClock.DATE:
         return (valuation,)

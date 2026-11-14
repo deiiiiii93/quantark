@@ -88,7 +88,8 @@ def _floored_se(path, value, reference, base_se, fields):
     Cash: a row's cash is an indicator times a bounded amount, so its floor is the indicator's binomial error (the
     rarer side of the reference's and the engine's probability on the row, as on the probability gate) times the
     REFERENCE's cash per unit probability -- on a row the reference visits its own ``|mean| / p``, on a row it never
-    visits the largest such unit over the visited rows of the same column. The engine's own cash never sets the
+    visits the largest such unit over the visited rows of the same column, or the contract's cash scale
+    ``max(1, |pv|)`` when it visits no row of the column. The engine's own cash never sets the
     scale, so a row the reference never visits holds the engine's cash to the probability gate's tolerance times a
     reference cash scale (CP8 minor i: scaling by the engine's value made that gate vacuous)."""
     se = np.asarray(base_se, dtype=float)
@@ -104,7 +105,8 @@ def _floored_se(path, value, reference, base_se, fields):
             visited = p_ref * n >= 0.5
             unit = np.zeros_like(mean)
             unit[visited] = np.abs(mean[visited]) / p_ref[visited]
-            unit[~visited] = float(np.max(unit[visited])) if np.any(visited) else 0.0
+            # a column the reference never visits: the contract's cash scale (never 0, never the engine's value)
+            unit[~visited] = float(np.max(unit[visited])) if np.any(visited) else _cash_scale(reference)
             p_engine = np.clip(np.asarray(fields.get(probability, p_ref), dtype=float), 0.0, 1.0)
             if p_engine.shape != p_ref.shape:
                 p_engine = p_ref

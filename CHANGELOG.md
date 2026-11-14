@@ -158,7 +158,9 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 - KO-reset with EXPIRY coupon pay: the engines disagree on when a first-schedule knock-out pays.
   MC pays at the first schedule's maturity (1.0); PDE 1D, QUAD V2 and QUAD V1 pay at the product
   maturity (2.0). `price()` differs by about 2.1 on the matrix contract (MC 93.45 ± 0.09 vs
-  91.34). Owner decision pending; the slow cross-engine matrix pins it as a strict expected failure.
+  91.34). Owner decision pending. It is pinned as a strict expected failure twice: by the slow
+  cross-engine matrix and by the default-suite gate of the refined level against the banked MC
+  reference (`test_the_refined_level_agrees_with_the_mc_reference_on_banked_numbers`).
 - No KI after a certain KO on grid engines holds up to truncated-domain edge mass. When the KO
   barrier lies below the grid (the AC9 test contract), the knocked-in far-edge row counts the
   edge-reaching mass as knocked in. LV PDE: 1.07e-5 at the default width 4, 4.9e-9 at 6, 2.6e-13 at
