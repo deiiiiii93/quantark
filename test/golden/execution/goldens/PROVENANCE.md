@@ -112,3 +112,15 @@ not edited). HestonSnowballPDESolver's price leaf is the recorded pre-existing f
 | KOResetSnowballPDESolver | 252 | 0.16935814292128348 |
 | LocalVolSnowballPDESolver | 252 | 0.1415394353904827 |
 | HestonSnowballPDESolver | 252 | 0.1415408110683148 |
+
+## 2026-11-14: unified event statistics T23 (spec D29 termination survival)
+
+Spec: `.ship/2026-11-11-unified-event-stats/spec.md` D29. `EventDistribution` survival holds a maturity-type
+termination alive at its own determination and drops it right after; tied survival nodes are one node holding the
+value after their last row. Not a regeneration: after a field-level diff (spec D22) of every phase-4 case, one leaf
+of `pde_phase4_goldens.json` replaced by the live payload (prices, npv, every probability unchanged;
+HestonSnowballPDESolver's price leaf is the recorded pre-existing failure and was not touched).
+
+| case | field | before | after | cause |
+|---|---|---|---|---|
+| KOResetSnowballPDESolver | `price_with_events.event_distribution.survival_probability` | 37 nodes (the pre/post tie at each first-schedule date twice); 0.15027517 / 0.14556133 at t = 1.0 (F5 drop at the first schedule's maturity) | 25 nodes (one per time, the post-tie value, unchanged); 0.22587627 at t = 1.0 (the post-tie 0.14556133 plus the matured mass 0.08031487, alive at its determination) | D29 |
