@@ -343,7 +343,8 @@ class SnowballStatistics(RollingStatistics):
                                 discounted_cash=ki_settlement.discounted_cash, payment_time=ki_settlement.payment_time)
         return es.knock_in_fields(rule, want=self.want_ki_path, probability_no_ko=ki_settlement.probability,
                                   expected_loss=loss, unavailable=unavailable,
-                                  forward=lambda: adjoint.knock_in_from_forward_pass(self, states, captures))
+                                  forward=lambda: adjoint.knock_in_from_forward_pass(self, states, captures),
+                                  valuation_dates=es.at_valuation_dates(self.product, self.env))
 
     # --- the forward adjoint pass's stage plans (unified event statistics T13) ----------------------------------
     #

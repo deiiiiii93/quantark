@@ -19,10 +19,22 @@ import numpy as np
 from quantark.util.calendar.day_counter import calculate_year_fraction
 from quantark.util.numerical import Tolerance
 
-__all__ = ["STEP_OVERLAP", "knock_in_day_axis", "not_a_grid_time", "step_overlap"]
+__all__ = ["STEP_OVERLAP", "at_valuation_dates", "knock_in_day_axis", "not_a_grid_time", "step_overlap"]
 
 #: the continuous knock-in rows' interpolation scheme (spec D18)
 STEP_OVERLAP = "step_overlap"
+
+
+def at_valuation_dates(product, pricing_env) -> Optional[tuple]:
+    """``(valuation_date,)`` on a dated note, else ``None``: the dates (and payment dates) of a knock-in row decided at
+    valuation -- a discrete KI observed then with the spot through it, a carried knock-in, a continuous barrier
+    already breached. One rule on every engine (CP8: a unified table does not differ by engine on dates)."""
+    from quantark.asset.clock import ProductClock, product_clock
+
+    valuation = getattr(pricing_env, "valuation_date", None)
+    if valuation is not None and product_clock(product) is ProductClock.DATE:
+        return (valuation,)
+    return None
 
 
 def knock_in_day_axis(product, pricing_env, horizon: float) -> Tuple[np.ndarray, Optional[tuple]]:

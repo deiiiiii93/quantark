@@ -23,6 +23,7 @@ from typing import Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
+from quantark.asset.equity.engine.knock_in_days import at_valuation_dates
 from quantark.asset.equity.engine.event_stats import (
     EventStatistics,
     KnockInStatistics,
@@ -117,6 +118,7 @@ class _Assembly:
             knocked_in_now=bool(sums.get("ki_breached_at_valuation", False)),
             knocked_out_now=knocked_out_now, knock_in_count=knocked_in,
             clean_ko_times=clean_ko_times, clean_ko_counts=clean_ko_counts,
+            valuation_dates=at_valuation_dates(self.product, self.env),
         )
         return {
             "knock_in.probability": knocked_in / n,

@@ -71,7 +71,8 @@ def knocked_out_event_statistics(solver, product, env, request, decision, pv=Non
     ki_settlement = es.outcome_row(env, probability=0.0, discounted=0.0, **ki_timing)
     loss = es.expected_loss(product, env, probability=0.0, discounted_cash=0.0, payment_time=ki_settlement.payment_time)
     knock_in, ki_table = es.knock_in_fields(rule, want=es.want_knock_in_path(request.streams),
-                                            probability_no_ko=0.0, expected_loss=loss, unavailable=unavailable)
+                                            probability_no_ko=0.0, expected_loss=loss, unavailable=unavailable,
+                                            valuation_dates=es.at_valuation_dates(product, env))
     lifetime = float(np.sum(observations.probability * observations.times))
     return es.assemble(family=family, pv=float(pv), observations=observations, coupons=coupons, maturity=maturity,
                        ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table, expected_lifetime=lifetime,

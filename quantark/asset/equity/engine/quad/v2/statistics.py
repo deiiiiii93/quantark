@@ -152,8 +152,9 @@ def terminated_statistics(product, env, lifecycle_state, *, pv: float, provenanc
     nothing = dict(time=0.0, payment_time=0.0, probability=0.0, discounted_cash=0.0, cash_to_pay=0.0)
     unavailable: Dict[str, str] = {}
     if knocked_in:
-        ki_table = KnockInTable(times=[0.0], payment_times=[0.0], probability=[1.0], survival=[0.0],
-                                interpolated=[False])
+        dates = es.at_valuation_dates(product, env)
+        ki_table = KnockInTable(times=[0.0], payment_times=[0.0], dates=dates, payment_dates=dates, probability=[1.0],
+                                survival=[0.0], interpolated=[False])
     else:
         ki_table = KnockInTable.empty()
         unavailable["knock_in.expected_time"] = es.NO_KNOCK_IN
@@ -369,6 +370,7 @@ def v2_event_statistics(product, env, context, values: Dict[str, float], *, pv: 
     knock_in, ki_table = es.knock_in_fields(
         rule, want=es.want_knock_in_path(streams), probability_no_ko=ki_settlement.probability, expected_loss=loss,
         unavailable=unavailable, forward=lambda: knock_in_table(product, env, context, spot),
+        valuation_dates=es.at_valuation_dates(product, env),
     )
 
     receivables = receivables_table(lifecycle_state, env, knocked_in=carried)

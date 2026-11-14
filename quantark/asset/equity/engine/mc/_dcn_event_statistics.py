@@ -152,6 +152,7 @@ class _DCNAssembly:
             knocked_in_now=self.knocked_in_now, knocked_out_now=knocked_out_now,
             knock_in_count=float(sums["ki_count"]),
             clean_ko_times=self.times, clean_ko_counts=np.asarray(sums["ko_clean_count"], dtype=float),
+            valuation_dates=(self.valuation_date,),
         )
         if times.size == 1 and (self.carried or self.knocked_in_now):
             dates = (self.valuation_date,)          # the one row at t = 0 is the valuation date

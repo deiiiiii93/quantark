@@ -92,6 +92,7 @@ def knock_in_rows(
     knock_in_count: float,
     clean_ko_times: np.ndarray,
     clean_ko_counts: np.ndarray,
+    valuation_dates: Optional[tuple] = None,
 ) -> Tuple[np.ndarray, Optional[tuple], np.ndarray, np.ndarray, np.ndarray]:
     """``(times, dates, probability, survival, interpolated)`` of the per-date knock-in table (DESIGN §4.5).
 
@@ -103,21 +104,19 @@ def knock_in_rows(
         knocked_out_now: the note is knocked out at valuation without a carried knock-in: the table is empty.
         knock_in_count: paths knocked in before any knock-out (the one row's mass when ``knocked_in_now``).
         clean_ko_times, clean_ko_counts: knock-outs with no knock-in before them, by time (survival).
+        valuation_dates: the dates of the row at 0 when the knock-in is decided at valuation
+            (``knock_in_days.at_valuation_dates``: ``(valuation_date,)`` on a dated note, else ``None``).
     """
     empty = np.zeros(0, dtype=float)
-    row_at_zero_dates = None
     if layout.kind == "discrete" and _every_path_knocked_in_at_valuation(layout.row_times, first_counts, n):
         # a discrete KI observed at valuation with the spot through it: a knock-in at time 0 (DESIGN §4.5), one row
-        # at 0 as for a continuous breach or a carried knock-in (the spot at t = 0 is every path's); on a dated note
-        # the row keeps its observation date (the valuation date)
+        # at 0 as for a continuous breach or a carried knock-in (the spot at t = 0 is every path's)
         knocked_in_now = True
-        if layout.row_dates is not None and len(layout.row_dates):
-            row_at_zero_dates = (layout.row_dates[0],)
     if layout.kind == "none" or (knocked_out_now and layout.kind != "carried"):
         return empty, None, empty, empty, np.zeros(0, dtype=bool)
     if layout.kind == "carried" or knocked_in_now:
         probability = np.array([knock_in_count / n], dtype=float)
-        return (np.zeros(1), row_at_zero_dates, probability, 1.0 - probability, np.zeros(1, dtype=bool))
+        return (np.zeros(1), valuation_dates, probability, 1.0 - probability, np.zeros(1, dtype=bool))
     times = layout.row_times
     if layout.kind == "continuous":
         probability = step_overlap(layout.step_ends, first_counts, times) / n

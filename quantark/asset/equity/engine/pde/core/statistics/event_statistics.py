@@ -25,6 +25,7 @@ from typing import Callable, Dict, Optional, Sequence
 
 import numpy as np
 
+from quantark.asset.equity.engine.knock_in_days import at_valuation_dates  # noqa: F401 (re-export)
 from quantark.asset.equity.engine.event_stats import (
     CashLedger,
     CouponTable,
@@ -160,14 +161,18 @@ def outcome_row(env, *, time: float, payment_time: float, date=None, payment_dat
 
 
 def knock_in_fields(rule: str, *, want: bool, probability_no_ko: float, expected_loss: float,
-                    unavailable: Dict[str, str], forward: Optional[Callable[[], tuple]] = None):
+                    unavailable: Dict[str, str], forward: Optional[Callable[[], tuple]] = None,
+                    valuation_dates: Optional[tuple] = None):
     """``(KnockInStatistics, ki_table)`` by the valuation-date ``rule``; the reasons go into ``unavailable``.
 
     ``forward``: the forward adjoint pass (``adjoint.knock_in_from_forward_pass`` bound to the march), run only for
     the ``FORWARD`` rule of a request that asks for the knock-in stream (D17: a pruned request never runs it); it
-    returns ``(probability, expected_time, ki_table, expected_time_reason)`` or raises ``AdjointUnavailable``."""
+    returns ``(probability, expected_time, ki_table, expected_time_reason)`` or raises ``AdjointUnavailable``.
+    ``valuation_dates``: the at-valuation row's dates (``knock_in_days.at_valuation_dates``; ``None`` on a numeric
+    note)."""
     if rule == KnockInRule.KNOCKED_IN_NOW:
-        table = KnockInTable(times=np.zeros(1), payment_times=np.zeros(1), probability=np.ones(1),
+        table = KnockInTable(times=np.zeros(1), payment_times=np.zeros(1), dates=valuation_dates,
+                             payment_dates=valuation_dates, probability=np.ones(1),
                              survival=np.zeros(1), interpolated=np.zeros(1, dtype=bool))
         stats = KnockInStatistics(probability=1.0, probability_no_ko=probability_no_ko, expected_time=0.0,
                                   expected_loss=expected_loss)

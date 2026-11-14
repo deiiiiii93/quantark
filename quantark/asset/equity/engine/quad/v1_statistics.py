@@ -202,7 +202,8 @@ def statistics(product, env, *, family: str, pv: float, observations: Observatio
         def forward():
             raise AdjointUnavailable(knock_in_refusal)
     knock_in, ki_table = es.knock_in_fields(rule, want=want_knock_in, probability_no_ko=ki_settlement.probability,
-                                            expected_loss=loss, unavailable=unavailable, forward=forward)
+                                            expected_loss=loss, unavailable=unavailable, forward=forward,
+                                            valuation_dates=es.at_valuation_dates(product, env))
     lifetime = (float(np.sum(observations.probability * observations.times)) + maturity.probability * maturity.time
                 + ki_settlement.probability * ki_settlement.time)
     return es.assemble(family=family, pv=pv, observations=observations, coupons=coupons, maturity=maturity,
