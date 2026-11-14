@@ -185,7 +185,7 @@ class KOResetStatistics(SnowballStatistics):
         r_lo0, r_up0, r_lo1, r_up1 = rows
         lo0, up0, lo1, up1 = edges
         det_post = solver._df_between_times(self.env, current, solver._total_tau)
-        pre_maturity = float(product.get_pre_maturity_time(self.env))
+        pre_maturity = self._pre_maturity_time()
         alive = current <= pre_maturity or is_close(current, pre_maturity, abs_tol=Tolerance.PRECISION)
         det_pre = solver._df_between_times(self.env, current, pre_maturity) if alive else 0.0
         ko1, ki1 = (r_lo1, r_up1) if product.is_reverse else (r_up1, r_lo1)
@@ -199,6 +199,14 @@ class KOResetStatistics(SnowballStatistics):
         ko0[u_pre], ko0[u_post] = 0.0, 0.0
         for r in (r_lo1, r_up1):
             r[u_pre] = 0.0
+
+    def _pre_maturity_time(self) -> float:
+        """The first schedule's maturity (``get_pre_maturity_time``), resolved once per statistics group -- one per
+        solve -- rather than on every step's rows (T25: it resolves the whole first schedule)."""
+        pre = self.__dict__.get("_pre_maturity")
+        if pre is None:
+            pre = self._pre_maturity = float(self.product.get_pre_maturity_time(self.env))
+        return pre
 
     # --- the readout ------------------------------------------------------------
 

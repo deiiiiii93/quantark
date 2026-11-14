@@ -490,6 +490,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         self._structured_terminal_delay_df = self._terminal_delay_df(
             product, pricing_env
         )
+        self._ki_edge_memo = None  # per-solve (``_knock_in_edge_terms``)
         self._is_reverse = product.is_reverse
         self._ki_continuous = bool(ki_continuous)
         self._ki_barrier = 0.0

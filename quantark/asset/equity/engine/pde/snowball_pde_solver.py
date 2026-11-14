@@ -411,6 +411,8 @@ class SnowballPDESolver(BasePDESolver):
         # Time tracking
         self._total_tau: float = 0.0
         self._structured_terminal_delay_df: float = 1.0
+        # the knock-in edge's payoff-read terms, per solve (``_knock_in_edge_terms``)
+        self._ki_edge_memo = None
         self._profile_enabled = enable_profiling
         self._profile_stats: Dict[str, float] = {}
         self._ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = OrderedDict()
@@ -481,6 +483,7 @@ class SnowballPDESolver(BasePDESolver):
         self._structured_terminal_delay_df = self._terminal_delay_df(
             product, pricing_env
         )
+        self._ki_edge_memo = None  # per-solve
         return knocked_in_at_valuation
 
     def _prepare_continuous_ki_correction(
@@ -1830,16 +1833,17 @@ class SnowballPDESolver(BasePDESolver):
             # Put is worthless at high S
             v = principal * df_to_maturity
             upper = EdgeRow(v, "v1_upper_principal", (RowTerm("M", v),))
-        if leg_annualized(product, "knock_in") or self._airbag_moves_knock_in_edge(product, pricing_env, s_vec):
+        edge_terms = self._knock_in_edge_terms(product, pricing_env, s_vec)
+        if edge_terms is not None:
             # D26: an annualized knock-in leg scales the knocked-in downside by a tenor only the payoff resolves
             # (Snowball: the contract tenor; KO-reset: the post-KI tenor). D27: under partial protection the
             # closed forms ignore an airbag that changes the payoff on the knock-in edge cell. In both cases the
             # knock-in edge's row is read off the payoff itself. Every other contract keeps the closed forms: D26 /
             # D27 move those classes only, every other price stays bit for bit.
             if product.is_reverse:
-                upper = self._payoff_v1_edge_row("upper", tau, product, pricing_env, s_vec, upper.branch)
+                upper = self._payoff_v1_edge_row(edge_terms, tau, pricing_env, upper.branch)
             else:
-                lower = self._payoff_v1_edge_row("lower", tau, product, pricing_env, s_vec, lower.branch)
+                lower = self._payoff_v1_edge_row(edge_terms, tau, pricing_env, lower.branch)
         if self._fold is not None:
             # The knocked-in branch's folded cash on the rows the event statistics' knock-in column
             # carries it: settled knocked in at the knock-in edge, and at the knock-out edge only when
@@ -1875,18 +1879,39 @@ class SnowballPDESolver(BasePDESolver):
             for s in cell
         )
 
-    def _payoff_v1_edge_row(self, edge, tau, product, pricing_env, s_vec, branch):
-        """The knocked-in row at ``edge`` ("lower" or "upper") read off ``get_maturity_payoff_v1`` (D26): the
-        discounted forward value of the payoff's affine piece through the edge cell. Its slope and intercept are the
-        chord of the payoff between the edge node and its neighbour, so the row carries whatever the payoff applies
-        there (participation, multiplier, airbag, protection floor, an annualized leg's tenor) and, as ``tau`` falls
-        to 0, tends to the terminal condition at the edge node."""
-        i, j = (0, 1) if edge == "lower" else (-1, -2)
-        s_edge, s_next = float(s_vec[i]), float(s_vec[j])
-        p_edge = float(product.get_maturity_payoff_v1(s_edge, pricing_env))
-        p_next = float(product.get_maturity_payoff_v1(s_next, pricing_env))
-        slope = (p_next - p_edge) / (s_next - s_edge)
-        intercept = p_edge - slope * s_edge
+    def _knock_in_edge_terms(self, product, pricing_env, s_vec):
+        """``None`` where the knocked-in knock-in-edge row keeps its closed form, else the payoff chord's terms
+        ``(s_edge, slope, intercept)`` of that edge ("upper" on a reverse product, else "lower"), read off
+        ``get_maturity_payoff_v1`` (D26 / D27; ``_payoff_v1_edge_row``).
+
+        Neither depends on the step: the rule (an annualized knock-in leg, or ``_airbag_moves_knock_in_edge``) and
+        the chord read the contract, the market and the edge cell only. They are computed once per solve (T25) and
+        reused by every row the solve builds -- the same floats, so every row stays bit for bit. The memo is keyed
+        on the product and environment objects and the edge cell's nodes, and cleared at each solve's state
+        preamble (``_prepare_solve_state`` / the ADI routes' ``_prepare_state``)."""
+        cell = (float(s_vec[0]), float(s_vec[1]), float(s_vec[-1]), float(s_vec[-2]))
+        memo = getattr(self, "_ki_edge_memo", None)
+        if memo is not None and memo[0] is product and memo[1] is pricing_env and memo[2] == cell:
+            return memo[3]
+        terms = None
+        if leg_annualized(product, "knock_in") or self._airbag_moves_knock_in_edge(product, pricing_env, s_vec):
+            i, j = (-1, -2) if product.is_reverse else (0, 1)
+            s_edge, s_next = float(s_vec[i]), float(s_vec[j])
+            p_edge = float(product.get_maturity_payoff_v1(s_edge, pricing_env))
+            p_next = float(product.get_maturity_payoff_v1(s_next, pricing_env))
+            slope = (p_next - p_edge) / (s_next - s_edge)
+            intercept = p_edge - slope * s_edge
+            terms = (s_edge, slope, intercept)
+        self._ki_edge_memo = (product, pricing_env, cell, terms)
+        return terms
+
+    def _payoff_v1_edge_row(self, terms, tau, pricing_env, branch):
+        """The knocked-in row at the knock-in edge read off ``get_maturity_payoff_v1`` (D26): the discounted forward
+        value of the payoff's affine piece through the edge cell (``terms``: ``_knock_in_edge_terms``). Its slope and
+        intercept are the chord of the payoff between the edge node and its neighbour, so the row carries whatever
+        the payoff applies there (participation, multiplier, airbag, protection floor, an annualized leg's tenor)
+        and, as ``tau`` falls to 0, tends to the terminal condition at the edge node."""
+        s_edge, slope, intercept = terms
         df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
         v = intercept * df + slope * s_edge * df_div
         return EdgeRow(v, branch, (RowTerm("M", v),))
