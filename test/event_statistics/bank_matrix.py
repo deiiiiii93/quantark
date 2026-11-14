@@ -28,6 +28,7 @@ import argparse
 import json
 import multiprocessing as mp
 import platform
+import subprocess
 import sys
 import time
 import warnings
@@ -51,13 +52,22 @@ def _lists(fields):
     return {path: np.asarray(value, dtype=float).tolist() for path, value in fields.items()}
 
 
-def bank_entry(key: str) -> dict:
+def _commit() -> str:
+    """The banked library's git commit (``+dirty`` when ``quantark/`` differs from it): a later D22 diff's base."""
+    root = HERE.parent.parent
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--", "quantark"], cwd=root,
+                           capture_output=True, text=True).stdout.strip()
+    return head + ("+dirty" if dirty else "")
+
+
+def bank_entry(key: str, commit: str = "") -> dict:
     """One entry's record: every grid engine at every level, and the MC reference."""
     _setup()
     from event_statistics import matrix_cases as M
 
     name, group = key.split("|")
-    record = {"engines": {}}
+    record = {"engines": {}, "commit": commit, "generated": time.strftime("%Y-%m-%d")}
     if M.CONTRACTS[name].terminated:
         return record
     start = time.perf_counter()
@@ -111,11 +121,14 @@ def main() -> None:
     bank["_provenance"] = {"python": platform.python_version(), "machine": platform.machine(),
                            "generated": time.strftime("%Y-%m-%d"), "script": "test/event_statistics/bank_matrix.py",
                            "levels": "L0 gated; L1, L2 refined (matrix_cases.py)",
-                           "mc_reference": f"{len(M.SEEDS)} PSEUDO runs x {M.MC_PATHS} paths"}
+                           "mc_reference": f"{len(M.SEEDS)} PSEUDO runs x {M.MC_PATHS} paths",
+                           "commit": _commit(),
+                           "entries": "each entry records its own commit and date; entries without one were banked "
+                                      "2026-11-14 on library 448a8f4e (T24)"}
     started = time.perf_counter()
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(max_workers=args.workers, mp_context=ctx) as pool:
-        futures = {pool.submit(bank_entry, key): key for key in todo}
+        futures = {pool.submit(bank_entry, key, bank["_provenance"]["commit"]): key for key in todo}
         for future in as_completed(futures):
             key = futures[future]
             bank[key] = future.result()

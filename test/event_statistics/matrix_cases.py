@@ -159,9 +159,11 @@ def _dcn_pde(lv=False):
 
 
 def _dcn_adi():
-    return {"L0": lambda: HestonDCNPDESolver(DCN_HESTON, n_x=61, n_v=21),
-            "L1": lambda: HestonDCNPDESolver(DCN_HESTON, n_x=121, n_v=41, substeps_per_interval=2),
-            "L2": lambda: HestonDCNPDESolver(DCN_HESTON, n_x=241, n_v=81, substeps_per_interval=4)}
+    """L0 the engine's default mesh (301 x 101, one step per daily interval: CP8 ruling b -- the smoke's 61 x 21 passed
+    the matrix only through an allowance of up to ~32 SE), refined in both space and time beyond it."""
+    return {"L0": lambda: HestonDCNPDESolver(DCN_HESTON),
+            "L1": lambda: HestonDCNPDESolver(DCN_HESTON, n_x=451, n_v=151, substeps_per_interval=2),
+            "L2": lambda: HestonDCNPDESolver(DCN_HESTON, n_x=601, n_v=201, substeps_per_interval=4)}
 
 
 def _continuous_ki(product) -> bool:

@@ -82,8 +82,15 @@ def _cash_scale(reference: M.Reference) -> float:
     return max(1.0, abs(float(reference.mean["pv"][0])))
 
 
-def _floored_se(path, value, reference, base_se):
-    """The batch SE with the binomial floor on probabilities and on probability-weighted cash."""
+def _floored_se(path, value, reference, base_se, fields):
+    """The batch SE with the binomial floor on probabilities and on probability-weighted cash.
+
+    Cash: a row's cash is an indicator times a bounded amount, so its floor is the indicator's binomial error (the
+    rarer side of the reference's and the engine's probability on the row, as on the probability gate) times the
+    REFERENCE's cash per unit probability -- on a row the reference visits its own ``|mean| / p``, on a row it never
+    visits the largest such unit over the visited rows of the same column. The engine's own cash never sets the
+    scale, so a row the reference never visits holds the engine's cash to the probability gate's tolerance times a
+    reference cash scale (CP8 minor i: scaling by the engine's value made that gate vacuous)."""
     se = np.asarray(base_se, dtype=float)
     mean = np.asarray(reference.mean[path], dtype=float)
     n = float(reference.paths)
@@ -92,13 +99,17 @@ def _floored_se(path, value, reference, base_se):
     head, _, column = path.rpartition(".")
     probability = f"{head}.probability"
     if column in ("discounted_cash", "cash_to_pay") and probability in reference.mean:
-        p_ref = np.asarray(reference.mean[probability], dtype=float)
+        p_ref = np.clip(np.asarray(reference.mean[probability], dtype=float), 0.0, 1.0)
         if p_ref.shape == mean.shape:
-            p = np.clip(p_ref, 0.0, 1.0)
-            unit = np.maximum(np.abs(mean), np.abs(value)) / np.maximum(p, 1.0 / n)
-            # the cash of a row is an indicator times a bounded amount: the indicator's binomial error, its rare side
-            # bounded below by one path in the reference (a row the reference never or always visits)
-            q = np.maximum(np.minimum(p, 1.0 - p), 1.0 / n)
+            visited = p_ref * n >= 0.5
+            unit = np.zeros_like(mean)
+            unit[visited] = np.abs(mean[visited]) / p_ref[visited]
+            unit[~visited] = float(np.max(unit[visited])) if np.any(visited) else 0.0
+            p_engine = np.clip(np.asarray(fields.get(probability, p_ref), dtype=float), 0.0, 1.0)
+            if p_engine.shape != p_ref.shape:
+                p_engine = p_ref
+            q = np.maximum(np.minimum(p_ref, 1.0 - p_ref), np.minimum(p_engine, 1.0 - p_engine))
+            q = np.maximum(q, 1.0 / n)
             return np.maximum(se, np.sqrt(q * (1.0 - q) / n) * unit)
     return se
 
@@ -205,7 +216,7 @@ def test_every_engine_agrees_with_the_mc_reference(key):
         fields = _receivables_offset(fields, reference)
         allowance = bank["allowance"]
         rows = _gate(key, engine, fields, reference,
-                     se_of=lambda path, value: _floored_se(path, value, reference, reference.se[path]),
+                     se_of=lambda path, value: _floored_se(path, value, reference, reference.se[path], fields),
                      allowance_of=lambda path: np.asarray(allowance[path], dtype=float),
                      convention=convention_grid)
         problems += _judge(key, engine, rows, log)
@@ -230,7 +241,8 @@ def test_every_engine_agrees_with_the_mc_reference(key):
                 alt = ref_se * proxy_scale
                 if path in ("ki_cdf", "ki_survival") and cumulative is not None:
                     alt = np.maximum(alt, cumulative)
-            return _floored_se(path, value, reference, np.sqrt(ref_se ** 2 + np.asarray(alt, dtype=float) ** 2))
+            return _floored_se(path, value, reference, np.sqrt(ref_se ** 2 + np.asarray(alt, dtype=float) ** 2),
+                               fields)
 
         rows = _gate(key, "alt", fields, reference, se_of=se_alt,
                      allowance_of=lambda path: 0.0, convention=convention_mc)
@@ -373,6 +385,39 @@ def test_an_mc_engine_with_one_knock_in_path_has_no_expected_time_error():
     assert stats.knock_in.expected_time is not None and stats.knock_in.expected_time > 0.0
     assert "knock_in.expected_time" not in stats.standard_errors
     assert stats.unavailable["standard_errors.knock_in.expected_time"].startswith("undefined:")
+
+
+def _banked_reference(key: str) -> M.Reference:
+    r = BANK[key]["mc_reference"]
+    return M.Reference(mean={k: np.asarray(v, dtype=float) for k, v in r["mean"].items()},
+                       se={k: (None if v is None else np.asarray(v, dtype=float)) for k, v in r["se"].items()},
+                       runs=r["runs"], paths=r["paths"], knock_in_paths=r["knock_in_paths"],
+                       unavailable=dict(r["unavailable"]))
+
+
+BANKED_GRID = [(key, engine) for key, record in BANK.items() if not key.startswith("_")
+               for engine in record.get("engines", {})]
+
+
+@pytest.mark.parametrize("key, engine", BANKED_GRID)
+def test_the_refined_level_agrees_with_the_mc_reference_on_banked_numbers(key, engine):
+    """CP8 ruling b: the matrix gates L0 with the envelope allowance; this gates the twice-refined L2 against the same
+    banked MC reference with only its own last refinement step ``|L1 - L2|`` as allowance -- so a large L0 allowance
+    cannot hide an engine whose refined numbers disagree with the MC. Banked numbers only: no solve, default suite.
+    (A refinement step is not an error bound -- non-monotone convergence exists, T24 DCN Heston -- but L2 agreeing
+    with an independent MC within K SE plus that step is the evidence the L0 allowance is discretisation.)"""
+    name, group = key.split("|")
+    reference = _banked_reference(key)
+    record = BANK[key]["engines"][engine]
+    fields = _receivables_offset({k: np.asarray(v, dtype=float) for k, v in record["L2"].items()}, reference)
+    step = {k: np.abs(np.asarray(record["L1"][k], dtype=float) - np.asarray(record["L2"][k], dtype=float))
+            for k in record["allowance"]}
+    convention = 2.0 * _day(name, group) if _continuous(name) else 0.0
+    rows = _gate(key, engine, fields, reference,
+                 se_of=lambda path, value: _floored_se(path, value, reference, reference.se[path], fields),
+                 allowance_of=lambda path: step[path], convention=convention)
+    problems = _judge(key, engine, rows, [])
+    assert not problems, "\n".join(problems)
 
 
 def test_the_matrix_bank_covers_every_entry_and_engine():
