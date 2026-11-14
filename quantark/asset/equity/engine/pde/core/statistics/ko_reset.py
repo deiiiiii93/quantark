@@ -17,7 +17,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_close
 
@@ -211,8 +211,9 @@ class KOResetStatistics(SnowballStatistics):
     # --- the readout ------------------------------------------------------------
 
     def _maturity_timing(self, terminal):
-        """``(pre, post)`` timing dicts of the two maturities: the first schedule's end (paid after the terminal
-        delay; its dates its last record's when that record sits at it) and the product's terminal."""
+        """``(pre, post)`` timing dicts of the two maturities: the first schedule's end (paid on the explicit settlement
+        date when booked, else after the terminal delay -- ``first_schedule_settlement``; its dates its last record's
+        when that record sits at it) and the product's terminal."""
         product, env = self.product, self.env
         delay = float(terminal.payment_time) - float(terminal.determination_time)
         pre_maturity = float(product.get_pre_maturity_time(env))
@@ -220,8 +221,11 @@ class KOResetStatistics(SnowballStatistics):
         pre_det_date = (last_pre.observation_date
                         if last_pre is not None and is_close(float(last_pre.observation_time), pre_maturity)
                         else None)
-        pre_pay_date = pre_det_date if is_close(delay, 0.0) else None
-        pre = dict(time=pre_maturity, payment_time=pre_maturity + delay, date=pre_det_date,
+        # paid on the explicit settlement date when booked (spec D33), else the terminal delay after its maturity
+        settlement = first_schedule_settlement(product, env, terminal)
+        pre_pay_date = (settlement.payment_date if settlement.settlement_date_governs
+                        else pre_det_date if is_close(delay, 0.0) else None)
+        pre = dict(time=pre_maturity, payment_time=settlement.payment_time, date=pre_det_date,
                    payment_date=pre_pay_date)
         post = dict(time=float(self.tau), payment_time=float(self.tau) + delay, date=terminal.determination_date,
                     payment_date=terminal.payment_date)

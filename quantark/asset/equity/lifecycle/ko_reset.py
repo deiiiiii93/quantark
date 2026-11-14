@@ -21,9 +21,10 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing_at
+from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing_at
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, leg_annualized
 from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType
 from quantark.util.enum.option_enums import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
 
@@ -239,16 +240,32 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         return records[-1]
 
     def _pre_timing(self, product: Any, env: PricingEnvironment, last: Dict[str, Any]):
-        """V0's terminal timing: determined at schedule 1's last observation."""
+        """V0's terminal timing: determined at schedule 1's last observation, paid on the explicit settlement date
+        when booked, else by the settlement convention (``first_schedule_terminal_timing``, spec D33)."""
         schedule_env = self._schedule_resolution_env(product, env)
         if self._uses_date_timing(product) and last["determination_date"] is not None:
-            return resolve_terminal_timing_at(
-                product, schedule_env, determination_date=pd.Timestamp(last["determination_date"]).to_pydatetime(),
-                cashflow_id="ko_reset_v0_terminal",
+            return first_schedule_terminal_timing(
+                product, schedule_env, determination_date=pd.Timestamp(last["determination_date"]).to_pydatetime()
             )
-        return resolve_terminal_timing_at(
-            product, schedule_env, determination_time=float(last["time"]), cashflow_id="ko_reset_v0_terminal"
-        )
+        return first_schedule_terminal_timing(product, schedule_env, determination_time=float(last["time"]))
+
+    def _booked_schedule_one_records(self, product: Any, env: PricingEnvironment) -> List[Dict[str, Any]]:
+        """Schedule 1's knock-out records as they are booked. Under EXPIRY pay a schedule-1 knock-out is paid with
+        the note it ends (spec D30, D33): a path never knocked in, whose note ends at schedule 1's maturity, so each
+        record settles when V0 does (``_pre_timing``: the explicit settlement date when booked, else schedule 1's
+        maturity plus the settlement delay). Under INSTANT pay each record keeps its own settlement."""
+        records = self._schedule_records(product, env, product.barrier_config)
+        if product.accrual_config.coupon_pay_type != CouponPayType.EXPIRY or not records:
+            return records
+        last = records[-1]
+        timing = self._pre_timing(product, env, last)
+        payment_date = self._terminal_payment_date(product, timing)
+        if payment_date is None:
+            payment_date = last["date"]          # paid at schedule 1's maturity itself
+        return [
+            dict(record, settlement_date=payment_date, settlement_time=float(timing.payment_time))
+            for record in records
+        ]
 
     def _final_timing(self, env: PricingEnvironment):
         """V1's terminal timing: determined at the knocked-in contract's end."""
@@ -314,11 +331,15 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             self._previous_close = pd.Timestamp(date).normalize()
 
     def _test_knock_outs(self, date, product, env, spot, valuation_point, *, schedule: int):
-        config = product.barrier_config if schedule == 1 else product.post_barrier_config
         observed = (
             self.lifecycle.observed_ko_indices if schedule == 1 else self.lifecycle.observed_post_ko_indices
         )
-        for idx, rec in enumerate(self._schedule_records(product, env, config)):
+        records = (
+            self._booked_schedule_one_records(product, env)
+            if schedule == 1
+            else self._schedule_records(product, env, product.post_barrier_config)
+        )
+        for idx, rec in enumerate(records):
             if idx in observed or not self._record_is_due(date, valuation_point, rec):
                 continue
             observed.add(idx)
@@ -478,7 +499,9 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
     base = AutocallableLifecycleTracker.resolve_calendar_schedule(tracker, dates, env)
 
     def records_on_calendar(owner, contract, config):
-        recs = owner._schedule_records(contract, env, config)
+        # schedule 1 as booked (``_booked_schedule_one_records``: under EXPIRY paid with the note it ends)
+        recs = (owner._booked_schedule_one_records(contract, env) if config is contract.barrier_config
+                else owner._schedule_records(contract, env, config))
         due = [owner._record_first_due(dates, r, contract) for r in recs]
         return (
             np.array(due, dtype=np.int64),

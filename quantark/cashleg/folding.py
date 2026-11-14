@@ -367,7 +367,8 @@ def _autocallable_structure(product, pricing_env) -> _Structure:
 
 def _ko_reset_structure(product, pricing_env) -> _Structure:
     """KO-reset: both schedules on one axis (pre first at a tie) and the two maturity buckets."""
-    from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time, resolve_terminal_timing
+    from quantark.asset.equity.engine.settlement_support import (
+        first_schedule_payment_time, first_schedule_settlement, resolve_terminal_timing)
     from quantark.execution.errors import CapabilityError
     from quantark.util.enum import CouponPayType, PostKOScheduleMode
 
@@ -398,7 +399,11 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
     if pre_t.size + post_t.size == 0:
         return _trivial_structure(product, pricing_env)
     delay = float(terminal.payment_time) - float(terminal.determination_time)
-    pre_maturity, post_maturity = float(product.get_pre_maturity_time(pricing_env)), tau
+    # the note that ends with schedule 1: paid on the explicit settlement date when booked (spec D33), else the
+    # terminal delay after schedule 1's maturity -- where every engine (MC included) settles it
+    first_schedule = first_schedule_settlement(product, pricing_env, terminal)
+    pre_maturity, post_maturity = first_schedule.determination_time, tau
+    pre_payment = first_schedule.payment_time
     times = np.r_[pre_t, post_t]
     tag = np.r_[np.zeros(pre_t.size), np.ones(post_t.size)]
     order = np.lexsort((tag, times))                      # the event route's merged order
@@ -417,7 +422,7 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
         stats = _structure_statistics(
             family="ko_reset", times=merged_times, payments=merged_pays, p_ko=p_ko, survival=survival,
             schedule=schedule_tags, p_no_ki=p_no_ki, p_ki=p_ki,
-            maturity=dict(time=pre_maturity, payment_time=pre_maturity + delay),
+            maturity=dict(time=pre_maturity, payment_time=pre_payment),
             ki_settlement=dict(time=post_maturity, payment_time=post_maturity + delay),
         )
         return EventDistribution.from_statistics(stats)
@@ -426,7 +431,7 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
         ko=tuple(
             _Slot("pre" if tag[i] == 0 else "post", float(times[i]), float(pays[i])) for i in order
         ),
-        no_ki=_Slot("pre", pre_maturity, pre_maturity + delay),
+        no_ki=_Slot("pre", pre_maturity, pre_payment),
         ki=_Slot("post", post_maturity, post_maturity + delay),
         distribution=distribution,
     )

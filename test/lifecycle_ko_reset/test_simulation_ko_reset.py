@@ -75,6 +75,22 @@ def test_exact_mode_matches_the_replay_to_the_last_bit(mode, kind):
     assert report.max_pv_gap == 0.0 and report.max_total_pnl_gap == 0.0
 
 
+@pytest.mark.parametrize("kind", ["ko1", "v0", "ki_ko2"])
+def test_exact_mode_matches_the_replay_under_expiry_pay(kind):
+    """EXPIRY pay: a schedule-1 knock-out is booked with the note it ends (spec D30, D33), on the replay and on the
+    simulated paths alike (the calendar schedule places it on V0's settlement)."""
+    from dataclasses import replace
+
+    from quantark.util.enum import CouponPayType
+
+    product = short_ko_reset(M.ABSOLUTE)
+    product.accrual_config = replace(product.accrual_config, coupon_pay_type=CouponPayType.EXPIRY)
+    cfg = ensemble_config(products=_book(product), engine_config=pde_engine_config())
+    report = run_oracle(cfg, _paths(kind), 0)
+    assert report.passed, report.summary()
+    assert report.max_pv_gap == 0.0 and report.max_total_pnl_gap == 0.0
+
+
 @pytest.mark.parametrize("kind, events", [
     ("ko1", ["knock_out"]), ("v0", ["maturity"]), ("ki_ko2", ["knock_in", "knock_out"]),
     ("ki_v1", ["knock_in", "maturity"]),

@@ -138,8 +138,9 @@ def _memory_count_at_t0(product, env, state):
 
 def _ko_reset_schedule_1_end(product, env, time_bump):
     """The payment time when a KO-reset's schedule 1 ends within the bump un-knocked: it matured then (rule 2),
-    paid with the terminal settlement lag after its last observation; else None."""
-    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    paid on the explicit settlement date when booked (spec D33), else with the terminal settlement lag after its last
+    observation; else None."""
+    from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
     from quantark.asset.equity.product.option import KnockOutResetSnowballOption
 
     if not isinstance(product, KnockOutResetSnowballOption):
@@ -148,6 +149,9 @@ def _ko_reset_schedule_1_end(product, env, time_bump):
     if not times or any(t >= time_bump or is_close(t, time_bump) for t in times):
         return None
     terminal = resolve_terminal_timing(product, env)
+    settlement = first_schedule_settlement(product, env, terminal)
+    if settlement.settlement_date_governs:
+        return float(settlement.payment_time)
     return max(times) + float(terminal.payment_time - terminal.determination_time)
 
 

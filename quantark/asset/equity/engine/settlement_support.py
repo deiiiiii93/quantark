@@ -416,28 +416,108 @@ def resolve_terminal_timing_at(
     return SettlementResolver.resolve_contingent(product, request, pricing_env)
 
 
-def first_schedule_payment_time(
+def first_schedule_terminal_timing(
+    product,
+    pricing_env: "PricingEnvironment",
+    *,
+    determination_time: Optional[float] = None,
+    determination_date: Optional[datetime] = None,
+) -> ResolvedPaymentTiming:
+    """KO-reset: the timing of a note that ends with its first schedule, determined at schedule 1's maturity (its last
+    record: a date on a dated contract, else a time) -- the never-knocked-in maturity and, under EXPIRY pay, a
+    first-schedule knock-out (spec D30).
+
+    The resolver's TERMINAL precedence is the settlement precedence of spec D33: the product's explicit
+    ``settlement_date`` when booked, else the settlement convention applied to schedule 1's maturity. Monte Carlo and the
+    lifecycle tracker settle the note here; the booking layers (lifecycle tracker, intraday timeline) date it with it.
+    """
+    return resolve_terminal_timing_at(
+        product,
+        pricing_env,
+        determination_time=determination_time,
+        determination_date=determination_date,
+        cashflow_id="ko_reset_v0_terminal",
+    )
+
+
+@dataclass(frozen=True)
+class FirstScheduleSettlement:
+    """KO-reset: when a note that ends with its first schedule is paid (``first_schedule_settlement``).
+
+    ``determination_time`` is schedule 1's maturity; ``payment_time`` / ``payment_date`` its payment; ``delay_df`` is
+    DF(payment) / DF(determination), the factor a grid engine seeds the never-knocked-in maturity with at schedule 1's
+    maturity. ``settlement_date_governs`` says the product's explicit ``settlement_date`` set the payment (spec D33).
+    ``payment_date`` is ``None`` unless the settlement date governs (callers date the delay rule themselves).
+    """
+
+    determination_time: float
+    payment_time: float
+    payment_date: Optional[datetime]
+    delay_df: float
+    settlement_date_governs: bool
+
+
+def first_schedule_settlement(
     product,
     pricing_env: "PricingEnvironment",
     terminal: Optional[ResolvedPaymentTiming] = None,
-) -> float:
-    """KO-reset: when a note that ends with its first schedule is paid -- schedule 1's maturity plus the terminal
-    settlement delay.
+) -> FirstScheduleSettlement:
+    """KO-reset: the payment of a note that ends with its first schedule -- the never-knocked-in maturity, and under
+    EXPIRY coupon pay also a first-schedule knock-out (spec D30): that knock-out happens only on a path never knocked
+    in, whose note ends at schedule 1's maturity.
 
-    It is the never-knocked-in maturity's payment, and under EXPIRY coupon pay also a first-schedule knock-out's
-    (spec D30, owner ruling 2026-11-14): that knock-out happens only on a path never knocked in, whose note ends at
-    schedule 1's maturity. Monte Carlo pays both there; the grid engines pay their never-knocked-in maturity row at
-    ``pre_maturity + delay``, and this is that time. When schedule 1 runs to the product maturity there is one maturity
-    and its payment is the product terminal's own (``terminal.payment_time``, the same float).
+    Settlement precedence (spec D33, owner ruling 2026-11-14): an explicit ``settlement_date`` comes first; the
+    settlement delay applies only when none is booked.
+
+    - schedule 1 shorter than the product and a ``settlement_date`` booked: that date (the resolver's TERMINAL
+      precedence at schedule 1's maturity, exactly the time Monte Carlo pays at), ``delay_df`` = DF(settlement) /
+      DF(schedule 1's maturity);
+    - otherwise: schedule 1's maturity plus the terminal settlement delay, ``pre_maturity + (payment - determination)``
+      of the product terminal, with the terminal's ``delay_df`` (the grid engines' rule before D33, unchanged). When
+      schedule 1 runs to the product maturity there is one maturity: this is the terminal's own delay, and with a
+      ``settlement_date`` the product terminal already pays on it.
 
     ``terminal``: the product's ``resolve_terminal_timing``, when the caller holds it.
     """
     terminal = resolve_terminal_timing(product, pricing_env) if terminal is None else terminal
     pre_maturity = float(product.get_pre_maturity_time(pricing_env))
     determination = float(terminal.determination_time)
-    if is_close(pre_maturity, determination, abs_tol=Tolerance.PRECISION):
+    one_maturity = is_close(pre_maturity, determination, abs_tol=Tolerance.PRECISION)
+    if getattr(product, "settlement_date", None) is not None and not one_maturity:
+        timing = first_schedule_terminal_timing(product, pricing_env, determination_time=max(pre_maturity, 0.0))
+        return FirstScheduleSettlement(
+            determination_time=pre_maturity,
+            payment_time=float(timing.payment_time),
+            payment_date=timing.payment_date,
+            delay_df=float(timing.delay_df),
+            settlement_date_governs=True,
+        )
+    return FirstScheduleSettlement(
+        determination_time=pre_maturity,
+        payment_time=pre_maturity + (float(terminal.payment_time) - determination),
+        payment_date=None,
+        delay_df=float(terminal.delay_df),
+        settlement_date_governs=False,
+    )
+
+
+def first_schedule_payment_time(
+    product,
+    pricing_env: "PricingEnvironment",
+    terminal: Optional[ResolvedPaymentTiming] = None,
+) -> float:
+    """KO-reset: when a note that ends with its first schedule is paid (``first_schedule_settlement``'s rule).
+
+    The never-knocked-in maturity's payment, and under EXPIRY coupon pay a first-schedule knock-out's (spec D30): an
+    explicit ``settlement_date`` when booked (spec D33), else schedule 1's maturity plus the terminal settlement delay.
+    When schedule 1 runs to the product maturity there is one maturity and its payment is the product terminal's own
+    (``terminal.payment_time``, the same float).
+    """
+    terminal = resolve_terminal_timing(product, pricing_env) if terminal is None else terminal
+    pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+    if is_close(pre_maturity, float(terminal.determination_time), abs_tol=Tolerance.PRECISION):
         return float(terminal.payment_time)
-    return pre_maturity + (float(terminal.payment_time) - determination)
+    return first_schedule_settlement(product, pricing_env, terminal).payment_time
 
 
 def apply_determination_to_payment(
@@ -665,6 +745,10 @@ __all__ = [
     "apply_determination_to_payment",
     "build_american_exercise_date_grid",
     "constant_hit_lag_year_fraction",
+    "FirstScheduleSettlement",
+    "first_schedule_payment_time",
+    "first_schedule_settlement",
+    "first_schedule_terminal_timing",
     "pending_receivable_pv",
     "requested_settlement_support",
     "resolve_american_exercise_timings",

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -131,3 +131,48 @@ def test_a_contract_called_alive_past_its_first_schedule_without_a_knock_in_is_r
 
     with pytest.raises(ValidationError, match="matured"):
         resolve_context(_req(sse_sessions, desk, dated_ko_reset(sse_calendar, T0), ts=LATE, lifecycle_state=_late_checkpoint(False)))
+
+
+# --- EXPIRY pay: a knock-out is booked when the note it ends is paid (spec D30, D33) ---------------------------------
+
+def _expiry(prod, settlement_date=None):
+    from dataclasses import replace
+
+    from quantark.util.enum import CouponPayType
+
+    prod.accrual_config = replace(prod.accrual_config, coupon_pay_type=CouponPayType.EXPIRY)
+    prod.settlement_date = settlement_date
+    prod.validate()
+    return prod
+
+
+def _ko_events(timeline, regime):
+    return [e for e in timeline.events if e.kind is EventKind.KO and e.regime == regime]
+
+
+def test_an_expiry_schedule_one_knock_out_is_booked_when_schedule_one_is_paid(sse_calendar, sse_sessions):
+    """A schedule-1 knock-out happens only on a note never knocked in, which ends at schedule 1's maturity (D30): under
+    EXPIRY pay it is booked on that note's payment -- here (no settlement date, no lag) the payment schedule 1's last
+    record makes under INSTANT pay -- not with the product terminal. A schedule-2 knock-out keeps the terminal's."""
+    timeline = resolve_timeline(_expiry(dated_ko_reset(sse_calendar, T0, pre_months=6, post_months=12)), sse_sessions,
+                                flat_env(TS))
+    instant = resolve_timeline(dated_ko_reset(sse_calendar, T0, pre_months=6, post_months=12), sse_sessions, flat_env(TS))
+    schedule_one_paid = max(_ko_events(instant, "pre"), key=lambda e: e.timestamp).payment_timestamp
+    terminal = timeline.terminal().payment_timestamp
+    assert schedule_one_paid < terminal
+    for event in _ko_events(timeline, "pre"):
+        assert event.payment_timestamp == max(schedule_one_paid, event.timestamp)
+    for event in _ko_events(timeline, "post"):
+        assert event.payment_timestamp == max(terminal, event.timestamp)
+
+
+def test_an_expiry_schedule_one_knock_out_is_booked_on_the_settlement_date(sse_calendar, sse_sessions):
+    """With an explicit settlement date the note that ends with schedule 1 is paid on it (D33), as the product terminal
+    is: every knock-out, pre or post, is booked on the settlement date's payment instant."""
+    prod = dated_ko_reset(sse_calendar, T0, pre_months=6, post_months=12)
+    settlement = prod.exercise_date + timedelta(days=7)
+    timeline = resolve_timeline(_expiry(prod, settlement), sse_sessions, flat_env(TS))
+    paid = sse_sessions.payment_at(settlement.date())
+    assert timeline.terminal().payment_timestamp == paid
+    for event in _ko_events(timeline, "pre") + _ko_events(timeline, "post"):
+        assert event.payment_timestamp == paid

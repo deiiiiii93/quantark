@@ -78,6 +78,10 @@ D9_CAUSES: Dict[str, str] = {
     "o": "D28 partial-protection edge row: partially protected PDE / ADI contracts whose floor does not bind on the "
          "knocked-in knock-in edge cell read that row off the payoff (no banked case is partially protected: "
          "test_no_banked_case_is_in_the_d28_partial_protection_class)",
+    "q": "D33 settlement precedence: a KO-reset note that ends with schedule 1 (the never-knocked-in maturity; under "
+         "EXPIRY also a schedule-1 knock-out) is paid on the product's explicit settlement_date when booked, the "
+         "settlement delay only without one, on PDE 1D / LV PDE / ADI, QUAD V1, QUAD V2 and the fold structure (no "
+         "banked case is one: test_no_banked_case_is_in_the_d33_settlement_precedence_class)",
 }
 
 
@@ -1599,6 +1603,35 @@ def test_no_banked_case_is_in_the_d30_ko_reset_expiry_class():
             in_class.append(case_id)
     assert ko_resets, "the bank holds KO-reset cases: the census must see them"
     assert in_class == [], f"in the D30 class, pin under cause (n): {in_class}"
+
+
+def test_no_banked_case_is_in_the_d33_settlement_precedence_class():
+    """Cause (q), D33, pins no record, because no banked case is in its class: a KO-reset with an explicit
+    ``settlement_date`` whose first schedule ends before the product maturity (the only contracts whose payment time
+    moves; one-maturity notes already paid their maturity on the settlement date). Every banked KO-reset is on the
+    numeric clock (``cases._ko_reset``), which cannot carry a settlement date (clock rule), so each banked record
+    reproduces through T25b-fu (or moves by an earlier cause); a case added to the bank in that class would have to be
+    pinned here under (q), its expected value the base value with the never-knocked-in maturity (and, under EXPIRY, the
+    schedule-1 knock-out) cash re-discounted from ``pre + (settlement - T)`` to the settlement date (the ratio of the
+    two discount factors, independent of the engine under test)."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+
+    assert BANKED is not None, "baseline.json is not banked"
+    assert not any(move.cause == "q" for move in EXPECTED_MOVES.values())
+    ko_resets, in_class = [], []
+    for case_id in BANKED["cases"]:
+        _, product, env = _case(case_id).fresh()
+        if not isinstance(product, KnockOutResetSnowballOption):
+            continue
+        ko_resets.append(case_id)
+        if getattr(product, "settlement_date", None) is None:
+            continue
+        pre = [r.observation_time for r in product._resolve_ko_schedule(product.barrier_config, env)[0]]
+        if pre and max(pre) < float(resolve_terminal_timing(product, env).determination_time):
+            in_class.append(case_id)
+    assert ko_resets, "the bank holds KO-reset cases: the census must see them"
+    assert in_class == [], f"in the D33 class, pin under cause (q): {in_class}"
 
 
 def test_expected_moves_name_banked_records_and_d9_causes():

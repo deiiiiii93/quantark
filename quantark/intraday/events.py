@@ -15,7 +15,7 @@ from datetime import datetime, time, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
 
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing
 from quantark.intraday.session import TradingSessionCalendar
 from quantark.intraday.timestamp import add_year_fraction, require_aware, to_utc
 from quantark.priceenv import PricingEnvironment
@@ -257,16 +257,21 @@ def _ko_reset_events(product, cal, env, origin, fixing_time):
                               "schedule would depend on the unknown hit instant")
     terminal = _terminal_event(product, cal, env, origin, fixing_time)
     events = [terminal]
+    expiry = product.accrual_config.coupon_pay_type.name == "EXPIRY"
     for regime, config in (("pre", product.barrier_config), ("post", product.post_barrier_config)):
         schedule = config.ko_observation_schedule
         records = ko_reset_records(product, config, env)
         if schedule is None or len(records) != len(schedule.records):
             raise ValidationError(f"schedule env must keep every {regime}-KI KO record active (anchor at initial_date)")
+        # EXPIRY pay: a knock-out is paid with the note it ends -- schedule 1's (spec D30, D33) for a pre-KI one,
+        # the product terminal's for a post-KI one
+        note_end = (_first_schedule_payment(product, cal, env, origin, fixing_time, records)
+                    if expiry and regime == "pre" else terminal.payment_timestamp)
         for i, (rec, src, _rate, cash) in enumerate(records):
             ts, date_only = _instant(cal, timestamp=src.observation_timestamp, dt=rec.observation_date,
                                      tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ko_{regime}[{i}]")
-            if product.accrual_config.coupon_pay_type.name == "EXPIRY":
-                pay = max(terminal.payment_timestamp, ts, key=to_utc)
+            if expiry:
+                pay = max(note_end, ts, key=to_utc)
             else:
                 pay = _payment(cal, timestamp=src.settlement_timestamp, dt=rec.settlement_date, tau=rec.settlement_time,
                                origin=origin, fallback=ts)
@@ -285,6 +290,21 @@ def _ko_reset_events(product, cal, env, origin, fixing_time):
                                          tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ki[{i}]")
                 events.append(ContractEvent.make(EventKind.KI, i, ts, ts, rec.barrier, None, date_only))
     return events, continuous
+
+
+def _first_schedule_payment(product, cal, env, origin, fixing_time, records) -> datetime:
+    """When a KO-reset note that ends with schedule 1 is paid: determined at schedule 1's last record, paid on the
+    explicit settlement date when booked, else by the settlement convention (``first_schedule_terminal_timing``, spec
+    D33) -- the payment the lifecycle tracker books for V0 and Monte Carlo settles it at."""
+    rec, src, _rate, _cash = max(records, key=lambda r: float(r[0].observation_time))
+    ts, _ = _instant(cal, timestamp=src.observation_timestamp, dt=rec.observation_date, tau=rec.observation_time,
+                     origin=origin, fixing_time=fixing_time, what="ko_pre[last]")
+    timing = (first_schedule_terminal_timing(product, env, determination_date=rec.observation_date)
+              if rec.observation_date is not None
+              else first_schedule_terminal_timing(product, env, determination_time=float(rec.observation_time)))
+    payment_date = getattr(timing, "payment_date", None)
+    return _payment(cal, timestamp=None, dt=payment_date,
+                    tau=None if payment_date is not None else timing.payment_time, origin=origin, fallback=ts)
 
 
 def _terminal_event(product, cal, env, origin, fixing_time) -> ContractEvent:

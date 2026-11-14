@@ -12,6 +12,7 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
 )
 from quantark.asset.equity.engine.settlement_support import (
     first_schedule_payment_time,
+    first_schedule_settlement,
     resolve_terminal_timing,
 )
 from quantark.util.enum import (
@@ -143,13 +144,14 @@ def _reset_record_dates(product, env, config):
     }
 
 
-def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity):
+def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity, no_ki_payment=None):
     """Add a fold overlay's KO cash to the records; return the per-branch terminal cash.
 
     Records are ``(observation_time, barrier, cash_at_settlement, payment_time)``.
     Times are the raw contractual ones (before canonical merging), the timing the
     overlay was built on. The alive branch of a KO-reset ends at its pre-maturity
-    and settles after the same terminal delay as the knocked-in branch.
+    and settles after the same terminal delay as the knocked-in branch, or on the
+    explicit settlement date when one governs (``no_ki_payment``, spec D33).
     """
     schedules = (("pre", pre), ("post", post)) if reset else (("main", pre),)
     records = [(name, r[0], r[3]) for name, rows in schedules for r in rows]
@@ -162,7 +164,8 @@ def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity):
     new_post = folded[1] if reset else new_pre
     delay = terminal.payment_time - terminal.determination_time
     branch_terminal = {
-        "no_ki": float(fold.bind_terminal("no_ki", pre_maturity, pre_maturity + delay)),
+        "no_ki": float(fold.bind_terminal(
+            "no_ki", pre_maturity, pre_maturity + delay if no_ki_payment is None else no_ki_payment)),
         "ki": float(fold.bind_terminal("ki", maturity, terminal.payment_time)),
     }
     return new_pre, new_post, branch_terminal
@@ -375,10 +378,17 @@ def compile_contract(
         return result
 
     terminal = resolve_terminal_timing(product, env)
+    # a KO-reset note that ends with schedule 1 is paid on the explicit settlement date when booked (spec D33)
+    first_schedule = first_schedule_settlement(product, env, terminal) if reset else None
+    governed_payment = (
+        first_schedule.payment_time
+        if first_schedule is not None and first_schedule.settlement_date_governs
+        else None
+    )
     fold_terminal = {}
     if fold is not None and not fold.is_empty:
         pre, post, fold_terminal = _bind_fold(
-            fold, reset, pre, post, terminal, maturity, pre_maturity
+            fold, reset, pre, post, terminal, maturity, pre_maturity, governed_payment
         )
     pre_by, post_by, ki_by = keyed(pre), keyed(post), keyed(ki)
     maturity, pre_maturity = mapping[maturity], mapping[pre_maturity]
@@ -690,6 +700,8 @@ def compile_contract(
                     if t == maturity
                     else env.get_discount_factor(
                         t + terminal.payment_time - terminal.determination_time
+                        if governed_payment is None
+                        else governed_payment
                     )
                     / env.get_discount_factor(t)
                 )

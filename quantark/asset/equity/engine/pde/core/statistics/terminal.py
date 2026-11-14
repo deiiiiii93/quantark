@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.util.enum import CouponPayType
@@ -143,8 +143,12 @@ def _ko_reset_knocked_out_rows(solver, product, env, decision, terminal):
     observations = es.observation_table(env, records, unit, schedule=["pre"] * len(pre) + ["post"] * len(post),
                                         order=order)
     delay = float(terminal.payment_time) - float(terminal.determination_time)
-    pre_maturity = float(product.get_pre_maturity_time(env))
-    maturity_timing = dict(time=pre_maturity, payment_time=pre_maturity + delay)
+    # the note that ends with schedule 1: paid on the explicit settlement date when booked (spec D33), else the
+    # terminal delay after schedule 1's maturity
+    settlement = first_schedule_settlement(product, env, terminal)
+    maturity_timing = dict(time=settlement.determination_time, payment_time=settlement.payment_time)
+    if settlement.settlement_date_governs:
+        maturity_timing.update(payment_date=settlement.payment_date)
     ki_timing = dict(time=tau, payment_time=tau + delay, date=terminal.determination_date,
                      payment_date=terminal.payment_date)
     return observations, maturity_timing, ki_timing

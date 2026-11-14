@@ -16,6 +16,7 @@ import numpy as np
 from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.settlement_support import (
     first_schedule_payment_time,
+    first_schedule_settlement,
     resolve_terminal_timing,
 )
 from quantark.asset.equity.engine.quad.quad_adapters import (
@@ -306,18 +307,23 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         # seeded when the sweep reaches pre_maturity and is identically zero
         # above -- which is its true value there, the contract having already
         # terminated in that state.
+        # The note that ends with schedule 1 is paid on the explicit settlement date when booked (spec D33),
+        # else the terminal settlement lag after schedule 1's maturity (``first_schedule_settlement``).
+        first_schedule = first_schedule_settlement(product, pricing_env, terminal)
         v_out_terminal = np.array(
             [
                 product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
                 for spot_value in spot_grid
             ],
             dtype=float,
-        ) * payment_timings.terminal.delay_df
+        ) * (first_schedule.delay_df if first_schedule.settlement_date_governs
+             else payment_timings.terminal.delay_df)
         if fold is not None:
-            # Folded cash of the alive branch is paid at the first schedule's maturity plus the
-            # terminal settlement lag (the fold structure's slot), discounted from there to the
-            # pre-maturity by its own exact ratio; the product's own redemption keeps its discount.
-            no_ki_payment = pre_maturity + (terminal.payment_time - terminal.determination_time)
+            # Folded cash of the alive branch is paid with the note (the fold structure's slot),
+            # discounted from there to the pre-maturity by its own exact ratio; the product's own
+            # redemption keeps its discount.
+            no_ki_payment = (first_schedule.payment_time if first_schedule.settlement_date_governs
+                             else pre_maturity + (terminal.payment_time - terminal.determination_time))
             no_ki_cash = fold.bind_terminal("no_ki", pre_maturity, no_ki_payment)
             v_out_terminal = v_out_terminal + no_ki_cash * (
                 pricing_env.get_discount_factor(no_ki_payment)
@@ -754,7 +760,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             [product.get_maturity_payoff_v0(s, pricing_env=pricing_env) for s in spot_grid], dtype=float
         )
         terminal_in_cash = v_in_cash * terminal.delay_df
-        terminal_out_cash = v_out_cash * terminal.delay_df
+        # the maturity at schedule 1's end, as ``price`` seeds it (spec D33: an explicit settlement date governs)
+        first_schedule = first_schedule_settlement(product, pricing_env, terminal)
+        terminal_out_cash = v_out_cash * (
+            first_schedule.delay_df if first_schedule.settlement_date_governs else terminal.delay_df
+        )
 
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
@@ -984,9 +994,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         pre_date = (last_pre.observation_date if last_pre is not None
                     and is_close(float(last_pre.observation_time), pre_maturity) else None)
         df_pre = float(pricing_env.get_discount_factor(pre_maturity)) if pre_maturity > 0.0 else 1.0
+        # paid on the explicit settlement date when booked (spec D33), else the terminal delay after its maturity
+        settlement = first_schedule_settlement(product, pricing_env, terminal)
+        governs = settlement.settlement_date_governs
         maturity_row = es.outcome_row(
-            pricing_env, time=pre_maturity, payment_time=pre_maturity + delay, date=pre_date,
-            payment_date=pre_date if is_close(delay, 0.0) else None,
+            pricing_env, time=pre_maturity, payment_time=settlement.payment_time if governs else pre_maturity + delay,
+            date=pre_date,
+            payment_date=settlement.payment_date if governs else pre_date if is_close(delay, 0.0) else None,
             probability=maturity_unit / df_pre, discounted=maturity_cash,
         )
         ki_settlement = es.outcome_row(

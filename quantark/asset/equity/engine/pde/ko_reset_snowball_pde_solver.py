@@ -15,7 +15,10 @@ import numpy as np
 from quantark.asset.equity.engine.pde.base_pde_solver import GRID_CACHE_MAX_ENTRIES
 from quantark.asset.equity.engine.pde.core.adapters.ko_reset import KOResetAdapter
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time
+from quantark.asset.equity.engine.settlement_support import (
+    first_schedule_payment_time,
+    first_schedule_settlement,
+)
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
@@ -203,9 +206,14 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         return product.decide_observations_at_valuation(pricing_env.spot, pricing_env, knocked_in=carried)
 
     def _first_schedule_payment_time(self, product, pricing_env) -> float:
-        """Schedule 1's maturity plus the terminal delay (``first_schedule_payment_time``): when the never-knocked-in
-        note is paid, and under EXPIRY pay a first-schedule knock-out (spec D30)."""
+        """When the never-knocked-in note is paid, and under EXPIRY pay a first-schedule knock-out (spec D30): the
+        explicit settlement date when booked (spec D33), else schedule 1's maturity plus the terminal delay
+        (``first_schedule_payment_time``)."""
         return first_schedule_payment_time(product, pricing_env, self._terminal_timing(product, pricing_env))
+
+    def _first_schedule_settlement(self, product, pricing_env):
+        """``first_schedule_settlement``: the payment (and its delay factor) of a note that ends with schedule 1."""
+        return first_schedule_settlement(product, pricing_env, self._terminal_timing(product, pricing_env))
 
     def _ko_settlement_time(self, product, pricing_env, record, regime):
         """A knock-out's payment time: its settlement, or under EXPIRY accrual the end of the note it ends --
@@ -242,11 +250,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         return [("pre", rec) for rec in pre] + [("post", rec) for rec in post]
 
     def _fold_no_ki_timing(self, product, pricing_env):
-        """The alive branch matures on the first schedule: determined at its maturity, paid the terminal
-        settlement lag later, discounted from there to the pre-maturity by its own ratio."""
-        timing = self._terminal_timing(product, pricing_env)
-        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
-        payment = pre_maturity + (float(timing.payment_time) - float(timing.determination_time))
+        """The alive branch matures on the first schedule: determined at its maturity, paid on the explicit
+        settlement date when booked (spec D33), else the terminal settlement lag later; discounted from there to the
+        pre-maturity by its own ratio."""
+        settlement = self._first_schedule_settlement(product, pricing_env)
+        pre_maturity, payment = settlement.determination_time, settlement.payment_time
         return pre_maturity, payment, self._df_between_times(pricing_env, pre_maturity, payment)
 
     def _folded_knock_out_cash(self, product, pricing_env, decision, fold) -> float:
@@ -372,7 +380,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         payoffs = np.array(
             [product.get_maturity_payoff_v0(s, pricing_env, contract_tenor=tenor) for s in s_vec]
         )
-        grid[:, -1] = payoffs * self._structured_terminal_delay_df
+        # seeded at schedule 1's maturity: its payment's delay factor, the terminal's unless an explicit settlement
+        # date governs (spec D33)
+        settlement = self._first_schedule_settlement(product, pricing_env)
+        delay_df = settlement.delay_df if settlement.settlement_date_governs else self._structured_terminal_delay_df
+        grid[:, -1] = payoffs * delay_df
         if self._fold is not None:
             grid[:, -1] += self._fold.no_ki * self._fold.no_ki_df
 
