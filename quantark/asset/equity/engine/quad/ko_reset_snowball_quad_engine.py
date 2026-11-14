@@ -15,6 +15,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.settlement_support import (
+    first_schedule_payment_time,
     resolve_terminal_timing,
 )
 from quantark.asset.equity.engine.quad.quad_adapters import (
@@ -128,7 +129,12 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             record = decision.ko_record
             settlement = record.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                settlement = resolve_terminal_timing(product, pricing_env).payment_time
+                # EXPIRY pay: with the note's end -- schedule 1's maturity for a first-schedule knock-out (spec D30)
+                settlement = (
+                    first_schedule_payment_time(product, pricing_env)
+                    if decision.ko_regime == "pre"
+                    else resolve_terminal_timing(product, pricing_env).payment_time
+                )
             discount = (
                 pricing_env.get_discount_factor(settlement)
                 if settlement is not None and settlement > 0.0
@@ -1095,6 +1101,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             else 0.0
         )
         terminal_payment_time: Optional[float] = None
+        first_schedule = config is product.barrier_config
         ko_records: List[ResolvedObservationRecord] = []
         for idx, rec in enumerate(resolved_schedule):
             rate = rates[idx]
@@ -1112,9 +1119,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
             settlement_time = rec.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+                # EXPIRY pay: with the note's end -- schedule 1's maturity for a first-schedule knock-out (a path
+                # never knocked in ends there, spec D30), the product terminal for a second-schedule one
                 terminal_payment_time = (
                     terminal_payment_time
                     if terminal_payment_time is not None
+                    else first_schedule_payment_time(product, pricing_env)
+                    if first_schedule
                     else resolve_terminal_timing(
                         product, pricing_env
                     ).payment_time

@@ -15,6 +15,7 @@ import numpy as np
 from quantark.asset.equity.engine.pde.base_pde_solver import GRID_CACHE_MAX_ENTRIES
 from quantark.asset.equity.engine.pde.core.adapters.ko_reset import KOResetAdapter
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
@@ -90,6 +91,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         resolved_schedule, rates, schedule_records = product._resolve_ko_schedule(
             config, pricing_env
         )
+        first_schedule = config is product.barrier_config
         principal_component = (
             product.initial_price * product.contract_multiplier
             if product.payoff_config.include_principal
@@ -112,9 +114,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
 
             settlement_time = rec.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                settlement_time = self._terminal_payment_time(
-                    product,
-                    pricing_env,
+                # EXPIRY pay: with the note's end -- schedule 1's maturity for a first-schedule knock-out (a path
+                # never knocked in ends there, spec D30), the product terminal for a second-schedule one
+                settlement_time = (
+                    self._first_schedule_payment_time(product, pricing_env)
+                    if first_schedule
+                    else self._terminal_payment_time(product, pricing_env)
                 )
 
             ko_records.append(
@@ -197,16 +202,33 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         product.require_alive(pricing_env, carried)
         return product.decide_observations_at_valuation(pricing_env.spot, pricing_env, knocked_in=carried)
 
-    def _ko_settlement_time(self, product, pricing_env, record):
-        """A knock-out's payment time: its settlement, or the terminal payment under EXPIRY accrual."""
+    def _first_schedule_payment_time(self, product, pricing_env) -> float:
+        """Schedule 1's maturity plus the terminal delay (``first_schedule_payment_time``): when the never-knocked-in
+        note is paid, and under EXPIRY pay a first-schedule knock-out (spec D30)."""
+        return first_schedule_payment_time(product, pricing_env, self._terminal_timing(product, pricing_env))
+
+    def _ko_settlement_time(self, product, pricing_env, record, regime):
+        """A knock-out's payment time: its settlement, or under EXPIRY accrual the end of the note it ends --
+        schedule 1's maturity for a ``"pre"`` knock-out (spec D30), the terminal payment for a ``"post"`` one."""
         if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+            if regime == "pre":
+                return self._first_schedule_payment_time(product, pricing_env)
             return self._terminal_payment_time(product, pricing_env)
         return record.settlement_time
+
+    def _get_immediate_ko_payoff(self, product, pricing_env) -> float:
+        """The 2D (ADI) routes read the knock-out decided at valuation here. Under EXPIRY pay a first-schedule one is
+        paid at schedule 1's maturity (``_knocked_out_value``, spec D30); everything else as the snowball reads it."""
+        if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+            decision = self._valuation_decision(product, pricing_env)
+            if decision.knocked_out and decision.ko_regime == "pre":
+                return self._knocked_out_value(product, pricing_env, decision)
+        return super()._get_immediate_ko_payoff(product, pricing_env)
 
     def _knocked_out_value(self, product, pricing_env, decision) -> float:
         """The knock-out the decision fired, pre or post schedule: its contractual cash at its payment."""
         record = decision.ko_record
-        settlement_time = self._ko_settlement_time(product, pricing_env, record)
+        settlement_time = self._ko_settlement_time(product, pricing_env, record, decision.ko_regime)
         if settlement_time is not None and settlement_time > 0.0:
             return float(record.payoff) * float(pricing_env.get_discount_factor(settlement_time))
         return float(record.payoff)
@@ -234,7 +256,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         record = decision.ko_record
         schedule = "pre" if decision.ko_regime == "pre" else "post"
         amount = bound.ko_amount(schedule, record.observation_time)
-        settlement_time = self._ko_settlement_time(product, pricing_env, record)
+        settlement_time = self._ko_settlement_time(product, pricing_env, record, decision.ko_regime)
         if settlement_time is not None and settlement_time > 0.0:
             return float(amount) * float(pricing_env.get_discount_factor(settlement_time))
         return float(amount)

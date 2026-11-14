@@ -237,7 +237,9 @@ def test_structured_timing_bundle_preserves_explicit_event_times():
     assert timings.terminal.payment_time == pytest.approx(1.0 + LAG)
 
 
-def test_ko_reset_expiry_payments_use_terminal_payment_time():
+def test_ko_reset_expiry_payments_settle_with_the_note_they_end():
+    """EXPIRY pay (spec D30): a schedule-2 knock-out pays with the product terminal (2.0 + lag), a schedule-1 one with
+    the never-knocked-in maturity, schedule 1's end plus the same lag (1.0 + lag)."""
     product = create_ko_reset_snowball(
         initial_price=100.0,
         strike=100.0,
@@ -255,14 +257,14 @@ def test_ko_reset_expiry_payments_use_terminal_payment_time():
     ]
 
     for engine in engines:
-        for config in (
-            product.barrier_config,
-            product.post_barrier_config,
+        for config, end in (
+            (product.barrier_config, 1.0),
+            (product.post_barrier_config, 2.0),
         ):
             records = engine._resolve_ko_records(product, env, config)
             assert [
                 record.settlement_time for record in records
-            ] == pytest.approx([2.0 + LAG] * len(records))
+            ] == pytest.approx([end + LAG] * len(records))
 
 
 def test_payment_lag_does_not_change_quad_event_probabilities():

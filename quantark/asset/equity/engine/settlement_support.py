@@ -23,7 +23,7 @@ from quantark.util.calendar import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import Tolerance, is_close, is_zero
 
 from .capabilities import SettlementSupport
 
@@ -414,6 +414,30 @@ def resolve_terminal_timing_at(
         cashflow_id=cashflow_id,
     )
     return SettlementResolver.resolve_contingent(product, request, pricing_env)
+
+
+def first_schedule_payment_time(
+    product,
+    pricing_env: "PricingEnvironment",
+    terminal: Optional[ResolvedPaymentTiming] = None,
+) -> float:
+    """KO-reset: when a note that ends with its first schedule is paid -- schedule 1's maturity plus the terminal
+    settlement delay.
+
+    It is the never-knocked-in maturity's payment, and under EXPIRY coupon pay also a first-schedule knock-out's
+    (spec D30, owner ruling 2026-11-14): that knock-out happens only on a path never knocked in, whose note ends at
+    schedule 1's maturity. Monte Carlo pays both there; the grid engines pay their never-knocked-in maturity row at
+    ``pre_maturity + delay``, and this is that time. When schedule 1 runs to the product maturity there is one maturity
+    and its payment is the product terminal's own (``terminal.payment_time``, the same float).
+
+    ``terminal``: the product's ``resolve_terminal_timing``, when the caller holds it.
+    """
+    terminal = resolve_terminal_timing(product, pricing_env) if terminal is None else terminal
+    pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+    determination = float(terminal.determination_time)
+    if is_close(pre_maturity, determination, abs_tol=Tolerance.PRECISION):
+        return float(terminal.payment_time)
+    return pre_maturity + (float(terminal.payment_time) - determination)
 
 
 def apply_determination_to_payment(

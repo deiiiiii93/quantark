@@ -71,6 +71,10 @@ D9_CAUSES: Dict[str, str] = {
          "test_no_banked_case_is_in_the_d27_airbag_class)",
     "m": "D29 termination survival: settled notes leave after their settlement (a maturity-type termination is alive "
          "at its determination and gone right after, past the note's last node too)",
+    "n": "D30 KO-reset EXPIRY schedule-1 pay date: under EXPIRY coupon pay a first-schedule knock-out is paid at "
+         "schedule 1's maturity (plus the terminal delay), not the product maturity, on PDE 1D / LV PDE / ADI, QUAD V1, "
+         "QUAD V2 and the fold structure (no banked case is one: "
+         "test_no_banked_case_is_in_the_d30_ko_reset_expiry_class)",
 }
 
 
@@ -1538,6 +1542,34 @@ def test_no_banked_case_is_in_the_d27_airbag_class():
         if airbag is not None and airbag.airbag_barrier is not None and payoff.protection_type == ProtectionType.PARTIAL:
             in_class.append(case_id)
     assert in_class == [], f"in the D27 class, pin under cause (l): {in_class}"
+
+
+def test_no_banked_case_is_in_the_d30_ko_reset_expiry_class():
+    """Cause (n), D30, pins no record, because no banked case is in its class: a KO-reset under EXPIRY coupon pay whose
+    first schedule ends before the product maturity (the only contracts whose payment time moves). Every banked
+    KO-reset pays INSTANT (``cases._ko_reset``: the default ``AccrualConfig``), so each banked record reproduces
+    through T25b (or moves by an earlier cause); a case added to the bank in that class would have to be pinned here
+    under (n), its expected value the base value with the schedule-1 knock-out cash re-discounted from the product
+    terminal's payment to schedule 1's (independent of the engine under test)."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.util.enum import CouponPayType
+
+    assert BANKED is not None, "baseline.json is not banked"
+    assert not any(move.cause == "n" for move in EXPECTED_MOVES.values())
+    ko_resets, in_class = [], []
+    for case_id in BANKED["cases"]:
+        _, product, env = _case(case_id).fresh()
+        if not isinstance(product, KnockOutResetSnowballOption):
+            continue
+        ko_resets.append(case_id)
+        if product.accrual_config.coupon_pay_type != CouponPayType.EXPIRY:
+            continue
+        pre = [r.observation_time for r in product._resolve_ko_schedule(product.barrier_config, env)[0]]
+        if pre and max(pre) < float(resolve_terminal_timing(product, env).determination_time):
+            in_class.append(case_id)
+    assert ko_resets, "the bank holds KO-reset cases: the census must see them"
+    assert in_class == [], f"in the D30 class, pin under cause (n): {in_class}"
 
 
 def test_expected_moves_name_banked_records_and_d9_causes():

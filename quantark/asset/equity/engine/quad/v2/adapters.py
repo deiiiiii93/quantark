@@ -10,7 +10,10 @@ from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+from quantark.asset.equity.engine.settlement_support import (
+    first_schedule_payment_time,
+    resolve_terminal_timing,
+)
 from quantark.util.enum import (
     ObservationType,
     CouponPayType,
@@ -77,10 +80,31 @@ def _affine_payoff(product, env, ki, lo, hi):
     return float(cash), float(asset)
 
 
+def _expiry_payment(product, env, config):
+    """``(time, date)`` an EXPIRY-pay knock-out of ``config``'s schedule is paid at: the end of the note it ends --
+    schedule 1's maturity plus the terminal delay for a first-schedule knock-out (a path never knocked in ends there,
+    spec D30), dated as the never-knocked-in maturity row dates it; the product terminal for a second-schedule one."""
+    terminal = resolve_terminal_timing(product, env)
+    if config is not product.barrier_config:
+        return terminal.payment_time, terminal.payment_date
+    time = first_schedule_payment_time(product, env, terminal)
+    if time == terminal.payment_time:
+        return time, terminal.payment_date              # one maturity: the product terminal's own
+    records = product._resolve_ko_schedule(config, env)[0]
+    last = max(records, key=lambda r: float(r.observation_time)) if records else None
+    delay = float(terminal.payment_time) - float(terminal.determination_time)
+    date = (last.observation_date if last is not None and is_close(delay, 0.0) else None)
+    return time, date
+
+
 def _reset_records(product, env, config):
     records, rates, originals = product._resolve_ko_schedule(config, env)
     result = []
-    terminal_time = resolve_terminal_timing(product, env).payment_time
+    terminal_time = (
+        _expiry_payment(product, env, config)[0]
+        if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY
+        else None
+    )
     for record, rate, original in zip(records, rates, originals):
         amount = (
             product.initial_price
@@ -105,15 +129,15 @@ def _reset_records(product, env, config):
 
 
 def _reset_record_dates(product, env, config):
-    """Raw observation time -> (observation date, payment date) of a KO-reset schedule's records (the payment
-    date the terminal one under EXPIRY pay, as ``_reset_records`` pays it)."""
+    """Raw observation time -> (observation date, payment date) of a KO-reset schedule's records (under EXPIRY pay
+    the payment date of the note's end, as ``_reset_records`` pays it: ``_expiry_payment``)."""
     records = product._resolve_ko_schedule(config, env)[0]
-    terminal = resolve_terminal_timing(product, env)
     expiry = product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY
+    expiry_date = _expiry_payment(product, env, config)[1] if expiry else None
     return {
         float(record.observation_time): (
             record.observation_date,
-            terminal.payment_date if expiry else record.settlement_date,
+            expiry_date if expiry else record.settlement_date,
         )
         for record in records
     }

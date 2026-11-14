@@ -367,7 +367,7 @@ def _autocallable_structure(product, pricing_env) -> _Structure:
 
 def _ko_reset_structure(product, pricing_env) -> _Structure:
     """KO-reset: both schedules on one axis (pre first at a tie) and the two maturity buckets."""
-    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time, resolve_terminal_timing
     from quantark.execution.errors import CapabilityError
     from quantark.util.enum import CouponPayType, PostKOScheduleMode
 
@@ -383,16 +383,18 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
     terminal = resolve_terminal_timing(product, pricing_env)
     expiry = product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY
 
-    def schedule(config):
+    def schedule(config, expiry_payment):
         resolved, _, _ = product._resolve_ko_schedule(config, pricing_env)
         times, pays = [], []
         for rec in _in_life(resolved, tau):
             times.append(float(rec.observation_time))
-            pays.append(float(terminal.payment_time) if expiry else _settlement(rec))
+            pays.append(expiry_payment if expiry else _settlement(rec))
         return np.array(times, dtype=float), np.array(pays, dtype=float)
 
-    pre_t, pre_pay = schedule(product.barrier_config)
-    post_t, post_pay = schedule(product.post_barrier_config)
+    # EXPIRY pay: with the note's end -- schedule 1's maturity for a first-schedule knock-out (spec D30)
+    pre_t, pre_pay = schedule(product.barrier_config,
+                              first_schedule_payment_time(product, pricing_env, terminal) if expiry else None)
+    post_t, post_pay = schedule(product.post_barrier_config, float(terminal.payment_time))
     if pre_t.size + post_t.size == 0:
         return _trivial_structure(product, pricing_env)
     delay = float(terminal.payment_time) - float(terminal.determination_time)

@@ -97,7 +97,7 @@ One row per observation in the union of the KO and coupon observations, sorted b
 | Column | Meaning |
 |---|---|
 | `times`, `dates` | when the row is decided |
-| `payment_times`, `payment_dates` | when the KO cash settles |
+| `payment_times`, `payment_dates` | when the KO cash settles. Under EXPIRY coupon pay: with the note's end -- a KO-reset `pre` row with the `maturity` row (the first schedule's maturity plus the terminal delay: a first-schedule KO ends a never-knocked-in note), a `post` row with the product's terminal. |
 | `is_ko_obs`, `is_coupon_obs` | which kinds of observation the row is. A coupon-only row (DCN `ko_lock_months`, a Phoenix observation without a KO barrier) has KO probability and cash exactly 0. |
 | `schedule` | `"pre"` / `"post"` per row on KO-reset, else `None`. Both schedules sit in one table; a time can repeat once per tag, `pre` first. |
 | `probability` | P(KO at this row) |
