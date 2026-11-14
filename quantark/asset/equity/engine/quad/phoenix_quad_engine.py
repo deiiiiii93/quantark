@@ -556,29 +556,30 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             start = max(obs_idx - missed, 0)
             return float(coupon_cumulative[obs_idx] - coupon_cumulative[start] + carried)
 
-        # Terminal condition for each memory state (base payoff; coupons added via jumps)
+        # Terminal condition for each memory state (base payoff; coupons added via jumps). The base payoff does
+        # not depend on the memory state (no coupon accumulated: get_maturity_payoff_v1 takes none, v0 gets 0.0),
+        # so it is evaluated once and every state starts from the same arrays (T25: the same floats as one
+        # evaluation per state; neither array is written below).
+        base_in_cash = np.array(
+            [
+                product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
+                for spot_value in spot_grid
+            ],
+            dtype=float,
+        )
+        base_out_cash = np.array(
+            [
+                product.get_maturity_payoff_v0(
+                    spot_value,
+                    accumulated_coupons=0.0,
+                    pricing_env=pricing_env,
+                )
+                for spot_value in spot_grid
+            ],
+            dtype=float,
+        )
         for k in range(num_obs + 1):
-            v_in_cash = np.array(
-                [
-                    product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
-                    for spot_value in spot_grid
-                ],
-                dtype=float,
-            )
-            # V1 usually doesn't pay coupons? Checked logic: get_maturity_payoff_v1 doesn't take accumulated.
-            # So accumulated is ignored for V1.
-
-            v_out_cash = np.array(
-                [
-                    product.get_maturity_payoff_v0(
-                        spot_value,
-                        accumulated_coupons=0.0,
-                        pricing_env=pricing_env,
-                    )
-                    for spot_value in spot_grid
-                ],
-                dtype=float,
-            )
+            v_in_cash, v_out_cash = base_in_cash, base_out_cash
             if fold_terminal is not None:
                 v_in_cash = v_in_cash + fold_terminal["ki"]
                 v_out_cash = v_out_cash + fold_terminal["no_ki"]
