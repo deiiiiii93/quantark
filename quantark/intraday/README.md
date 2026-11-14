@@ -233,6 +233,12 @@ Every limit below raises rather than approximating. None of them is a silent fal
   second schedule up to its final maturity. A contract NOT knocked in when the first schedule
   ends matured there: a checkpoint that still calls it alive is refused (`ValidationError`),
   and a knock-in is never tested after that schedule's last observation.
+- **A KO-reset snowball with an explicit `settlement_date`.** A note that ends with the first
+  schedule (never knocked in; under EXPIRY pay also a first-schedule knock-out) is paid on the
+  settlement date (spec D33). The float-time twin cannot carry a date, so it carries that payment
+  as `first_schedule_settlement_time`, resolved once from the contract
+  (`ContractTimeline.first_schedule_payment`); every engine reads it through
+  `settlement_support.first_schedule_settlement` (spec D34).
 - Dated autocallables without `initial_date` (their accrual would move with the valuation
   timestamp), time-based checkpoints, checkpoints that report the future, and two due
   fixings on one local date (the daily lifecycle tracker cannot separate them) fail closed.

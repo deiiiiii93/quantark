@@ -238,7 +238,7 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     convention), as it books the never-knocked-in maturity; it used to book the record's own
     settlement date. Its calendar schedule (simulated paths) places the same settlement day and
     delay. The intraday timeline's pre-KI KO events under EXPIRY pay carry that payment instant
-    instead of the product terminal's. Booking only; no price moves.
+    instead of the product terminal's. Booking only; the intraday price follows in item 25.
 24. **KO-reset MC: the knocked-in redemption reads the spot at the second schedule's end (D31).** On
     an ABSOLUTE second schedule (a carried knock-in included), BSM, local-vol, Heston and Heston-SLV MC
     paid the knocked-in redemption at the second schedule's end but read its spot at the grid's last
@@ -249,6 +249,20 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     0.25 and aged 0.3, moving from +8 SE to −1 SE against PDE. The `ki_settlement` cash moves with
     them. The REBASED/ABSOLUTE pair now prices the same (the former 0.0252 "tenor" gap was this
     readout). A knock-in after the second schedule's end keeps the old readout (see §10).
+25. **KO-reset intraday twin: the first schedule is paid on the settlement date (D34).** The float-time
+    twin of a dated KO-reset note now carries the payment of a note that ends with the first schedule
+    as `first_schedule_settlement_time`, a new numeric-clock argument of
+    `KnockOutResetSnowballOption`. It is resolved once from the dated contract per D33
+    (`ContractTimeline.first_schedule_payment`), and every engine reads it through
+    `first_schedule_settlement` / `first_schedule_terminal_timing`. The twin used to keep only the
+    terminal's lag (settlement − maturity), so its engines paid the never-knocked-in maturity (and an
+    EXPIRY first-schedule knock-out) at the first schedule's maturity plus that lag. Intraday prices of
+    dated notes with a `settlement_date` whose first schedule ends before the product maturity, not
+    knocked in, are lower. Example: −2.55 EXPIRY / −0.34 INSTANT on a fresh 2-year note with principal,
+    first schedule to one year, settled 20 days after the exercise date. They now equal the dated note
+    on the same engine on the twin's clock, to the bit. Every other intraday price and every
+    non-intraday price is bitwise unchanged. A numeric contract may set the argument itself; a dated
+    contract that sets it is refused (clock rule).
 
 ## 10. Known limitations in 0.11.0
 

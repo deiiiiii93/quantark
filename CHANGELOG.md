@@ -43,7 +43,7 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
   plus "P(matured knocked in)".
 
-### Changed: prices (seven sanctioned moves; every other `price()` is bitwise unchanged)
+### Changed: prices (eight sanctioned moves; every other `price()` is bitwise unchanged)
 
 - **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
   maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
@@ -51,6 +51,9 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 - **KO-reset with an explicit `settlement_date`: a note that ends with the first schedule is paid on
   the settlement date** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed
   below for the rule and the moves in price units.
+- **KO-reset intraday prices of a dated note with an explicit `settlement_date`: the float-time twin
+  carries the first schedule's payment** (intraday PDE and QUAD V2 routes). See Fixed below for the
+  rule and the moves in price units.
 - **KO-reset Monte Carlo: the knocked-in payoff reads the spot at the second schedule's end**
   (BSM, local-vol, Heston and Heston-SLV MC). See Fixed below for the rule and the moves in price
   units.
@@ -145,6 +148,11 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   carried-KI flag from the product's lifecycle marker or the state's `knocked_in`, feeding
   `from_statistics(..., knock_in_carried=...)`.
 - `AutocallablePathAnalyzer.analyze_snowball_risk_neutral` returns `EventStatistics`.
+- `KnockOutResetSnowballOption(first_schedule_settlement_time=...)` (numeric clock only): the explicit
+  payment time of a note that ends with its first schedule (never knocked in; under EXPIRY also a
+  first-schedule knock-out), the numeric counterpart of an explicit `settlement_date` (D33, D34). It
+  ages with `time_shift` and enters `cache_key()` only when set. `ContractTimeline.first_schedule_payment`
+  is the intraday instant it is resolved from.
 
 ### Fixed
 
@@ -220,7 +228,34 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   else the first schedule's maturity plus the settlement convention. The tracker booked such a
   knock-out on its record's own settlement date, and the intraday timeline at the product terminal's
   payment. The simulated-path calendar schedule places the same settlement day and delay, and exact
-  mode still equals the replay. Booking only: no price moves (intraday prices are bitwise).
+  mode still equals the replay. Booking only: no price moves (the intraday price follows in the next
+  entry).
+- **The intraday twin of a dated KO-reset note pays its first schedule on the settlement date
+  (D34)** (owner ruling 2026-11-14). The float-time twin clears the contract's dates, so it booked
+  the settlement date only as the terminal's year-fraction lag (settlement − maturity), and its
+  engines paid the never-knocked-in maturity, and under EXPIRY a first-schedule knock-out, at the
+  first schedule's maturity plus that lag: the pre-D33 rule. The twin now carries that payment
+  explicitly. `KnockOutResetSnowballOption` takes `first_schedule_settlement_time` (numeric clock
+  only; a dated contract books its `settlement_date`): the explicit payment of a note that ends with
+  the first schedule. The intraday timeline resolves it once from the dated contract
+  (`ContractTimeline.first_schedule_payment`, the settlement date's payment instant), and every
+  engine reads it through the D33 helper (`first_schedule_settlement` /
+  `first_schedule_terminal_timing`). Monte Carlo's never-knocked-in settlement and EXPIRY
+  first-schedule knock-outs, and QUAD V1's matured-at-valuation branch, now resolve through that
+  helper too; their requests are unchanged for every contract without the new field.
+  - Moves only intraday prices of dated KO-reset notes with a `settlement_date` whose first schedule
+    ends before the product maturity, not knocked in. Notes without a `settlement_date`, one-maturity
+    notes, knocked-in notes and every non-intraday price are bitwise unchanged.
+  - The intraday price now equals the dated note's price on the same engine on the twin's clock, to
+    the bit (valuation at the close, same market objects; PDE 1D, QUAD V1, QUAD V2 and MC, fresh and
+    aged, INSTANT and EXPIRY).
+  - Moves (intraday QUAD V2 / PDE routes, desk variance profile, flat 20%): a 2-year note with
+    principal, first schedule to one year, discrete KI 80, settled 20 days after the exercise date:
+    EXPIRY 97.47 → 94.91 (−2.55) fresh and 103.23 → 100.40 (−2.83) four months in; INSTANT
+    99.33 → 98.99 (−0.34) and 104.37 → 103.71 (−0.67). On the intraday test notes (no principal,
+    6-month first schedule of 12, rebate 10%): EXPIRY −0.050 to −0.079, INSTANT −0.023 to −0.073.
+  - No banked cash-leg case carries the new field (census under cause (r)); no golden and no
+    certified anchor moved.
 - **KO-reset Monte Carlo: the knocked-in payoff reads the spot at the second schedule's end**
   (owner ruling 2026-11-14; BSM, local-vol, Heston and Heston-SLV MC, which share the KO-reset payoff
   kernel). A knocked-in KO-reset is a knocked-in Snowball on the second schedule: its redemption is
