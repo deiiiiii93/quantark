@@ -145,33 +145,38 @@ class StepTranspose:
         self.tri_v = _transposed_tridiagonal(*core._tri_V(dt, theta))           # (n_v,) each
 
     # --- the operators' transposes ---------------------------------------------------------------------------
+    #
+    # The duals run column-major here, ``(n_c, n_s, n_v)`` contiguous (T25): every operation is the elementwise
+    # operation of the ``(n_s, n_v, n_c)`` form on the same operands in the same order, so the same bits, with long
+    # contiguous inner loops instead of ``n_c``-long ones. The edge-row sums keep that form's reduction exactly
+    # (``_edge_sum``).
 
     def _a1_t(self, P):
         out = np.zeros_like(P)
         cm, c0, cp = self.a1
-        Q = P[1:-1, 1:-1]
-        out[:-2, 1:-1] += cm[:, :, None] * Q
-        out[1:-1, 1:-1] += c0[:, :, None] * Q
-        out[2:, 1:-1] += cp[:, :, None] * Q
+        Q = P[:, 1:-1, 1:-1]
+        out[:, :-2, 1:-1] += cm * Q
+        out[:, 1:-1, 1:-1] += c0 * Q
+        out[:, 2:, 1:-1] += cp * Q
         if self.degenerate:
             cm0, c00, cp0 = self.a1_v0
-            Q0 = P[1:-1, 0]
-            out[:-2, 0] += cm0[:, None] * Q0
-            out[1:-1, 0] += c00[:, None] * Q0
-            out[2:, 0] += cp0[:, None] * Q0
+            Q0 = P[:, 1:-1, 0]
+            out[:, :-2, 0] += cm0 * Q0
+            out[:, 1:-1, 0] += c00 * Q0
+            out[:, 2:, 0] += cp0 * Q0
         return out
 
     def _a2_t(self, P):
         out = np.zeros_like(P)
         sub, diag, sup = self.a2
-        Q = P[1:-1, 1:-1]
-        out[1:-1, :-2] += sub[None, :, None] * Q
-        out[1:-1, 1:-1] += diag[None, :, None] * Q
-        out[1:-1, 2:] += sup[None, :, None] * Q
+        Q = P[:, 1:-1, 1:-1]
+        out[:, 1:-1, :-2] += sub * Q
+        out[:, 1:-1, 1:-1] += diag * Q
+        out[:, 1:-1, 2:] += sup * Q
         if self.degenerate:
-            g = self.a2_v0 * P[1:-1, 0]
-            out[1:-1, 1] += g
-            out[1:-1, 0] -= g
+            g = self.a2_v0 * P[:, 1:-1, 0]
+            out[:, 1:-1, 1] += g
+            out[:, 1:-1, 0] -= g
         return out
 
     def _a0_t(self, P):
@@ -180,15 +185,35 @@ class StepTranspose:
             return out
         xm, x0, xp = self.x1
         vm, v0, vp = self.v1
-        Q = self.a0[:, :, None] * P[1:-1, 1:-1]
-        X = np.zeros((P.shape[0] - 2, P.shape[1], P.shape[2]))
-        X[:, :-2] += vm[None, :, None] * Q
-        X[:, 1:-1] += v0[None, :, None] * Q
-        X[:, 2:] += vp[None, :, None] * Q
-        out[:-2] += xm[:, None, None] * X
-        out[1:-1] += x0[:, None, None] * X
-        out[2:] += xp[:, None, None] * X
+        Q = self.a0 * P[:, 1:-1, 1:-1]
+        X = np.zeros((P.shape[0], P.shape[1] - 2, P.shape[2]))
+        X[:, :, :-2] += vm * Q
+        X[:, :, 1:-1] += v0 * Q
+        X[:, :, 2:] += vp * Q
+        out[:, :-2] += xm[:, None] * X
+        out[:, 1:-1] += x0[:, None] * X
+        out[:, 2:] += xp[:, None] * X
         return out
+
+    @staticmethod
+    def _edge_sum(Q, i):
+        """``Q``'s spot row ``i`` summed over the variance axis, per column -- the ``(n_s, n_v, n_c)`` form's
+        ``Q[i].sum(axis=0)`` on a C-contiguous ``(n_v, n_c)`` block, reproduced on that very block so the
+        reduction order (and so every bit) is the same."""
+        return np.ascontiguousarray(Q[:, i, :].T).sum(axis=0)
+
+    def _sweep_coefficients(self, n_c):
+        """The transposed sweeps' coefficients broadcast to the batch of ``n_c`` columns (built once per batch
+        width, the arrays every solve of this step reads; the solver does not write them)."""
+        cache = self.__dict__.setdefault("_sweeps", {})
+        hit = cache.get(n_c)
+        if hit is None:
+            n_s, n_v = self.n_s, self.n_v
+            hit = cache[n_c] = (
+                tuple(np.broadcast_to(m, (n_c, n_v, n_s)).reshape(-1, n_s) for m in self.tri_s),
+                tuple(np.broadcast_to(m, (n_c, n_s, n_v)).reshape(-1, n_v) for m in self.tri_v),
+            )
+        return hit
 
     # --- the step ----------------------------------------------------------------------------------------------
 
@@ -196,46 +221,46 @@ class StepTranspose:
         n_s, n_v, n_c = P.shape
         dt, theta = self.dt, self.theta
         rows = {"lo": np.zeros(n_c), "hi": np.zeros(n_c)}         # duals of the scaled rows low / discount, high / ...
+        tri_s, tri_v = self._sweep_coefficients(n_c)
+        edge_sum = self._edge_sum
 
         def bc_t(Q):
             Q = Q.copy()
-            rows["lo"] += Q[0].sum(axis=0)
-            rows["hi"] += Q[-1].sum(axis=0)
-            Q[0] = 0.0
-            Q[-1] = 0.0
-            Q[:, -2] += Q[:, -1]
+            rows["lo"] += edge_sum(Q, 0)
+            rows["hi"] += edge_sum(Q, -1)
+            Q[:, 0] = 0.0
             Q[:, -1] = 0.0
+            Q[:, :, -2] += Q[:, :, -1]
+            Q[:, :, -1] = 0.0
             if not self.degenerate:
-                Q[:, 1] += Q[:, 0]
-                Q[:, 0] = 0.0
+                Q[:, :, 1] += Q[:, :, 0]
+                Q[:, :, 0] = 0.0
             return Q
 
         def solve_s_t(Q):
             Q = bc_t(Q)
-            sub, diag, sup = (np.broadcast_to(m, (n_c, n_v, n_s)).reshape(-1, n_s) for m in self.tri_s)
-            R = solve_tridiag_batch(sub, diag, sup, Q.transpose(2, 1, 0).reshape(-1, n_s))
-            R = R.reshape(n_c, n_v, n_s).transpose(2, 1, 0).copy()
-            rows["lo"] += R[0].sum(axis=0)
-            rows["hi"] += R[-1].sum(axis=0)
-            R[0] = 0.0
-            R[-1] = 0.0
+            R = solve_tridiag_batch(*tri_s, Q.transpose(0, 2, 1).reshape(-1, n_s))
+            R = R.reshape(n_c, n_v, n_s).transpose(0, 2, 1).copy()
+            rows["lo"] += edge_sum(R, 0)
+            rows["hi"] += edge_sum(R, -1)
+            R[:, 0] = 0.0
+            R[:, -1] = 0.0
             return R, -theta * dt * R
 
         def solve_v_t(Q):
             Q = bc_t(Q)
-            sub, diag, sup = (np.broadcast_to(m, (n_c, n_s, n_v)).reshape(-1, n_v) for m in self.tri_v)
-            R = solve_tridiag_batch(sub, diag, sup, Q.transpose(2, 0, 1).reshape(-1, n_v))
-            R = R.reshape(n_c, n_s, n_v).transpose(1, 2, 0).copy()
+            R = solve_tridiag_batch(*tri_v, Q.reshape(-1, n_v))
+            R = R.reshape(n_c, n_s, n_v).copy()
             if not self.degenerate:
-                R[:, 0] = 0.0
-            R[:, -1] = 0.0
+                R[:, :, 0] = 0.0
+            R[:, :, -1] = 0.0
             return R, -theta * dt * R
 
         dlow = P[0].sum(axis=0)
         dhigh = P[-1].sum(axis=0)
-        P = P.copy()
-        P[0] = 0.0
-        P[-1] = 0.0
+        P = np.array(P.transpose(2, 0, 1), order="C")     # (n_c, n_s, n_v), a copy
+        P[:, 0] = 0.0
+        P[:, -1] = 0.0
         P *= self.discount
         p_y0 = np.zeros_like(P)
         p_a1 = np.zeros_like(P)
@@ -264,7 +289,7 @@ class StepTranspose:
             p_y0 += p_y0b
         out = (p_y0 + self._a1_t(dt * p_y0 + p_a1) + self._a2_t(dt * p_y0 + p_a2)
                + self._a0_t(dt * p_y0 + p_a0))
-        return out, dlow + rows["lo"] / self.discount, dhigh + rows["hi"] / self.discount
+        return out.transpose(1, 2, 0), dlow + rows["lo"] / self.discount, dhigh + rows["hi"] / self.discount
 
 
 # --- the readout ------------------------------------------------------------------------------------------------
