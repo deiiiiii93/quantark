@@ -28,7 +28,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, is_valid_number
 
 from .observation_schedule import (
     at_valuation_instant,
@@ -88,6 +88,9 @@ class KnockOutResetSnowballOption(SnowballOption):
         default_factory=lambda: BarrierConfig(ko_barrier=1.0, ko_rate=0.0)
     )
     post_ko_mode: PostKOScheduleMode = PostKOScheduleMode.ABSOLUTE
+    # Not a dataclass field: an instance attribute only when set (``__init__``), so a contract without it keeps the
+    # attributes, fingerprints and cache keys it always had.
+    first_schedule_settlement_time = None
 
     def __init__(
         self,
@@ -110,9 +113,20 @@ class KnockOutResetSnowballOption(SnowballOption):
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
         post_ko_mode: PostKOScheduleMode = PostKOScheduleMode.ABSOLUTE,
         settlement_convention: Optional[SettlementConvention] = None,
+        first_schedule_settlement_time: Optional[float] = None,
     ):
+        """``first_schedule_settlement_time`` (numeric clock only): when a note that ends with its first schedule is
+        paid -- the never-knocked-in maturity and, under EXPIRY coupon pay, a first-schedule knock-out (spec D30) --
+        when the contract fixes that payment explicitly. It is the numeric counterpart of an explicit
+        ``settlement_date`` for that payment (settlement precedence, spec D33): the float-time intraday twin of a
+        dated note whose settlement date pays its first schedule carries it (spec D34). ``None`` (the default): an
+        explicit ``settlement_date`` when booked, else schedule 1's maturity plus the settlement delay
+        (``settlement_support.first_schedule_settlement``). A dated contract books a ``settlement_date`` instead.
+        """
         self.post_barrier_config = post_barrier_config
         self.post_ko_mode = post_ko_mode
+        if first_schedule_settlement_time is not None:
+            self.first_schedule_settlement_time = first_schedule_settlement_time
 
         super().__init__(
             initial_price=initial_price,
@@ -136,8 +150,26 @@ class KnockOutResetSnowballOption(SnowballOption):
 
     def validate(self, *, allow_zero_maturity: bool = False) -> None:
         self._validate_post_ko_mode()
+        self._validate_first_schedule_settlement_time()
         super().validate(allow_zero_maturity=allow_zero_maturity)
         self._validate_dated_rebased_end()
+
+    def _validate_first_schedule_settlement_time(self) -> None:
+        """A finite time on the numeric clock (spec D34): a dated contract states the payment as its
+        ``settlement_date`` (clock rule)."""
+        from quantark.asset.clock import ProductClock, product_clock
+
+        value = getattr(self, "first_schedule_settlement_time", None)
+        if value is None:
+            return
+        if not is_valid_number(value):
+            raise ValidationError(f"first_schedule_settlement_time must be a finite time, got {value!r}")
+        if product_clock(self) is ProductClock.DATE:
+            raise ValidationError(
+                "KnockOutResetSnowballOption is on the date clock (exercise_date set): first_schedule_settlement_time "
+                "is a numeric time with no date for it; a dated contract books its settlement_date (clock rule)"
+            )
+        self.first_schedule_settlement_time = float(value)
 
     # ------------------------------------------------------------------
     # A REBASED contract on the date clock (ship spec 2026-10-26, Decision 6)
@@ -356,6 +388,9 @@ class KnockOutResetSnowballOption(SnowballOption):
         cash does not move (accrual time spec §1); its explicit factors drop with its records.
         """
         super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
+        if self.first_schedule_settlement_time is not None:
+            # a time on the numeric clock, like the records: it moves with the origin
+            self.first_schedule_settlement_time = float(self.first_schedule_settlement_time) - float(time_bump)
         config = self.barrier_config
         passed = config is None or not (
             BarrierConfig._has_future(config.ko_observation_schedule, config.ko_observation_dates)
@@ -887,4 +922,6 @@ class KnockOutResetSnowballOption(SnowballOption):
 
         key["post_barrier_config"] = _serialize_value(self.post_barrier_config)
         key["post_ko_mode"] = _serialize_value(self.post_ko_mode)
+        if self.first_schedule_settlement_time is not None:       # absent otherwise: existing keys stay as they were
+            key["first_schedule_settlement_time"] = float(self.first_schedule_settlement_time)
         return key

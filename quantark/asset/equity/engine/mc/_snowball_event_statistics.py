@@ -48,6 +48,7 @@ from quantark.asset.equity.engine.mc._mc_event_statistics import (
     standard_errors_or_reason,
 )
 from quantark.asset.equity.settlement import CashflowKind
+from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import PricingError
@@ -288,13 +289,12 @@ class _KOResetAssembly(_Assembly):
         self.pre_maturity = float(product.get_pre_maturity_time(pricing_env))
         _, self.pre_settlement = engine._compute_ko_schedule_payoffs(
             product, self.pre_times, np.asarray(pre_profile["rates"], dtype=float), pre_profile["records"],
-            pricing_env, self.pre_maturity,
+            pricing_env, self.pre_maturity, first_schedule=True,
         )
         self.pre_dates = _all_dates(record.observation_date for record in pre_profile["records"])
         self.pre_payment_dates = self._schedule_payment_dates(self.pre_times, pre_profile["records"],
                                                               self.pre_maturity)
-        self.v0_timing = engine._resolve_payment_timing(
-            product, pricing_env, self.pre_maturity, CashflowKind.TERMINAL, cashflow_id="ko_reset_v0_terminal")
+        self.v0_timing = first_schedule_terminal_timing(product, pricing_env, determination_time=self.pre_maturity)
         if not self.rebased:
             self.post_maturity = float(product.get_post_maturity_time(pricing_env))
             _, self.post_settlement = engine._compute_ko_schedule_payoffs(

@@ -204,6 +204,13 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
     twin.maturity = calendar_year_fraction(ts, terminal.timestamp)
     _clear_dates(twin)
     twin.settlement_convention = _settlement(calendar_year_fraction(ts, terminal.payment_timestamp) - twin.maturity)
+    if timeline.first_schedule_payment is not None:
+        # The contract pays the note that ends with schedule 1 on its explicit settlement date (spec D33), which the
+        # cleared date cannot say on the float clock: the twin carries that payment as a time (spec D34), so every
+        # engine reads it through ``first_schedule_settlement`` as it reads the dated contract's.
+        twin.first_schedule_settlement_time = calendar_year_fraction(ts, timeline.first_schedule_payment)
+    elif "first_schedule_settlement_time" in vars(twin):
+        del twin.first_schedule_settlement_time          # a numeric source's own time is on its own clock
     _rekey(twin)
     setattr(twin, "_otc_lifecycle_knocked_in", bool(state.knocked_in))
     setattr(twin, "_otc_lifecycle_knock_in_anchor", getattr(state, "knock_in_anchor", None))

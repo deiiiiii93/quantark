@@ -86,6 +86,9 @@ D9_CAUSES: Dict[str, str] = {
          "EXPIRY also a schedule-1 knock-out) is paid on the product's explicit settlement_date when booked, the "
          "settlement delay only without one, on PDE 1D / LV PDE / ADI, QUAD V1, QUAD V2 and the fold structure (no "
          "banked case is one: test_no_banked_case_is_in_the_d33_settlement_precedence_class)",
+    "r": "D34 intraday twin carries the D33 payment: a numeric KO-reset with first_schedule_settlement_time (the "
+         "intraday twin of a dated D33-class note) is paid there; only intraday prices of D33-class notes move (no "
+         "banked case carries it: test_no_banked_case_is_in_the_d34_intraday_twin_class)",
 }
 
 
@@ -1671,6 +1674,29 @@ def test_no_banked_case_is_in_the_d33_settlement_precedence_class():
             in_class.append(case_id)
     assert ko_resets, "the bank holds KO-reset cases: the census must see them"
     assert in_class == [], f"in the D33 class, pin under cause (q): {in_class}"
+
+
+def test_no_banked_case_is_in_the_d34_intraday_twin_class():
+    """Cause (r), D34, pins no record, because no banked case is in its class: a numeric KO-reset carrying
+    ``first_schedule_settlement_time``, the explicit first-schedule payment the float-time intraday twin of a dated
+    D33-class note carries (only such a contract's payment moves; without it every engine reads exactly the request it
+    read before). The bank prices no intraday twin and no banked KO-reset carries the time, so each banked record
+    reproduces through T25g; a case added to the bank in that class would have to be pinned here under (r), its
+    expected value the dated note's on the same engine on the twin's clock (``test_ko_reset_d33_twin``)."""
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+
+    assert BANKED is not None, "baseline.json is not banked"
+    assert not any(move.cause == "r" for move in EXPECTED_MOVES.values())
+    ko_resets, in_class = [], []
+    for case_id in BANKED["cases"]:
+        _, product, _env = _case(case_id).fresh()
+        if not isinstance(product, KnockOutResetSnowballOption):
+            continue
+        ko_resets.append(case_id)
+        if getattr(product, "first_schedule_settlement_time", None) is not None:
+            in_class.append(case_id)
+    assert ko_resets, "the bank holds KO-reset cases: the census must see them"
+    assert in_class == [], f"in the D34 class, pin under cause (r): {in_class}"
 
 
 def test_expected_moves_name_banked_records_and_d9_causes():

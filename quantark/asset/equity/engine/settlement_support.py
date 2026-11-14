@@ -428,16 +428,30 @@ def first_schedule_terminal_timing(
     first-schedule knock-out (spec D30).
 
     The resolver's TERMINAL precedence is the settlement precedence of spec D33: the product's explicit
-    ``settlement_date`` when booked, else the settlement convention applied to schedule 1's maturity. Monte Carlo and the
+    ``settlement_date`` when booked, else the settlement convention applied to schedule 1's maturity. A numeric contract
+    states the same explicit payment as its ``first_schedule_settlement_time`` (spec D34: the float-time intraday twin
+    of a dated note whose settlement date pays its first schedule), which comes first likewise. Monte Carlo and the
     lifecycle tracker settle the note here; the booking layers (lifecycle tracker, intraday timeline) date it with it.
     """
-    return resolve_terminal_timing_at(
-        product,
-        pricing_env,
-        determination_time=determination_time,
+    explicit_time = getattr(product, "first_schedule_settlement_time", None)
+    if explicit_time is None:
+        return resolve_terminal_timing_at(
+            product,
+            pricing_env,
+            determination_time=determination_time,
+            determination_date=determination_date,
+            cashflow_id="ko_reset_v0_terminal",
+        )
+    if (determination_time is None) == (determination_date is None):
+        raise ValidationError("give exactly one of determination_time and determination_date")
+    request = SettlementRequest(
+        kind=CashflowKind.TERMINAL,
         determination_date=determination_date,
+        determination_time=None if determination_time is None else float(determination_time),
+        explicit_payment_time=float(explicit_time),
         cashflow_id="ko_reset_v0_terminal",
     )
+    return SettlementResolver.resolve_contingent(product, request, pricing_env)
 
 
 @dataclass(frozen=True)
@@ -446,8 +460,9 @@ class FirstScheduleSettlement:
 
     ``determination_time`` is schedule 1's maturity; ``payment_time`` / ``payment_date`` its payment; ``delay_df`` is
     DF(payment) / DF(determination), the factor a grid engine seeds the never-knocked-in maturity with at schedule 1's
-    maturity. ``settlement_date_governs`` says the product's explicit ``settlement_date`` set the payment (spec D33).
-    ``payment_date`` is ``None`` unless the settlement date governs (callers date the delay rule themselves).
+    maturity. ``settlement_date_governs`` says an explicit payment set it (spec D33): the product's ``settlement_date``,
+    or on the numeric clock its ``first_schedule_settlement_time`` (spec D34). ``payment_date`` is ``None`` unless the
+    settlement date governs (callers date the delay rule themselves; a numeric contract has no dates).
     """
 
     determination_time: float
@@ -467,11 +482,12 @@ def first_schedule_settlement(
     in, whose note ends at schedule 1's maturity.
 
     Settlement precedence (spec D33, owner ruling 2026-11-14): an explicit ``settlement_date`` comes first; the
-    settlement delay applies only when none is booked.
+    settlement delay applies only when none is booked. On the numeric clock the explicit payment is the contract's
+    ``first_schedule_settlement_time`` (spec D34): the intraday twin of a dated note carries its settlement date so.
 
-    - schedule 1 shorter than the product and a ``settlement_date`` booked: that date (the resolver's TERMINAL
-      precedence at schedule 1's maturity, exactly the time Monte Carlo pays at), ``delay_df`` = DF(settlement) /
-      DF(schedule 1's maturity);
+    - schedule 1 shorter than the product and an explicit payment booked (``settlement_date``, or
+      ``first_schedule_settlement_time``): that payment (``first_schedule_terminal_timing`` at schedule 1's maturity,
+      exactly the time Monte Carlo pays at), ``delay_df`` = DF(payment) / DF(schedule 1's maturity);
     - otherwise: schedule 1's maturity plus the terminal settlement delay, ``pre_maturity + (payment - determination)``
       of the product terminal, with the terminal's ``delay_df`` (the grid engines' rule before D33, unchanged). When
       schedule 1 runs to the product maturity there is one maturity: this is the terminal's own delay, and with a
@@ -483,7 +499,9 @@ def first_schedule_settlement(
     pre_maturity = float(product.get_pre_maturity_time(pricing_env))
     determination = float(terminal.determination_time)
     one_maturity = is_close(pre_maturity, determination, abs_tol=Tolerance.PRECISION)
-    if getattr(product, "settlement_date", None) is not None and not one_maturity:
+    explicit = (getattr(product, "settlement_date", None) is not None
+                or getattr(product, "first_schedule_settlement_time", None) is not None)
+    if explicit and not one_maturity:
         timing = first_schedule_terminal_timing(product, pricing_env, determination_time=max(pre_maturity, 0.0))
         return FirstScheduleSettlement(
             determination_time=pre_maturity,

@@ -24,6 +24,7 @@ from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import EventStatistics
+from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
 )
@@ -1253,9 +1254,15 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
         records: List[ObservationRecord],
         pricing_env: PricingEnvironment,
         maturity_time: float,
+        *,
+        first_schedule: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute KO payoffs and settlement times for a resolved schedule.
+
+        Under EXPIRY pay every knock-out is paid with the note it ends, determined at ``maturity_time``. For schedule 1
+        (``first_schedule``) that note ends with schedule 1 (spec D30) and is paid by ``first_schedule_terminal_timing``:
+        its explicit payment when booked (spec D33, D34), else the settlement convention after ``maturity_time``.
         """
         if len(times) == 0:
             return np.array([]), np.array([])
@@ -1291,6 +1298,13 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                     for index, time in enumerate(times)
                 ],
                 dtype=float,
+            )
+        elif first_schedule:
+            terminal_payment_time = float(first_schedule_terminal_timing(
+                product, pricing_env, determination_time=float(maturity_time),
+            ).payment_time)
+            settlement_times = np.full(
+                len(times), terminal_payment_time, dtype=float
             )
         else:
             terminal_payment_time = self._resolve_payment_time(
@@ -1968,6 +1982,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             pre_records,
             pricing_env,
             pre_maturity,
+            first_schedule=True,
         )
 
         post_payoffs = np.array([], dtype=float)
@@ -2139,10 +2154,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                 + [("post", float(t), float(p)) for t, p in zip(post_times, post_settlement_times)],
                 (
                     float(pre_maturity),
-                    self._resolve_payment_time(
-                        product, pricing_env, float(pre_maturity), CashflowKind.TERMINAL,
-                        cashflow_id="ko_reset_v0_terminal",
-                    ),
+                    float(first_schedule_terminal_timing(
+                        product, pricing_env, determination_time=float(pre_maturity),
+                    ).payment_time),
                 ),
                 (
                     float(post_maturity_abs),
@@ -2223,13 +2237,10 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                 dtype=float,
             )
             payoffs[is_v0] = v0_payoffs if fold is None else v0_payoffs + fold[1]
-            settlement_times[is_v0] = self._resolve_payment_time(
-                product,
-                pricing_env,
-                float(pre_maturity),
-                CashflowKind.TERMINAL,
-                cashflow_id="ko_reset_v0_terminal",
-            )
+            # the note that ends with schedule 1: its explicit payment when booked (spec D33, D34), else the delay
+            settlement_times[is_v0] = float(first_schedule_terminal_timing(
+                product, pricing_env, determination_time=float(pre_maturity),
+            ).payment_time)
 
         if is_v1.any():
             tenors = None

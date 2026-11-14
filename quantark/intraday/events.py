@@ -15,7 +15,8 @@ from datetime import datetime, time, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
 
-from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing
+from quantark.asset.equity.engine.settlement_support import (first_schedule_settlement, first_schedule_terminal_timing,
+                                                              resolve_terminal_timing)
 from quantark.intraday.session import TradingSessionCalendar
 from quantark.intraday.timestamp import add_year_fraction, require_aware, to_utc
 from quantark.priceenv import PricingEnvironment
@@ -121,6 +122,10 @@ class ContractTimeline:
     continuous_ki_barrier: Optional[float]  # set when the product monitors KI continuously
     schedule_origin: Optional[datetime]     # for float-time products
     continuous_barrier: Optional[ContinuousBarrier] = None
+    # KO-reset: the payment instant of a note that ends with its first schedule when an explicit payment governs it
+    # (spec D33: the product's settlement date; ``first_schedule_settlement``), else None. The float-time twin carries
+    # it as ``first_schedule_settlement_time`` (spec D34).
+    first_schedule_payment: Optional[datetime] = None
 
     def __post_init__(self):
         object.__setattr__(self, "events", tuple(sorted(self.events, key=_order_key)))
@@ -258,15 +263,19 @@ def _ko_reset_events(product, cal, env, origin, fixing_time):
     terminal = _terminal_event(product, cal, env, origin, fixing_time)
     events = [terminal]
     expiry = product.accrual_config.coupon_pay_type.name == "EXPIRY"
+    # an explicit payment (a settlement date) pays the note that ends with schedule 1 (spec D33); the twin carries it
+    governed = first_schedule_settlement(product, env).settlement_date_governs
+    first_payment = None
     for regime, config in (("pre", product.barrier_config), ("post", product.post_barrier_config)):
         schedule = config.ko_observation_schedule
         records = ko_reset_records(product, config, env)
         if schedule is None or len(records) != len(schedule.records):
             raise ValidationError(f"schedule env must keep every {regime}-KI KO record active (anchor at initial_date)")
+        if regime == "pre" and (expiry or governed):
+            first_payment = _first_schedule_payment(product, cal, env, origin, fixing_time, records)
         # EXPIRY pay: a knock-out is paid with the note it ends -- schedule 1's (spec D30, D33) for a pre-KI one,
         # the product terminal's for a post-KI one
-        note_end = (_first_schedule_payment(product, cal, env, origin, fixing_time, records)
-                    if expiry and regime == "pre" else terminal.payment_timestamp)
+        note_end = first_payment if expiry and regime == "pre" else terminal.payment_timestamp
         for i, (rec, src, _rate, cash) in enumerate(records):
             ts, date_only = _instant(cal, timestamp=src.observation_timestamp, dt=rec.observation_date,
                                      tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ko_{regime}[{i}]")
@@ -289,7 +298,7 @@ def _ko_reset_events(product, cal, env, origin, fixing_time):
                 ts, date_only = _instant(cal, timestamp=ki_src[i].observation_timestamp, dt=rec.observation_date,
                                          tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ki[{i}]")
                 events.append(ContractEvent.make(EventKind.KI, i, ts, ts, rec.barrier, None, date_only))
-    return events, continuous
+    return events, continuous, (first_payment if governed else None)
 
 
 def _first_schedule_payment(product, cal, env, origin, fixing_time, records) -> datetime:
@@ -425,8 +434,10 @@ def resolve_timeline(product, session_calendar: TradingSessionCalendar, template
         raise ValidationError("fixing_time_of_day must be a datetime.time")
     env = _schedule_env(product, template_env)
     continuous_barrier = None
+    first_schedule_payment = None
     if type(product) is KnockOutResetSnowballOption:
-        events, continuous = _ko_reset_events(product, session_calendar, env, schedule_origin, fixing_time_of_day)
+        events, continuous, first_schedule_payment = _ko_reset_events(product, session_calendar, env, schedule_origin,
+                                                                      fixing_time_of_day)
     elif type(product) in (BarrierOption, OneTouchOption):
         events, continuous_barrier = _barrier_events(product, session_calendar, env, schedule_origin, fixing_time_of_day)
         continuous = None
@@ -449,4 +460,5 @@ def resolve_timeline(product, session_calendar: TradingSessionCalendar, template
         tenor = float(product.get_contract_tenor(env))
     else:
         tenor = float(product.get_maturity(env))
-    return ContractTimeline(tuple(events), initial_ts, tenor, continuous, schedule_origin, continuous_barrier)
+    return ContractTimeline(tuple(events), initial_ts, tenor, continuous, schedule_origin, continuous_barrier,
+                            first_schedule_payment)

@@ -17,6 +17,7 @@ from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.settlement_support import (
     first_schedule_payment_time,
     first_schedule_settlement,
+    first_schedule_terminal_timing,
     resolve_terminal_timing,
 )
 from quantark.asset.equity.engine.quad.quad_adapters import (
@@ -31,7 +32,6 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from quantark.asset.equity.settlement import CashflowKind, SettlementRequest, SettlementResolver
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import EngineType
@@ -453,15 +453,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if decision.knocked_in:
                 carried_knock_in = True
             else:
-                timing = SettlementResolver.resolve_contingent(
-                    product,
-                    SettlementRequest(
-                        kind=CashflowKind.TERMINAL,
-                        determination_time=pre_maturity,
-                        cashflow_id="ko_reset_v0_terminal",
-                    ),
-                    pricing_env,
-                )
+                timing = first_schedule_terminal_timing(product, pricing_env, determination_time=pre_maturity)
                 redemption = product.get_maturity_payoff_v0(spot, pricing_env=pricing_env)
                 if fold is not None:
                     redemption = float(redemption) + fold.bind_terminal(
@@ -1062,14 +1054,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         known spot (``price``'s rule), certain; the whole price is its cash."""
         from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
         from quantark.asset.equity.engine.quad import v1_statistics
-        from quantark.asset.equity.settlement import CashflowKind, SettlementRequest, SettlementResolver
-
-        timing = SettlementResolver.resolve_contingent(
-            product,
-            SettlementRequest(kind=CashflowKind.TERMINAL, determination_time=pre_maturity,
-                              cashflow_id="ko_reset_v0_terminal"),
-            pricing_env,
-        )
+        timing = first_schedule_terminal_timing(product, pricing_env, determination_time=pre_maturity)
         all_records = [*pre_ko_records, *post_ko_records]
         terminal = resolve_terminal_timing(product, pricing_env)
         observations, _, ki_settlement = self._reset_rows(
