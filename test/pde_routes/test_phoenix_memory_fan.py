@@ -4,6 +4,11 @@ The old fan's numbers are frozen in ``phoenix_memory_fan_reference.json`` (captu
 ``phoenix_memory_fan_capture.py``). Prices, every event-statistics number and session outputs compare with
 ``golden_compare.close``; the BUMP Greeks carry the prices' noise through their stencil (``anchor_tolerance``
 with a conservative L1 weight per Greek), so they are never held to the bare price tolerance.
+
+``memory_partial_protection`` (a 90% maximum loss) was re-banked by unified event statistics T25c (D28): its floor does
+not bind on the knocked-in surface's knock-in edge cell, so that row now reads the payoff (price +0.00207, equal to the
+unprotected note's to the bit; probabilities, times and coupon fields unchanged). D22 diff:
+``.ship/2026-11-11-unified-event-stats/tmp/T25c-fan-d22-diff.md``.
 """
 from __future__ import annotations
 

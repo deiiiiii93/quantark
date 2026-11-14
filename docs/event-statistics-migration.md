@@ -212,6 +212,13 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     93.29, now within 0.3 SE of MC; see the CHANGELOG), and `observations.payment_times` /
     `payment_dates` of the `pre` rows move to the maturity row's. Probabilities and cash amounts do
     not move.
+21. **PDE / ADI partial protection without an airbag: the knocked-in edge row reads the payoff
+    where the floor does not bind on the edge cell.** Partially protected Snowball, reverse,
+    Phoenix and KO-reset notes whose floor does not bind at the grid's knock-in edge (deep floors,
+    e.g. a 90% maximum loss) price higher where paths reach that edge: local vol on the default
+    grid +0.63 to +0.70 on the 90% test notes (from −19 to −25 SE to within 1 SE of MC), flat vol and
+    Heston ADI below 2e-3. Notes whose floor binds there (e.g. 10–30% maximum loss) are bitwise
+    unchanged (see the CHANGELOG).
 
 ## 10. Known limitations in 0.11.0
 
@@ -241,8 +248,10 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   Recorded deviation.
 - Local-vol MC default stepping is biased on skewed surfaces; references use
   `max_sde_step_days=1`.
-- PDE partial protection without an airbag is wrong at narrow widths (LV Snowball partial 0.9:
-  width 3 vs 16 differs by 2.05); owner decision (candidate D28).
+- A protection floor whose kink lies just beyond the PDE grid edge is invisible to the knocked-in
+  edge row, closed-form or payoff-read; on skewed local vol at maximum losses of about 50–78% the
+  default-grid price keeps up to about 0.14 of domain-width dependence (2-year monthly Snowball).
+  Pre-existing; a wider domain removes it.
 - REBASED vs ABSOLUTE KO-reset annualized-KI knocked-in tenor differs (0.5 vs about 0.501), a 0.0252
   price gap; owner decision.
 - D29's determination-time rule: a COMPLETE_PERIOD funding leg ending on a settlement date after the

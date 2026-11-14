@@ -43,7 +43,7 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
   plus "P(matured knocked in)".
 
-### Changed: prices (four sanctioned moves; every other `price()` is bitwise unchanged)
+### Changed: prices (five sanctioned moves; every other `price()` is bitwise unchanged)
 
 - **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
   maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
@@ -73,6 +73,9 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   from 2.9e-2–9.2e-2 to ≤ 9.3e-4 (flat), 1.65–1.76 to ≤ 1.4e-2 (local vol; 3.7e-2 on annualized KO-reset, identical with protection NONE), up to 0.63 to
   ≤ 2.3e-3 (Heston ADI) and up to 1.07 to ≤ 4.7e-3 (SLV ADI). Against MC these contracts sat 24 to
   127 SE low; now within 2.9 SE. No certified anchor moved.
+- **PDE knocked-in edge row, partial protection without an airbag** (PDE 1D flat and local vol,
+  Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). See Fixed below for the rule and the moves
+  in price units.
 
 ### Changed: statistics
 
@@ -169,6 +172,34 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 
   The Monte Carlo fold route on these contracts, which raised (the fold structure assumed payment at
   the product maturity), now values.
+- **PDE knocked-in edge row honours partial protection without an airbag** (owner ruling
+  2026-11-14; PDE 1D flat and local vol, Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). The
+  protected closed-form rows of the knocked-in surface write a constant at the knock-in edge: a
+  standard note's maximum loss at S = 0 (floored), a reverse note's floor. That constant is the
+  payoff only where the protection floor binds. Where the floor does not bind on the edge cell (a
+  deep floor such as a 90% maximum loss, or a reverse floor beyond the upper edge), the row is now
+  read off the knocked-in payoff, as for the annualized-KI and airbag rows. Contracts whose floor
+  binds on the edge cell (for example a 10–30% maximum loss) are bitwise unchanged, as are NONE and
+  FULL protection. The width-3 vs width-16 gap falls from 0.067–0.12 to ≤ 3.3e-4 (flat), 1.7–2.1 to
+  ≤ 6.2e-3 (local vol), and 0.02–1.29 to ≤ 4.1e-3 (ADI); the remaining local-vol Phoenix and SLV
+  Phoenix gaps equal the unprotected contract's. Moves on the default grids, with Monte Carlo
+  references of 16 × 20,000 paths (local vol: 1-day SDE steps; Heston: 32 substeps per interval):
+  - 1-year quarterly Snowball (discrete KI 75), 90% maximum loss: local vol 98.622 → 99.321
+    (+0.699; MC 99.297 ± 0.027, from −25.1 SE to +0.9 SE); flat +0.0019; Heston +5e-5;
+  - KO-reset (2-year, KI 80), 90% maximum loss: local vol 97.897 → 98.528 (+0.631; MC
+    98.530 ± 0.028, from −22.8 SE to −0.1 SE); flat +0.0011; Heston +2e-6;
+  - 2-year monthly Snowball (continuous KI 75), 90% maximum loss: local vol 97.958 → 98.607
+    (+0.648; MC 98.600 ± 0.034, from −18.8 SE to +0.2 SE); flat +0.0011; Heston +2e-6;
+  - the same note at a 70% maximum loss: local vol 98.573 → 98.607 (+0.033; MC 98.703 ± 0.026,
+    from −5.0 SE to −3.7 SE; see Known issues); flat and Heston unchanged (the floor binds on their
+    edge cells);
+  - reverse Snowball at half participation, 100% maximum loss (floor above 300): flat +0.0015;
+    local vol and Heston unchanged. A reverse note at full participation (floor at most 200) binds
+    on every default edge and does not move.
+  No banked cash-leg case is partially protected (census under cause (o)) and no certified anchor
+  moved. One frozen PDE reference moved and was re-banked: the Phoenix memory fan's partial row
+  (90% maximum loss, flat default grid) +0.00207, now equal to the unprotected note; its
+  probabilities, times and coupon fields are unchanged.
 
 ### Known issues
 
@@ -190,8 +221,13 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   8; ADI ≤ 5e-9. P(KI) = 1 − ΣP(KO) in every case. Accepted as a recorded deviation.
 - Local-vol MC default stepping (one log-Euler step per contractual interval) is biased on skewed
   surfaces; references and the cross-engine tests use `max_sde_step_days=1`. Defaults unchanged.
-- PDE partial protection without an airbag is wrong at narrow grid widths (LV Snowball, partial
-  0.9: width 3 vs 16 differs by 2.05). Pre-existing; owner decision (candidate D28).
+- PDE knocked-in edge row when the protection floor's kink lies just beyond the grid edge: neither
+  the closed-form row (floor binding on the edge cell) nor the payoff-read row (floor not binding,
+  0.11.0) sees a kink outside the domain, so the price keeps a domain-width dependence while the
+  kink is within reach of the edge. Seen on skewed local vol at maximum losses of about 50–78%
+  (2-year monthly Snowball, default grid vs width 16: up to −0.14 on either row; at 70% the
+  payoff-read row leaves −0.133, 3.7 SE below MC, down from −0.167). Flat vol and the Heston/SLV
+  ADI default grids are within 2e-3. Pre-existing; a wider domain removes it.
 - REBASED vs ABSOLUTE KO-reset: the annualized-KI knocked-in redemption uses a different tenor
   (ABSOLUTE 0.5 vs REBASED about 0.501), a 0.0252 price gap on the pair test. Owner decision.
 - D29 counts a settled note as gone from its determination time, not its payment time. A

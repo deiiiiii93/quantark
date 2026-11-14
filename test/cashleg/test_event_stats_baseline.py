@@ -75,6 +75,9 @@ D9_CAUSES: Dict[str, str] = {
          "schedule 1's maturity (plus the terminal delay), not the product maturity, on PDE 1D / LV PDE / ADI, QUAD V1, "
          "QUAD V2 and the fold structure (no banked case is one: "
          "test_no_banked_case_is_in_the_d30_ko_reset_expiry_class)",
+    "o": "D28 partial-protection edge row: partially protected PDE / ADI contracts whose floor does not bind on the "
+         "knocked-in knock-in edge cell read that row off the payoff (no banked case is partially protected: "
+         "test_no_banked_case_is_in_the_d28_partial_protection_class)",
 }
 
 
@@ -722,21 +725,24 @@ _WIDE_ROW_INDEPENDENCE = 1e-8
 
 class _BaseKnockInRow:
     """Within the block, the PDE solvers write base's knocked-in edge row (the D26 branch off: the knock-in leg reads
-    as not annualized to ``SnowballPDESolver._boundary_rows_v1``, and the D27 airbag gate is shut; the product and every
-    other leg are untouched)."""
+    as not annualized to ``SnowballPDESolver._boundary_rows_v1``, and the D27 airbag and D28 partial-floor gates are
+    shut; the product and every other leg are untouched)."""
 
     def __enter__(self):
         from quantark.asset.equity.engine.pde import snowball_pde_solver as sps
 
         self._module, self._real = sps, sps.leg_annualized
         self._airbag = sps.SnowballPDESolver.__dict__["_airbag_moves_knock_in_edge"]
+        self._floor = sps.SnowballPDESolver.__dict__["_partial_floor_unbound_on_knock_in_edge"]
         sps.leg_annualized = lambda product, leg: False if leg == "knock_in" else self._real(product, leg)
         sps.SnowballPDESolver._airbag_moves_knock_in_edge = staticmethod(lambda product, env, s_vec: False)
+        sps.SnowballPDESolver._partial_floor_unbound_on_knock_in_edge = staticmethod(lambda product, env, s_vec: False)
         return self
 
     def __exit__(self, *exc):
         self._module.leg_annualized = self._real
         self._module.SnowballPDESolver._airbag_moves_knock_in_edge = self._airbag
+        self._module.SnowballPDESolver._partial_floor_unbound_on_knock_in_edge = self._floor
         return False
 
 
@@ -1542,6 +1548,29 @@ def test_no_banked_case_is_in_the_d27_airbag_class():
         if airbag is not None and airbag.airbag_barrier is not None and payoff.protection_type == ProtectionType.PARTIAL:
             in_class.append(case_id)
     assert in_class == [], f"in the D27 class, pin under cause (l): {in_class}"
+
+
+def test_no_banked_case_is_in_the_d28_partial_protection_class():
+    """Cause (o), D28, pins no record, because no banked case can reach the partial-protection edge row: its gate
+    (``SnowballPDESolver._partial_floor_unbound_on_knock_in_edge``) fires only on a partially protected contract, and
+    no banked product is one (the census reads the protection off each case's product, not the gate under test). Every
+    banked PDE / ADI price therefore reproduces through T25c (or moves by an earlier cause); a case added to the bank
+    with partial protection would have to be pinned here under (o)."""
+    from quantark.util.enum import ProtectionType
+
+    assert BANKED is not None, "baseline.json is not banked"
+    assert not any(move.cause == "o" for move in EXPECTED_MOVES.values())
+    payoff_products, in_class = [], []
+    for case_id in BANKED["cases"]:
+        _, product, _ = _case(case_id).fresh()
+        payoff = getattr(product, "payoff_config", None)
+        if payoff is None or not hasattr(payoff, "protection_type"):
+            continue
+        payoff_products.append(case_id)
+        if payoff.protection_type == ProtectionType.PARTIAL:
+            in_class.append(case_id)
+    assert payoff_products, "the bank holds products with a payoff protection: the census must see them"
+    assert in_class == [], f"partially protected, pin under cause (o): {in_class}"
 
 
 def test_no_banked_case_is_in_the_d30_ko_reset_expiry_class():
