@@ -311,6 +311,9 @@ def test_the_two_sides_price_the_same_paths(state):
     assert dist.rebased is (state == "unknocked")
     ref = paths(state)
     assert ref["n"] == cases._MC["num_paths"]
+    # this contract settles every outcome at its determination (no lag), so each payment time the direct valuation
+    # uses is the contract's own, decided from the paths -- not read from the kernel's settlement arithmetic
+    np.testing.assert_array_equal(ref["settle"], ref["det"])
     if state == "unknocked":
         np.testing.assert_array_equal(np.unique(dist.stream_times[EventType.KO]), candidate_axis(state))
     else:
