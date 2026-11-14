@@ -239,6 +239,16 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     settlement date. Its calendar schedule (simulated paths) places the same settlement day and
     delay. The intraday timeline's pre-KI KO events under EXPIRY pay carry that payment instant
     instead of the product terminal's. Booking only; no price moves.
+24. **KO-reset MC: the knocked-in redemption reads the spot at the second schedule's end (D31).** On
+    an ABSOLUTE second schedule (a carried knock-in included), BSM, local-vol, Heston and Heston-SLV MC
+    paid the knocked-in redemption at the second schedule's end but read its spot at the grid's last
+    node: the first schedule's end when that runs past the second schedule. They now read it at the
+    second schedule's end node, as REBASED MC, PDE and QUAD do. Paths are unchanged. MC prices of
+    ABSOLUTE KO-reset notes whose second schedule ends before the grid move. The main case is the
+    tracker's ABSOLUTE copy of a REBASED note knocked in early: −0.085 on a 2-year note knocked in on
+    0.25 and aged 0.3, moving from +8 SE to −1 SE against PDE. The `ki_settlement` cash moves with
+    them. The REBASED/ABSOLUTE pair now prices the same (the former 0.0252 "tenor" gap was this
+    readout). A knock-in after the second schedule's end keeps the old readout (see §10).
 
 ## 10. Known limitations in 0.11.0
 
@@ -268,8 +278,12 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   edge row, closed-form or payoff-read; on skewed local vol at maximum losses of about 50–78% the
   default-grid price keeps up to about 0.14 of domain-width dependence (2-year monthly Snowball).
   Pre-existing; a wider domain removes it.
-- REBASED vs ABSOLUTE KO-reset annualized-KI knocked-in tenor differs (0.5 vs about 0.501), a 0.0252
-  price gap; owner decision.
+- KO-reset ABSOLUTE contracts whose knock-in can fall after the second schedule's end have no rule
+  for that path. MC keeps its pre-0.11.0 readout at the grid's last node, and the grid engines differ:
+  MC is 0.17 above PDE on a 1-year monthly note with the second schedule to 6 months. Owner question.
+- PDE 1D and QUAD V1/V2 depend on the product `maturity` for a carried-knock-in ABSOLUTE contract
+  whose second schedule ends before it; MC does not. The gap is 0.13 on the note above. Tracker copies
+  agree across engines.
 - D29's determination-time rule: a COMPLETE_PERIOD funding leg ending on a settlement date after the
   determination pays nothing on the matured mass.
 

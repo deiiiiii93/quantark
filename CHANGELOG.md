@@ -43,7 +43,7 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
   plus "P(matured knocked in)".
 
-### Changed: prices (six sanctioned moves; every other `price()` is bitwise unchanged)
+### Changed: prices (seven sanctioned moves; every other `price()` is bitwise unchanged)
 
 - **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
   maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
@@ -51,6 +51,9 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 - **KO-reset with an explicit `settlement_date`: a note that ends with the first schedule is paid on
   the settlement date** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed
   below for the rule and the moves in price units.
+- **KO-reset Monte Carlo: the knocked-in payoff reads the spot at the second schedule's end**
+  (BSM, local-vol, Heston and Heston-SLV MC). See Fixed below for the rule and the moves in price
+  units.
 
 - **QUAD V2 memory Phoenix with `initial_coupon_arrears > 0`.** V2 ignored arrears owed at the
   pricing date while QUAD V1, PDE and MC pay them. V2 now releases them at the first remaining
@@ -218,6 +221,34 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   knock-out on its record's own settlement date, and the intraday timeline at the product terminal's
   payment. The simulated-path calendar schedule places the same settlement day and delay, and exact
   mode still equals the replay. Booking only: no price moves (intraday prices are bitwise).
+- **KO-reset Monte Carlo: the knocked-in payoff reads the spot at the second schedule's end**
+  (owner ruling 2026-11-14; BSM, local-vol, Heston and Heston-SLV MC, which share the KO-reset payoff
+  kernel). A knocked-in KO-reset is a knocked-in Snowball on the second schedule: its redemption is
+  decided on the spot at that schedule's last fixing and paid there. On an ABSOLUTE second schedule,
+  including a carried knock-in, the kernel paid the redemption at the second schedule's end but read
+  its spot at the grid's last node. Where the first schedule's dates run past the second schedule's
+  end, that node is the first schedule's end, so the redemption was read on a later spot. It is now
+  read at the second schedule's end node, as REBASED MC, PDE and QUAD already did. The REBASED vs
+  ABSOLUTE gap listed as a Known issue was this readout, not a tenor difference: both layouts
+  annualize the knocked-in redemption over the same tenor (0.5 on the pair test). The paths are
+  unchanged. Price moves are confined to MC on ABSOLUTE contracts whose second schedule ends before
+  the grid does: chiefly the ABSOLUTE copy that the lifecycle tracker prices for a REBASED note knocked
+  in early. REBASED MC, PDE, QUAD, and contracts whose second schedule runs to the end are bitwise
+  unchanged; a knock-in after the second schedule's end keeps its old readout (see Known issues). Moves
+  with a Monte Carlo reference of 16 × 262,144 paths:
+  - the pair test (REBASED knocked in at valuation, second schedule 0.25/0.5, first schedule to 1.0),
+    ABSOLUTE: 88.211 → 88.180 (−0.031), from +6.9 SE to −0.6 SE against PDE 88.182. It now equals
+    REBASED to round-off on all four MC engines (on the 4,096-path test engines, BSM −0.0252, local
+    vol −0.0174, Heston −0.157, SLV −0.200);
+  - tracker copy of a 2-year quarterly REBASED note (second schedule offsets to 1 year), knocked in
+    on 0.25 and aged 0.3, spot 78: 72.708 → 72.623 (−0.085), from +8.0 SE to −1.0 SE against PDE
+    72.631; without annualized KI: −0.068 (+8.0 SE → −1.0 SE);
+  - the same note knocked in on 0.5 and aged 0.55, spot 85: −0.038 (+2.5 SE → −1.6 SE);
+  - knocked in on the first schedule's last record (the second schedule ends after it): unchanged.
+
+  No banked cash-leg case and no cross-engine matrix contract is in this class (census under cause
+  (p)); no golden and no certified anchor moved. The knocked-in settlement cash in the statistics
+  moves with the price (`npv == price()` bitwise).
 - **PDE knocked-in edge row honours partial protection without an airbag** (owner ruling
   2026-11-14; PDE 1D flat and local vol, Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). The
   protected closed-form rows of the knocked-in surface write a constant at the knock-in edge: a
@@ -270,8 +301,17 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   (2-year monthly Snowball, default grid vs width 16: up to −0.14 on either row; at 70% the
   payoff-read row leaves −0.133, 3.7 SE below MC, down from −0.167). Flat vol and the Heston/SLV
   ADI default grids are within 2e-3. Pre-existing; a wider domain removes it.
-- REBASED vs ABSOLUTE KO-reset: the annualized-KI knocked-in redemption uses a different tenor
-  (ABSOLUTE 0.5 vs REBASED about 0.501), a 0.0252 price gap on the pair test. Owner decision.
+- KO-reset ABSOLUTE contracts whose knock-in can fall after the second schedule's end. These are
+  native contracts with knock-in dates past the second schedule; tracker copies carry their knock-in
+  and are not affected. No rule covers a knock-in after the second schedule's end. MC keeps reading
+  that path's redemption at the grid's last node, and the grid engines price it differently. On a
+  1-year monthly note with the second schedule to 6 months, MC sits 0.17 above PDE. Pre-existing;
+  owner question.
+- KO-reset ABSOLUTE contracts whose second schedule ends before the product `maturity`. PDE 1D,
+  QUAD V1 and QUAD V2 depend on the product maturity for a carried knock-in, which MC does not. On
+  the 1-year monthly note with the second schedule to 6 months and a carried knock-in, the price is
+  98.24 with maturity 1.0 and 98.37 with maturity at the second schedule's end; MC gives 98.37.
+  Tracker copies agree across engines. Pre-existing; not investigated.
 - D29 counts a settled note as gone from its determination time, not its payment time. A
   COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
   matured mass.
