@@ -444,7 +444,14 @@ class _KOResetAssembly(_Assembly):
             fields["termination.probability"] = probability
             fields["termination.discounted_cash"] = discounted / n
             fields["termination.cash_to_pay"] = cash / n
-            by_time = np.array([probability[self.term_times == t].sum() for t in self.survival_times])
+            # survival counts a termination at t as the ABSOLUTE layout counts the same kind at the same t
+            # (``ObservationTable.survival`` with F5), so the two layouts of one contract value legs alike: a knock-out
+            # leaves at its row; the never-knocked-in maturity leaves at its determination when that precedes the
+            # axis' last time; the knocked-in settlement never leaves
+            events = np.asarray(self.term_event, dtype=object)
+            last = float(self.survival_times[-1]) if self.survival_times.size else 0.0
+            leaves = np.isin(events, ("ko_pre", "ko_post")) | ((events == "maturity") & (self.term_times < last))
+            by_time = np.array([probability[(self.term_times == t) & leaves].sum() for t in self.survival_times])
             fields["termination.survival"] = 1.0 - np.cumsum(by_time)
             ended = np.concatenate([[0.0], np.cumsum(by_time)])
             fields["observations.probability"] = pre_count / n

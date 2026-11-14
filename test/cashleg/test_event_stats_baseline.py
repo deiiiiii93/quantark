@@ -353,8 +353,14 @@ def _rebased_distribution_on_the_same_paths(record: dict):
             assert abs(float(probability[rows].sum()) - count / n) <= 1e-15, (event_type, t, p)
         assert covered == np.count_nonzero(in_event), f"{event_type}: a path off the axis"
     assert abs(float(dist.probabilities[EventType.MATURITY_NO_KO]) - np.count_nonzero(ref["v0"]) / n) <= 1e-15
+    # survival as the ABSOLUTE layout counts it (T23 follow-up): a knock-out leaves at its row, the never-knocked-in
+    # maturity at its determination when that precedes the axis' last time, the knocked-in settlement never
+    last = float(dist.survival_times[-1])
+    knocked_out = np.isin(ref["event"], ("ko_pre", "ko_post"))
+    matured_early = (ref["event"] == "maturity") & (ref["det"] < last)
     for t, survival in zip(dist.survival_times, dist.survival_probability):
-        assert abs(survival - (1.0 - np.count_nonzero(ref["det"] <= t) / n)) <= 1e-14
+        gone = (knocked_out | matured_early) & (ref["det"] <= t)
+        assert abs(survival - (1.0 - np.count_nonzero(gone) / n)) <= 1e-14, (t, survival)
     grid = ref["grid"]
     candidates = set(np.asarray(grid["pre_times"], dtype=float).tolist())
     for ki_time in np.asarray(grid["ki_times"], dtype=float):

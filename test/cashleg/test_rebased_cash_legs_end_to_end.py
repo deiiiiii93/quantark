@@ -212,18 +212,14 @@ def _df(env, times) -> np.ndarray:
 
 
 def _alive(state: str, ref, t: float) -> float:
-    """P(alive at t) on the paths, by each layout's survival definition (at the valuation every path is alive):
-
-    * REBASED (the termination distribution's absolute survival, D13 / T9): not determined by t -- every outcome
-      (knock-out, maturity, knocked-in settlement) leaves at its own determination;
-    * ABSOLUTE (``ObservationTable.survival``, P(alive after the row); spec Contracts / F5): a knock-out leaves at
-      its row; the never-knocked-in maturity leaves at its determination only when that precedes the last row; the
-      knocked-in settlement, at the contract's end, never leaves."""
+    """P(alive at t) on the paths, by the ABSOLUTE layout's survival definition (``ObservationTable.survival``,
+    P(alive after the row); spec Contracts / F5), which a REBASED note follows too (T23 follow-up: a termination at
+    t counts exactly as the ABSOLUTE layout counts the same kind at the same t). At the valuation every path is
+    alive; a knock-out leaves at its row; the never-knocked-in maturity leaves at its determination only when that
+    precedes the last row of the axis; the knocked-in settlement never leaves."""
     if t <= 0.0:
         return 1.0
     event, det = ref["event"], ref["det"]
-    if state == "unknocked":
-        return float(np.count_nonzero(det > t)) / ref["n"]
     last_row = float(candidate_axis(state)[-1])
     gone = (np.isin(event, ("ko_pre", "ko_post")) & (det <= t)) | (
         (event == "maturity") & (det <= t) & (det < last_row))
@@ -439,3 +435,98 @@ def test_the_fold_binder_refuses_knock_in_and_coupon_legs_on_the_knocked_in_note
     with pytest.raises(CapabilityError, match="cannot be folded"):
         folded_trade_value(engine, product, env, [legs("knocked_in")[name]], quantity=1.0, unit_notional=cases.UNIT,
                            mode=FoldMode.TOTAL)
+
+
+# --- one contract, two layouts (T23 follow-up: REBASED survival follows the ABSOLUTE layout) --------------------
+#
+# A REBASED KO-reset knocked in at the valuation (its one knock-in record at t = 0, spot below the barrier) pins the
+# knock-in date, so its schedule 2 sits at fixed absolute dates: the ABSOLUTE contract ``with_absolute_schedule_2(0)``
+# is the same contract. Both price on the same grid and the same paths (asserted), so every leg on the two layouts
+# must agree to round-off. Oracle: the ABSOLUTE layout (banked, cross-engine checked).
+
+PAIR_SPOT = 78.0
+#: schedule-2 offsets: to the first schedule's end (the knocked-in settlement on the axis' last time) or ending before
+#: it (the settlement in the middle of the axis, the first schedule's dates running on past it)
+PAIR_OFFSETS = {"settles_last": (0.25, 0.5, 0.75, 1.0), "settles_inside": (0.25, 0.5)}
+
+
+def _pair(kind: str, layout: str):
+    product = cases._ko_reset(PostKOScheduleMode.REBASED)
+    product.barrier_config = replace(product.barrier_config, ki_observation_schedule=cases._schedule((0.0,), 80.0))
+    product.post_barrier_config = replace(product.post_barrier_config,
+                                          ko_observation_schedule=cases._schedule(PAIR_OFFSETS[kind], 95.0))
+    product.maturity = 1.0
+    product.validate()
+    if layout == "rebased":
+        return product
+    record = product.barrier_config.ki_observation_schedule.records[0]
+    return product.with_absolute_schedule_2(0.0, anchor=knock_in_anchor_for(record, 0))
+
+
+@lru_cache(maxsize=None)
+def _pair_route(kind: str, layout: str):
+    env = cases.flat_env(PAIR_SPOT)
+    return _engine().price_with_events(_pair(kind, layout), env).event_distribution, env
+
+
+def _pair_legs(kind: str, layout: str) -> dict:
+    """Every leg type x trigger, the same cash on both layouts: an AutocallableCashLeg lists the REBASED candidate
+    times once each (a REBASED leg refuses a time listed twice) and the ABSOLUTE rows with the first schedule's rows
+    beside the second's (zero mass, same factor), its terminal branch settling with the note (D13 pays a REBASED
+    knocked-in branch at the note's settlement)."""
+    dist, _ = _pair_route(kind, layout)
+    times = np.asarray(dist.stream_times[EventType.KO], dtype=float)
+    unique = np.unique(_pair_route(kind, "rebased")[0].stream_times[EventType.KO])
+    factor = {float(t): f for t, f in zip(unique, np.linspace(0.3, 1.0, unique.size))}
+    obs = unique if layout == "rebased" else times
+    end = float(np.max(PAIR_OFFSETS[kind]))
+    out = {}
+    for name, leg in legs("unknocked").items():
+        if isinstance(leg, AutocallableCashLeg):
+            leg = replace(leg, observation_schedule=tuple(obs), accrual_factors=tuple(factor[float(t)] for t in obs),
+                          settlement_schedule=tuple(obs + 0.01), terminal_settlement_time=end)
+        elif isinstance(leg, AccrualLeg):
+            ends = np.arange(1, 5) * 0.25
+            leg = replace(leg, schedule=LegSchedule(period_starts=ends - 0.25, period_ends=ends,
+                                                    payment_times=np.asarray(leg.schedule.payment_times[:4])))
+        out[name] = leg
+    return out
+
+
+@pytest.mark.parametrize("kind", tuple(PAIR_OFFSETS))
+def test_the_pair_is_one_contract_on_the_same_paths(kind):
+    """Same outcome, determination and settlement on every path; the same event probabilities on both layouts."""
+    env = cases.flat_env(PAIR_SPOT)
+    from test_asset.equity.engine_mc import mc_same_path_reference
+
+    rebased = mc_same_path_reference.ko_reset_paths(_engine(), _pair(kind, "rebased"), env)
+    absolute = mc_same_path_reference.ko_reset_paths(_engine(), _pair(kind, "absolute"), env)
+    for key in ("event", "det", "settle"):
+        np.testing.assert_array_equal(rebased[key], absolute[key])
+    assert np.all(rebased["ki_time"] == 0.0)
+    a, _ = _pair_route(kind, "absolute")
+    r, _ = _pair_route(kind, "rebased")
+    assert r.rebased and not a.rebased
+    np.testing.assert_array_equal(r.probabilities[EventType.KO], a.probabilities[EventType.KO])
+    assert np.sum(r.probabilities[EventType.MATURITY_WITH_KI]) == a.probabilities[EventType.MATURITY_WITH_KI]
+
+
+@pytest.mark.parametrize("kind", tuple(PAIR_OFFSETS))
+def test_rebased_survival_is_the_absolute_survival(kind):
+    a, _ = _pair_route(kind, "absolute")
+    r, _ = _pair_route(kind, "rebased")
+    # at every survival node of either axis and past the end; between nodes the two axes interpolate differently
+    # (the ABSOLUTE axis repeats a tied time for its zero-mass first-schedule row), so off-node reads are not compared
+    for t in np.union1d(np.union1d(a.survival_times, r.survival_times), [1.2]):
+        assert abs(r.survival_at(float(t)) - a.survival_at(float(t))) <= 1e-15, (kind, t)
+
+
+@pytest.mark.parametrize("name", [n for n in LEG_NAMES if n not in NO_COUPON_STREAM])
+@pytest.mark.parametrize("kind", tuple(PAIR_OFFSETS))
+def test_every_leg_has_one_value_on_the_two_layouts(kind, name):
+    values = {}
+    for layout in ("rebased", "absolute"):
+        dist, env = _pair_route(kind, layout)
+        values[layout] = _pair_legs(kind, layout)[name].value(dist, env, cases.UNIT)
+    leg = _pair_legs(kind, "absolute")[name]
+    assert abs(values["rebased"] - values["absolute"]) <= ROUND_OFF * _scale(leg), (kind, name, values)
