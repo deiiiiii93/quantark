@@ -10,7 +10,7 @@ import numpy as np
 
 from quantark.cashleg.base import CashLeg, roll_payment_time
 from quantark.cashleg.base_amount import BaseAmount
-from quantark.cashleg.event_distribution import EventDistribution, EventType
+from quantark.cashleg.event_distribution import EventDistribution, EventType, SurvivalAnchor
 from quantark.cashleg.leg_schedule import LegSchedule
 from quantark.util.calendar.business_calendar import Calendar
 from quantark.util.calendar.day_counter import (
@@ -65,6 +65,13 @@ class AccrualLeg(CashLeg):
     and ``day_count`` is not read. A dated ``BUSINESS_DAYS`` leg needs
     ``calendar`` and ``bus_days_in_year``; those two fields are refused on any
     other leg, which would never read them.
+
+    ``survival_until`` (spec D32) says when a terminated note stops accruing for a ``TRUNCATE_AT_KO`` leg:
+    ``SurvivalAnchor.DETERMINATION`` (the default, spec D29) at the termination's determination;
+    ``SurvivalAnchor.PAYMENT`` (opt-in) at its payment -- every knock-out, never-knocked-in maturity, knocked-in
+    settlement and REBASED path settlement counts as alive until its own payment time and gone after it. A
+    distribution without the termination payment times refuses a PAYMENT leg (``ValidationError``). A
+    ``PAY_FULL_SCHEDULE`` leg reads no survival and refuses ``PAYMENT``.
     """
 
     rate: float = 0.0
@@ -79,6 +86,7 @@ class AccrualLeg(CashLeg):
     #: per-period accrual fractions carried by ``time_shift`` on a schedule without dates, so a rolled period
     #: keeps its exact original amount (``(end - dt) - (start - dt)`` is not ``end - start`` in floating point)
     fixed_fractions: Optional[Tuple[float, ...]] = None
+    survival_until: SurvivalAnchor = SurvivalAnchor.DETERMINATION
 
     def __post_init__(self) -> None:
         if self.base is None:
@@ -95,6 +103,14 @@ class AccrualLeg(CashLeg):
             raise ValidationError(f"Invalid KOBehavior: {self.ko_behavior}")
         if not isinstance(self.survival_basis, SurvivalBasis):
             raise ValidationError(f"Invalid SurvivalBasis: {self.survival_basis}")
+        if not isinstance(self.survival_until, SurvivalAnchor):
+            raise ValidationError(f"AccrualLeg survival_until must be a SurvivalAnchor, got {self.survival_until!r}")
+        if (self.survival_until is SurvivalAnchor.PAYMENT
+                and self.ko_behavior is KOBehavior.PAY_FULL_SCHEDULE):
+            raise ValidationError(
+                "AccrualLeg survival_until=PAYMENT is read only by a TRUNCATE_AT_KO leg; a PAY_FULL_SCHEDULE leg "
+                "reads no survival"
+            )
         self._validate_day_count_inputs()
         if self.fixed_fractions is not None and len(self.fixed_fractions) != len(
             self.schedule.period_starts
@@ -144,9 +160,12 @@ class AccrualLeg(CashLeg):
             )
 
     def required_event_types(self) -> frozenset:
-        """KO drives the survival truncation; a full-schedule leg needs nothing."""
+        """KO drives the survival truncation; a full-schedule leg needs nothing. Survival to the payment time
+        (spec D32) also reads the maturity outcomes' payment times."""
 
         if self.ko_behavior is KOBehavior.TRUNCATE_AT_KO:
+            if self.survival_until is SurvivalAnchor.PAYMENT:
+                return frozenset({EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI})
             return frozenset({EventType.KO})
         return frozenset()
 
@@ -164,14 +183,17 @@ class AccrualLeg(CashLeg):
             survival = np.ones(n_periods, dtype=float)
         else:
             # spec D29: a note settled at a period's start does not enter it (``survival_after``); a period ending
-            # at a settlement is complete (``survival_at`` holds the settled note at its own time)
+            # at a settlement is complete (``survival_at`` holds the settled note at its own time); spec D32: the same
+            # rule counted from each termination's payment time under ``survival_until=PAYMENT``
             if self.survival_basis is SurvivalBasis.ENTER_PERIOD:
                 survival = np.array(
-                    [event_dist.survival_after(float(t)) for t in self.schedule.period_starts], dtype=float
+                    [event_dist.survival_after(float(t), anchor=self.survival_until)
+                     for t in self.schedule.period_starts], dtype=float
                 )
             else:
                 survival = np.array(
-                    [event_dist.survival_at(float(t)) for t in self.schedule.period_ends], dtype=float
+                    [event_dist.survival_at(float(t), anchor=self.survival_until)
+                     for t in self.schedule.period_ends], dtype=float
                 )
 
         payment_times = self._payment_times(event_dist)

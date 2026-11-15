@@ -10,7 +10,7 @@ from quantark.cashleg.autocallable_leg import (
 from quantark.cashleg.base import CashLeg, LegDirection, roll_payment_time
 from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
 from quantark.cashleg.deterministic_leg import DeterministicLeg
-from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
+from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult, SurvivalAnchor
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.cashleg.folding import (
     FoldedEventCash,
@@ -69,6 +69,7 @@ __all__ = [
     "PaymentConvention",
     "PaymentTrigger",
     "PricingResult",
+    "SurvivalAnchor",
     "SurvivalBasis",
     "TradeGreeks",
     "TradeValueBreakdown",

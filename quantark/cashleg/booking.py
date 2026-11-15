@@ -33,7 +33,7 @@ from quantark.cashleg.autocallable_leg import AccrualBasis, AutocallableCashLeg,
 from quantark.cashleg.base import CashLeg, roll_payment_time
 from quantark.cashleg.base_amount import BaseAmountMode
 from quantark.cashleg.deterministic_leg import DeterministicLeg
-from quantark.cashleg.event_distribution import EventType
+from quantark.cashleg.event_distribution import EventType, SurvivalAnchor
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.cashleg.leg_schedule import LegSchedule
 from quantark.util.exceptions import ValidationError
@@ -195,6 +195,21 @@ def _live_flows(leg: CashLeg, unit_notional: float) -> List[Tuple[int, float, fl
     return []
 
 
+def _survives_ko(ref: float, outcome: "RealizedOutcome", *, paid_anchor: bool, entering: bool) -> bool:
+    """Whether an accrual period whose survival reference is ``ref`` pays on a knock-out path.
+
+    ``DETERMINATION`` (spec D29): the engine prices survival after the observation, so a reference ON the KO date
+    did not survive. ``PAYMENT`` (spec D32): the note is alive until the knock-out's payment (``settlement_time``) and
+    gone after it -- a period ending on or before the payment completes; a period starting at the payment does not
+    enter."""
+    if not paid_anchor:
+        return ref < outcome.event_time and not is_zero(ref - outcome.event_time)
+    on_payment = is_zero(ref - outcome.settlement_time)
+    if entering:
+        return ref < outcome.settlement_time and not on_payment
+    return ref < outcome.settlement_time or on_payment
+
+
 def _termination_flows(leg: CashLeg, outcome: RealizedOutcome, unit_notional: float) -> List[Tuple[int, float, float]]:
     """Every flow of ``leg`` under ``outcome``: ``(index, amount, payment time)``; flows that do not pay omitted."""
     ko = outcome.kind is OutcomeKind.KO
@@ -205,9 +220,10 @@ def _termination_flows(leg: CashLeg, outcome: RealizedOutcome, unit_notional: fl
         refs = s.period_starts if leg.survival_basis is SurvivalBasis.ENTER_PERIOD else s.period_ends
         truncate = ko and leg.ko_behavior is KOBehavior.TRUNCATE_AT_KO
         flows = []
+        paid_anchor = leg.survival_until is SurvivalAnchor.PAYMENT
+        entering = leg.survival_basis is SurvivalBasis.ENTER_PERIOD
         for i, amount in enumerate(_accrual_amounts(leg, unit_notional)):
-            # the engine prices survival after the observation: a reference ON the KO date did not survive
-            if truncate and not (float(refs[i]) < outcome.event_time and not is_zero(float(refs[i]) - outcome.event_time)):
+            if truncate and not _survives_ko(float(refs[i]), outcome, paid_anchor=paid_anchor, entering=entering):
                 continue
             pay = (outcome.maturity_settlement_time if leg.payment_convention is PaymentConvention.AT_MATURITY
                    else float(s.payment_times[i]))

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from functools import cached_property
 from typing import Dict, Optional, Union
 
 import numpy as np
@@ -28,6 +29,20 @@ class EventType(Enum):
     COUPON = "coupon"
     MATURITY_NO_KO = "maturity_no_ko"
     MATURITY_WITH_KI = "maturity_with_ki"
+
+
+class SurvivalAnchor(Enum):
+    """When a terminated note stops counting as alive for a survival-reading cash leg (spec D29, D32).
+
+    ``DETERMINATION`` (the default): spec D29 -- a knock-out leaves at its own observation row; a maturity-type
+    termination (never-knocked-in maturity, knocked-in settlement, each REBASED path's own settlement) is alive at its
+    determination and gone right after it, whatever its payment lag.
+    ``PAYMENT`` (opt-in): every termination, knock-outs included, is alive until its own payment time and gone after
+    it -- the note accrues until its cash is actually paid.
+    """
+
+    DETERMINATION = "determination"
+    PAYMENT = "payment"
 
 
 _TERMINATION_EVENTS = {
@@ -54,6 +69,12 @@ _REBASED_SOURCES = {
 }
 
 
+def _anchor(anchor) -> "SurvivalAnchor":
+    if not isinstance(anchor, SurvivalAnchor):
+        raise ValidationError(f"survival anchor must be a SurvivalAnchor, got {anchor!r}")
+    return anchor
+
+
 def knock_in_was_carried(product, lifecycle_state=None) -> bool:
     """Whether ``product`` was already knocked in at the valuation (the carried state the engines read): the OTC
     lifecycle flag of the autocallables (``_otc_lifecycle_knocked_in``), a DCN's ``knocked_in_at_valuation``, or a
@@ -76,7 +97,9 @@ class EventDistribution:
             an observation at 0 the first value is 1; with one, it is that observation's post-event survival.
         stream_times: determination time of every row of each array stream (year fractions).
         stream_dates: the same as datetimes per stream, where known.
-        payment_times, payment_dates: settlement per stream (an array on the stream's axis, or a scalar).
+        payment_times, payment_dates: settlement per stream (an array on the stream's axis, or a scalar). The
+            termination streams' payment times (KO, MATURITY_NO_KO, MATURITY_WITH_KI; the REBASED rows each at
+            their own settlement) are what ``SurvivalAnchor.PAYMENT`` reads (spec D32).
         path_dependent_payment_events: streams whose payment needs the engine's cash ledger.
         determination_times: determination time of each scalar outcome; one absent here is determined at the
             last survival time.
@@ -504,8 +527,15 @@ class EventDistribution:
         """Determination time of a scalar outcome (the last survival time unless stated)."""
         return float(self.determination_times.get(event_type, self.survival_times[-1]))
 
-    def survival_at(self, t: float) -> float:
-        """Survival probability at a year fraction (spec D29).
+    def survival_at(self, t: float, *, anchor: SurvivalAnchor = SurvivalAnchor.DETERMINATION) -> float:
+        """Survival probability at a year fraction (spec D29; ``anchor``: spec D32).
+
+        ``anchor=SurvivalAnchor.PAYMENT`` reads every termination -- knock-out, never-knocked-in maturity, knocked-in
+        settlement, each REBASED path's own settlement -- as alive until its own payment time and gone after it:
+        ``1 - (termination mass paid strictly before t)``, from the per-stream probabilities and payment times (a
+        step; nothing is interpolated, so a paid note is never revived). It raises ``ValidationError`` when a
+        termination stream carries no payment time (``_paid_terminations``). The rest of this docstring is the
+        ``DETERMINATION`` (default) rule.
 
         At a node it is the node's value: knock-outs at that time excluded, maturity-type terminations at that time
         still alive. Between nodes the knock-out part is interpolated linearly, while a maturity-type termination
@@ -517,10 +547,13 @@ class EventDistribution:
         knock-out leaves at its observation row although its cash settles later: a note whose maturity is determined
         at T and settles at T + lag reads 0 for every t > T. A COMPLETE_PERIOD leg whose last period ends on such a
         later settlement date therefore pays nothing on the matured mass (pinned by
-        ``test/cashleg/test_d29_determination_time.py``).
+        ``test/cashleg/test_d29_determination_time.py``). ``SurvivalAnchor.PAYMENT`` (spec D32) is the opt-in rule
+        that counts from the payment time instead.
         """
 
         self.ensure_live("survival_at")
+        if _anchor(anchor) is SurvivalAnchor.PAYMENT:
+            return self._paid_survival(float(t), entering=False)
         t = float(t)
         time_grid, survival_grid = self.survival_times, self.survival_probability
         if is_zero(t):
@@ -531,24 +564,83 @@ class EventDistribution:
             return 1.0
         if self.terminal_times.size:
             # the knock-out part: every node with the maturity-type mass determined before it put back
-            settled_before = np.array([self._settled_before(float(u)) for u in time_grid])
-            base = survival_grid + settled_before
-            return float(self._interpolate(t, time_grid, base)) - self._settled_before(t)
+            return float(self._interpolate(t, time_grid, self._knock_out_part)) - self._settled_before(t)
         return float(self._interpolate(t, time_grid, survival_grid))
 
-    def survival_after(self, t: float) -> float:
+    def survival_after(self, t: float, *, anchor: SurvivalAnchor = SurvivalAnchor.DETERMINATION) -> float:
         """Survival just after ``t``: ``survival_at(t)`` less the maturity-type terminations determined at ``t``
         (spec D29: a note settled at ``t`` does not enter a period starting at ``t``). ``t`` is compared with the
-        terminations' determination times, not their payment times (CP8 ruling I1; see ``survival_at``)."""
+        terminations' determination times, not their payment times (CP8 ruling I1; see ``survival_at``).
+
+        ``anchor=SurvivalAnchor.PAYMENT`` (spec D32): ``survival_at(t, anchor=PAYMENT)`` less every termination PAID
+        at ``t`` (a note paid at ``t`` does not enter a period starting at ``t``)."""
+        if _anchor(anchor) is SurvivalAnchor.PAYMENT:
+            self.ensure_live("survival_after")
+            return self._paid_survival(float(t), entering=True)
         settled_now = 0.0
         if self.terminal_times.size and float(t) > 0.0:
             hit = np.abs(self.terminal_times - float(t)) <= Tolerance.ZERO
             settled_now = float(np.sum(self.terminal_probability[hit]))
         return self.survival_at(t) - settled_now
 
+    @cached_property
+    def _knock_out_part(self) -> np.ndarray:
+        """The D29 survival nodes with the maturity-type mass determined before each node put back (the part
+        ``survival_at`` interpolates). Computed once per distribution; the arithmetic is the per-read one it
+        replaces, so every read is bit-identical (CP8 minor: it was rebuilt on every read, quadratic on REBASED)."""
+        settled_before = np.array([self._settled_before(float(u)) for u in self.survival_times])
+        return self.survival_probability + settled_before
+
     def _settled_before(self, t: float) -> float:
         """Maturity-type mass determined strictly before ``t`` (beyond ``Tolerance.ZERO``)."""
         return float(np.sum(self.terminal_probability[self.terminal_times < t - Tolerance.ZERO]))
+
+    @cached_property
+    def _paid_terminations(self) -> tuple[np.ndarray, np.ndarray]:
+        """Payment time and mass of every termination row (spec D32): the KO stream's rows, the never-knocked-in
+        maturity (its probability carries the D16 residual) and the knocked-in settlement (a scalar, or a REBASED
+        path-dependent settlement's rows on the candidate axis, each at its own payment time).
+
+        Raises:
+            ValidationError: a termination stream with probability carries no fixed payment time (path-dependent, or
+                absent from ``payment_times``) -- a PAYMENT read is refused, never approximated.
+        """
+        times, masses = [], []
+        for event_type in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):
+            if event_type not in self.probabilities:
+                continue
+            if event_type in self.path_dependent_payment_events:
+                raise ValidationError(
+                    f"survival to the payment time (SurvivalAnchor.PAYMENT) needs the {event_type.value} payment "
+                    "times, which are path-dependent here (the engine's cash ledger holds them); no fallback"
+                )
+            if event_type not in self.payment_times:
+                raise ValidationError(
+                    f"survival to the payment time (SurvivalAnchor.PAYMENT) needs the {event_type.value} payment "
+                    "times, which this distribution does not carry; no fallback"
+                )
+            mass = np.atleast_1d(np.asarray(self.probabilities[event_type], dtype=float))
+            pay = np.atleast_1d(np.asarray(self.payment_times[event_type], dtype=float))
+            if pay.shape != mass.shape:
+                raise ValidationError(
+                    f"{event_type.value} carries {pay.size} payment times for {mass.size} probability rows"
+                )
+            times.append(pay)
+            masses.append(mass)
+        if not times:
+            return np.zeros(0), np.zeros(0)
+        return np.concatenate(times), np.concatenate(masses)
+
+    def _paid_survival(self, t: float, *, entering: bool) -> float:
+        """Spec D32: 1 - the termination mass paid strictly before ``t`` (beyond ``Tolerance.ZERO``); ``entering``
+        also removes the mass paid at ``t``. A time before the valuation reads 1."""
+        pay, mass = self._paid_terminations
+        if t < 0.0 and not is_zero(t):
+            return 1.0
+        gone = pay < t - Tolerance.ZERO
+        if entering:
+            gone = gone | (np.abs(pay - t) <= Tolerance.ZERO)
+        return 1.0 - float(np.sum(mass[gone]))
 
     @staticmethod
     def _interpolate(t: float, time_grid: np.ndarray, values: np.ndarray) -> float:
