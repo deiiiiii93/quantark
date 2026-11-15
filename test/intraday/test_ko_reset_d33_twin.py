@@ -172,14 +172,16 @@ def test_a_knocked_in_settled_note_prices_as_the_dated_note(sse_calendar, sse_se
 
 # --- the numeric field --------------------------------------------------------------------------------------------
 
-def _numeric_note(**kw):
+def _numeric_note(pre_end=0.5, convention=None, **kw):
     from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
     from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
     from quantark.util.enum.option_enums import ObservationType
 
-    pre = [k / 12.0 for k in range(1, 7)]
+    pre = [k / 12.0 for k in range(1, int(round(pre_end * 12)) + 1)]
     post = [k / 12.0 for k in range(1, 13)]
+    if convention is not None:
+        kw["settlement_convention"] = convention
     return KnockOutResetSnowballOption(
         initial_price=100.0, strike=100.0, maturity=1.0,
         barrier_config=BarrierConfig(
@@ -220,3 +222,37 @@ def test_aging_a_numeric_note_moves_its_first_schedule_payment():
     note = _numeric_note(first_schedule_settlement_time=1.1)
     note.time_shift(0.25, None, flat_env(datetime(2026, 1, 5)))
     assert note.first_schedule_settlement_time == pytest.approx(0.85, abs=1e-15)
+
+
+# --- CP9 I1 / M3: the argument means a payment of a note that ends with schedule 1, after schedule 1 --------------
+
+def _lag(years):
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+
+    return SettlementConvention(lag=years, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+
+
+def test_a_one_maturity_note_refuses_a_first_schedule_payment_other_than_its_terminal_payment():
+    """Schedule 1 runs to the product maturity: the note's one payment is the product terminal's, so a different
+    first-schedule time means nothing (MC read it, the grid did not: CP9 I1)."""
+    with pytest.raises(ValidationError, match="first_schedule_settlement_time"):
+        _numeric_note(pre_end=1.0, first_schedule_settlement_time=3.0)
+    with pytest.raises(ValidationError, match="first_schedule_settlement_time"):
+        _numeric_note(pre_end=1.0, convention=_lag(0.05), first_schedule_settlement_time=1.0)
+    # equal to the terminal payment (round-off is equality): accepted, and it changes nothing
+    assert _numeric_note(pre_end=1.0, convention=_lag(0.05), first_schedule_settlement_time=1.05 + 1e-15) is not None
+    assert _numeric_note(pre_end=1.0, first_schedule_settlement_time=1.0) is not None
+
+
+def test_a_first_schedule_payment_before_schedule_one_ends_is_refused():
+    with pytest.raises(ValidationError, match="first_schedule_settlement_time"):
+        _numeric_note(pre_end=0.5, first_schedule_settlement_time=0.25)
+    assert _numeric_note(pre_end=0.5, first_schedule_settlement_time=0.5).first_schedule_settlement_time == 0.5
+
+
+def test_equality_reads_the_first_schedule_payment_only_when_set():
+    assert _numeric_note() == _numeric_note()
+    assert _numeric_note(first_schedule_settlement_time=1.1) == _numeric_note(first_schedule_settlement_time=1.1)
+    assert _numeric_note(first_schedule_settlement_time=1.1) != _numeric_note(first_schedule_settlement_time=1.2)
+    assert _numeric_note(first_schedule_settlement_time=1.1) != _numeric_note()
+    assert _numeric_note() != _numeric_note(pre_end=0.25)            # the other fields still count

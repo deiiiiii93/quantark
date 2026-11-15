@@ -9,7 +9,7 @@ The post-KI schedule can be applied in two modes:
 """
 
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
@@ -158,6 +158,59 @@ class KnockOutResetSnowballOption(SnowballOption):
         super().validate(allow_zero_maturity=allow_zero_maturity)
         self._validate_dated_rebased_end()
         self._validate_schedule_two_ends_last()
+        self._validate_first_schedule_settlement_range()
+
+    def __eq__(self, other):
+        """The dataclass fields, and ``first_schedule_settlement_time`` when either side sets it (it is not a field,
+        so contracts without it compare exactly as before; CP9 M3)."""
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        names = [f.name for f in fields(self) if f.compare]
+        if tuple(getattr(self, n) for n in names) != tuple(getattr(other, n) for n in names):
+            return False
+        return self.first_schedule_settlement_time == other.first_schedule_settlement_time
+
+    __hash__ = None
+
+    def _validate_first_schedule_settlement_range(self) -> None:
+        """``first_schedule_settlement_time`` is the payment of a note that ends with schedule 1 (spec D34), so it is
+        refused (CP9 I1, owner ruling option A):
+
+        - before schedule 1's maturity (its last booked observation): a payment cannot precede its determination;
+        - when schedule 1 runs to the product maturity, unless it equals the product terminal's payment time: such a
+          note has one maturity, paid by the product terminal (``first_schedule_settlement``), so another time means
+          nothing.
+
+        Times compare with ``is_close`` (round-off is equality). Checked on the booked records, as an aged contract
+        keeps both its records and this time on one clock; a contract whose schedule 1 has no record left is not
+        checked (only a knocked-in note is alive there, and it never pays on schedule 1).
+        """
+        value = getattr(self, "first_schedule_settlement_time", None)
+        schedule = None if self.barrier_config is None else self.barrier_config.ko_observation_schedule
+        if value is None or schedule is None or not schedule.records:
+            return
+        pre_end = max(float(r.observation_time) for r in schedule.records)
+        if value < pre_end and not is_close(value, pre_end, abs_tol=Tolerance.ZERO):
+            raise ValidationError(
+                f"first_schedule_settlement_time {value!r} precedes schedule 1's maturity {pre_end!r}: the payment of a "
+                "note that ends with schedule 1 cannot come before it ends"
+            )
+        from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+        from quantark.param import FlatRateCurve, FlatVolSurface, NoDividend, SpotQuote
+        from quantark.priceenv import PricingEnvironment
+
+        # market-free: a numeric contract's times are on its own clock, and only times are read here
+        env = PricingEnvironment(rate_curve=FlatRateCurve(0.0), valuation_date=datetime(2000, 1, 3),
+                                 spot_quote=SpotQuote(float(self.initial_price) or 1.0),
+                                 vol_surface=FlatVolSurface(0.2), div_yield=NoDividend())
+        terminal = resolve_terminal_timing(self, env)
+        one_maturity = is_close(pre_end, float(terminal.determination_time), abs_tol=Tolerance.PRECISION)
+        if one_maturity and not is_close(value, float(terminal.payment_time), abs_tol=Tolerance.ZERO):
+            raise ValidationError(
+                f"first_schedule_settlement_time {value!r}: schedule 1 runs to the product maturity, so the note has one "
+                f"maturity, paid at the product terminal's payment time {float(terminal.payment_time)!r}; another "
+                "first-schedule payment means nothing (book it as the terminal settlement)"
+            )
 
     # ------------------------------------------------------------------
     # Validity: schedule 2 ends last (spec D35, owner ruling 2026-11-14)
