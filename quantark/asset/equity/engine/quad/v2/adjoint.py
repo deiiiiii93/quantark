@@ -342,7 +342,8 @@ class _Pass:
         barrier = self.contract.continuous_barrier
         coordinate = (2 * barrier - 2 * mesh.lo) / mesh.h
         if params.continuous_grid_backend == "pointwise" or abs(coordinate - round(coordinate)) > _ALIGNED:
-            # TODO(T16): transpose the pointwise continuous readout on every node (continuous_readout)
+            # TODO(unified event statistics):
+            # transpose the pointwise continuous readout on every node (continuous_readout)
             raise AdjointUnavailable(
                 "undefined: the forward pass transposes the barrier-aligned reflection grid only; this route reads "
                 "the continuous knock-in pointwise (continuous_grid_backend='pointwise' or an unaligned mesh)"
@@ -370,7 +371,8 @@ class _Pass:
             log_weight = -2 * mean / variance * (x[indices] - barrier)
             ordinary = np.abs(log_weight) < _ORDINARY_LOG_WEIGHT
             if np.any(flat[indices[~ordinary]] != 0.0):
-                # TODO(T16): transpose the pointwise survival integral of the non-ordinary reflection nodes
+                # TODO(unified event statistics):
+                # transpose the pointwise survival integral of the non-ordinary reflection nodes
                 raise AdjointUnavailable(
                     "undefined: a reflection node's multiplier leaves the ordinary range (|log weight| >= 500); the "
                     "forward pass does not transpose the pointwise survival integral there"
@@ -466,7 +468,7 @@ class _Pass:
         c = -2 * mean / variance
         log_weight = c * (x0 - barrier)
         if abs(log_weight) >= _ORDINARY_LOG_WEIGHT:
-            # TODO(T16): transpose ``_stable_survival`` at the spot
+            # TODO(unified event statistics): transpose ``_stable_survival`` at the spot
             raise AdjointUnavailable(
                 "undefined: the spot's reflection multiplier leaves the ordinary range (|log weight| >= 500); the "
                 "forward pass does not transpose the stable survival integral"
@@ -524,7 +526,8 @@ class _Pass:
             nxt = events[i + 1]
             mean, variance, discount = float(log.means[i + 1]), float(log.variances[i + 1]), float(log.discounts[i + 1])
             if variance == 0:
-                # TODO(T16): transpose the deterministic shift (``Function.shifted`` + ``deterministic_continuous``)
+                # TODO(unified event statistics):
+                # transpose the deterministic shift (``Function.shifted`` + ``deterministic_continuous``)
                 raise AdjointUnavailable(
                     "undefined: a zero-variance interval after the valuation shifts the grid functions "
                     "deterministically; the forward pass does not transpose that shift"

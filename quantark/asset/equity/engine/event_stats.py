@@ -44,8 +44,8 @@ class StatisticsRefused(PricingError):
 class StatisticUnavailable(ValidationError, ValueError):
     """A statistic listed in ``EventStatistics.unavailable`` was read through ``EventStatistics.require``.
 
-    The value may be present (a flagged number kept so the type's identities hold) but is not the field's
-    definition; the message carries the ``unavailable`` reason.
+    The field is ``None`` or not the field's definition (not requested, or undefined for the trade); the message
+    carries the ``unavailable`` reason.
     """
 
 

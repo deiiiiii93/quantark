@@ -508,6 +508,8 @@ def compile_contract(
         # AMOUNT, which every engine reads. A count, when present, carries them; an amount beside it must be
         # the same debt (the intraday twin hands this engine both), else the two disagree and nothing says which
         # holds. Without a count the amount is owed exactly as QUAD V1, the PDE solver and Monte Carlo owe it.
+        # Known limitation: a lifecycle-tracker count beside a booked amount that covers periods before the
+        # tracked schedule (separate debts, not one stated twice) is refused here too; no library path builds it.
         owed = (
             float(product.coupon_config.initial_coupon_arrears)
             if product.has_memory_coupon

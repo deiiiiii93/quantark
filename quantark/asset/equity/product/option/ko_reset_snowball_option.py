@@ -258,8 +258,9 @@ class KnockOutResetSnowballOption(SnowballOption):
             end = last(post.records)
             if before(end, pre_end):
                 raise ValidationError(
-                    f"KO-reset snowball (ABSOLUTE): schedule 2 must end on or after schedule 1 (spec D35): schedule 2's "
-                    f"last observation {show(end)} precedes schedule 1's last observation {show(pre_end)}"
+                    "KO-reset snowball (ABSOLUTE): schedule 2 must end on or after schedule 1, because a knock-in "
+                    f"replaces schedule 1 by schedule 2 for the rest of the note's life: schedule 2's last observation "
+                    f"{show(end)} precedes schedule 1's last observation {show(pre_end)}"
                 )
             return
         ki = self.barrier_config.ki_observation_schedule
@@ -277,9 +278,10 @@ class KnockOutResetSnowballOption(SnowballOption):
             offset = f"{last_offset!r}"
         if before(end, pre_end):
             raise ValidationError(
-                f"KO-reset snowball (REBASED): schedule 2 must end on or after schedule 1 (spec D35): a knock-in on the "
-                f"first knock-in observation {show(first)} plus schedule 2's last offset ({offset}) ends {show(end)}, "
-                f"before schedule 1's last observation {show(pre_end)}"
+                "KO-reset snowball (REBASED): schedule 2 must end on or after schedule 1, because a knock-in "
+                f"replaces schedule 1 by schedule 2 for the rest of the note's life: a knock-in on the first knock-in "
+                f"observation {show(first)} plus schedule 2's last offset ({offset}) ends {show(end)}, before schedule "
+                f"1's last observation {show(pre_end)}"
             )
 
     def _validate_first_schedule_settlement_time(self) -> None:

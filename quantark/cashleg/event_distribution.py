@@ -108,9 +108,9 @@ class EventDistribution:
             ``from_statistics`` (spec D16) and carried here so a reader sees it.
         rebased: a REBASED KO-reset (spec D13): events sit on the absolute candidate axis and legs value each
             event at its own time.
-        flagged_streams: stream -> the statistics' ``unavailable`` reason for the field the stream was built from
-            (e.g. a legacy producer's KI table kept as base kept it). The stream is present, but its numbers are
-            not the field's definition; a leg can see that here.
+        flagged_streams: stream -> the statistics' ``unavailable`` reason for the field the stream was built from,
+            when that field is listed there (for example pruned as not requested). A leg reading the stream can
+            see that here.
         terminated: the note ended before the valuation (receivables only, spec §4.9c): no event is left, every
             reader of events refuses (a leg riding an ended note settles with it; its value is not derivable
             from events).
