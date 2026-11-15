@@ -238,7 +238,29 @@ def test_pv_is_price_bitwise_on_the_forced_fft_backend(name):
     assert cls(QuadV2Params(backend="fft")).price_with_events(make(), env()).npv == price
 
 
-# --- AC8 ------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("name", list(FFT_CASES))
+def test_every_fft_contraction_sees_one_channel(name, monkeypatch):
+    """D23 by construction, on any architecture: the arm64 BLAS happened to give the batched einsum the single-channel
+    bits, the x86_64 CI's did not (``pv`` 1 ULP off ``price()`` on PR #3). ``apply_fft`` therefore runs each channel
+    through the same one-channel transform and contraction that ``price()`` runs, so no FFT call ever sees more than
+    one channel -- and ``price()``'s own single-channel call is unchanged."""
+    from quantark.asset.equity.engine.quad.v2 import fft as v2_fft
+
+    widths = []
+    one = v2_fft._apply_fft_one
+
+    def spy(kernel, values, *args):
+        widths.append(values.shape[0])
+        return one(kernel, values, *args)
+
+    monkeypatch.setattr(v2_fft, "_apply_fft_one", spy)
+    cls, make = FFT_CASES[name]
+    engine = cls(QuadV2Params(backend="fft"))
+    engine.calculate_event_stats(make(), env())
+    assert len(engine._prepared.channels) > 10 and widths and set(widths) == {1}
+
+
+# --- AC8------------------------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", IDS)

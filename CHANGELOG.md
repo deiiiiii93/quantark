@@ -240,7 +240,12 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   engine: a full request ≤ 2×; a request without the KI streams ≤ 1.10× (QUAD V1 ≤ 1.5×, its direct
   maturity column is never pruned). Accepted exception: PDE 1D memory Phoenix under EXPIRY pay,
   pruned requests up to 1.15× (measured 1.12–1.14×), because its coupon-cash columns cannot be
-  pruned. DCN had no statistics before; its full request is ≤ 2× its `price()`.
+  pruned. Second accepted exception: QUAD V2 with `backend="fft"` forced on a contract whose auto
+  backend is direct, pruned requests up to 1.41× (full 1.88×; snowball, continuous KI, ~9 ms),
+  because the FFT now runs each statistics channel on its own so that `pv` equals `price()` bitwise on
+  every architecture (the batched einsum was 1 ULP off on x86_64). Routes that choose FFT on auto
+  (daily KI) are faster than before (full 0.91×, pruned 0.74×). DCN had no statistics before; its
+  full request is ≤ 2× its `price()`.
 - MC `calculate_event_stats` on an expired note returns `None` (was `ValueError`).
 - QUAD V1 `event_stats_mode="forward_density"` reports no KI path statistics and raises
   `StatisticsRefused` for memory or EXPIRY Phoenix (it returned empty coupon cash).

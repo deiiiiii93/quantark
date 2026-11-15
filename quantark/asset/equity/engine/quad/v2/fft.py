@@ -5,6 +5,21 @@ from quantark.util.exceptions import NumericalError
 
 
 def apply_fft(kernel, values, max_work_bytes, cache, key):
+    """Apply the block kernel to every channel of ``values`` (shape ``(channels, cells, order)``).
+
+    Each channel goes through its own single-channel transform and contraction, so a channel's result never
+    depends on how many channels share the call. ``price()`` runs one channel and the statistics context runs
+    one per statistic; batching them through one einsum let the BLAS pick a channel-count-dependent reduction
+    order (seen on the x86_64 CI), which broke ``EventStatistics.pv == price()`` bitwise (spec D23).
+    """
+    if values.shape[0] > 1:
+        return np.concatenate(
+            [_apply_fft_one(kernel, values[c : c + 1], max_work_bytes, cache, key) for c in range(values.shape[0])]
+        )
+    return _apply_fft_one(kernel, values, max_work_bytes, cache, key)
+
+
+def _apply_fft_one(kernel, values, max_work_bytes, cache, key):
     channels, cells, order = values.shape
     band = (len(kernel) - 1) // 2
     length = next_fast_len(cells + 4 * band)
