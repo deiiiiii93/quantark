@@ -16,7 +16,7 @@ For every case x grid engine of ``cases.CASES``: the statistics at the three lev
 
 Run from the worktree root (banking interpreter: the main ``.venv``, py3.11)::
 
-    env PYTHONPATH=<wt>:<wt>/test /Users/fuxinyao/quant-ark/.venv/bin/python test/event_statistics/bank_allowances.py
+    env PYTHONPATH=<wt>:<wt>/test <venv>/bin/python test/event_statistics/bank_allowances.py
 
 Never edit ``allowances.json`` by hand; re-bank only for a deliberate engine change, with a field-level diff (D22).
 """

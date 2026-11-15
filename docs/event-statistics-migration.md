@@ -336,6 +336,12 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
 - D29's determination-time rule: a COMPLETE_PERIOD funding leg ending on a settlement date after the
   determination pays nothing on the matured mass. Opt in to `AccrualLeg(survival_until=SurvivalAnchor.PAYMENT)` (D32) where the
   trade accrues to the payment date.
+- `AutocallablePathAnalyzer` prices a KO-reset Snowball with Snowball semantics (one KO schedule,
+  no reset at knock-in) and labels its statistics family `snowball`. It does not refuse the product;
+  use an engine for KO-reset statistics.
+- Model-validation certificates: the intraday study's `implementation_fingerprint`s moved with this
+  release (they were already stale at 0.5.5). The certified numbers are unchanged, but the next amend
+  of those certificates must re-run their references.
 
 ## 11. Tracked study outputs still on the old definitions
 
@@ -350,4 +356,5 @@ refresh them.
 | `example/case_studies/snowball_2y_carry_curve/README.md` | "P(KI) 62.9% vs 61.6%" is KI-ever; `results/pricing.json` was regenerated (P(KI before KO) 0.354) |
 | `example/case_studies/gaussian_quad_comparison/results/events_*.json`, `REPORT.md` | maturity numbers on the old `expected_discounted_maturity_cashflow` split |
 | `example/case_studies/quad_v2_validation/README.md` | says continuous KI-ever is unavailable on V2; V2 now reports P(KI before any KO) and a continuous KI table |
+| `docs/autocall-engine-perf/demos/capture_stats_goldens.py` | reads the removed event-statistics fields and raises `AttributeError` on 0.11.0 |
 | `docs/research/continuous-ki-consistency/`, `docs/research/vol-model-ki-consistency/` | measure the old KI-ever field; pricing results stand. Their scripts read the removed `ki_ever_probability` / `ki_survive_knocked_in_probability` fields and now raise `AttributeError` on 0.11.0 |

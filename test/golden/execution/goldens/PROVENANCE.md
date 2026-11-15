@@ -80,7 +80,7 @@ which is the signature of a discounting change rather than a change to the march
 
 ## 2026-11-11: unified event statistics T6 (per-stream EventDistribution axes)
 
-Spec: `.ship/2026-11-11-unified-event-stats/spec.md` D16 (`from_statistics` absorbs the statistics'
+Spec (unified event statistics) D16 (`from_statistics` absorbs the statistics'
 `probability_residual` into MATURITY_NO_KO and carries it as `EventDistribution.probability_residual`).
 Not a regeneration: one leaf of `pde_phase4_goldens.json` edited by hand, after a field-level diff (spec D22)
 of every phase-4 event case showed it is the only leaf outside `golden_compare` tolerance (prices and npv
@@ -95,7 +95,7 @@ axis for every case here.
 
 ## 2026-11-12: unified event statistics T13 (PDE 1D forward adjoint pass)
 
-Spec: `.ship/2026-11-11-unified-event-stats/spec.md` AC13/AC14 (the PDE 1D statistics now carry the per-date
+Spec (unified event statistics) AC13/AC14 (the PDE 1D statistics now carry the per-date
 knock-in table, so `price_with_events(emit_distribution=True)` carries the KI stream).
 Not a regeneration: one leaf **added** per phase-4 event case of `pde_phase4_goldens.json`
 (`price_with_events.event_distribution.probabilities.KI`, copied from the live payload), after a field-level diff
@@ -115,7 +115,7 @@ not edited). HestonSnowballPDESolver's price leaf is the recorded pre-existing f
 
 ## 2026-11-14: unified event statistics T23 (spec D29 termination survival)
 
-Spec: `.ship/2026-11-11-unified-event-stats/spec.md` D29. `EventDistribution` survival holds a maturity-type
+Spec (unified event statistics) D29. `EventDistribution` survival holds a maturity-type
 termination alive at its own determination and drops it right after; tied survival nodes are one node holding the
 value after their last row. Not a regeneration: after a field-level diff (spec D22) of every phase-4 case, one leaf
 of `pde_phase4_goldens.json` replaced by the live payload (prices, npv, every probability unchanged;

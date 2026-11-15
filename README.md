@@ -100,6 +100,8 @@ pip install git+https://github.com/deiiiiii93/quantark
 > **Version numbers.** This README and the [CHANGELOG](CHANGELOG.md) name behaviour changes by the
 > milestones 0.6.0 to 0.10.0 (for example "the 0.7.0 base-family mask"). Those were internal
 > milestones that were never published; they all ship in **0.5.5**, the first release after 0.5.0.
+> The next release after 0.5.5 is **0.11.0** (unified event statistics), numbered past those
+> milestone labels so that no version is reused.
 
 Optional accelerator (Numba): `pip install "quantark[accel]"` compiles the Monte Carlo QE
 kernels and the PDE mesh builder. Results are bit-identical with or without it; a cold PDE

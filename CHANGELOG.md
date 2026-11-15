@@ -57,84 +57,6 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   the maturity date is gone. The risk report's "P(KI before maturity)" becomes "P(KI before any KO)"
   plus "P(matured knocked in)".
 
-### Changed: prices (eight sanctioned moves; every other `price()` is bitwise unchanged)
-
-- **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
-  maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
-  rule and the moves in price units.
-- **KO-reset with an explicit `settlement_date`: a note that ends with the first schedule is paid on
-  the settlement date** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed
-  below for the rule and the moves in price units.
-- **KO-reset intraday prices of a dated note with an explicit `settlement_date`: the float-time twin
-  carries the first schedule's payment** (intraday PDE and QUAD V2 routes). See Fixed below for the
-  rule and the moves in price units.
-- **KO-reset Monte Carlo: the knocked-in payoff reads the spot at the second schedule's end**
-  (BSM, local-vol, Heston and Heston-SLV MC). See Fixed below for the rule and the moves in price
-  units.
-
-- **QUAD V2 memory Phoenix with `initial_coupon_arrears > 0`.** V2 ignored arrears owed at the
-  pricing date while QUAD V1, PDE and MC pay them. V2 now releases them at the first remaining
-  coupon observation (with a coupon hit or a knock-out there, else carried). The V2 price rises by
-  about the arrears times their discount factor: +1.00 to +1.49 on the test contracts (spot 100,
-  arrears 1.5). V2 now agrees with V1 (3.3e-6 at 16001 nodes) and with MC (within
-  2.6 SE over 8 seeds). Contracts without arrears are bitwise unchanged. V2 theta on a missed
-  first coupon without a lifecycle count moves with it (−1.77 to +0.033, in line with V1/PDE/MC).
-- **PDE knocked-in edge row, annualized knock-in** (PDE 1D flat and local vol, Heston/SLV ADI).
-  The far-edge row of the knocked-in surface (lower edge; upper on a reverse note; the max-loss
-  row) omitted the annualized-KI tenor multiplier that the maturity payoff applies (Snowball
-  `is_annualized_ki`, KO-reset post-KI tenor). The row now reads slope and intercept from
-  `get_maturity_payoff_v1`. Moves only annualized-KI contracts whose edge is reachable. Local-vol
-  KO-reset on the default grid: 96.16 → 94.10, confirmed by an independent CTMC QUAD (94.10). The
-  width-3 vs width-16 gap falls from 0.14 to 3e-4 (flat), 2.3–3.5 to ≤ 4.5e-3 (local vol) and
-  0.7–1.5 to ≤ 1.6e-3 (ADI); local-vol PDE and ADI agree with MC within 2.4 SE. No certified anchor
-  moved.
-- **PDE knocked-in edge row, airbag with partial protection** (PDE 1D flat and local vol,
-  Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). The closed-form max-loss edge row ignored
-  the airbag. Contracts with PARTIAL protection and an airbag that changes the knocked-in payoff on
-  the edge cell now use the payoff-read row; NONE and FULL protection, and partial contracts where
-  the airbag does not change the edge, are bitwise unchanged. The width-3 vs width-16 gap falls
-  from 2.9e-2–9.2e-2 to ≤ 9.3e-4 (flat), 1.65–1.76 to ≤ 1.4e-2 (local vol; 3.7e-2 on annualized KO-reset, identical with protection NONE), up to 0.63 to
-  ≤ 2.3e-3 (Heston ADI) and up to 1.07 to ≤ 4.7e-3 (SLV ADI). Against MC these contracts sat 24 to
-  127 SE low; now within 2.9 SE. No certified anchor moved.
-- **PDE knocked-in edge row, partial protection without an airbag** (PDE 1D flat and local vol,
-  Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). See Fixed below for the rule and the moves
-  in price units.
-
-### Changed: statistics
-
-- KI is never triggered after a knock-out, on every engine, and a knock-out wins a same-instant tie
-  with a discrete KI. Outcomes partition the paths: KO rows, `maturity` (never KO, never KI) and
-  `ki_settlement` (KI, no KO), each computed directly; the maturity is no longer `1 − ΣKO − ki`.
-- `probability_residual` and `reconciliation_error` are computed by the type and always reported,
-  never absorbed. `from_statistics` absorbs the probability residual into MATURITY_NO_KO and
-  carries it as `EventDistribution.probability_residual`.
-- `EventStatistics.pv` is `price()`'s value on every engine; MC statistics are recorded on
-  `price()`'s own paths.
-- The KI stream lives on the KI table's own axis (payment = KI observation; legs add their offset),
-  so it is never dropped; AT_KI legs that used to raise now value.
-- `cash_to_pay` is computed directly on path-dependent rows (EXPIRY coupons, memory arrears,
-  REBASED) instead of discounted / DF.
-- EXPIRY coupon rows are path-dependent on every engine.
-- MC `calculate_event_stats` on an expired note returns `None` (was `ValueError`).
-- QUAD V1 `event_stats_mode="forward_density"` reports no KI path statistics and raises
-  `StatisticsRefused` for memory or EXPIRY Phoenix (it returned empty coupon cash).
-- KO-reset ABSOLUTE on MC: the never-knocked-in maturity is determined at the first schedule's end
-  and leaves the survival there; probabilities unchanged.
-- Settled notes leave the survival at their DETERMINATION time (D29). A knock-out leaves at its
-  observation row. A maturity-type termination (never-knocked-in maturity, knocked-in settlement,
-  each REBASED path's own settlement) is alive at its determination time and gone right after it,
-  even while its cash is still unpaid. `survival_at` steps there, interpolation between nodes never
-  revives a settled note, and past the last node a settled note stays gone. Cash legs move with it:
-  - accrual legs pay nothing past a settled note's end (aged DCN, quarterly ENTER leg running to
-    2.0: MC 6598.93 → 3453.33);
-  - a KO-reset ABSOLUTE COMPLETE_PERIOD leg now pays its period ending at the first schedule's
-    maturity on the notes that mature there;
-  - a COMPLETE_PERIOD leg whose last period ends on a settlement date after the determination pays
-    nothing on the matured mass (see Known issues).
-- A carried knock-in (R1): `EventDistribution.from_statistics(stats, knock_in_carried=True)` gives
-  an empty KI stream and `knock_in_carried=True`, so an AT_KI leg on an already-knocked-in note
-  values 0. The knock-in is a past event.
-
 ### Added
 
 - `EventStatistics` with `ObservationTable` (KO/coupon grid, KO-reset `pre`/`post` tags),
@@ -180,6 +102,254 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   it before the first schedule's maturity, and refuses it on a note whose first schedule runs to the
   product maturity unless it equals the terminal payment time (one maturity, one payment). `ContractTimeline.first_schedule_payment`
   is the intraday instant it is resolved from.
+
+- `CarryExtrapolation.FLAT_CARRY_YIELD`: a third carry long-end rule that holds the zero carry yield `B(T)/T` at the
+  last node's value (flat `q` under a flat rate curve). `CarryImpliedDividendYield.parallel_shifted` shifts nodes
+  exactly under it; the legacy `ForwardCarryCurve` rejects it. Existing rules and defaults are unchanged.
+- `calculate_carry_curve_buckets` (`quantark.asset.equity.riskmeasures`, with `CarryCurveBucketReport` /
+  `CarryPillarBucket`): pillar-bucket risk on any `CarryCurve` — `∂PV/∂F_i` at fixed spot with optional hedge lots
+  per pillar, spot delta (nodes held), pinned-forward delta (forwards held), rho_q per node and parallel, and the
+  chain-rule / rho-sum identity residuals. Every price goes through `resolve_bump_engine`. Case study:
+  `example/case_studies/snowball_2y_carry_curve/` (2Y CSI 1000 snowball, flat q vs the IM + MO carry curve).
+
+- Curve construction (`quantark.param.curve`, re-exported from `quantark.param`): `ZeroCurve` and `CarryCurve` on one
+  shared term interpolator with five schemes (`CurveInterpolation.LINEAR_ZERO`, `LOG_LINEAR_DF`, `CUBIC_ZERO`,
+  `LOG_CUBIC_DF`, Hagan–West `MONOTONE_CONVEX`) and the existing `RateExtrapolation` / `CarryExtrapolation` long-end
+  rules; instrument quotes (`DepositQuote`, `SwapQuote`, `BondQuote`, `FuturesQuote`, `OptionPairQuote`) in numeric
+  (`tenor_years`) or dated (dates + `valuation_date`, calendar ACT/365F) mode, never mixed; an iterative sequential
+  bootstrap — `bootstrap_discount_curve` (deposits, par swaps, bonds), `bootstrap_projection_curve` (dual-curve, one
+  `RateIndex` off a given discount curve), `build_carry_curve` (index futures or call/put pairs, with a live
+  `to_dividend_yield(rate_curve)` view) — and `reprice_quotes` for the round-trip residuals. Dated swaps and bonds are
+  built as the repo's own `InterestRateSwap` / `FixedBond`, so bootstrapped curves reprice through
+  `IRSDiscountEngine` and `BondDiscountEngine` by construction; a QuantLib cross-check (skipped when QuantLib is
+  absent) agrees within 1e-10. `key_rate_bumped_zero_curve` uses `with_pillars` when the curve has it. Guide:
+  `docs/curve-construction.md`; demo: `example/param/curve_construction_demo.py`.
+- Pillar-curve protocol for the risk stack: `quantark.param.rrf.is_pillar_curve` (`pillars` + `with_pillars`) and
+  `is_flat_rate_curve`; `InterpolatedRateCurve.with_pillars`. The equity/FX/credit stress applicators, FX VaR
+  revaluation, SA-CVA key-rate IR delta, as-of roll-down and term-structure drift, PnL-explain bucketing and the
+  execution greeks fingerprints accept a `ZeroCurve` (or any pillar curve) where they used to require
+  `InterpolatedRateCurve`; a stressed or bumped curve keeps its interpolation, extrapolation and clock anchor.
+- `simple_forward_rate(curve, t_start, t_end, dcf=None)` (`quantark.param.rrf.projection`): the simple forward over a
+  window on a rate curve, with the running-period (`t_start < 0`) rule; the single projection call site for the rate
+  engines, the FRN and the bootstrap strips.
+- Trade-value portfolios: `EquityPortfolio(trade_value=True)` values every `EquityPosition` at its full trade
+  value (product × signed quantity + cash legs), with bump Greeks from `get_trade_risk` and PnL against the new
+  `EquityPosition.entry_trade_value`. VaR (historical, Monte Carlo incl. attribution, parametric), SIMM via the
+  portfolio adapter, static stress, dynamic scenarios and backtests follow the flag through one shared switch
+  (`quantark.portfolio.equity.valuation`). Default off: the product path is bitwise unchanged.
+- Multi-day cash-leg booking: `quantark.cashleg.booking.LegCashBook` rolls a position's legs with the product and
+  books their flows as paid cash and receivables by explicit per-leg rules on knock-out and maturity. The equity
+  backtest (`BacktestConfig.trade_value`), dynamic scenarios and the product-replay engine (`trade_value`,
+  per-trade `cash_legs`) use it; leg cash is part of `paid_cash` / `pending_receivable_pv`. Leg times count from
+  the contract's `initial_date` (else the run start); unruled leg variants raise `CapabilityError`.
+- `time_shift` on `DeterministicLeg`, `AccrualLeg` and `FixedPayoffLeg` (shared landing rule
+  `quantark.cashleg.base.roll_payment_time`); PnL explain's `cash_legs` line (`Factor.CASH_LEGS`).
+
+- `ConvertibleBondTFTreeEngine`: the Tsiveriotis-Fernandes model on a CRR binomial tree, a lattice
+  twin of the TF PDE. Each node carries the total value and its cash-only component (COCB), which
+  discounts at `r + credit_spread`. Time steps are equal in total implied variance, so a vol term
+  structure keeps the tree recombining; flat vol gives equal time steps. Select it with
+  `ConvertibleBondEngine(env, method=EngineType.TREE(ConvertibleBondMethod.TF))`;
+  `EngineType.PDE(TF)`, `ConvertibleBondMethod.TF` and `"tf"` still mean the TF PDE.
+  `ConvertibleBondResult.engine_type` says which engine produced a price. Against the TF PDE at
+  800×2000 on a widened domain the tree agrees to 0.05 per 100 face on seven cases (puts, soft
+  call, term-structure rates and vol).
+- `ConvertibleBond.final_coupon_on_conversion` (`FinalCouponOnConversion.KEEP` or `FORFEIT`): whether
+  a holder converting at maturity still receives the final coupon. `KEEP`, the default, is unchanged
+  (maturity value `max(parity, face) + coupon`; prices byte-identical on all five engines). `FORFEIT`
+  gives `max(parity, face + coupon)`, the QuantLib convention: GS, HW, jump-diffusion, the TF PDE and
+  the TF tree fold the final coupon into `ConvertibleBond.maturity_redemption`, and
+  `ConvertibleBond.coupon_amount` drops it from the in-step coupons (HW therefore survival-weights
+  the folded coupon over the last step, about `coupon × hazard × dt`). The setting also accepts
+  `"keep"` / `"forfeit"`, and rejects anything else. Against QuantLib 1.44's
+  `BinomialConvertibleEngine<CRR>` on the AC7 cases at 2000 steps this convention is the largest
+  piece of the GS–QuantLib gap (up to 0.79 per 100 face, on the demo bond); with `FORFEIT` the GS
+  tree lands within 0.02 of QuantLib at 500 steps.
+
+- Mid-life valuation of discrete FX barriers and sharkfins: `observation_dates` (the date-clock form of
+  `observation_times`) and `observed_fixings` (`{observation date or time: realised spot}`). A recorded breach
+  decides the contract (a knock-out keeps only a rebate not yet paid; a knock-in is the vanilla); otherwise only the
+  fixings ahead are simulated. A past fixing without a record is decided at the current spot with one
+  `MissingFixingWarning`; theta records the fixings it steps over (`record_passed_fixings`), bump Greeks freeze the
+  base fill (`with_missing_fixings_filled`).
+- Accumulator `past_observations` as `(date, spot)` on a dated contract (a list mixing dates and times is refused).
+- `quantark.util.calendar.add_months(date, n, calendar=None, convention=None)`: the calendar's "+nM" (day of month
+  kept, clamped at the month end, optional business-day adjustment).
+
+### Changed
+
+#### Prices (eight sanctioned moves; every other `price()` is bitwise unchanged)
+
+- **KO-reset with EXPIRY coupon pay: a first-schedule knock-out pays at the first schedule's
+  maturity** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed below for the
+  rule and the moves in price units.
+- **KO-reset with an explicit `settlement_date`: a note that ends with the first schedule is paid on
+  the settlement date** (PDE 1D flat and local vol, Heston/SLV ADI, QUAD V1, QUAD V2). See Fixed
+  below for the rule and the moves in price units.
+- **KO-reset intraday prices of a dated note with an explicit `settlement_date`: the float-time twin
+  carries the first schedule's payment** (intraday PDE and QUAD V2 routes). See Fixed below for the
+  rule and the moves in price units.
+- **KO-reset Monte Carlo: the knocked-in payoff reads the spot at the second schedule's end**
+  (BSM, local-vol, Heston and Heston-SLV MC). See Fixed below for the rule and the moves in price
+  units.
+
+- **QUAD V2 memory Phoenix with `initial_coupon_arrears > 0`.** V2 ignored arrears owed at the
+  pricing date while QUAD V1, PDE and MC pay them. V2 now releases them at the first remaining
+  coupon observation (with a coupon hit or a knock-out there, else carried). The V2 price rises by
+  about the arrears times their discount factor: +1.00 to +1.49 on the test contracts (spot 100,
+  arrears 1.5). V2 now agrees with V1 (3.3e-6 at 16001 nodes) and with MC (within
+  2.6 SE over 8 seeds). Contracts without arrears are bitwise unchanged. V2 theta on a missed
+  first coupon without a lifecycle count moves with it (−1.77 to +0.033, in line with V1/PDE/MC).
+- **PDE knocked-in edge row, annualized knock-in** (PDE 1D flat and local vol, Heston/SLV ADI).
+  The far-edge row of the knocked-in surface (lower edge; upper on a reverse note; the max-loss
+  row) omitted the annualized-KI tenor multiplier that the maturity payoff applies (Snowball
+  `is_annualized_ki`, KO-reset post-KI tenor). The row now reads slope and intercept from
+  `get_maturity_payoff_v1`. Moves only annualized-KI contracts whose edge is reachable. Local-vol
+  KO-reset on the default grid: 96.16 → 94.10, confirmed by an independent CTMC QUAD (94.10). The
+  width-3 vs width-16 gap falls from 0.14 to 3e-4 (flat), 2.3–3.5 to ≤ 4.5e-3 (local vol) and
+  0.7–1.5 to ≤ 1.6e-3 (ADI); local-vol PDE and ADI agree with MC within 2.4 SE. No certified anchor
+  moved.
+- **PDE knocked-in edge row, airbag with partial protection** (PDE 1D flat and local vol,
+  Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). The closed-form max-loss edge row ignored
+  the airbag. Contracts with PARTIAL protection and an airbag that changes the knocked-in payoff on
+  the edge cell now use the payoff-read row; NONE and FULL protection, and partial contracts where
+  the airbag does not change the edge, are bitwise unchanged. The width-3 vs width-16 gap falls
+  from 2.9e-2–9.2e-2 to ≤ 9.3e-4 (flat), 1.65–1.76 to ≤ 1.4e-2 (local vol; 3.7e-2 on annualized KO-reset, identical with protection NONE), up to 0.63 to
+  ≤ 2.3e-3 (Heston ADI) and up to 1.07 to ≤ 4.7e-3 (SLV ADI). Against MC these contracts sat 24 to
+  127 SE low; now within 2.9 SE. No certified anchor moved.
+- **PDE knocked-in edge row, partial protection without an airbag** (PDE 1D flat and local vol,
+  Heston/SLV ADI; Snowball, reverse, Phoenix, KO-reset). See Fixed below for the rule and the moves
+  in price units.
+
+#### Statistics
+
+- KI is never triggered after a knock-out, on every engine, and a knock-out wins a same-instant tie
+  with a discrete KI. Outcomes partition the paths: KO rows, `maturity` (never KO, never KI) and
+  `ki_settlement` (KI, no KO), each computed directly; the maturity is no longer `1 − ΣKO − ki`.
+- `probability_residual` and `reconciliation_error` are computed by the type and always reported,
+  never absorbed. `from_statistics` absorbs the probability residual into MATURITY_NO_KO and
+  carries it as `EventDistribution.probability_residual`.
+- `EventStatistics.pv` is `price()`'s value on every engine; MC statistics are recorded on
+  `price()`'s own paths.
+- The KI stream lives on the KI table's own axis (payment = KI observation; legs add their offset),
+  so it is never dropped; AT_KI legs that used to raise now value.
+- `cash_to_pay` is computed directly on path-dependent rows (EXPIRY coupons, memory arrears,
+  REBASED) instead of discounted / DF.
+- EXPIRY coupon rows are path-dependent on every engine.
+- Cost of a statistics request against the pre-migration `calculate_event_stats` on the same
+  engine: a full request ≤ 2×; a request without the KI streams ≤ 1.10× (QUAD V1 ≤ 1.5×, its direct
+  maturity column is never pruned). Accepted exception: PDE 1D memory Phoenix under EXPIRY pay,
+  pruned requests up to 1.15× (measured 1.12–1.14×), because its coupon-cash columns cannot be
+  pruned. DCN had no statistics before; its full request is ≤ 2× its `price()`.
+- MC `calculate_event_stats` on an expired note returns `None` (was `ValueError`).
+- QUAD V1 `event_stats_mode="forward_density"` reports no KI path statistics and raises
+  `StatisticsRefused` for memory or EXPIRY Phoenix (it returned empty coupon cash).
+- KO-reset ABSOLUTE on MC: the never-knocked-in maturity is determined at the first schedule's end
+  and leaves the survival there; probabilities unchanged.
+- Settled notes leave the survival at their DETERMINATION time (D29). A knock-out leaves at its
+  observation row. A maturity-type termination (never-knocked-in maturity, knocked-in settlement,
+  each REBASED path's own settlement) is alive at its determination time and gone right after it,
+  even while its cash is still unpaid. `survival_at` steps there, interpolation between nodes never
+  revives a settled note, and past the last node a settled note stays gone. Cash legs move with it:
+  - accrual legs pay nothing past a settled note's end (aged DCN, quarterly ENTER leg running to
+    2.0: MC 6598.93 → 3453.33);
+  - a KO-reset ABSOLUTE COMPLETE_PERIOD leg now pays its period ending at the first schedule's
+    maturity on the notes that mature there;
+  - a COMPLETE_PERIOD leg whose last period ends on a settlement date after the determination pays
+    nothing on the matured mass (see Known issues).
+- A carried knock-in (R1): `EventDistribution.from_statistics(stats, knock_in_carried=True)` gives
+  an empty KI stream and `knock_in_carried=True`, so an AT_KI leg on an already-knocked-in note
+  values 0. The knock-in is a past event.
+
+#### Other
+
+- **Floating-rate projection convention** (IRS `FloatingLeg`, `FloatingRateBond`, `FRAEngine`, `CapFloorEngine`,
+  the `SwaptionEngine` zero-annuity fallback). A projected coupon is now the simple forward on the projection curve
+  over the window the index covers, in the leg's own day count: `L = (P(t_a)/P(t_b) − 1)/dcf` over the accrual period
+  for in-advance and overnight-compounded flows, over `[t_fix, t_fix + tenor]` for a term index reset in arrears (no
+  convexity adjustment). A running period uses the pro-rata spot rate `(1/P(t_e) − 1)/(dcf·t_e/(t_e − t_s))`; a
+  still-payable coupon whose accrual has fully elapsed with no stored fixing raises `MarketDataError` instead of being
+  valued at today's rate; the `t1 < 0 → 0` clamps in the FRA and cap/floor engines are gone. The previous code plugged
+  the continuously-compounded forward over `[t_fix, t_fix + tenor]` (overnight: the zero rate at the fixing date) into
+  `N·L·dcf`. **Values move:** on a term index quoted on the axis day count (ACT/365) by the compounding convexity
+  `≈ f²τ/2` (≈ 1 bp at 3 %/3M); on an ACT/360 index the day-count basis term `≈ −f·5/365` dominates (−3.8 bp at
+  5 %/3M: +3.1 bp convexity, −6.9 bp basis); on an overnight-compounded leg the move is first-order in the curve slope
+  (≈ 200 bp on a 10Y quarterly coupon with `z(t) = 2 % + 0.2 %·t`). Equity, FX, credit and bond-discount outputs and
+  all goldens have no floating projection and are bitwise unchanged; two rate tests that encoded the shortcut were
+  reconciled to the exact formulas.
+- Cash-leg times count from the trade's `initial_date` in every consumer, not only in multi-day runs. Point-in-time
+  trade valuation (`EquityPosition.get_trade_value` / `get_trade_value_breakdown` / `get_trade_greeks` /
+  `get_trade_risk`, hence trade-value portfolios, static stress, VaR and SIMM) rolls the legs from the initial date to
+  the valuation date with the booking's own rule (`quantark.cashleg.legs_seen_from`), so an aged trade has one day-0
+  value across the static tools, backtests, dynamic scenarios and replay. New `EquityPosition.cash_legs_clock`
+  (`LegClock.CONTRACT` default, `LegClock.VALUATION` for legs already rolled) and `on_valuation_clock(env)`.
+  **Rebooking needed:** an aged trade (valuation after `initial_date`) whose legs were booked with times counted from
+  the valuation date now reprices — rebook its leg times from the initial date, or set
+  `cash_legs_clock=LegClock.VALUATION` on it. Trades valued on their initial date, and products without
+  `initial_date`, are unchanged.
+- **The date / numeric clock rule** (every equity and FX option; DCN, TARF and TARN keep their own, already
+  compliant, rules). A product is on the DATE clock (every time a date: `exercise_date` / `maturity_date`, FX
+  `expiry_date`) or the NUMERIC clock (every time a float, in years from the day it is booked on), never a mix.
+  Both forms complete: the dates win and the floats are dropped at construction (`maturity` beside a date,
+  `maturity_date` supplying `exercise_date`, FX `delivery` beside `delivery_date`), so `maturity` + `exercise_date`
+  and `maturity` + `expiry_date` are no longer refused. Partial or mixed input is refused with a `ValidationError`
+  naming the field: a date field on a numeric contract (`initial_date`, `settlement_date`, `maturity_date`, dated
+  records, FX `delivery_date`), or a float a dated contract needs with no date for it (a record with only
+  `observation_time`, legacy float observation lists, FX float `observation_times`, FX `delivery` alone, float
+  accumulator `past_observations`). Durations and counts stay clock-neutral (`tenor`, settlement lags in any unit,
+  accrual factors, schedule generators, REBASED offsets). Detection is `quantark.asset.clock.clock_violations`;
+  enforcement `enforce_clock`, first in every validate. Complete-clock contracts are bitwise unchanged.
+  This replaces the numeric-note-from-`initial_date` valuation of 2026-10-24: `age_note_to_valuation_date` is gone,
+  `EquityPosition.on_valuation_clock` only rolls a dated trade's `CONTRACT`-clock cash legs (it never changes the
+  product), and the PnL explain snapshot, trade theta split and SIMM vega tenor read the note as booked.
+  **Migration:** a numeric note with an `initial_date` no longer constructs. Book it either dated (give
+  `exercise_date` and dated records; keep `initial_date`), or numeric as seen from the day you book it: a note
+  struck N days ago is the original contract aged by `product.time_shift(N / 365, valuation_date, env,
+  keep_landing=True)` (records already past dropped, the elapsed time banked in `accrued_offset`), the form the
+  lifecycle trackers' copies already have. On the numeric clock the tracker's origin is the run's `start_date`.
+- A REBASED KO-reset on the date clock places schedule 2 in calendar months: its offsets (booked as `k / 12` years)
+  mean `k` months, and each knock-in record date generates schedule 2 as `add_months(date, k)`
+  (`rebased_extended_schedule`); the latest end is the `exercise_date` (derived on a `maturity_date` booking; a
+  given one may not precede it). Monte Carlo, the lifecycle tracker and the knocked-in conversion read the
+  generated dates. **Reprices:** a dated REBASED contract used to read its offsets as continuous years from the
+  knock-in time (`t_ki + k / 12`); it now lands on calendar months. Offsets that are not whole months, and
+  schedule-2 settlement offsets (no date form), are refused on a dated contract. Numeric REBASED is unchanged.
+- A DISCRETE FX barrier / sharkfin is observed only on its fixings: a spot beyond the barrier on a day without a
+  fixing no longer knocks it (the engines' inception shortcut used to apply the continuous rule). Continuous
+  monitoring is unchanged.
+- Asian `observation_dates` (legacy schedule) is now read: it resolves like a record's date and wins over
+  `observation_times`. It was validated but ignored (a uniform schedule was generated instead).
+- Static equity stress follows `EquityPortfolio.trade_value` (default product mode): a product-mode portfolio is
+  valued with `get_market_value` / `get_greeks` again; `native_batch` runs on trade-value portfolios only. New
+  result metadata `value_basis`.
+- Trade theta now carries the time value of deterministic, accrual and fixed-payoff cash legs (they roll with
+  the product; a payment inside the bump is gone at t1, as for other engine-determined cash).
+- `EventDistribution.survival_at` at the valuation instant reads the post-observation survival of an event kept
+  at 0 (a theta-shifted or knocked-out-at-valuation contract) instead of 1; an `AutocallableCashLeg` keeps its
+  terminal branch after its last observation while the terminal settlement is ahead.
+- `ConvertibleBond.hazard_rate` now defaults to `None`, which derives the intensity from the credit
+  triangle: `ConvertibleBond.effective_hazard_rate = credit_spread / (1 − recovery_rate)` (new
+  `quantark.asset.credit.conventions.spread_to_hazard`). Jump-diffusion, the HW trinomial and their
+  CS01 read it, so a bond priced on GS/TF (which read `credit_spread`) and on the hazard engines
+  carries the same credit. An explicit `hazard_rate`, zero included, still wins, and those prices
+  are unchanged; a bond that set a spread but no hazard used to price riskless on the hazard
+  engines and now prices its spread. With no hazard and `recovery_rate = 1` the spread does not
+  determine the intensity, so the hazard engines raise. The convertible demos drop their
+  hand-picked 1% hazard: on the demo bond HW and jump-diffusion move from 138.74 to 136.64–136.65,
+  and the five engines now span 136.37–136.80 (they were 2.4 apart).
+- On default, the jump-diffusion and HW trinomial convertible engines (all three vol schemes) now
+  pay the holder `max(conversion_ratio × (1 − η) × S, recovery_rate × face)` while conversion is
+  open: the better of the recovery and conversion into the shares left after the stock drops by
+  `stock_jump_on_default` (η), as in Ayache, Forsyth & Vetzal (2003, eq. 4.9). They used to pay the
+  recovery alone, so a bond with η < 1 threw away conversion into surviving shares. Jump-diffusion's
+  conversion probability counts conversion on default (HW's stays conditional on survival). At
+  η = 1 (Hull, Andersen–Buffum: the stock goes to zero) or with conversion closed the payoff is the
+  recovery as before, and prices are byte-identical. The product default is η = 0.4, so every
+  bond built with default settings, a hazard rate and open conversion reprices upward. The HW
+  `recovery_component` stays the recovery floor (default probability × R × face); conversion on
+  default lands in `bond_component`. At η = 0.4 with hazard `credit_spread / (1 − R)` the demo bond rises 4.48 per 100 face (132.64 → 137.12; the gap to η = 1 shrinks from 8.1 to
+  3.6), and the AC7 cases rise 0.09–4.52. An American zero-coupon convertible (q = 0, where early
+  conversion is never optimal) matches its exact value to 0.005 in jump-diffusion and 0.01 in HW.
 
 ### Fixed
 
@@ -357,219 +527,6 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   (90% maximum loss, flat default grid) +0.00207, now equal to the unprotected note; its
   probabilities, times and coupon fields are unchanged.
 
-### Known issues
-
-- DCN prices and statistics discount the DCN's ACT/365F grid times on the environment curve, which
-  is wrong under `BUSINESS_DAYS` or `ACT_360` environments; the fix moves prices and is left to a
-  separate release.
-- REBASED KO-reset statistics are MC-only; local-vol MC `estimator="one_step_survival"` has no
-  statistics; `PricingSession` `EVENT_STATS` is refused for `DCNPDEEngine` and
-  `LocalVolDCNPDEEngine`.
-- Tracked study outputs computed before this release still show the old KI-ever and maturity
-  numbers; see section 11 of the migration note.
-- No KI after a certain KO on grid engines holds up to truncated-domain edge mass. When the KO
-  barrier lies below the grid (the AC9 test contract), the knocked-in far-edge row counts the
-  edge-reaching mass as knocked in. LV PDE: 1.07e-5 at the default width 4, 4.9e-9 at 6, 2.6e-13 at
-  8; ADI ≤ 5e-9. P(KI) = 1 − ΣP(KO) in every case. Accepted as a recorded deviation.
-- Local-vol MC default stepping (one log-Euler step per contractual interval) is biased on skewed
-  surfaces; references and the cross-engine tests use `max_sde_step_days=1`. Defaults unchanged.
-- PDE knocked-in edge row when the protection floor's kink lies just beyond the grid edge: neither
-  the closed-form row (floor binding on the edge cell) nor the payoff-read row (floor not binding,
-  0.11.0) sees a kink outside the domain, so the price keeps a domain-width dependence while the
-  kink is within reach of the edge. Seen on skewed local vol at maximum losses of about 50–78%
-  (2-year monthly Snowball, default grid vs width 16: up to −0.14 on either row; at 70% the
-  payoff-read row leaves −0.133, 3.7 SE below MC, down from −0.167). Flat vol and the Heston/SLV
-  ADI default grids are within 2e-3. Pre-existing; a wider domain removes it.
-- KO-reset ABSOLUTE contracts whose second schedule ends before the product `maturity`. PDE 1D,
-  QUAD V1 and QUAD V2 depend on the product maturity for a carried knock-in, which MC does not. On a
-  valid note (both schedules monthly to 6 months, KI 80, spot 90, carried knock-in) the grid engines
-  give 94.43 with maturity 1.0 and 95.06 with maturity 0.5; MC gives 95.07 either way. Tracker
-  copies end with their second schedule and agree across engines. Pre-existing; not investigated.
-- D29 counts a settled note as gone from its determination time, not its payment time. A
-  COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
-  matured mass under the default; opt in to `survival_until=SurvivalAnchor.PAYMENT` (D32) to accrue
-  to the payment date.
-- Theta's at-valuation schedule-2 knock-out of a KO-reset under EXPIRY pay is paid at the record's
-  own settlement, while the engines pay it at the product terminal. Pre-existing; unmeasured.
-- The realized `LegCashBook` never truncates accrual on a maturity outcome, under either anchor.
-  Pricing leaves the matured note at its determination (D29) or, under `SurvivalAnchor.PAYMENT`, at
-  its payment, so realized and priced accrual differ past the maturity determination.
-- A dated KO-reset with a business-day settlement lag and no `settlement_date`: MC raises (it
-  resolves the never-knocked-in payment from a time, and a business-day lag needs a date). The grid
-  engines shift the terminal's delay to the first schedule's maturity, while the tracker and the
-  intraday timeline apply the convention to the first schedule's dated maturity. Where the
-  business-day delays differ between the two maturities, booking and grid pricing disagree.
-  Pre-existing; unmeasured.
-
-Other changes in this release:
-
-### Added
-
-- `CarryExtrapolation.FLAT_CARRY_YIELD`: a third carry long-end rule that holds the zero carry yield `B(T)/T` at the
-  last node's value (flat `q` under a flat rate curve). `CarryImpliedDividendYield.parallel_shifted` shifts nodes
-  exactly under it; the legacy `ForwardCarryCurve` rejects it. Existing rules and defaults are unchanged.
-- `calculate_carry_curve_buckets` (`quantark.asset.equity.riskmeasures`, with `CarryCurveBucketReport` /
-  `CarryPillarBucket`): pillar-bucket risk on any `CarryCurve` — `∂PV/∂F_i` at fixed spot with optional hedge lots
-  per pillar, spot delta (nodes held), pinned-forward delta (forwards held), rho_q per node and parallel, and the
-  chain-rule / rho-sum identity residuals. Every price goes through `resolve_bump_engine`. Case study:
-  `example/case_studies/snowball_2y_carry_curve/` (2Y CSI 1000 snowball, flat q vs the IM + MO carry curve).
-
-- Curve construction (`quantark.param.curve`, re-exported from `quantark.param`): `ZeroCurve` and `CarryCurve` on one
-  shared term interpolator with five schemes (`CurveInterpolation.LINEAR_ZERO`, `LOG_LINEAR_DF`, `CUBIC_ZERO`,
-  `LOG_CUBIC_DF`, Hagan–West `MONOTONE_CONVEX`) and the existing `RateExtrapolation` / `CarryExtrapolation` long-end
-  rules; instrument quotes (`DepositQuote`, `SwapQuote`, `BondQuote`, `FuturesQuote`, `OptionPairQuote`) in numeric
-  (`tenor_years`) or dated (dates + `valuation_date`, calendar ACT/365F) mode, never mixed; an iterative sequential
-  bootstrap — `bootstrap_discount_curve` (deposits, par swaps, bonds), `bootstrap_projection_curve` (dual-curve, one
-  `RateIndex` off a given discount curve), `build_carry_curve` (index futures or call/put pairs, with a live
-  `to_dividend_yield(rate_curve)` view) — and `reprice_quotes` for the round-trip residuals. Dated swaps and bonds are
-  built as the repo's own `InterestRateSwap` / `FixedBond`, so bootstrapped curves reprice through
-  `IRSDiscountEngine` and `BondDiscountEngine` by construction; a QuantLib cross-check (skipped when QuantLib is
-  absent) agrees within 1e-10. `key_rate_bumped_zero_curve` uses `with_pillars` when the curve has it. Guide:
-  `docs/curve-construction.md`; demo: `example/param/curve_construction_demo.py`.
-- Pillar-curve protocol for the risk stack: `quantark.param.rrf.is_pillar_curve` (`pillars` + `with_pillars`) and
-  `is_flat_rate_curve`; `InterpolatedRateCurve.with_pillars`. The equity/FX/credit stress applicators, FX VaR
-  revaluation, SA-CVA key-rate IR delta, as-of roll-down and term-structure drift, PnL-explain bucketing and the
-  execution greeks fingerprints accept a `ZeroCurve` (or any pillar curve) where they used to require
-  `InterpolatedRateCurve`; a stressed or bumped curve keeps its interpolation, extrapolation and clock anchor.
-- `simple_forward_rate(curve, t_start, t_end, dcf=None)` (`quantark.param.rrf.projection`): the simple forward over a
-  window on a rate curve, with the running-period (`t_start < 0`) rule; the single projection call site for the rate
-  engines, the FRN and the bootstrap strips.
-- Trade-value portfolios: `EquityPortfolio(trade_value=True)` values every `EquityPosition` at its full trade
-  value (product × signed quantity + cash legs), with bump Greeks from `get_trade_risk` and PnL against the new
-  `EquityPosition.entry_trade_value`. VaR (historical, Monte Carlo incl. attribution, parametric), SIMM via the
-  portfolio adapter, static stress, dynamic scenarios and backtests follow the flag through one shared switch
-  (`quantark.portfolio.equity.valuation`). Default off: the product path is bitwise unchanged.
-- Multi-day cash-leg booking: `quantark.cashleg.booking.LegCashBook` rolls a position's legs with the product and
-  books their flows as paid cash and receivables by explicit per-leg rules on knock-out and maturity. The equity
-  backtest (`BacktestConfig.trade_value`), dynamic scenarios and the product-replay engine (`trade_value`,
-  per-trade `cash_legs`) use it; leg cash is part of `paid_cash` / `pending_receivable_pv`. Leg times count from
-  the contract's `initial_date` (else the run start); unruled leg variants raise `CapabilityError`.
-- `time_shift` on `DeterministicLeg`, `AccrualLeg` and `FixedPayoffLeg` (shared landing rule
-  `quantark.cashleg.base.roll_payment_time`); PnL explain's `cash_legs` line (`Factor.CASH_LEGS`).
-
-- `ConvertibleBondTFTreeEngine`: the Tsiveriotis-Fernandes model on a CRR binomial tree, a lattice
-  twin of the TF PDE. Each node carries the total value and its cash-only component (COCB), which
-  discounts at `r + credit_spread`. Time steps are equal in total implied variance, so a vol term
-  structure keeps the tree recombining; flat vol gives equal time steps. Select it with
-  `ConvertibleBondEngine(env, method=EngineType.TREE(ConvertibleBondMethod.TF))`;
-  `EngineType.PDE(TF)`, `ConvertibleBondMethod.TF` and `"tf"` still mean the TF PDE.
-  `ConvertibleBondResult.engine_type` says which engine produced a price. Against the TF PDE at
-  800×2000 on a widened domain the tree agrees to 0.05 per 100 face on seven cases (puts, soft
-  call, term-structure rates and vol).
-- `ConvertibleBond.final_coupon_on_conversion` (`FinalCouponOnConversion.KEEP` or `FORFEIT`): whether
-  a holder converting at maturity still receives the final coupon. `KEEP`, the default, is unchanged
-  (maturity value `max(parity, face) + coupon`; prices byte-identical on all five engines). `FORFEIT`
-  gives `max(parity, face + coupon)`, the QuantLib convention: GS, HW, jump-diffusion, the TF PDE and
-  the TF tree fold the final coupon into `ConvertibleBond.maturity_redemption`, and
-  `ConvertibleBond.coupon_amount` drops it from the in-step coupons (HW therefore survival-weights
-  the folded coupon over the last step, about `coupon × hazard × dt`). The setting also accepts
-  `"keep"` / `"forfeit"`, and rejects anything else. Against QuantLib 1.44's
-  `BinomialConvertibleEngine<CRR>` on the AC7 cases at 2000 steps this convention is the largest
-  piece of the GS–QuantLib gap (up to 0.79 per 100 face, on the demo bond); with `FORFEIT` the GS
-  tree lands within 0.02 of QuantLib at 500 steps.
-
-- Mid-life valuation of discrete FX barriers and sharkfins: `observation_dates` (the date-clock form of
-  `observation_times`) and `observed_fixings` (`{observation date or time: realised spot}`). A recorded breach
-  decides the contract (a knock-out keeps only a rebate not yet paid; a knock-in is the vanilla); otherwise only the
-  fixings ahead are simulated. A past fixing without a record is decided at the current spot with one
-  `MissingFixingWarning`; theta records the fixings it steps over (`record_passed_fixings`), bump Greeks freeze the
-  base fill (`with_missing_fixings_filled`).
-- Accumulator `past_observations` as `(date, spot)` on a dated contract (a list mixing dates and times is refused).
-- `quantark.util.calendar.add_months(date, n, calendar=None, convention=None)`: the calendar's "+nM" (day of month
-  kept, clamped at the month end, optional business-day adjustment).
-
-### Changed
-
-- **Floating-rate projection convention** (IRS `FloatingLeg`, `FloatingRateBond`, `FRAEngine`, `CapFloorEngine`,
-  the `SwaptionEngine` zero-annuity fallback). A projected coupon is now the simple forward on the projection curve
-  over the window the index covers, in the leg's own day count: `L = (P(t_a)/P(t_b) − 1)/dcf` over the accrual period
-  for in-advance and overnight-compounded flows, over `[t_fix, t_fix + tenor]` for a term index reset in arrears (no
-  convexity adjustment). A running period uses the pro-rata spot rate `(1/P(t_e) − 1)/(dcf·t_e/(t_e − t_s))`; a
-  still-payable coupon whose accrual has fully elapsed with no stored fixing raises `MarketDataError` instead of being
-  valued at today's rate; the `t1 < 0 → 0` clamps in the FRA and cap/floor engines are gone. The previous code plugged
-  the continuously-compounded forward over `[t_fix, t_fix + tenor]` (overnight: the zero rate at the fixing date) into
-  `N·L·dcf`. **Values move:** on a term index quoted on the axis day count (ACT/365) by the compounding convexity
-  `≈ f²τ/2` (≈ 1 bp at 3 %/3M); on an ACT/360 index the day-count basis term `≈ −f·5/365` dominates (−3.8 bp at
-  5 %/3M: +3.1 bp convexity, −6.9 bp basis); on an overnight-compounded leg the move is first-order in the curve slope
-  (≈ 200 bp on a 10Y quarterly coupon with `z(t) = 2 % + 0.2 %·t`). Equity, FX, credit and bond-discount outputs and
-  all goldens have no floating projection and are bitwise unchanged; two rate tests that encoded the shortcut were
-  reconciled to the exact formulas.
-- Cash-leg times count from the trade's `initial_date` in every consumer, not only in multi-day runs. Point-in-time
-  trade valuation (`EquityPosition.get_trade_value` / `get_trade_value_breakdown` / `get_trade_greeks` /
-  `get_trade_risk`, hence trade-value portfolios, static stress, VaR and SIMM) rolls the legs from the initial date to
-  the valuation date with the booking's own rule (`quantark.cashleg.legs_seen_from`), so an aged trade has one day-0
-  value across the static tools, backtests, dynamic scenarios and replay. New `EquityPosition.cash_legs_clock`
-  (`LegClock.CONTRACT` default, `LegClock.VALUATION` for legs already rolled) and `on_valuation_clock(env)`.
-  **Rebooking needed:** an aged trade (valuation after `initial_date`) whose legs were booked with times counted from
-  the valuation date now reprices — rebook its leg times from the initial date, or set
-  `cash_legs_clock=LegClock.VALUATION` on it. Trades valued on their initial date, and products without
-  `initial_date`, are unchanged.
-- **The date / numeric clock rule** (every equity and FX option; DCN, TARF and TARN keep their own, already
-  compliant, rules). A product is on the DATE clock (every time a date: `exercise_date` / `maturity_date`, FX
-  `expiry_date`) or the NUMERIC clock (every time a float, in years from the day it is booked on), never a mix.
-  Both forms complete: the dates win and the floats are dropped at construction (`maturity` beside a date,
-  `maturity_date` supplying `exercise_date`, FX `delivery` beside `delivery_date`), so `maturity` + `exercise_date`
-  and `maturity` + `expiry_date` are no longer refused. Partial or mixed input is refused with a `ValidationError`
-  naming the field: a date field on a numeric contract (`initial_date`, `settlement_date`, `maturity_date`, dated
-  records, FX `delivery_date`), or a float a dated contract needs with no date for it (a record with only
-  `observation_time`, legacy float observation lists, FX float `observation_times`, FX `delivery` alone, float
-  accumulator `past_observations`). Durations and counts stay clock-neutral (`tenor`, settlement lags in any unit,
-  accrual factors, schedule generators, REBASED offsets). Detection is `quantark.asset.clock.clock_violations`;
-  enforcement `enforce_clock`, first in every validate. Complete-clock contracts are bitwise unchanged.
-  This replaces the numeric-note-from-`initial_date` valuation of 2026-10-24: `age_note_to_valuation_date` is gone,
-  `EquityPosition.on_valuation_clock` only rolls a dated trade's `CONTRACT`-clock cash legs (it never changes the
-  product), and the PnL explain snapshot, trade theta split and SIMM vega tenor read the note as booked.
-  **Migration:** a numeric note with an `initial_date` no longer constructs. Book it either dated (give
-  `exercise_date` and dated records; keep `initial_date`), or numeric as seen from the day you book it: a note
-  struck N days ago is the original contract aged by `product.time_shift(N / 365, valuation_date, env,
-  keep_landing=True)` (records already past dropped, the elapsed time banked in `accrued_offset`), the form the
-  lifecycle trackers' copies already have. On the numeric clock the tracker's origin is the run's `start_date`.
-- A REBASED KO-reset on the date clock places schedule 2 in calendar months: its offsets (booked as `k / 12` years)
-  mean `k` months, and each knock-in record date generates schedule 2 as `add_months(date, k)`
-  (`rebased_extended_schedule`); the latest end is the `exercise_date` (derived on a `maturity_date` booking; a
-  given one may not precede it). Monte Carlo, the lifecycle tracker and the knocked-in conversion read the
-  generated dates. **Reprices:** a dated REBASED contract used to read its offsets as continuous years from the
-  knock-in time (`t_ki + k / 12`); it now lands on calendar months. Offsets that are not whole months, and
-  schedule-2 settlement offsets (no date form), are refused on a dated contract. Numeric REBASED is unchanged.
-- A DISCRETE FX barrier / sharkfin is observed only on its fixings: a spot beyond the barrier on a day without a
-  fixing no longer knocks it (the engines' inception shortcut used to apply the continuous rule). Continuous
-  monitoring is unchanged.
-- Asian `observation_dates` (legacy schedule) is now read: it resolves like a record's date and wins over
-  `observation_times`. It was validated but ignored (a uniform schedule was generated instead).
-- Static equity stress follows `EquityPortfolio.trade_value` (default product mode): a product-mode portfolio is
-  valued with `get_market_value` / `get_greeks` again; `native_batch` runs on trade-value portfolios only. New
-  result metadata `value_basis`.
-- Trade theta now carries the time value of deterministic, accrual and fixed-payoff cash legs (they roll with
-  the product; a payment inside the bump is gone at t1, as for other engine-determined cash).
-- `EventDistribution.survival_at` at the valuation instant reads the post-observation survival of an event kept
-  at 0 (a theta-shifted or knocked-out-at-valuation contract) instead of 1; an `AutocallableCashLeg` keeps its
-  terminal branch after its last observation while the terminal settlement is ahead.
-- `ConvertibleBond.hazard_rate` now defaults to `None`, which derives the intensity from the credit
-  triangle: `ConvertibleBond.effective_hazard_rate = credit_spread / (1 − recovery_rate)` (new
-  `quantark.asset.credit.conventions.spread_to_hazard`). Jump-diffusion, the HW trinomial and their
-  CS01 read it, so a bond priced on GS/TF (which read `credit_spread`) and on the hazard engines
-  carries the same credit. An explicit `hazard_rate`, zero included, still wins, and those prices
-  are unchanged; a bond that set a spread but no hazard used to price riskless on the hazard
-  engines and now prices its spread. With no hazard and `recovery_rate = 1` the spread does not
-  determine the intensity, so the hazard engines raise. The convertible demos drop their
-  hand-picked 1% hazard: on the demo bond HW and jump-diffusion move from 138.74 to 136.64–136.65,
-  and the five engines now span 136.37–136.80 (they were 2.4 apart).
-- On default, the jump-diffusion and HW trinomial convertible engines (all three vol schemes) now
-  pay the holder `max(conversion_ratio × (1 − η) × S, recovery_rate × face)` while conversion is
-  open: the better of the recovery and conversion into the shares left after the stock drops by
-  `stock_jump_on_default` (η), as in Ayache, Forsyth & Vetzal (2003, eq. 4.9). They used to pay the
-  recovery alone, so a bond with η < 1 threw away conversion into surviving shares. Jump-diffusion's
-  conversion probability counts conversion on default (HW's stays conditional on survival). At
-  η = 1 (Hull, Andersen–Buffum: the stock goes to zero) or with conversion closed the payoff is the
-  recovery as before, and prices are byte-identical. The product default is η = 0.4, so every
-  bond built with default settings, a hazard rate and open conversion reprices upward. The HW
-  `recovery_component` stays the recovery floor (default probability × R × face); conversion on
-  default lands in `bond_component`. At η = 0.4 with hazard `credit_spread / (1 − R)` the demo bond rises 4.48 per 100 face (132.64 → 137.12; the gap to η = 1 shrinks from 8.1 to
-  3.6), and the AC7 cases rise 0.09–4.52. An American zero-coupon convertible (q = 0, where early
-  conversion is never optimal) matches its exact value to 0.005 in jump-diffusion and 0.01 in HW.
-
-### Fixed
-
 - A realised receivable due on this close up to rounding (`Tolerance.ZERO`) is paid on it
   (`LifecycleCashflowLedger`): a numeric year-fraction lag added to an aged time could land an ulp past the close,
   stay pending, and then raise "payment must be strictly after valuation".
@@ -640,6 +597,48 @@ Other changes in this release:
 
 ### Known issues
 
+- DCN prices and statistics discount the DCN's ACT/365F grid times on the environment curve, which
+  is wrong under `BUSINESS_DAYS` or `ACT_360` environments; the fix moves prices and is left to a
+  separate release.
+- REBASED KO-reset statistics are MC-only; local-vol MC `estimator="one_step_survival"` has no
+  statistics; `PricingSession` `EVENT_STATS` is refused for `DCNPDEEngine` and
+  `LocalVolDCNPDEEngine`.
+- Tracked study outputs computed before this release still show the old KI-ever and maturity
+  numbers; see section 11 of the migration note.
+- No KI after a certain KO on grid engines holds up to truncated-domain edge mass. When the KO
+  barrier lies below the grid (the AC9 test contract), the knocked-in far-edge row counts the
+  edge-reaching mass as knocked in. LV PDE: 1.07e-5 at the default width 4, 4.9e-9 at 6, 2.6e-13 at
+  8; ADI ≤ 5e-9. P(KI) = 1 − ΣP(KO) in every case. Accepted as a recorded deviation.
+- Local-vol MC default stepping (one log-Euler step per contractual interval) is biased on skewed
+  surfaces; references and the cross-engine tests use `max_sde_step_days=1`. Defaults unchanged.
+- PDE knocked-in edge row when the protection floor's kink lies just beyond the grid edge: neither
+  the closed-form row (floor binding on the edge cell) nor the payoff-read row (floor not binding,
+  0.11.0) sees a kink outside the domain, so the price keeps a domain-width dependence while the
+  kink is within reach of the edge. Seen on skewed local vol at maximum losses of about 50–78%
+  (2-year monthly Snowball, default grid vs width 16: up to −0.14 on either row; at 70% the
+  payoff-read row leaves −0.133, 3.7 SE below MC, down from −0.167). Flat vol and the Heston/SLV
+  ADI default grids are within 2e-3. Pre-existing; a wider domain removes it.
+- KO-reset ABSOLUTE contracts whose second schedule ends before the product `maturity`. PDE 1D,
+  QUAD V1 and QUAD V2 depend on the product maturity for a carried knock-in, which MC does not. On a
+  valid note (both schedules monthly to 6 months, KI 80, spot 90, carried knock-in) the grid engines
+  give 94.43 with maturity 1.0 and 95.06 with maturity 0.5; MC gives 95.07 either way. Tracker
+  copies end with their second schedule and agree across engines. Pre-existing; not investigated.
+- D29 counts a settled note as gone from its determination time, not its payment time. A
+  COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
+  matured mass under the default; opt in to `survival_until=SurvivalAnchor.PAYMENT` (D32) to accrue
+  to the payment date.
+- Theta's at-valuation schedule-2 knock-out of a KO-reset under EXPIRY pay is paid at the record's
+  own settlement, while the engines pay it at the product terminal. Pre-existing; unmeasured.
+- The realized `LegCashBook` never truncates accrual on a maturity outcome, under either anchor.
+  Pricing leaves the matured note at its determination (D29) or, under `SurvivalAnchor.PAYMENT`, at
+  its payment, so realized and priced accrual differ past the maturity determination.
+- A dated KO-reset with a business-day settlement lag and no `settlement_date`: MC raises (it
+  resolves the never-knocked-in payment from a time, and a business-day lag needs a date). The grid
+  engines shift the terminal's delay to the first schedule's maturity, while the tracker and the
+  intraday timeline apply the convention to the first schedule's dated maturity. Where the
+  business-day delays differ between the two maturities, booking and grid pricing disagree.
+  Pre-existing; unmeasured.
+
 - TF prices of hard-callable bonds are grid-sensitive in both TF engines (about ±0.45 per 100 face
   on the demo callable bond as N or the PDE grid changes; conversion probability swings between
   about 0.63 and 0.85, and delta with it). Refinement does not cure it: the tree is still bimodal at
@@ -647,6 +646,22 @@ Other changes in this release:
   parity = call price, where the TF split into cash and shares is undefined; on a lattice the node
   at the tie is called for cash (the call price joins the risky-discounted cash component) or
   converted, depending on the grid. It needs `credit_spread > 0`; the GS tree is not affected.
+- QUAD V1 `price()` never applies a knock-in to the EXPIRY coupon column under cell-average
+  projection when a discrete KI falls on a KO date and `disable_ko_after_ki` is set. A known price
+  defect, pre-existing and not measured; it is left for a price-moving release.
+- Dated intraday Snowball: MC gives 0.919 / 0.923 against QUAD V2 0.905 on the same request, beyond
+  MC noise. Pre-existing; not investigated.
+- KO-reset grid engines without a `settlement_date` seed the never-knocked-in maturity with the
+  product terminal's delay factor DF(T + δ) / DF(T) at the first schedule's maturity, not
+  DF(pre + δ) / DF(pre). Exact on a flat curve; on a term curve with a settlement delay δ > 0 it is
+  off by the forward-rate difference over δ. Pre-existing, kept for bitwise prices.
+- QUAD V2 memory Phoenix refuses a lifecycle-tracker missed-coupon count beside a booked
+  `initial_coupon_arrears` amount that differs from it, even when the amount covers periods before the
+  tracked schedule (two separate debts). No library path builds that combination.
+- DCN Heston ADI `price()` is about 5% slower than in 0.5.5 (3.40 s vs 3.23 s on the reference
+  note); prices are bitwise unchanged.
+- DCN Monte Carlo cash-leg bank records can differ by 1–2 ULP between runs under parallel test
+  workers; serial runs are stable.
 
 ## [0.5.5] - 2026-10-16
 

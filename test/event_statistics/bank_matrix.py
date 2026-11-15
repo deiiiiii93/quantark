@@ -17,7 +17,7 @@ recomputes the reference live.
 Run from the worktree root with the banking interpreter (main ``.venv``, py3.11), long runs detached::
 
     env PYTHONPATH=<wt>:<wt>/test nohup caffeinate -i -m -s \\
-        /Users/fuxinyao/quant-ark/.venv/bin/python test/event_statistics/bank_matrix.py [--workers 6] [entry ...]
+        <venv>/bin/python test/event_statistics/bank_matrix.py [--workers 6] [entry ...]
 
 ``entry`` (``name|group``) re-banks only those entries, keeping the rest. Never edit ``matrix_allowances.json`` by
 hand; re-bank only for a deliberate engine change, with a field-level diff (D22).

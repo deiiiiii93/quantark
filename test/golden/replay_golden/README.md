@@ -59,13 +59,15 @@ sits inside that same bucket:
 The third row is the clearest tell: MC's 10,000 paths never sampled that
 1-in-250,000-ish knockout and reported a flat `0.0`; the PDE resolves it.
 
+*Historical (pre-0.11.0): the rest of this entry describes the removed legacy KI fields, and its KI
+numbers (MC 0.0686, PDE 0.065123) are the values banked at that date. 0.11.0 replaced those fields with
+`EventStatistics` (P(KI before any KO)) and re-banked these goldens; the current numbers are in the CSV files.*
+
 **KI rows differ in date attribution and count — this is the documented
 `ki_probability` definition split between engine families, not a new bug.**
 The MC engine emits two dated KI rows per scalar_bsm/localvol case (`0.004`
 at 2024-01-03 and `0.0646` at 2024-01-05, summing to `0.0686`); the PDE
 emits one row (`0.065123` at 2024-01-08).
-
-*Historical (pre-0.11.0): the paragraphs below describe the removed legacy KI fields; 0.11.0 replaced them with `EventStatistics`.*
 
 `ki_probability` is documented in `event_stats.py` as a **legacy** field
 whose definition differs by engine, kept only for backward compatibility:
