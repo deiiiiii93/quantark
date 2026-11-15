@@ -167,7 +167,8 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   stream's payment time (path-dependent or absent) raises `ValidationError`. `LegCashBook` truncates a
   knock-out at its settlement time for such a leg. The default `SurvivalAnchor.DETERMINATION` is D29
   unchanged: every price and every cash-leg bank record is bitwise identical. `SurvivalAnchor` is
-  exported from `quantark.cashleg`.
+  exported from `quantark.cashleg`. Under EXPIRY coupon pay a knock-out is paid at maturity, so a
+  PAYMENT leg (`TRUNCATE_AT_KO` included) accrues to maturity on knock-out paths.
 - `knock_in_was_carried(product, lifecycle_state=None)` (`quantark.cashleg.event_distribution`): the
   carried-KI flag from the product's lifecycle marker or the state's `knocked_in`, feeding
   `from_statistics(..., knock_in_carried=...)`.
@@ -175,7 +176,9 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 - `KnockOutResetSnowballOption(first_schedule_settlement_time=...)` (numeric clock only): the explicit
   payment time of a note that ends with its first schedule (never knocked in; under EXPIRY also a
   first-schedule knock-out), the numeric counterpart of an explicit `settlement_date` (D33, D34). It
-  ages with `time_shift` and enters `cache_key()` only when set. `ContractTimeline.first_schedule_payment`
+  ages with `time_shift`, and enters `cache_key()` and equality only when set. `validate()` refuses
+  it before the first schedule's maturity, and refuses it on a note whose first schedule runs to the
+  product maturity unless it equals the terminal payment time (one maturity, one payment). `ContractTimeline.first_schedule_payment`
   is the intraday instant it is resolved from.
 
 ### Fixed
@@ -386,6 +389,17 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
   matured mass under the default; opt in to `survival_until=SurvivalAnchor.PAYMENT` (D32) to accrue
   to the payment date.
+- Theta's at-valuation schedule-2 knock-out of a KO-reset under EXPIRY pay is paid at the record's
+  own settlement, while the engines pay it at the product terminal. Pre-existing; unmeasured.
+- The realized `LegCashBook` never truncates accrual on a maturity outcome, under either anchor.
+  Pricing leaves the matured note at its determination (D29) or, under `SurvivalAnchor.PAYMENT`, at
+  its payment, so realized and priced accrual differ past the maturity determination.
+- A dated KO-reset with a business-day settlement lag and no `settlement_date`: MC raises (it
+  resolves the never-knocked-in payment from a time, and a business-day lag needs a date). The grid
+  engines shift the terminal's delay to the first schedule's maturity, while the tracker and the
+  intraday timeline apply the convention to the first schedule's dated maturity. Where the
+  business-day delays differ between the two maturities, booking and grid pricing disagree.
+  Pre-existing; unmeasured.
 
 Other changes in this release:
 
