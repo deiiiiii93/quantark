@@ -158,6 +158,16 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
 - `EventDistribution.survival_after(t)`: survival just after `t`, less the maturity-type terminations
   determined at `t` (a note settled at `t` does not enter a period starting at `t`); ENTER-basis
   accrual legs read it.
+- `AccrualLeg(survival_until=SurvivalAnchor.PAYMENT)` (D32, opt-in): a terminated note keeps accruing
+  until its cash is actually paid. Every termination -- knock-out, never-knocked-in maturity,
+  knocked-in settlement, each REBASED path's own settlement -- is alive until its own payment time
+  and gone after it. `EventDistribution.survival_at(t, anchor=...)` / `survival_after(t, anchor=...)`
+  read it from the per-stream probabilities and payment times, so it works on every engine and on the
+  folded route; it is a step and never revives a paid note. A distribution without a termination
+  stream's payment time (path-dependent or absent) raises `ValidationError`. `LegCashBook` truncates a
+  knock-out at its settlement time for such a leg. The default `SurvivalAnchor.DETERMINATION` is D29
+  unchanged: every price and every cash-leg bank record is bitwise identical. `SurvivalAnchor` is
+  exported from `quantark.cashleg`.
 - `knock_in_was_carried(product, lifecycle_state=None)` (`quantark.cashleg.event_distribution`): the
   carried-KI flag from the product's lifecycle marker or the state's `knocked_in`, feeding
   `from_statistics(..., knock_in_carried=...)`.
@@ -374,7 +384,8 @@ PDE 1D flat and local vol, Heston/SLV ADI, DCN PDE). API:
   copies end with their second schedule and agree across engines. Pre-existing; not investigated.
 - D29 counts a settled note as gone from its determination time, not its payment time. A
   COMPLETE_PERIOD funding leg whose last period ends on a later settlement date pays nothing on the
-  matured mass.
+  matured mass under the default; opt in to `survival_until=SurvivalAnchor.PAYMENT` (D32) to accrue
+  to the payment date.
 
 Other changes in this release:
 

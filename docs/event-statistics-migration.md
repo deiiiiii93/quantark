@@ -128,6 +128,7 @@ dates, `cash_to_pay`), `knock_in.expected_time`, `knock_in.expected_loss`, `expe
 | positional construction | keyword-only | |
 | — | `probability_residual`, `rebased`, `terminated`, `determination_time(event)`, `ended()`, `ensure_live()` | New. |
 | — | `survival_after(t)` | New. Survival just after `t`: `survival_at(t)` less the maturity-type terminations determined at `t`. |
+| — | `survival_at(t, anchor=)`, `survival_after(t, anchor=)`, `SurvivalAnchor` | New (D32). `anchor=SurvivalAnchor.PAYMENT` counts every termination as alive until its payment time; default `DETERMINATION` is D29. Raises `ValidationError` without termination payment times. |
 | — | `knock_in_carried` (field and `from_statistics(..., knock_in_carried=)`), `knock_in_was_carried(product, lifecycle_state)` | New. A carried knock-in is a past event: empty KI stream. |
 
 ## 8. Replay schema (product replay frames)
@@ -287,6 +288,18 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     (−113.29 on a principal note, now +0.0093). INSTANT pay and second-schedule knock-outs are
     unchanged. Monte Carlo's knock-out decided at zero time to maturity reads the same rule; there the
     first schedule ends at the product terminal, so its price is unchanged.
+28. **Opt-in accrual to the payment date (D32).** `AccrualLeg` gains `survival_until:
+    SurvivalAnchor`. The default `DETERMINATION` keeps D29 (item 18) bit for bit; nothing changes for
+    an existing leg. `PAYMENT` counts every termination -- knock-out, never-knocked-in maturity,
+    knocked-in settlement, each REBASED path's own settlement -- as alive until its own payment time
+    (`observations.payment_times`, the maturity / `ki_settlement` `payment_time`, the REBASED
+    `termination.payment_times`) and gone after it: a COMPLETE_PERIOD period ending on a settlement
+    date pays on the matured mass, a period ending on a T+k knock-out's payment pays on it, and under
+    EXPIRY coupon pay a knock-out accrues until the maturity payment. Survival is then a step
+    (`1 − mass paid strictly before t`), not interpolated between observations. The leg also reads
+    the maturity streams (`required_event_types`), folds as before, and `LegCashBook` truncates a
+    knock-out at its settlement time. Missing termination payment times raise `ValidationError`;
+    `PAYMENT` on a `PAY_FULL_SCHEDULE` leg is refused.
 
 ## 10. Known limitations in 0.11.0
 
@@ -321,7 +334,8 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
   months, KI 80, spot 90) the grid engines give 94.43 with maturity 1.0 and 95.06 with maturity 0.5;
   MC gives 95.07 either way. Tracker copies end with their second schedule and agree across engines.
 - D29's determination-time rule: a COMPLETE_PERIOD funding leg ending on a settlement date after the
-  determination pays nothing on the matured mass.
+  determination pays nothing on the matured mass. Opt in to `AccrualLeg(survival_until=SurvivalAnchor.PAYMENT)` (D32) where the
+  trade accrues to the payment date.
 
 ## 11. Tracked study outputs still on the old definitions
 
