@@ -21,7 +21,8 @@ def test_mc_fallback_does_not_swallow_a_2d_refusal():
     config = fixtures.make_scalar_bsm_config()
     config.engine_config.event_stats_fallback = "mc"
     engine = AutocallableBacktestEngine(config)
-    # a default 2D solver: statistics refused unless statistics='flat_vol_surrogate'
-    engine._inner._replays[0].event_stats_engine = HestonSnowballPDESolver(HP, n_x=48, n_v=18, n_t=16)
+    # a 2D solver that refuses statistics (the default became 'native' in 79938a1c, so ask for the refusal)
+    engine._inner._replays[0].event_stats_engine = HestonSnowballPDESolver(
+        HP, n_x=48, n_v=18, n_t=16, statistics="refuse")
     with pytest.raises(StatisticsRefused, match="flat_vol_surrogate"):
         engine.run()

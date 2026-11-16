@@ -200,8 +200,9 @@ def test_2d_snowball_dated_twin_event_stats(route):
 
 
 @pytest.mark.parametrize("route", list(AUTOCALL_ROUTES))
-def test_2d_memory_phoenix_stays_refused_in_both_forms(route):
-    """Memory coupons on the 2D Phoenix PDE: the separate, pre-existing refusal, identical in both forms."""
+def test_2d_memory_phoenix_prices_its_numeric_twin(route):
+    """Memory coupons on the 2D Phoenix PDE (native since 79938a1c; refused before): both forms, one value."""
+    pv = {}
     for form in ("dated", "numeric"):
         p = create_standard_phoenix(100.0, 100.0, 1.0, ko_barrier=103.0, ki_barrier=70.0, coupon_barrier=80.0,
                                     coupon_rate=0.01, num_observations=12, memory_coupon=True, is_annualized=False)
@@ -210,8 +211,8 @@ def test_2d_memory_phoenix_stays_refused_in_both_forms(route):
                                    ko_observation_schedule=ObservationSchedule(records=_records(form, 103.0)))
         p.validate()
         p = _aged(p, form, 45)
-        with pytest.raises(ValidationError, match="non-memory Phoenix coupons only"):
-            _quiet(lambda: AUTOCALL_ROUTES[route]("phoenix").price(p, env(100.0, _on(45))))
+        pv[form] = float(_quiet(lambda: AUTOCALL_ROUTES[route]("phoenix").price(p, env(100.0, _on(45)))))
+    _assert_twin(pv["dated"], pv["numeric"], "pv")
 
 
 # ======================================================================================================================

@@ -7,6 +7,7 @@ import pytest
 
 from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.param.engine_params import EngineParams
 from quantark.util.exceptions import ValidationError
 
 
@@ -112,8 +113,10 @@ def test_ki_monitoring_mode_removed_from_pde_only():
 
 
 def test_pdeparams_field_list_is_final():
-    own = [f.name for f in dataclasses.fields(PDEParams)
-           if f.name not in ("bump_size", "bump_config", "bus_days_in_year")]
+    # Fields inherited from EngineParams belong to every engine's params, so the
+    # PDE-own surface is what PDEParams adds on top of its base.
+    inherited = {f.name for f in dataclasses.fields(EngineParams)}
+    own = [f.name for f in dataclasses.fields(PDEParams) if f.name not in inherited]
     assert own == ["accuracy", "grid", "stepper", "operator", "readout", "event_projection",
                    "cache_enabled"]
 

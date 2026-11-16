@@ -414,6 +414,11 @@ ENGINE_INVENTORY = (
             adoption_state="supported", prepared_state="prepared_capable",
             prepared_rationale=_PREPARED_PDE_2D,
             validation_profile=_PROFILE_BITWISE),
+    # KO-reset vol-model solvers (exported by the KI-statistics unification);
+    # not yet adopted by the session layer, so no prepared/bitwise claim.
+    _eq_pde("LocalVolKOResetSnowballPDESolver", "lv", "ko_reset_snowball"),
+    _eq_pde("HestonKOResetSnowballPDESolver", "heston", "ko_reset_snowball"),
+    _eq_pde("HestonSLVKOResetSnowballPDESolver", "slv", "ko_reset_snowball"),
     _eq_pde_prepared("DCNPDEEngine", "bsm", "dcn"),
     _eq_pde_prepared("LocalVolDCNPDEEngine", "lv", "dcn"),
     _eq_pde("HestonDCNPDESolver", "heston", "dcn",

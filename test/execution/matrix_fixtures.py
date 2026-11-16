@@ -712,6 +712,35 @@ def _build_equity_pde():
 
     out["KOResetSnowballPDESolver"] = ko_reset
 
+    def _ko_reset_product():
+        from quantark.asset.equity.product.option import create_ko_reset_snowball
+        from quantark.util.enum import PostKOScheduleMode
+
+        return create_ko_reset_snowball(
+            initial_price=100.0, strike=100.0, maturity_pre=1.0,
+            maturity_post=2.0, post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+            ki_continuous=False,
+        )
+
+    def ko_reset_vol(name):
+        def build():
+            import quantark.asset.equity.engine.pde as pde_mod
+
+            cls = getattr(pde_mod, name)
+            if name == "LocalVolKOResetSnowballPDESolver":
+                engine = cls(_pdep())
+            elif name == "HestonKOResetSnowballPDESolver":
+                engine = cls(_hp(), n_x=64, n_v=18, n_t=16)  # 48 is under the 2y grid guard
+            else:
+                engine = cls(_hp(), _unit_leverage(), n_x=64, n_v=18, n_t=16)
+            return engine, _ko_reset_product(), _eq_grid_env(), "product_env"
+
+        return build
+
+    for name in ("LocalVolKOResetSnowballPDESolver", "HestonKOResetSnowballPDESolver",
+                 "HestonSLVKOResetSnowballPDESolver"):
+        out[name] = ko_reset_vol(name)
+
     def _heston_pde(name):
         def build():
             from quantark.asset.equity.engine.pde import (

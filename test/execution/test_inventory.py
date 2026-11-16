@@ -40,7 +40,7 @@ def test_inventory_counts_match_spec_snapshot():
     for r in ENGINE_INVENTORY:
         by_family.setdefault((r.asset_family, r.engine_type, r.role), []).append(r)
     assert len(by_family[("equity", "mc", "engine")]) == 33
-    assert len(by_family[("equity", "pde", "engine")]) == 24
+    assert len(by_family[("equity", "pde", "engine")]) == 27
     assert len(by_family[("equity", "pde", "abstract")]) == 1  # BasePDESolver
     assert len(by_family[("equity", "pde", "facade")]) == 1  # PDEEngine
     assert len(by_family[("fx", "mc", "engine")]) == 8

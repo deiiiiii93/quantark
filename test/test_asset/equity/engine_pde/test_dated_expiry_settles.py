@@ -459,10 +459,9 @@ def price(family: Family, name: str, engine_factory, form: str, spot: float,
 
 
 #: Routes that price NEITHER form at maturity 0.0, kept refusing on both: (family, engine) -> why. The vol-model
-#: European and barrier routes left this table in W9 (user ruling 2026-10-10: they settle at T = 0).
-REFUSING: Dict[Tuple[str, str], str] = {
-    ("phoenix", "heston_pde"): "HestonPhoenixPDESolver refuses memory coupons at any maturity (pre-existing)",
-}
+#: European and barrier routes left this table in W9 (user ruling 2026-10-10: they settle at T = 0). The Heston
+#: Phoenix PDE left it when 79938a1c gave the 2D route native coupon memory: it settles like every other route.
+REFUSING: Dict[Tuple[str, str], str] = {}
 
 #: The dated KO-reset with schedule-1 records in the past, refused on QUAD V2 at any date until W11 (a knock-in record
 #: resolved forward from the valuation date), settles like its numeric twin: it is in SETTLING. Mid-life twins on
