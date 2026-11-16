@@ -225,7 +225,9 @@ def test_key_rate_bump_returns_configured_zero_curve(scheme):
     assert bumped.interpolation is scheme and bumped.extrapolation is RateExtrapolation.FLAT_ZERO_RATE
     assert bumped.valuation_date == vd
     expected = [(t, z + 1e-4 if t == 2.0 else z) for t, z in PILLARS]
-    assert bumped.pillars == pytest.approx(expected)
+    # flattened: pytest >= 9.2 rejects nested structures inside approx
+    assert [v for pillar in bumped.pillars for v in pillar] == pytest.approx(
+        [v for pillar in expected for v in pillar])
     assert bumped.get_rate(2.0) == pytest.approx(0.0345 + 1e-4, abs=1e-14)
     assert bumped.get_rate(0.25) == pytest.approx(0.030, abs=1e-14)  # other pillars untouched
     with pytest.raises(ValidationError):

@@ -357,7 +357,9 @@ def test_build_curve_tails_and_pillar_inputs():
     assert isinstance(conv, ConvergingCarryCurve) and conv.half_life == 0.5 and conv.b_inf == -0.05
     expect = [(q.tenor, math.log(q.close / dc.spot)) for q in dc.im] + [
         (dc.mo.tenor, math.log(dc.mo.forward / dc.spot))]
-    assert hf.nodes == pytest.approx(expect, rel=1e-14)
+    # flattened: pytest >= 9.2 rejects nested structures inside approx
+    assert [v for node in hf.nodes for v in node] == pytest.approx(
+        [v for node in expect for v in node], rel=1e-14)
     assert build_curve(dc, "hold_forward", None, mo_forward=6500.0).nodes[-1][1] == pytest.approx(
         math.log(6500.0 / dc.spot), rel=1e-14)
     with pytest.raises(ValidationError):

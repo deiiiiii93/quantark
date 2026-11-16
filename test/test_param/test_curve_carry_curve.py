@@ -217,7 +217,9 @@ def test_view_parallel_shift_flat_forward_carry_is_node_shift(scheme):
     shifted = view.parallel_shifted(s)
     assert isinstance(shifted, CarryImpliedDividendYield)
     assert shifted.carry_curve.valuation_date == vd and shifted.carry_curve.interpolation is scheme
-    assert shifted.carry_curve.nodes == pytest.approx([(t, b - s * t) for t, b in NODES])
+    # flattened: pytest >= 9.2 rejects nested structures inside approx
+    assert [v for node in shifted.carry_curve.nodes for v in node] == pytest.approx(
+        [v for t, b in NODES for v in (t, b - s * t)])
     for T in GRID[1:]:
         assert shifted.get_yield(float(T)) == pytest.approx(view.get_yield(float(T)) + s, abs=1e-14)
 
@@ -246,7 +248,8 @@ def test_with_nodes_and_shifted_yield_keep_configuration():
     assert new.extrapolation is CarryExtrapolation.ZERO_FORWARD_CARRY
     assert new.last_observable_tenor == 2.0 and new.valuation_date == vd
     sh = cc.shifted_yield(0.01)
-    assert sh.nodes == pytest.approx([(t, b - 0.01 * t) for t, b in NODES])
+    assert [v for node in sh.nodes for v in node] == pytest.approx(
+        [v for t, b in NODES for v in (t, b - 0.01 * t)])
     assert sh.interpolation is cc.interpolation and sh.valuation_date == vd
     assert cc.nodes == NODES
 

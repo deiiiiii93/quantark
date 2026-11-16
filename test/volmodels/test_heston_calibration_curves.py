@@ -79,12 +79,27 @@ def test_calibration_params_unchanged_after_vectorization():
     assert res.cost < 1e-8                                    # fit quality not degraded
 
 
-def test_calibration_method_dispatch_gatheral_matches_legacy():
-    # method="gatheral" must dispatch to the per-option (legacy) objective, reproducing the
-    # pre-WS-B1 optimum exactly (it IS that path) — proving method is honored, not ignored.
+def test_calibration_method_dispatch_gatheral_matches_legacy(monkeypatch):
+    # method="gatheral" must dispatch to the per-option (legacy) objective — proving method is
+    # honored, not ignored. The spy proves the dispatch; the optimum is compared to the pre-WS-B1
+    # pins at the optimizer's own resolution (see the test above: xtol/ftol=1e-6, kappa flat). A
+    # 1e-9 pin on the trajectory failed intermittently on x86 CI (5.7e-6, run 43695238886).
+    import quantark.volmodels.heston.calibration as calibration
     from quantark.volmodels.heston import (
         HestonParams, MarketOption, calibrate_heston, heston_call_price,
     )
+    methods = []
+    per_option = calibration.heston_call_price
+
+    def spy(*args, **kwargs):
+        methods.append(kwargs.get("method"))
+        return per_option(*args, **kwargs)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("method='gatheral' reached the vectorized Lewis sweep")
+
+    monkeypatch.setattr(calibration, "heston_call_price", spy)
+    monkeypatch.setattr(calibration, "heston_call_prices_vectorized", refuse)
     s0, r, q = 100.0, 0.02, 0.0
     true = HestonParams(v0=0.05, kappa=1.5, theta=0.05, sigma=0.3, rho=-0.5)
     strikes = [80.0, 90.0, 100.0, 110.0, 120.0]
@@ -97,7 +112,11 @@ def test_calibration_method_dispatch_gatheral_matches_legacy():
     PRE = [0.05000000000010962, 1.5000000000519667, 0.049999999999948704,
            0.3000000000075705, -0.4999999999933314]
     got = [res.params.v0, res.params.kappa, res.params.theta, res.params.sigma, res.params.rho]
-    assert np.max(np.abs(np.array(got) - np.array(PRE))) < 1e-9
+    assert methods and set(methods) == {"gatheral"}          # every objective price was per-option
+    well_identified = [0, 2, 3, 4]  # v0, theta, sigma, rho
+    assert max(abs(got[i] - PRE[i]) for i in well_identified) < 1e-6
+    assert abs(got[1] - PRE[1]) < 1e-4                       # kappa (flat direction)
+    assert res.cost < 1e-8
 
 
 def test_calibration_method_weber_dispatches_and_succeeds():

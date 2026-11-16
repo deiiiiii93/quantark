@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import resource
 import sys
 from pathlib import Path
 
@@ -88,13 +87,39 @@ def test_ac5_full_risk_within_budget_of_the_reference(case, months, maturity):
         assert abs(out[key] - ref[key]) <= budget(key, ref[key]), (key, out[key], ref[key])
 
 
+_AC14_CHILD = """
+import json, resource, sys
+import numpy as np
+from example.case_studies.localvol_transition_quad.contract import snowball_contract
+from example.case_studies.localvol_transition_quad.engine import OUTPUTS, LocalVolQuad
+from example.case_studies.localvol_transition_quad.grid import GridConfig
+from example.case_studies.localvol_transition_quad.kernels import CTMCKernel
+from example.case_studies.localvol_transition_quad.market import load_fixture
+m = load_fixture()
+c = snowball_contract(m.spot, 1.0, 12)
+engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=400, half_width_std=8.0))
+a, b = engine.full_risk(c, m)["values"], engine.full_risk(c, m)["values"]
+peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+print(json.dumps({
+    "identical": all(np.float64(a[k]).tobytes() == np.float64(b[k]).tobytes() for k in OUTPUTS),
+    "peak_bytes": peak if sys.platform == "darwin" else peak * 1024,
+}))
+"""
+
+
 @pytest.mark.slow
 def test_ac14_full_risk_byte_identical_and_memory_bounded():
-    m = load_fixture()
-    c = snowball_contract(m.spot, 1.0, 12)
-    engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=400, half_width_std=8.0))
-    a, b = engine.full_risk(c, m)["values"], engine.full_risk(c, m)["values"]
-    assert all(np.float64(a[k]).tobytes() == np.float64(b[k]).tobytes() for k in OUTPUTS)
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    peak_bytes = peak if sys.platform == "darwin" else peak * 1024
-    assert peak_bytes < 8 * 1024 ** 3
+    # A fresh interpreter: ru_maxrss is a process-lifetime high-water mark, so measured inside an
+    # xdist worker it reported whatever the worker's earlier tests peaked at (8.6 GB on x86 CI,
+    # run 43695238886), not this computation.
+    import os
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+    proc = subprocess.run([sys.executable, "-c", _AC14_CHILD], cwd=root, env=env,
+                          capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    report = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert report["identical"]
+    assert report["peak_bytes"] < 8 * 1024 ** 3
