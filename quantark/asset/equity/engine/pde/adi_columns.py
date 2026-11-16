@@ -18,28 +18,26 @@ def _bound_spot_caches(core):
                 cache.pop(next(iter(cache)))
 
 
-def _linear_variance_transport(core, U, dt):
-    """Positive characteristic interpolation independent of the claim payoff.
+def _characteristic_variance_transport(core, U, dt):
+    """Characteristic interpolation with fixed weights, independent of the claim payoff.
 
     Clipping a cubic payoff interpolant is nonlinear: the price of added
     outcome cash then differs from its indicator claim. Native autocallables
-    use the same fixed positive weights for prices, memory and statistics.
+    use the same fixed weights for prices, memory and statistics: the core's
+    four-point Lagrange stencil (linear in its two edge brackets), unclipped.
+
+    Fixed weights keep the transport linear in the claim, and they sum to one,
+    so a sure unit is transported exactly. By Godunov's theorem a linear scheme
+    cannot be both monotone and better than first order; this one keeps third
+    order and gives up monotonicity. Fixed positive linear weights (79938a1c)
+    were first order, and the error of a semi-Lagrangian step grows like
+    dv**2/dt: in the convection-dominated sigma_collapse regime that moved the
+    certified delta 11 reference standard errors.
     """
     if dt <= 0.:
         return U
-    cache = getattr(core, '_linear_transport_cache', None)
-    if cache is None:
-        cache = core._linear_transport_cache = {}
-    key = round(float(dt), 15)
-    stencil = cache.get(key)
-    if stencil is None:
-        V = core.V_grid
-        feet = np.clip(core._characteristic_feet(dt), V[0], V[-1])
-        left = np.clip(np.searchsorted(V, feet)-1, 0, len(V)-2)
-        w = (feet-V[left])/(V[left+1]-V[left])
-        stencil = cache[key] = (left, w)
-    left, w = stencil
-    return U[:, left]*(1.-w) + U[:, left+1]*w
+    stencil = core._advection_stencil(dt)
+    return np.einsum("ijk,jk->ij", U[:, stencil.indices], stencil.weights, optimize=True)
 
 
 def step_columns(core, U, dt, tau, theta, t_mid, low, high, douglas, force_scalar=False):
@@ -54,7 +52,7 @@ def step_columns(core, U, dt, tau, theta, t_mid, low, high, douglas, force_scala
         original_a1, original_tri = core._A1, core._tri_S
         original_transport = core._advect_v
         if core._semi_lagrangian_v:
-            core._advect_v = lambda A, h: _linear_variance_transport(core, A, h)
+            core._advect_v = lambda A, h: _characteristic_variance_transport(core, A, h)
         def a1_without_reaction(A, t):
             action = original_a1(A, t)
             action[1:-1, 1:-1] += r*A[1:-1, 1:-1]

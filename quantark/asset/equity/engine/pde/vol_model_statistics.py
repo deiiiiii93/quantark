@@ -264,7 +264,7 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
         active_claims=sum(1 if A.ndim == 2 else A.shape[2] for _, A in active_claims()),
         ki_monitor=bool(stats is not None and stats.want_ki),
         discounting='exact',
-        variance_transport='linear_characteristic' if core._semi_lagrangian_v else core.v_drift_scheme,
+        variance_transport='cubic_characteristic' if core._semi_lagrangian_v else core.v_drift_scheme,
     )
 
     def boundaries(tau, j):

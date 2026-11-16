@@ -148,6 +148,49 @@ def test_batched_adi_is_scalar_adi_at_identical_settings(model, family, projecti
     assert x.ki_ever_probability == y.ki_ever_probability
 
 
+def _sigma_collapse_core():
+    """The adi2d certificate's sigma_collapse regime: v0 far above theta, vol-of-vol collapsed."""
+    from quantark.volmodels.adi_core import HestonSLVADICore
+
+    params = HestonParams(v0=.14027, kappa=3., theta=.00306, sigma=.00311, rho=-.5)
+    return HestonSLVADICore(100., 100., 3., .02, .0, params, 40, 30, 120, v_drift_scheme='semi_lagrangian')
+
+
+def test_characteristic_transport_is_third_order_in_variance():
+    """A cubic in v is transported exactly at every interior foot.
+
+    Linear characteristic interpolation is first order: in this convection-dominated regime it
+    moved the certified sigma_collapse delta 11 standard errors off its MC reference.
+    """
+    from quantark.asset.equity.engine.pde.adi_columns import _characteristic_variance_transport
+
+    core = _sigma_collapse_core()
+    V, dt = core.V_grid, 3. / 120
+    poly = lambda v: 2. - 5. * v + 7. * v ** 2 - 3. * v ** 3  # noqa: E731
+    U = np.tile(poly(V), (4, 1))
+    feet = np.clip(core._characteristic_feet(dt), V[0], V[-1])
+    bracket = np.clip(np.searchsorted(V, feet) - 1, 0, len(V) - 2)
+    interior = (bracket >= 1) & (bracket <= len(V) - 3)
+    assert interior.sum() > len(V) // 2
+    out = _characteristic_variance_transport(core, U, dt)
+    np.testing.assert_allclose(out[:, interior], np.tile(poly(feet[interior]), (4, 1)), rtol=0, atol=1e-12)
+
+
+def test_characteristic_transport_is_linear_in_the_claim():
+    """Fixed weights: transporting a sum of claims is the sum of the transports (the cash identity)."""
+    from quantark.asset.equity.engine.pde.adi_columns import _characteristic_variance_transport
+
+    core = _sigma_collapse_core()
+    rng = np.random.default_rng(7)
+    U, W = rng.random((5, len(core.V_grid))), np.where(rng.random((5, len(core.V_grid))) > .5, 1., 0.)
+    dt = 3. / 120
+    lhs = _characteristic_variance_transport(core, 2.5 * U - 1.5 * W, dt)
+    rhs = 2.5 * _characteristic_variance_transport(core, U, dt) - 1.5 * _characteristic_variance_transport(core, W, dt)
+    np.testing.assert_allclose(lhs, rhs, rtol=0, atol=1e-13)
+    sure = _characteristic_variance_transport(core, np.ones((2, len(core.V_grid))), dt)
+    np.testing.assert_allclose(sure, 1., rtol=0, atol=1e-14)
+
+
 @pytest.mark.parametrize('model', ['heston', 'slv'])
 @pytest.mark.parametrize('family', ['snowball', 'ko_reset'])
 @pytest.mark.parametrize('spot', [90., 100.])
@@ -162,7 +205,7 @@ def test_characteristic_transport_preserves_outcome_cash_linearity(model, family
     assert s.ki_survive_knocked_in_probability == pytest.approx(inc['ki'], abs=2e-10)
     assert ko == pytest.approx(inc['ko'], abs=2e-10)
     assert sum(inc.values()) == pytest.approx(1., abs=2e-10)
-    assert e._last_native_adi_diagnostics['variance_transport'] == 'linear_characteristic'
+    assert e._last_native_adi_diagnostics['variance_transport'] == 'cubic_characteristic'
 
 
 @pytest.mark.parametrize('model', ['heston', 'slv'])
