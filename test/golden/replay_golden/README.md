@@ -259,3 +259,21 @@ engine's event-statistics lattice against its pricing lattice.
 ```
  13 files changed, 42 insertions(+), 42 deletions(-)
 ```
+
+## 2026-11-15 regeneration: QUAD knock-in settlement redefined (79938a1c)
+
+Commit 79938a1c ("Unify autocallable KI statistics across engines") makes QUAD's `ki_probability` mean
+"settles knocked in" (knocked in and never knocked out), as PDE already did; MC keeps "ever breached"
+(`quantark/asset/equity/engine/docs/autocallable_event_stats_api.md`). It also reads the KI settlement off
+the price's own event projection. Bisected: 79938a1c^ passes the old goldens, 79938a1c fails them (the golden test's tolerance, not bytes).
+Two of 28 frames moved, both in the QUADRATURE `book` case and only the KI column:
+
+| frame / rows | field | before | after |
+|---|---|---|---|
+| `book_daily_event_summary` 2024-01-02 (not knocked in) | `ki_probability_to_maturity` | 0.06486871902550144 | 0.06528846750882111 |
+| `book_daily_event_summary` 2024-01-03 (knocked in) | `ki_probability_to_maturity` | 1.0 | 0.9988857155593289 |
+| `book_event_probabilities` 2024-01-02 -> 2024-01-08 KI | `event_probability` | 0.06486871902550144 | 0.06528846750882111 |
+
+On the knocked-in day the new value equals the row's own `survival_probability` (0.998885715559329) to
+rounding, which is what "settles knocked in" means once the note is knocked in. Every other column and frame,
+including PVs and cashflows, is byte-identical.

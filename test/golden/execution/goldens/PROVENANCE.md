@@ -62,3 +62,18 @@ pre schedule with the post knock-outs folded into the maturity mass).
 Spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md` §8. No execution golden was regenerated:
 `test/execution/` passed against the frozen files after stage 2 (full suite at e107b94e) and after stage 3's
 knock-in-side row (b0afa9d4), compared through `test/golden_compare.py` as always.
+
+## 2026-11-15: 2D Heston/SLV discounting correction (79938a1c)
+
+Commit 79938a1c ("Unify autocallable KI statistics across engines") integrates deterministic
+discounting exponentially outside the spatial ADI generator
+(`docs/research/vol-model-ki-consistency/README.md`). Regenerated: `pde_phase4_goldens.json` only
+(`freeze_goldens.py phase4`); bisected: 79938a1c^ passes the old file, 79938a1c fails it (through `golden_compare`).
+
+| case | field | before | after |
+|---|---|---|---|
+| HestonSnowballPDESolver (flat-vol surrogate) | price, price_with_events.npv | 973280.220693638 | 973285.617726092 |
+
+Only the price moved (5.5e-6 relative on the fixture's legacy pins: n_x=48, n_v=18, n_t=16, neumann
+v0 boundary, v_grid_power=0). Every event probability and the other seven cases are bitwise unchanged,
+which is the signature of a discounting change rather than a change to the marched survival.

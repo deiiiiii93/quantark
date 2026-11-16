@@ -63,7 +63,7 @@
       ]
     },
     "HestonSnowballPDESolver": {
-      "price": 973280.220693638,
+      "price": 973285.617726092,
       "price_with_events": {
         "event_distribution": {
           "event_times": [
@@ -90,7 +90,7 @@
             0.411821223709516
           ]
         },
-        "npv": 973280.220693638
+        "npv": 973285.617726092
       }
     },
     "KOResetSnowballPDESolver": {
