@@ -245,12 +245,16 @@ def test_carrying_forward_an_errored_cell_keeps_it_errored(tmp_path):
 class ExternalReference(SteadyReference):
     """A banked benchmark that refuses to stand in for itself, like the ADI 2D import's."""
 
-    def __init__(self, benchmark="fake.telescope", **kwargs):
+    def __init__(self, benchmark="fake.telescope", harness=None, **kwargs):
         super().__init__(**kwargs)
         self.benchmark = benchmark
+        self.harness = harness
 
     def config(self):
-        return {"benchmark": self.benchmark, "external": True}
+        config = {"benchmark": self.benchmark, "external": True}
+        if self.harness is not None:
+            config["harness"] = self.harness
+        return config
 
     def run_batch(self, case, batch_index):
         self.calls += 1
@@ -355,6 +359,49 @@ def test_an_external_benchmark_refuses_a_changed_declaration(tmp_path, imported)
     changed = ExternalReference(benchmark="fake.other_telescope", means_c=CASE_MEANS_C)
     with pytest.raises(ValidationError, match="declared"):
         _amend_external(tmp_path, imported, OffsetCandidate(means_c=CASE_MEANS_C), reference=changed)
+
+
+def _bank_harness(imported, harness):
+    """Re-bank the imported parent as though its harness had lived at ``harness``."""
+    path, payload = imported
+    payload = copy.deepcopy(payload)
+    payload["reference_config"] = ExternalReference(harness=harness).config()
+    payload["projected_sha256"] = projected_sha256(payload)
+    atomic_write_json(path, payload)
+    return path, payload
+
+
+def test_an_external_benchmark_follows_a_relocated_harness(tmp_path, imported):
+    # A harness file that moved (an example-folder relocation) is the same benchmark: the evidence it
+    # banked is unchanged. The child declares where the harness lives now and records the move.
+    path, parent = _bank_harness(imported, "example/old_home/harness.py")
+    moved = ExternalReference(harness="example/new_home/harness.py", means_c=CASE_MEANS_C)
+    certificate, reference = _amend_external(tmp_path, (path, parent), OffsetCandidate(means_c=CASE_MEANS_C),
+                                             reference=moved)
+    payload = certificate.payload
+    assert reference.calls == 0
+    assert payload["reference_config"] == moved.config()
+    assert payload["amendment"]["harness_relocated"] == {
+        "from": "example/old_home/harness.py", "to": "example/new_home/harness.py"}
+    assert payload["amendment"]["translated_cells"] == []
+    validate_parent(certificate.path)
+
+
+def test_an_external_benchmark_refuses_a_relocation_that_also_changes_the_declaration(tmp_path, imported):
+    path, parent = _bank_harness(imported, "example/old_home/harness.py")
+    changed = ExternalReference(benchmark="fake.other_telescope", harness="example/new_home/harness.py",
+                                means_c=CASE_MEANS_C)
+    with pytest.raises(ValidationError, match="declared"):
+        _amend_external(tmp_path, (path, parent), OffsetCandidate(means_c=CASE_MEANS_C), reference=changed)
+
+
+def test_an_unmoved_harness_records_no_relocation(tmp_path, imported):
+    path, parent = _bank_harness(imported, "example/home/harness.py")
+    same = ExternalReference(harness="example/home/harness.py", means_c=CASE_MEANS_C)
+    certificate, _ = _amend_external(tmp_path, (path, parent), OffsetCandidate(means_c=CASE_MEANS_C),
+                                     reference=same)
+    assert "harness_relocated" not in certificate.payload["amendment"]
+    assert certificate.payload["reference_config"] == parent["reference_config"]
 
 
 def test_an_external_benchmark_refuses_coverage_it_never_banked(tmp_path, imported):

@@ -264,6 +264,11 @@ Rules the tool enforces:
   a moved one is translated by the harness's own interval arithmetic with its
   envelopes held at their banked values, and any move that would change a
   verdict is refused — only the harness can re-certify that.
+- **A relocated harness is the same benchmark.** The external benchmark's declared
+  `harness` is where the producing script lives, not what it computed, so a moved
+  file amends: the child declares the current path and records the move as
+  `amendment.harness_relocated` (`from` / `to`). Every other declared field must
+  still match the parent exactly.
 
 ## 7. Adding a new engine family
 

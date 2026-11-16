@@ -321,6 +321,11 @@ def amend(
     return write_certificate(payload, root)
 
 
+def _without_harness(config: Mapping[str, Any]) -> dict:
+    """An external benchmark's declaration minus where its harness file lives."""
+    return {k: v for k, v in config.items() if k != "harness"}
+
+
 def _amend_external(study, parent, parent_payload, reference, sampling, quick, resume, reason, started, root,
                     store) -> Certificate:
     """Amend an imported certification, whose benchmark is external: banked, never run, never re-gated.
@@ -333,10 +338,15 @@ def _amend_external(study, parent, parent_payload, reference, sampling, quick, r
     aggregate's widened by its largest move -- is refused: only the harness can re-certify that.
     """
     banked_config, current_config = parent_payload.get("reference_config") or {}, _reference_config(reference)
-    if "imported" not in parent_payload or banked_config != current_config:
+    # The harness path says where the producing script lives, not what it computed: a relocated file is
+    # the same benchmark. Every other declared field must match exactly; the move is recorded below.
+    if "imported" not in parent_payload or _without_harness(banked_config) != _without_harness(current_config):
         raise ValidationError(
             "An external benchmark is amended only against the imported certificate that banks it, under the "
             f"benchmark it declared: the parent declares {banked_config!r}, the study {current_config!r}")
+    relocated = (
+        {"harness_relocated": {"from": banked_config.get("harness"), "to": current_config.get("harness")}}
+        if banked_config.get("harness") != current_config.get("harness") else {})
 
     parent_digest = parent_payload["projected_sha256"]
     parent_cells = {(c["candidate"], c["case"], c["quantity"]): c for c in parent_payload["cells"]}
@@ -407,6 +417,7 @@ def _amend_external(study, parent, parent_payload, reference, sampling, quick, r
                 "carried_cells": carried,
                 "translated_cells": translated,
                 "aggregate_shift_bounds": bounded,
+                **relocated,
             },
         },
     )
