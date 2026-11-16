@@ -1377,6 +1377,17 @@ class SnowballQuadEngine(BaseEngine):
                 else:
                     pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
                 ki_ever_probability = pv_ki_ever / df_T
+        elif knocked_in_at_valuation and want_ki:
+            # A carried knock-in on a contract whose KI barrier was dropped (parachute collapse):
+            # there is no KI column, but every surviving path settles knocked in, so the
+            # knocked-in settlement probability is the no-knock-out survival (equal to the KI
+            # column readout to rounding when the barrier is kept).
+            ki_probability = max(0.0, 1.0 - float(np.sum(ko_prob)))
+            ki_survive_knocked_in_probability = ki_probability
+            ki_ever_probability = 1.0
+            ki_times = np.array([0.0])
+            ki_event_probability = np.array([1.0])
+            ki_survival_probability = np.array([0.0])
 
         if want_coupon:
             extra_fields = self._extract_extra_quad_stats(

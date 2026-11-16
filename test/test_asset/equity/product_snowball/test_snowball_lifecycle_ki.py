@@ -82,11 +82,13 @@ def _engine_factories():
 
 
 def _assert_lifecycle_ki_event_stats(stats, engine="quad") -> None:
-    if engine == "pde":
+    if engine in ("pde", "quad"):
         # spec 3B §5.5: ki_ever is 1; ki_probability (= ki_survive, knocked in AND reaching maturity
-        # without a knock-out) is the marched no-knock-out survival, up to the march's discounting
+        # without a knock-out) is the marched no-knock-out survival, up to the march's discounting.
+        # QUAD joined this definition in 79938a1c (autocallable_event_stats_api.md); MC stays "ever".
         assert stats.ki_ever_probability == 1.0
-        assert stats.ki_probability == pytest.approx(1.0 - stats.ko_probability.sum(), abs=7e-9)
+        assert stats.ki_survive_knocked_in_probability == pytest.approx(
+            1.0 - stats.ko_probability.sum(), abs=7e-9)
     else:
         assert stats.ki_probability == pytest.approx(1.0)
     assert stats.ki_times.shape == (1,)
