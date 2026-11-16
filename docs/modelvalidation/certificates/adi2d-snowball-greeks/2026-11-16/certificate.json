@@ -1,0 +1,2303 @@
+{
+  "aggregates": [
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "cells": 7,
+      "mean_signed_bias_c": -0.032169672269978064,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.026879339078016477,
+      "source_bias": {
+        "aggregate_alignment": "strided_pooled",
+        "aggregate_batch_counts_by_case": {
+          "low_feller": 1024,
+          "near_expiry": 1024,
+          "near_ki": 2048,
+          "near_ko": 1024,
+          "ordinary_decayed": 1024,
+          "ordinary_full": 1024,
+          "sigma_collapse": 1024
+        },
+        "aggregate_common_scrambles": 1024,
+        "aggregate_pde_signed_refinement_contracts": {
+          "n_t": -0.00126943656628475,
+          "n_v": 0.0007561755268290271,
+          "n_x": 0.008130632041540001
+        },
+        "aggregate_reference_substep": {
+          "absolute_bias_upper_bound": 0.0043546505004604785,
+          "component_confidence": 0.975,
+          "half_width": 0.0035321279468501867,
+          "mean": 0.000822522553610292,
+          "standard_error": 0.0015735362953182177
+        },
+        "confidence": 0.975,
+        "economic_bound": 0.1,
+        "estimate_difference": -0.032169672269978064,
+        "interval": [
+          -0.05904901134799454,
+          -0.005290333191961587
+        ],
+        "label": "heston/mean_signed_delta_bias",
+        "pde_discretization_envelope": 0.01015624413465378,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.0043546505004604785,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.012368444442902216,
+        "reference_standard_error": 0.005510048486462438,
+        "status": "PASS",
+        "total_uncertainty": 0.026879339078016477
+      },
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "cells": 7,
+      "mean_signed_bias_c": -0.029994216220205865,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.03339241101437559,
+      "source_bias": {
+        "aggregate_cases": [
+          "ordinary_full",
+          "ordinary_decayed",
+          "near_ko",
+          "near_ki",
+          "low_feller",
+          "sigma_collapse",
+          "near_expiry"
+        ],
+        "aggregate_cohort_sizes": {
+          "middle_control": 32,
+          "parent_heston_high": 1024,
+          "primary_refresh": 512,
+          "schema11_replacements": 128
+        },
+        "aggregate_independent_cohorts": [
+          {
+            "batches": 512,
+            "name": "primary_refresh",
+            "seed_family": 20260811
+          },
+          {
+            "batches": 32,
+            "name": "middle_control",
+            "seed_family": 20260812
+          },
+          {
+            "batches": 1024,
+            "name": "parent_heston_high",
+            "seed_family": 20260807
+          },
+          {
+            "batches": 128,
+            "name": "schema11_replacements",
+            "seed_family": 20260809
+          }
+        ],
+        "aggregate_pde_signed_refinement_contracts": {
+          "n_t": -0.001138358350258718,
+          "n_v": 0.0007135679557540394,
+          "n_x": 0.00729799635172302
+        },
+        "component_confidence": 0.975,
+        "economic_bound": 0.1,
+        "endpoint_method": "paired_D_plus_minus_S_with_independent_cohort_Welch_t",
+        "endpoints": {
+          "delta_minus_substep": {
+            "cohort_means": [
+              6.705126784760003,
+              0.009345052059612202,
+              -6.715803246032554,
+              -0.025938837334037082
+            ],
+            "cohort_sizes": [
+              512,
+              32,
+              1024,
+              128
+            ],
+            "cohort_standard_errors": [
+              0.0028531429211863207,
+              0.006119193102205852,
+              0.0034353453974436455,
+              0.002471391335619404
+            ],
+            "confidence": 0.975,
+            "degrees_of_freedom": 88,
+            "estimate": -0.0272702465469757,
+            "half_width": 0.01817098904582097,
+            "standard_error": 0.00796833244062465
+          },
+          "delta_plus_substep": {
+            "cohort_means": [
+              6.705803093743764,
+              0.010193839385769147,
+              -6.715906400058886,
+              -0.030084749290853193
+            ],
+            "cohort_sizes": [
+              512,
+              32,
+              1024,
+              128
+            ],
+            "cohort_standard_errors": [
+              0.0048673474640133045,
+              0.007785221306477657,
+              0.00344449461534023,
+              0.004181613286721266
+            ],
+            "confidence": 0.975,
+            "degrees_of_freedom": 105,
+            "estimate": -0.029994216220205868,
+            "half_width": 0.024242488356639814,
+            "standard_error": 0.010660730507852738
+          }
+        },
+        "interval": [
+          -0.06338662723458145,
+          0.003398194794169725
+        ],
+        "label": "heston_slv/mean_signed_delta_bias",
+        "pde_discretization_envelope": 0.009149922657735779,
+        "reason": "simultaneous signed-bias interval is wholly inside the bound",
+        "simultaneous_coverage_lower_bound": 0.95,
+        "status": "PASS"
+      },
+      "within_bound": true
+    }
+  ],
+  "amendment": {
+    "aggregate_shift_bounds": [
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "quantity": "delta",
+        "shift_bound_c": 0.0016902654022000066
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "quantity": "delta",
+        "shift_bound_c": 0.0017013339007740638
+      }
+    ],
+    "carried_cells": [],
+    "external_benchmark": "banked by the parent and carried; never run. Every candidate re-ran: a bit-identical value carries its cell, a moved one is translated by the harness's interval arithmetic with its envelopes held at their banked values, and an aggregate keeps its banked numbers within shift_bound_c of its translated centre",
+    "harness_relocated": {
+      "from": "example/mo_volmodels/16_adi_greek_certification.py",
+      "to": "example/case_studies/mo_volmodels/16_adi_greek_certification.py"
+    },
+    "parent": "docs/modelvalidation/certificates/adi2d-snowball-greeks/2026-10-10/certificate.json",
+    "parent_projected_sha256": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+    "reason": "79938a1c moved 2D Heston/SLV snowball numerics: deterministic discounting integrated exponentially outside the ADI generator, and a fixed-weight characteristic variance transport so added outcome cash reconciles with its indicator. Its linear weights were first order and moved the sigma_collapse delta 11 reference SE off the MC reference; the transport now uses the core's fixed 4-point Lagrange weights unclipped (still linear in the claim, third order). Re-run every candidate cell against the banked reference. The harness moved under e267d78c (example/ to example/case_studies/), recorded as amendment.harness_relocated.",
+    "replaced_cells": [
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "ordinary_full",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "ordinary_full",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "ordinary_decayed",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "ordinary_decayed",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "near_ko",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "near_ko",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "near_ki",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "near_ki",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "low_feller",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "low_feller",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "sigma_collapse",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "sigma_collapse",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "near_expiry",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "case": "near_expiry",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "ordinary_full",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "ordinary_full",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "ordinary_decayed",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "ordinary_decayed",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "near_ko",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "near_ko",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "near_ki",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "near_ki",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "low_feller",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "low_feller",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "sigma_collapse",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "sigma_collapse",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "near_expiry",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "case": "near_expiry",
+        "quantity": "gamma"
+      }
+    ],
+    "translated_cells": [
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 0.2019060156992245,
+        "case": "ordinary_full",
+        "parent_candidate_value": 0.20190506515302542,
+        "quantity": "delta",
+        "shift_c": 5.242923357676978e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.02292698391412884,
+        "case": "ordinary_full",
+        "parent_candidate_value": -0.022927998866023813,
+        "quantity": "gamma",
+        "shift_c": 5.598165562276267e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 0.5854479607417208,
+        "case": "ordinary_decayed",
+        "parent_candidate_value": 0.5854591479609659,
+        "quantity": "delta",
+        "shift_c": -0.0006170529443383668
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.059229147450291904,
+        "case": "ordinary_decayed",
+        "parent_candidate_value": -0.05922810837512175,
+        "quantity": "gamma",
+        "shift_c": -5.272724425615455e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 0.10256729853025785,
+        "case": "near_ko",
+        "parent_candidate_value": 0.10257580112323181,
+        "quantity": "delta",
+        "shift_c": -0.00046897713490261315
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.014194771035532181,
+        "case": "near_ko",
+        "parent_candidate_value": -0.014196457789751617,
+        "quantity": "gamma",
+        "shift_c": 9.55482040542944e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 2.055728938882988,
+        "case": "near_ki",
+        "parent_candidate_value": 2.0557298102189474,
+        "quantity": "delta",
+        "shift_c": -4.806023797935929e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 0.20539275435589718,
+        "case": "near_ki",
+        "parent_candidate_value": 0.2053929640440421,
+        "quantity": "gamma",
+        "shift_c": -8.732148418644901e-06
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.012494580373484387,
+        "case": "low_feller",
+        "parent_candidate_value": -0.012489420835781084,
+        "quantity": "delta",
+        "shift_c": -0.0002845843870133573
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 0.021104527884511004,
+        "case": "low_feller",
+        "parent_candidate_value": 0.021099940819804264,
+        "quantity": "gamma",
+        "shift_c": 0.0002530085199149869
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": 0.3247404913902411,
+        "case": "sigma_collapse",
+        "parent_candidate_value": 0.324756744357909,
+        "quantity": "delta",
+        "shift_c": -0.0008964642002649825
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.03321774595036797,
+        "case": "sigma_collapse",
+        "parent_candidate_value": -0.03321732762442209,
+        "quantity": "gamma",
+        "shift_c": -2.3073585217683772e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.3640810538803594,
+        "case": "near_expiry",
+        "parent_candidate_value": -0.36405040923339627,
+        "quantity": "delta",
+        "shift_c": -0.0016902654022000066
+      },
+      {
+        "candidate": "equity.snowball.heston_pde",
+        "candidate_value": -0.01745546775173601,
+        "case": "near_expiry",
+        "parent_candidate_value": -0.017456774487989435,
+        "quantity": "gamma",
+        "shift_c": 7.207559224370829e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 0.20878387063308013,
+        "case": "ordinary_full",
+        "parent_candidate_value": 0.20878281051111247,
+        "quantity": "delta",
+        "shift_c": 5.8473099272334684e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.023221887287941945,
+        "case": "ordinary_full",
+        "parent_candidate_value": -0.023222909869483832,
+        "quantity": "gamma",
+        "shift_c": 5.64024837114558e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 0.5958252774880783,
+        "case": "ordinary_decayed",
+        "parent_candidate_value": 0.5958363714065494,
+        "quantity": "delta",
+        "shift_c": -0.0006119067577801383
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.05823537333518418,
+        "case": "ordinary_decayed",
+        "parent_candidate_value": -0.058234366319960505,
+        "quantity": "gamma",
+        "shift_c": -5.110038156367194e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 0.11206779703973428,
+        "case": "near_ko",
+        "parent_candidate_value": 0.11207614069226417,
+        "quantity": "delta",
+        "shift_c": -0.00046021046404016
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.015151123649797886,
+        "case": "near_ko",
+        "parent_candidate_value": -0.015152830591333308,
+        "quantity": "gamma",
+        "shift_c": 9.66917386397529e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 1.9961711217603908,
+        "case": "near_ki",
+        "parent_candidate_value": 1.9961719618164355,
+        "quantity": "delta",
+        "shift_c": -4.633493314570962e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 0.19157255105652884,
+        "case": "near_ki",
+        "parent_candidate_value": 0.19157275227172973,
+        "quantity": "gamma",
+        "shift_c": -8.379305368318098e-06
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.0023517836380981816,
+        "case": "low_feller",
+        "parent_candidate_value": -0.002346742630356946,
+        "quantity": "delta",
+        "shift_c": -0.00027804663527328634
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 0.02032415187729386,
+        "case": "low_feller",
+        "parent_candidate_value": 0.020319526760849804,
+        "quantity": "gamma",
+        "shift_c": 0.0002551073378637569
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": 0.3397264205883921,
+        "case": "sigma_collapse",
+        "parent_candidate_value": 0.3397424689046714,
+        "quantity": "delta",
+        "shift_c": -0.0008851762529082489
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.03323017027145658,
+        "case": "sigma_collapse",
+        "parent_candidate_value": -0.03322967105429231,
+        "quantity": "gamma",
+        "shift_c": -2.7535298480409456e-05
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.3589339946125607,
+        "case": "near_expiry",
+        "parent_candidate_value": -0.35890314929283296,
+        "quantity": "delta",
+        "shift_c": -0.0017013339007740638
+      },
+      {
+        "candidate": "equity.snowball.heston_slv_pde",
+        "candidate_value": -0.01892180646591335,
+        "case": "near_expiry",
+        "parent_candidate_value": -0.018923130459738147,
+        "quantity": "gamma",
+        "shift_c": 7.302746732489615e-05
+      }
+    ]
+  },
+  "cells": [
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 0.2019060156992245,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_full",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0037253632773763196,
+        "envelope_within_bound": true,
+        "interval_c": 0.0811988036173152,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.016353865419265427,
+        "signed_err_c": -0.03834241633278754
+      },
+      "identity_hash": "c205715893e1a6de44222f12c92f2f8ee31ecd8c2ae01a623e16f009dd848566",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0002964968883605158,
+        "value": 0.20260116677473125
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.03834241633278754,
+        "interval": [
+          -0.0811988036173152,
+          0.004513970951740134
+        ],
+        "label": "heston/ordinary_full/delta",
+        "pde_discretization_envelope": 0.0037253632773763196,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.00242138771958634,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.03670963628756501,
+        "reference_standard_error": 0.016353865419265427,
+        "status": "PASS",
+        "total_uncertainty": 0.04285638728452767
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.02292698391412884,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_full",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.003359539700060114,
+        "envelope_within_bound": true,
+        "interval_c": 0.04982715937759569,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.01120043771184619,
+        "signed_err_c": 0.01723444688157055
+      },
+      "identity_hash": "c205715893e1a6de44222f12c92f2f8ee31ecd8c2ae01a623e16f009dd848566",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.00020306483175078842,
+        "value": -0.023239445814847465
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.01723444688157055,
+        "interval": [
+          -0.015358265614454582,
+          0.04982715937759569
+        ],
+        "label": "heston/ordinary_full/gamma",
+        "pde_discretization_envelope": 0.003359539700060114,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.004091471789973191,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.025141701005991828,
+        "reference_standard_error": 0.01120043771184619,
+        "status": "PASS",
+        "total_uncertainty": 0.032592712496025134
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 0.5854479607417208,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_decayed",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0064026020361015075,
+        "envelope_within_bound": true,
+        "interval_c": 0.045547318581133076,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.01088701766146573,
+        "signed_err_c": -0.013318645629019193
+      },
+      "identity_hash": "238df65d7843ba67d5038eb801787f6299061a3205beee4d0c1b277a885362bb",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.00019738250116378665,
+        "value": 0.5856894288524666
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.013318645629019193,
+        "interval": [
+          -0.045547318581133076,
+          0.018910027323094693
+        ],
+        "label": "heston/ordinary_decayed/delta",
+        "pde_discretization_envelope": 0.0064026020361015075,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.0013879060930408094,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.024438164822971568,
+        "reference_standard_error": 0.01088701766146573,
+        "status": "PASS",
+        "total_uncertainty": 0.03222867295211389
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.059229147450291904,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_decayed",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0010138147852305282,
+        "envelope_within_bound": true,
+        "interval_c": 0.018993435341516367,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.006227642723566173,
+        "signed_err_c": -0.00048376970683844
+      },
+      "identity_hash": "238df65d7843ba67d5038eb801787f6299061a3205beee4d0c1b277a885362bb",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.00012272571824964418,
+        "value": -0.05921961398998043
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.00048376970683844,
+        "interval": [
+          -0.018993435341516367,
+          0.018025895927839486
+        ],
+        "label": "heston/ordinary_decayed/gamma",
+        "pde_discretization_envelope": 0.0010138147852305282,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.0035166175948005123,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.013979233254646886,
+        "reference_standard_error": 0.006227642723566173,
+        "status": "PASS",
+        "total_uncertainty": 0.018509665634677926
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 0.10256729853025785,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.011107740986210507,
+        "envelope_within_bound": true,
+        "interval_c": 0.04394216044396688,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0064354397044945316,
+        "signed_err_c": -0.01787796320926737
+      },
+      "identity_hash": "d2cb2ebbbb681898ff434ed86936bc692802d929c18dd9267e3d6762f2628738",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.00011667503667766224,
+        "value": 0.10289142743347893
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.01787796320926737,
+        "interval": [
+          -0.04394216044396688,
+          0.008186234025432133
+        ],
+        "label": "heston/near_ko/delta",
+        "pde_discretization_envelope": 0.011107740986210507,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.0005107796548534019,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.014445676593635593,
+        "reference_standard_error": 0.0064354397044945316,
+        "status": "PASS",
+        "total_uncertainty": 0.026064197234699504
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.014194771035532181,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0018284219915011787,
+        "envelope_within_bound": true,
+        "interval_c": 0.012811716324375702,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.002994775147447707,
+        "signed_err_c": -0.003257685647856077
+      },
+      "identity_hash": "d2cb2ebbbb681898ff434ed86936bc692802d929c18dd9267e3d6762f2628738",
+      "quantity": "gamma",
+      "reference": {
+        "se": 5.286807498075826e-05,
+        "value": -0.01413726168654437
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.003257685647856077,
+        "interval": [
+          -0.012811716324375702,
+          0.006296345028663549
+        ],
+        "label": "heston/near_ko/gamma",
+        "pde_discretization_envelope": 0.0018284219915011787,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.0010032159290933296,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.006722392755925118,
+        "reference_standard_error": 0.002994775147447707,
+        "status": "PASS",
+        "total_uncertainty": 0.009554030676519627
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 2.055728938882988,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.09499344261950864,
+        "envelope_within_bound": true,
+        "interval_c": 0.17787294495547964,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.016137956194624433,
+        "signed_err_c": -0.027406152903950598
+      },
+      "identity_hash": "c3f325bafb52739468a6e701ffd196cd54db4bf386402621b8ec9289647428ed",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0002925824368450366,
+        "value": 2.056225814627629
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.027406152903950598,
+        "interval": [
+          -0.17787294495547964,
+          0.12306063914757848
+        ],
+        "label": "heston/near_ki/delta",
+        "pde_discretization_envelope": 0.09499344261950864,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.01927506016631233,
+        "reference_degrees_of_freedom": 2047,
+        "reference_half_width": 0.03619828926570811,
+        "reference_standard_error": 0.016137956194624433,
+        "status": "PASS",
+        "total_uncertainty": 0.15046679205152907
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 0.20539275435589718,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.030133435596259504,
+        "envelope_within_bound": true,
+        "interval_c": 0.3457280788337281,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.03239767874186463,
+        "signed_err_c": 0.16463688434484341
+      },
+      "identity_hash": "c3f325bafb52739468a6e701ffd196cd54db4bf386402621b8ec9289647428ed",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0007779768309990799,
+        "value": 0.20143927106566836
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.16463688434484341,
+        "interval": [
+          -0.016454310144041254,
+          0.3457280788337281
+        ],
+        "label": "heston/near_ki/gamma",
+        "pde_discretization_envelope": 0.030133435596259504,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.07828805199218511,
+        "reference_degrees_of_freedom": 2047,
+        "reference_half_width": 0.07266970690044004,
+        "reference_standard_error": 0.03239767874186463,
+        "status": "PASS",
+        "total_uncertainty": 0.18109119448888467
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.012494580373484387,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "low_feller",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.012441585715981533,
+        "envelope_within_bound": true,
+        "interval_c": 0.19657136716083126,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.030839303013646274,
+        "signed_err_c": -0.09222732114643446
+      },
+      "identity_hash": "f16c2d27a677293a7c8af28eab2fe4e8b24d55414ad3c158d34b6920bc3011ba",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0005591190307816481,
+        "value": -0.010822491662913838
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.09222732114643446,
+        "interval": [
+          -0.19657136716083126,
+          0.012116724867962314
+        ],
+        "label": "heston/low_feller/delta",
+        "pde_discretization_envelope": 0.012441585715981533,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.022677260752666926,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.06922519954574832,
+        "reference_standard_error": 0.030839303013646274,
+        "status": "PASS",
+        "total_uncertainty": 0.10434404601439679
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 0.021104527884511004,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "low_feller",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.01464458301913212,
+        "envelope_within_bound": true,
+        "interval_c": 0.12260159290043085,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011592328963522662,
+        "signed_err_c": 0.05670361481986565
+      },
+      "identity_hash": "f16c2d27a677293a7c8af28eab2fe4e8b24d55414ad3c158d34b6920bc3011ba",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.00021016985149498296,
+        "value": 0.020076486811537654
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.05670361481986565,
+        "interval": [
+          -0.00919436326069957,
+          0.12260159290043085
+        ],
+        "label": "heston/low_feller/gamma",
+        "pde_discretization_envelope": 0.01464458301913212,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.025232013017074985,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.02602138204435811,
+        "reference_standard_error": 0.011592328963522662,
+        "status": "PASS",
+        "total_uncertainty": 0.06589797808056522
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": 0.3247404913902411,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "sigma_collapse",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.020611514315207816,
+        "envelope_within_bound": true,
+        "interval_c": 0.044106382279790135,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.010149641109991458,
+        "signed_err_c": 0.000646518652349558
+      },
+      "identity_hash": "09b412ea49c8df63f63347e46e0bfc53f706e1e51bb22b69e450dfcc16de969f",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.00018401380529543395,
+        "value": 0.3247287699553525
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.000646518652349558,
+        "interval": [
+          -0.042813344975091025,
+          0.044106382279790135
+        ],
+        "label": "heston/sigma_collapse/delta",
+        "pde_discretization_envelope": 0.020611514315207816,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 6.537880067527154e-05,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.022782970511557494,
+        "reference_standard_error": 0.010149641109991458,
+        "status": "PASS",
+        "total_uncertainty": 0.04345986362744058
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.03321774595036797,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "sigma_collapse",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.008219364235094753,
+        "envelope_within_bound": true,
+        "interval_c": 0.02504769404668942,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0048111068365948055,
+        "signed_err_c": -0.005842385311033161
+      },
+      "identity_hash": "09b412ea49c8df63f63347e46e0bfc53f706e1e51bb22b69e450dfcc16de969f",
+      "quantity": "gamma",
+      "reference": {
+        "se": 8.722575183601077e-05,
+        "value": -0.033111823037288116
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.005842385311033161,
+        "interval": [
+          -0.02504769404668942,
+          0.013362923424623094
+        ],
+        "label": "heston/sigma_collapse/gamma",
+        "pde_discretization_envelope": 0.008219364235094753,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.00018641927614848099,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.01079952522441302,
+        "reference_standard_error": 0.0048111068365948055,
+        "status": "PASS",
+        "total_uncertainty": 0.019205308735656255
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.3640810538803594,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.015574929354463387,
+        "envelope_within_bound": true,
+        "interval_c": 0.04588419611393487,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0015394322432519094,
+        "signed_err_c": -0.026649487247885902
+      },
+      "identity_hash": "b611e167ded42d7c94fde8d5a51fd6333ece4615c43460fc75660e952ee6d44a",
+      "quantity": "delta",
+      "reference": {
+        "se": 2.7910029724736584e-05,
+        "value": -0.36359789654459623
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.026649487247885902,
+        "interval": [
+          -0.04588419611393487,
+          -0.0074147783818369435
+        ],
+        "label": "heston/near_expiry/delta",
+        "pde_discretization_envelope": 0.015574929354463387,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.00020420516935362837,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.0034555743422319462,
+        "reference_standard_error": 0.0015394322432519094,
+        "status": "PASS",
+        "total_uncertainty": 0.01923470886604896
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "candidate_value": -0.01745546775173601,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.017142551482183833,
+        "envelope_within_bound": true,
+        "interval_c": 0.029877208241857345,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00036952977523171477,
+        "signed_err_c": 0.011830833706108306
+      },
+      "identity_hash": "b611e167ded42d7c94fde8d5a51fd6333ece4615c43460fc75660e952ee6d44a",
+      "quantity": "gamma",
+      "reference": {
+        "se": 6.699604387333008e-06,
+        "value": -0.01766996171329445
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.011830833706108306,
+        "interval": [
+          -0.006215540829640732,
+          0.029877208241857345
+        ],
+        "label": "heston/near_expiry/gamma",
+        "pde_discretization_envelope": 0.017142551482183833,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 7.433697804684691e-05,
+        "reference_degrees_of_freedom": 1023,
+        "reference_half_width": 0.0008294860755183601,
+        "reference_standard_error": 0.00036952977523171477,
+        "status": "PASS",
+        "total_uncertainty": 0.01804637453574904
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 0.20878387063308013,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_full",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0035717712860213638,
+        "envelope_within_bound": true,
+        "interval_c": 0.21062208784311715,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.06045612961033036,
+        "signed_err_c": 0.003788298455416864
+      },
+      "identity_hash": "8bf3af16f1a70963bd9d590aedcf28203deeb8075ed8535a529e0ebd67c2cc23",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0010960744663256585,
+        "value": 0.20871518847901954
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.003788298455416864,
+        "interval": [
+          -0.20304549093228336,
+          0.21062208784311715
+        ],
+        "label": "heston_slv/ordinary_full/delta",
+        "pde_discretization_envelope": 0.0035717712860213638,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.06613013932802335,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.13713187877365554,
+        "reference_standard_error": 0.06045612961033036,
+        "status": "PASS",
+        "total_uncertainty": 0.20683378938770025
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.023221887287941945,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_full",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00338843461136302,
+        "envelope_within_bound": true,
+        "interval_c": 0.3992752106632983,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.06930073007071602,
+        "signed_err_c": -0.04508211029286619
+      },
+      "identity_hash": "8bf3af16f1a70963bd9d590aedcf28203deeb8075ed8535a529e0ebd67c2cc23",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0012564277802404873,
+        "value": -0.022404545021763457
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.04508211029286619,
+        "interval": [
+          -0.3992752106632983,
+          0.30911099007756604
+        ],
+        "label": "heston_slv/ordinary_full/gamma",
+        "pde_discretization_envelope": 0.00338843461136302,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.19361069095060934,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.15719397480845984,
+        "reference_standard_error": 0.06930073007071602,
+        "status": "PASS",
+        "total_uncertainty": 0.35419310037043217
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 0.5958252774880783,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_decayed",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.006291241604443134,
+        "envelope_within_bound": true,
+        "interval_c": 0.26856474597388214,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.041624197632091714,
+        "signed_err_c": -0.0938414149363953
+      },
+      "identity_hash": "8ed3d0779b5a23d1ca4e72c35ccd72ecce0df887e556c93fd8189889c2d04841",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0007546500330056335,
+        "value": 0.5975266298481884
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.0938414149363953,
+        "interval": [
+          -0.26856474597388214,
+          0.08088191610109152
+        ],
+        "label": "heston_slv/ordinary_decayed/delta",
+        "pde_discretization_envelope": 0.006291241604443134,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.07401644522085893,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.09441564421218478,
+        "reference_standard_error": 0.041624197632091714,
+        "status": "PASS",
+        "total_uncertainty": 0.17472333103748683
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.05823537333518418,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "ordinary_decayed",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0010093363775891572,
+        "envelope_within_bound": true,
+        "interval_c": 0.41633497998249774,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.07272123242658905,
+        "signed_err_c": -0.002199305874715244
+      },
+      "identity_hash": "8ed3d0779b5a23d1ca4e72c35ccd72ecce0df887e556c93fd8189889c2d04841",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0014330888712963629,
+        "value": -0.05819203247490912
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.002199305874715244,
+        "interval": [
+          -0.41633497998249774,
+          0.4119363682330672
+        ],
+        "label": "heston_slv/ordinary_decayed/gamma",
+        "pde_discretization_envelope": 0.0010093363775891572,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.24817368042859492,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.1649526573015984,
+        "reference_standard_error": 0.07272123242658905,
+        "status": "PASS",
+        "total_uncertainty": 0.41413567410778246
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 0.11206779703973428,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.011014463075620791,
+        "envelope_within_bound": true,
+        "interval_c": 0.12608096882650463,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.02872797277500417,
+        "signed_err_c": 0.01445235786806195
+      },
+      "identity_hash": "94877a8a6a14d3981e12d6de72d5e66368bd5f0b0083914492bda5faa57071e2",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0005208404446486477,
+        "value": 0.11180577463539769
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.01445235786806195,
+        "interval": [
+          -0.09717625309038072,
+          0.12608096882650463
+        ],
+        "label": "heston_slv/near_ko/delta",
+        "pde_discretization_envelope": 0.011014463075620791,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.035450848389670275,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.06516329949315161,
+        "reference_standard_error": 0.02872797277500417,
+        "status": "PASS",
+        "total_uncertainty": 0.11162861095844268
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.015151123649797886,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0018620502502256938,
+        "envelope_within_bound": true,
+        "interval_c": 0.2812817669233326,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.04704058515881816,
+        "signed_err_c": -0.01890494532282644
+      },
+      "identity_hash": "94877a8a6a14d3981e12d6de72d5e66368bd5f0b0083914492bda5faa57071e2",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0008304280157509115,
+        "value": -0.014817386384852931
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.01890494532282644,
+        "interval": [
+          -0.2812817669233326,
+          0.24347187627767972
+        ],
+        "label": "heston_slv/near_ko/gamma",
+        "pde_discretization_envelope": 0.0018620502502256938,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.15381320340308913,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.10670156794719135,
+        "reference_standard_error": 0.04704058515881816,
+        "status": "PASS",
+        "total_uncertainty": 0.2623768216005062
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 1.9961711217603908,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.08763604513176126,
+        "envelope_within_bound": true,
+        "interval_c": 0.20669972209018306,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.01663670783660006,
+        "signed_err_c": -0.033770535875635437
+      },
+      "identity_hash": "ac5f2acc9799fb33e3e58369fbdafe846fbaa95f3fed420f7b3fcbfa3077d500",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0003016248440141861,
+        "value": 1.996783384277459
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.033770535875635437,
+        "interval": [
+          -0.20669972209018306,
+          0.13915865033891217
+        ],
+        "label": "heston_slv/near_ki/delta",
+        "pde_discretization_envelope": 0.08763604513176126,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.04755630584463494,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.037736835238151425,
+        "reference_standard_error": 0.01663670783660006,
+        "status": "PASS",
+        "total_uncertainty": 0.17292918621454761
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 0.19157255105652884,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.02127727613166033,
+        "envelope_within_bound": true,
+        "interval_c": 0.37855307444099245,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.04859949483957808,
+        "signed_err_c": 0.13816680857767039
+      },
+      "identity_hash": "ac5f2acc9799fb33e3e58369fbdafe846fbaa95f3fed420f7b3fcbfa3077d500",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0011670367276836262,
+        "value": 0.18825470298651845
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.13816680857767039,
+        "interval": [
+          -0.10221945728565167,
+          0.37855307444099245
+        ],
+        "label": "heston_slv/near_ki/gamma",
+        "pde_discretization_envelope": 0.02127727613166033,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.10887136655336412,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.11023762317829762,
+        "reference_standard_error": 0.04859949483957808,
+        "status": "PASS",
+        "total_uncertainty": 0.24038626586332207
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.0023517836380981816,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "low_feller",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.012186671848586262,
+        "envelope_within_bound": true,
+        "interval_c": 0.28419047141040943,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.03480920787357409,
+        "signed_err_c": -0.14521061784486175
+      },
+      "identity_hash": "034edd7b4dabf82bcd9bb14ce6dc73e7c2d432453041a562651c0bb5c0aa3aa8",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0006310937234845283,
+        "value": 0.00028089648027859043
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.14521061784486175,
+        "interval": [
+          -0.28419047141040943,
+          -0.0062307642793141636
+        ],
+        "label": "heston_slv/low_feller/delta",
+        "pde_discretization_envelope": 0.012186671848586262,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.0485411369695575,
+        "reference_degrees_of_freedom": 511,
+        "reference_half_width": 0.07825204474740381,
+        "reference_standard_error": 0.03480920787357409,
+        "status": "PASS",
+        "total_uncertainty": 0.1389798535655476
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 0.02032415187729386,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "low_feller",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.014699286180678034,
+        "envelope_within_bound": true,
+        "interval_c": 0.20068024498342685,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.02920542682223587,
+        "signed_err_c": 0.03718838169467589
+      },
+      "identity_hash": "034edd7b4dabf82bcd9bb14ce6dc73e7c2d432453041a562651c0bb5c0aa3aa8",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0005294967247212822,
+        "value": 0.01964992354209885
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.03718838169467589,
+        "interval": [
+          -0.12630348159407503,
+          0.20068024498342685
+        ],
+        "label": "heston_slv/low_feller/gamma",
+        "pde_discretization_envelope": 0.014699286180678034,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.08313798436752359,
+        "reference_degrees_of_freedom": 511,
+        "reference_half_width": 0.06565459274054929,
+        "reference_standard_error": 0.02920542682223587,
+        "status": "PASS",
+        "total_uncertainty": 0.16349186328875093
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": 0.3397264205883921,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "sigma_collapse",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.019831137926029026,
+        "envelope_within_bound": true,
+        "interval_c": 0.19002456302782425,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.03748220987820728,
+        "signed_err_c": -0.030998450820379653
+      },
+      "identity_hash": "f653625850f4423d629830db9c9862f2fb68e003d919ca9c3dd8d8cb39f024c9",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0006795554636686884,
+        "value": 0.34028842498164164
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.030998450820379653,
+        "interval": [
+          -0.19002456302782425,
+          0.12802766138706498
+        ],
+        "label": "heston_slv/sigma_collapse/delta",
+        "pde_discretization_envelope": 0.019831137926029026,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.05417454882055804,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.08502042546085754,
+        "reference_standard_error": 0.03748220987820728,
+        "status": "PASS",
+        "total_uncertainty": 0.15902611220744461
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.03323017027145658,
+      "carried_from": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+      "case": "sigma_collapse",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.008219265833492301,
+        "envelope_within_bound": true,
+        "interval_c": 0.4127854305072809,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.07727608362980791,
+        "signed_err_c": 0.08536600695067974
+      },
+      "identity_hash": "f653625850f4423d629830db9c9862f2fb68e003d919ca9c3dd8d8cb39f024c9",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.001401021578295108,
+        "value": -0.03477786280675296
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.08536600695067974,
+        "interval": [
+          -0.2420534166059214,
+          0.4127854305072809
+        ],
+        "label": "heston_slv/sigma_collapse/gamma",
+        "pde_discretization_envelope": 0.008219265833492301,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.1439157886983518,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.175284369024757,
+        "reference_standard_error": 0.07727608362980791,
+        "status": "PASS",
+        "total_uncertainty": 0.32741942355660114
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.3589339946125607,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.016118300132143323,
+        "envelope_within_bound": true,
+        "interval_c": 0.09512356025194135,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.015508532342273324,
+        "signed_err_c": -0.017781558852258482
+      },
+      "identity_hash": "8ab4f6cd61ff75ba287074fc1b4a6334c5e5cfb71088e4bbf2deabf21dfba35b",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0002811709320480028,
+        "value": -0.35861161352804455
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": -0.017781558852258482,
+        "interval": [
+          -0.09512356025194135,
+          0.059560442547424375
+        ],
+        "label": "heston_slv/near_expiry/delta",
+        "pde_discretization_envelope": 0.016118300132143323,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.026045892320363036,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.0351778089471765,
+        "reference_standard_error": 0.015508532342273324,
+        "status": "PASS",
+        "total_uncertainty": 0.07734200139968286
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "candidate_value": -0.01892180646591335,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.018020384615979834,
+        "envelope_within_bound": true,
+        "interval_c": 0.271856932838666,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.04257592671317513,
+        "signed_err_c": 0.0746409296115808
+      },
+      "identity_hash": "8ab4f6cd61ff75ba287074fc1b4a6334c5e5cfb71088e4bbf2deabf21dfba35b",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0007719049573840023,
+        "value": -0.020275052491045678
+      },
+      "source_verdict": {
+        "confidence": 0.975,
+        "economic_bound": 0.5,
+        "estimate_difference": 0.0746409296115808,
+        "interval": [
+          -0.12257507361550442,
+          0.271856932838666
+        ],
+        "label": "heston_slv/near_expiry/gamma",
+        "pde_discretization_envelope": 0.018020384615979834,
+        "reason": "comparison interval is wholly inside the economic bound",
+        "reference_bias_envelope": 0.08262117928891753,
+        "reference_degrees_of_freedom": 127,
+        "reference_half_width": 0.09657443932218786,
+        "reference_standard_error": 0.04257592671317513,
+        "status": "PASS",
+        "total_uncertainty": 0.1972160032270852
+      },
+      "translated_from": "d8bf666d9446510bbabcb08c154b40419cd729cc251d27a3d677297e3dc50eb3",
+      "verdict": "PASS"
+    }
+  ],
+  "decisions": {
+    "equity.snowball.heston_pde": "ADMITTED",
+    "equity.snowball.heston_slv_pde": "ADMITTED"
+  },
+  "imported": {
+    "evidence_files": {
+      "stage16_certification": "evidence/stage16_greek_certification.json",
+      "stage16_decision": "evidence/stage16_decision.json",
+      "stage17_decision": "evidence/stage17_decision.json",
+      "stage17_slv_amendment": "evidence/stage17_slv_aggregate_amendment.json"
+    },
+    "gate_differences": [
+      "Gamma is converted to hedge contracts through each CASE's own model spot, not one hedge inception spot; HedgeContractScale cannot express that, so the economic numbers here are the harness's own and were not re-derived.",
+      "interval_c is the conservative edge of the harness's comparison interval: a Student-t interval on the reference, Bonferroni-split at 97.5% across two stochastic components, widened by the PDE refinement envelope and the reference substep-bias envelope. This module's |err| + 2*SE would be narrower.",
+      "se_budget_met and interval_within_bound restate the harness's own PASS, whose declared reason is that the comparison interval is wholly inside the economic bound. envelope_within_bound is recomputed here from the banked envelope against half the cell bound.",
+      "The delta aggregate is an interval, not a mean +/- SE: mean_signed_bias_c is its centre and se_of_mean_c its HALF-WIDTH, so the reported edge equals the banked edge. heston pools strided across common scrambles; heston_slv is the stage-17 multilevel telescope on held-out seeds 20260811/12 with Welch-t across independent cohorts.",
+      "Gamma carries no aggregate bias gate, because the certification declared one only for delta."
+    ],
+    "harness": [
+      "example/mo_volmodels/16_adi_greek_certification.py",
+      "example/mo_volmodels/17_adi_slv_aggregate_certification.py"
+    ],
+    "not_runnable": "python -m quantark.modelvalidation run will refuse: the reference builder declares the external benchmark and raises rather than standing in for it. The candidate arm IS live, which is what assert_anchors exercises.",
+    "reason": "The ADI 2D Greek certification predates quantark/modelvalidation. Its evidence is translated from the producing harness rather than re-measured: the benchmark is a multilevel control-variate telescope that cost 28.6 hours of held-out production sampling, and re-running it would break the evidence chain it is banked on.",
+    "source_digests": {
+      "stage16_decision_sha256": "55e618eaccf1f4eb97c2620f5b5ee652ac590cc4e8c599a2acf84ed01edc4ef3",
+      "stage16_evidence_sha256": "5c2bd5796e42b6c241f534325738227c38077f978dc4de2b2f345b571e907d07",
+      "stage16_implementation_sha256": "ce027ee25157c30ffd54aedd86032d21ed20a288087f3c82a02cd9b2691c1fba",
+      "stage16_numerical_implementation_sha256": "68d064240d4992706067bd151f7e8c6d78583f051d59995c7cabaa63a352e68e",
+      "stage16_run_configuration_sha256": "ceb69449baa967069b04fa777c067825d1191512aa5c3870fc7c30722e5c235c",
+      "stage16_schema": 13,
+      "stage17_decision_sha256": "df17a642b38f2391dcb99fc7046557fad0092b1faf56c3d4be5527dacf88d6e1",
+      "stage17_evidence_sha256": "84a16fcac6a68ce0fc78795486cd591ae988c5d68bebcc7867e2bdac4f1cb978",
+      "stage17_parent_evidence_sha256": "5c2bd5796e42b6c241f534325738227c38077f978dc4de2b2f345b571e907d07",
+      "stage17_schema": 12
+    }
+  },
+  "projected_sha256": "cd5b2d4724cb7bf47f834300f69e4c0fbe16457f6510a71a5a0e21585e7d30cb",
+  "reference_config": {
+    "allocation": "pilot-frozen cost-weighted Neyman, no optional stopping",
+    "engine": "QESnowballMCEngine / HestonSLVQESnowballMCEngine",
+    "estimator": "multilevel control-variate telescope with exact conditional integration of the spot factor",
+    "external": true,
+    "greeks": "paired central difference (common random numbers)",
+    "harness": "example/case_studies/mo_volmodels/16_adi_greek_certification.py",
+    "method": "randomized_quasi (scrambled Sobol, Brownian bridge)",
+    "variance_scheme": "QE-M (martingale-corrected quadratic exponential)"
+  },
+  "references": {
+    "low_feller": {
+      "batches": 1024,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "f16c2d27a677293a7c8af28eab2fe4e8b24d55414ad3c158d34b6920bc3011ba",
+          "std_errors": {
+            "delta": 0.0005591190307816481,
+            "gamma": 0.00021016985149498296
+          },
+          "values": {
+            "delta": -0.010822491662913838,
+            "gamma": 0.020076486811537654
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "034edd7b4dabf82bcd9bb14ce6dc73e7c2d432453041a562651c0bb5c0aa3aa8",
+          "std_errors": {
+            "delta": 0.0006310937234845283,
+            "gamma": 0.0005294967247212822
+          },
+          "values": {
+            "delta": 0.00028089648027859043,
+            "gamma": 0.01964992354209885
+          }
+        }
+      },
+      "identity_hash": "f16c2d27a677293a7c8af28eab2fe4e8b24d55414ad3c158d34b6920bc3011ba",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 0.0005591190307816481,
+        "gamma": 0.00021016985149498296
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": -0.010822491662913838,
+        "gamma": 0.020076486811537654
+      }
+    },
+    "near_expiry": {
+      "batches": 1024,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "b611e167ded42d7c94fde8d5a51fd6333ece4615c43460fc75660e952ee6d44a",
+          "std_errors": {
+            "delta": 2.7910029724736584e-05,
+            "gamma": 6.699604387333008e-06
+          },
+          "values": {
+            "delta": -0.36359789654459623,
+            "gamma": -0.01766996171329445
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "8ab4f6cd61ff75ba287074fc1b4a6334c5e5cfb71088e4bbf2deabf21dfba35b",
+          "std_errors": {
+            "delta": 0.0002811709320480028,
+            "gamma": 0.0007719049573840023
+          },
+          "values": {
+            "delta": -0.35861161352804455,
+            "gamma": -0.020275052491045678
+          }
+        }
+      },
+      "identity_hash": "b611e167ded42d7c94fde8d5a51fd6333ece4615c43460fc75660e952ee6d44a",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 2.7910029724736584e-05,
+        "gamma": 6.699604387333008e-06
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": -0.36359789654459623,
+        "gamma": -0.01766996171329445
+      }
+    },
+    "near_ki": {
+      "batches": 2048,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "c3f325bafb52739468a6e701ffd196cd54db4bf386402621b8ec9289647428ed",
+          "std_errors": {
+            "delta": 0.0002925824368450366,
+            "gamma": 0.0007779768309990799
+          },
+          "values": {
+            "delta": 2.056225814627629,
+            "gamma": 0.20143927106566836
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "ac5f2acc9799fb33e3e58369fbdafe846fbaa95f3fed420f7b3fcbfa3077d500",
+          "std_errors": {
+            "delta": 0.0003016248440141861,
+            "gamma": 0.0011670367276836262
+          },
+          "values": {
+            "delta": 1.996783384277459,
+            "gamma": 0.18825470298651845
+          }
+        }
+      },
+      "identity_hash": "c3f325bafb52739468a6e701ffd196cd54db4bf386402621b8ec9289647428ed",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 0.0002925824368450366,
+        "gamma": 0.0007779768309990799
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": 2.056225814627629,
+        "gamma": 0.20143927106566836
+      }
+    },
+    "near_ko": {
+      "batches": 1024,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "d2cb2ebbbb681898ff434ed86936bc692802d929c18dd9267e3d6762f2628738",
+          "std_errors": {
+            "delta": 0.00011667503667766224,
+            "gamma": 5.286807498075826e-05
+          },
+          "values": {
+            "delta": 0.10289142743347893,
+            "gamma": -0.01413726168654437
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "94877a8a6a14d3981e12d6de72d5e66368bd5f0b0083914492bda5faa57071e2",
+          "std_errors": {
+            "delta": 0.0005208404446486477,
+            "gamma": 0.0008304280157509115
+          },
+          "values": {
+            "delta": 0.11180577463539769,
+            "gamma": -0.014817386384852931
+          }
+        }
+      },
+      "identity_hash": "d2cb2ebbbb681898ff434ed86936bc692802d929c18dd9267e3d6762f2628738",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 0.00011667503667766224,
+        "gamma": 5.286807498075826e-05
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": 0.10289142743347893,
+        "gamma": -0.01413726168654437
+      }
+    },
+    "ordinary_decayed": {
+      "batches": 1024,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "238df65d7843ba67d5038eb801787f6299061a3205beee4d0c1b277a885362bb",
+          "std_errors": {
+            "delta": 0.00019738250116378665,
+            "gamma": 0.00012272571824964418
+          },
+          "values": {
+            "delta": 0.5856894288524666,
+            "gamma": -0.05921961398998043
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "8ed3d0779b5a23d1ca4e72c35ccd72ecce0df887e556c93fd8189889c2d04841",
+          "std_errors": {
+            "delta": 0.0007546500330056335,
+            "gamma": 0.0014330888712963629
+          },
+          "values": {
+            "delta": 0.5975266298481884,
+            "gamma": -0.05819203247490912
+          }
+        }
+      },
+      "identity_hash": "238df65d7843ba67d5038eb801787f6299061a3205beee4d0c1b277a885362bb",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 0.00019738250116378665,
+        "gamma": 0.00012272571824964418
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": 0.5856894288524666,
+        "gamma": -0.05921961398998043
+      }
+    },
+    "ordinary_full": {
+      "batches": 1024,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "c205715893e1a6de44222f12c92f2f8ee31ecd8c2ae01a623e16f009dd848566",
+          "std_errors": {
+            "delta": 0.0002964968883605158,
+            "gamma": 0.00020306483175078842
+          },
+          "values": {
+            "delta": 0.20260116677473125,
+            "gamma": -0.023239445814847465
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "8bf3af16f1a70963bd9d590aedcf28203deeb8075ed8535a529e0ebd67c2cc23",
+          "std_errors": {
+            "delta": 0.0010960744663256585,
+            "gamma": 0.0012564277802404873
+          },
+          "values": {
+            "delta": 0.20871518847901954,
+            "gamma": -0.022404545021763457
+          }
+        }
+      },
+      "identity_hash": "c205715893e1a6de44222f12c92f2f8ee31ecd8c2ae01a623e16f009dd848566",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 0.0002964968883605158,
+        "gamma": 0.00020306483175078842
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": 0.20260116677473125,
+        "gamma": -0.023239445814847465
+      }
+    },
+    "sigma_collapse": {
+      "batches": 1024,
+      "by_variant": {
+        "heston": {
+          "identity_hash": "09b412ea49c8df63f63347e46e0bfc53f706e1e51bb22b69e450dfcc16de969f",
+          "std_errors": {
+            "delta": 0.00018401380529543395,
+            "gamma": 8.722575183601077e-05
+          },
+          "values": {
+            "delta": 0.3247287699553525,
+            "gamma": -0.033111823037288116
+          }
+        },
+        "heston_slv": {
+          "identity_hash": "f653625850f4423d629830db9c9862f2fb68e003d919ca9c3dd8d8cb39f024c9",
+          "std_errors": {
+            "delta": 0.0006795554636686884,
+            "gamma": 0.001401021578295108
+          },
+          "values": {
+            "delta": 0.34028842498164164,
+            "gamma": -0.03477786280675296
+          }
+        }
+      },
+      "identity_hash": "09b412ea49c8df63f63347e46e0bfc53f706e1e51bb22b69e450dfcc16de969f",
+      "seeds": [
+        20260808
+      ],
+      "std_errors": {
+        "delta": 0.00018401380529543395,
+        "gamma": 8.722575183601077e-05
+      },
+      "stopped_reason": "declared_allocation_exhausted",
+      "values": {
+        "delta": 0.3247287699553525,
+        "gamma": -0.033111823037288116
+      }
+    }
+  },
+  "runtime": {
+    "machine": "arm64",
+    "numpy": "2.4.6",
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "python": "3.11.8",
+    "quantark_git_sha": "d2a7976af2a37f4f640e339ce73316cd7c11fe67"
+  },
+  "schema": 1,
+  "study": {
+    "bounds": {
+      "cell": 0.5,
+      "envelope_fraction": 0.5,
+      "interval_k": 2.0,
+      "mean_signed_bias": 0.1,
+      "se_budget_fraction": 0.25
+    },
+    "candidates": [
+      {
+        "name": "equity.snowball.heston_pde",
+        "params": {
+          "controls": {
+            "barrier_greek_min_n_x": 0,
+            "barrier_greek_steps_per_tick": 0,
+            "greek_min_n_v": 0,
+            "greek_min_n_x": 0,
+            "greek_min_steps_per_year": 0,
+            "grid_style": "concentrated",
+            "v0_boundary": "degenerate_pde",
+            "v_drift_scheme": "auto",
+            "variance_grid_mode": "auto"
+          },
+          "engine": "HestonSnowballPDESolver",
+          "greeks": "central finite bump on a frozen spatial domain",
+          "grid_policy": {
+            "dense_ki_stencil": {
+              "n_x": 600,
+              "steps_per_ki_tick": 16
+            },
+            "min_n_t": 180,
+            "n_v": 135,
+            "n_x": 300,
+            "steps_per_year": 1600
+          },
+          "spot_bump": 0.01
+        }
+      },
+      {
+        "name": "equity.snowball.heston_slv_pde",
+        "params": {
+          "controls": {
+            "barrier_greek_min_n_x": 0,
+            "barrier_greek_steps_per_tick": 0,
+            "greek_min_n_v": 0,
+            "greek_min_n_x": 0,
+            "greek_min_steps_per_year": 0,
+            "grid_style": "concentrated",
+            "v0_boundary": "degenerate_pde",
+            "v_drift_scheme": "auto",
+            "variance_grid_mode": "auto"
+          },
+          "engine": "HestonSLVSnowballPDESolver",
+          "greeks": "central finite bump on a frozen spatial domain",
+          "grid_policy": {
+            "dense_ki_stencil": {
+              "n_x": 600,
+              "steps_per_ki_tick": 16
+            },
+            "min_n_t": 180,
+            "n_v": 135,
+            "n_x": 300,
+            "steps_per_year": 1600
+          },
+          "spot_bump": 0.01
+        }
+      }
+    ],
+    "cases": [
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 2.0,
+            "rho": -0.55,
+            "sigma": 0.3,
+            "theta": 0.04,
+            "v0": 0.04
+          },
+          "spot": 100.0
+        },
+        "name": "ordinary_full",
+        "product_params": {
+          "maturity": 3.0
+        }
+      },
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 2.0,
+            "rho": -0.55,
+            "sigma": 0.3,
+            "theta": 0.04,
+            "v0": 0.04
+          },
+          "spot": 92.0
+        },
+        "name": "ordinary_decayed",
+        "product_params": {
+          "maturity": 1.5
+        }
+      },
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 2.0,
+            "rho": -0.55,
+            "sigma": 0.3,
+            "theta": 0.04,
+            "v0": 0.04
+          },
+          "spot": 102.7
+        },
+        "name": "near_ko",
+        "product_params": {
+          "maturity": 1.0
+        }
+      },
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 2.0,
+            "rho": -0.55,
+            "sigma": 0.3,
+            "theta": 0.04,
+            "v0": 0.04
+          },
+          "spot": 75.5
+        },
+        "name": "near_ki",
+        "product_params": {
+          "dense_ki_stencil": true,
+          "maturity": 1.0
+        }
+      },
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 0.6,
+            "rho": -0.7,
+            "sigma": 0.5,
+            "theta": 0.04,
+            "v0": 0.04
+          },
+          "spot": 100.0
+        },
+        "name": "low_feller",
+        "product_params": {
+          "maturity": 2.0
+        }
+      },
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 3.0,
+            "rho": -0.5,
+            "sigma": 0.00311,
+            "theta": 0.00306,
+            "v0": 0.14027
+          },
+          "spot": 100.0
+        },
+        "name": "sigma_collapse",
+        "product_params": {
+          "maturity": 3.0
+        }
+      },
+      {
+        "environment_params": {
+          "heston": {
+            "kappa": 2.0,
+            "rho": -0.55,
+            "sigma": 0.3,
+            "theta": 0.04,
+            "v0": 0.04
+          },
+          "spot": 100.0
+        },
+        "name": "near_expiry",
+        "product_params": {
+          "maturity": 0.25
+        }
+      }
+    ],
+    "name": "adi2d-snowball-greeks",
+    "quantities": [
+      "delta",
+      "gamma"
+    ],
+    "quick": false,
+    "sampling": {
+      "bump": 0.01,
+      "max_batches": 2048,
+      "min_batches": 1024,
+      "paths_per_batch": 8192,
+      "seed": 20260808
+    },
+    "source_text": "# Snowball spot Greeks under Heston and Heston-SLV: the ADI 2D certification.\n#\n# Two deterministic engines -- the Heston ADI solver and the Heston-SLV ADI\n# solver, each two-dimensional in (spot, variance) -- certified for spot delta\n# and gamma across seven variance regimes.  The knock-in is monitored DISCRETELY\n# at 252 observations per year, which is what a Chinese snowball actually trades\n# and what keeps the continuous-monitoring machinery out of every cell here.\n#\n# THIS STUDY IS ARCHIVED, NOT RUNNABLE END TO END.\n#\n# Its benchmark is not a paired-RQMC average.  It is a multilevel\n# control-variate telescope on independent seed families, with exact conditional\n# integration of the spot factor, a pilot-frozen cost-weighted Neyman allocation\n# and a substep-refinement bias envelope -- machinery that lives in\n# example/case_studies/mo_volmodels/16_adi_greek_certification.py and cost 28.6 hours of\n# held-out production sampling.  The reference builder named below DECLARES that\n# benchmark and refuses to run, because a simplified stand-in would certify\n# against something the banked evidence does not describe.\n#\n# What this file IS for: it defines the candidate arm exactly, so\n# `assert_anchors` can re-run the two deterministic solvers on every commit and\n# check they still produce the numbers the evidence claims.  That takes about\n# four minutes for all fourteen cells.\n#\n# Banked evidence and provenance:\n#   docs/modelvalidation/certificates/adi2d-snowball-greeks/\n#\n# Economic scale: the trade is 50,000,000 of notional and one index-futures\n# contract at multiplier 200 hedges it at the cohort's strictest inception level\n# (4,532.52).  NOTE that the certification converted GAMMA using each case's own\n# model spot rather than the hedge inception spot -- a convention this module's\n# HedgeContractScale does not express -- so the banked cells carry their own\n# already-converted economic numbers and the scale below is declared for the\n# record, not used to re-derive them.  See the certificate README.\n\nstudy: adi2d-snowball-greeks\nschema: 1\n\n# Delta and gamma only.  PV was certified separately, by the stage-11 PDE\n# convergence gate, and folding it in here would claim coverage this evidence\n# does not have.\nquantities: [delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\n# The production sampling the banked evidence used, recorded so the certificate\n# is self-describing.  Per-case allocation was frozen from pilots and is not\n# expressible as a single batch count; the numbers here are the heston arm's\n# base allocation, and the per-case grid is in the banked evidence.\nsampling:\n  paths_per_batch: 8192\n  min_batches: 1024\n  max_batches: 2048\n  seed: 20260808\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 4532.52\n    notional: 50000000.0\n\nenvironment:\n  builder: equity.snowball.heston_flat_market\n  params:\n    spot: 100.0\n    rate: 0.02\n    div_yield: 0.01\n    asset_name: synthetic_index\n\nproduct:\n  builder: equity.snowball.vol_dense_ki\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ki_barrier: 75.0\n    ko_rate: 0.15\n    rebate_rate: 0.15\n    maturity: 1.0\n    contract_multiplier: 1.0\n    ki_observations_per_year: 252\n    ko_first_observation_years: 0.25\n    ko_observation_interval_years: 0.0833333333333333\n\nreference:\n  builder: equity.snowball.vol_multilevel_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.snowball.heston_pde\n    params: {}\n  - builder: equity.snowball.heston_slv_pde\n    params: {}\n\n# Seven variance regimes.  Each case names its own Heston block: the regime IS\n# the scenario here, in a way a spot shift alone cannot reproduce.\ncases:\n  # Three years at inception, comfortably between the barriers. The longest\n  # time axis in the study, so time-discretization error has the most room to\n  # accumulate.\n  - name: ordinary_full\n    environment:\n      spot: 100.0\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 3.0}\n\n  # Eighteen months in and 8% underwater: the seasoned state most of a live\n  # book is actually in, and the one a fresh-trade-only study never visits.\n  - name: ordinary_decayed\n    environment:\n      spot: 92.0\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 1.5}\n\n  # Just under the knock-out barrier at 103. The KO discontinuity sits inside\n  # the bump stencil, which is where a deterministic gamma usually breaks first.\n  - name: near_ko\n    environment:\n      spot: 102.7\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 1.0}\n\n  # Half a point above the knock-in barrier at 75, where the payoff turns over.\n  # This cell certifies the production Greek policy's own step density -- 16 ADI\n  # steps per 252-clock KI tick -- against a 32-step solve, so it runs a denser\n  # stencil than every other cell and doubles the spot axis to resolve a barrier\n  # the trade is sitting on.\n  - name: near_ki\n    environment:\n      spot: 75.5\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 1.0, dense_ki_stencil: true}\n\n  # Feller ratio 2*kappa*theta/sigma^2 = 0.192, far below 1: the variance\n  # process hits zero often, which is where a variance-axis discretization\n  # either holds or does not. Roughly half the certification's total cost.\n  - name: low_feller\n    environment:\n      spot: 100.0\n      heston: {v0: 0.04, kappa: 0.60, theta: 0.04, sigma: 0.50, rho: -0.70}\n    product: {maturity: 2.0}\n\n  # Vol-of-vol collapsed to 0.003 with v0 far above theta: the variance PDE\n  # becomes convection-dominated, the regime that exposed a first-order upwind\n  # bias in the variance transport.\n  - name: sigma_collapse\n    environment:\n      spot: 100.0\n      heston: {v0: 0.14027, kappa: 3.0, theta: 0.00306, sigma: 0.00311, rho: -0.50}\n    product: {maturity: 3.0}\n\n  # Three months left: few observations remain and time-discretization error has\n  # nowhere to average out.\n  - name: near_expiry\n    environment:\n      spot: 100.0\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 0.25}\n"
+  },
+  "wall_clock_seconds": 722.6253349781036
+}
