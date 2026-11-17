@@ -87,9 +87,20 @@ def test_ac5_full_risk_within_budget_of_the_reference(case, months, maturity):
         assert abs(out[key] - ref[key]) <= budget(key, ref[key]), (key, out[key], ref[key])
 
 
+# This process's own peak RSS in bytes. Linux keeps ru_maxrss across execve (getrusage(2)): a child spawned
+# from a 13 GB xdist worker reports 13 GB before doing anything. VmHWM is the high-water mark of the
+# address space, which execve replaces, so it starts fresh. macOS's ru_maxrss is per process (bytes).
+_PEAK_BYTES = """
+def peak_bytes():
+    if sys.platform == "darwin":
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    with open("/proc/self/status") as status:
+        return next(int(line.split()[1]) * 1024 for line in status if line.startswith("VmHWM:"))
+"""
+
 _AC14_CHILD = """
 import json, resource, sys
-import numpy as np
+import numpy as np""" + _PEAK_BYTES + """
 from example.case_studies.localvol_transition_quad.contract import snowball_contract
 from example.case_studies.localvol_transition_quad.engine import OUTPUTS, LocalVolQuad
 from example.case_studies.localvol_transition_quad.grid import GridConfig
@@ -99,27 +110,41 @@ m = load_fixture()
 c = snowball_contract(m.spot, 1.0, 12)
 engine = LocalVolQuad(CTMCKernel(), GridConfig(cells=400, half_width_std=8.0))
 a, b = engine.full_risk(c, m)["values"], engine.full_risk(c, m)["values"]
-peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 print(json.dumps({
     "identical": all(np.float64(a[k]).tobytes() == np.float64(b[k]).tobytes() for k in OUTPUTS),
-    "peak_bytes": peak if sys.platform == "darwin" else peak * 1024,
+    "peak_bytes": peak_bytes(),
 }))
 """
 
 
-@pytest.mark.slow
-def test_ac14_full_risk_byte_identical_and_memory_bounded():
-    # A fresh interpreter: ru_maxrss is a process-lifetime high-water mark, so measured inside an
-    # xdist worker it reported whatever the worker's earlier tests peaked at (8.6 GB on x86 CI,
-    # run 43695238886), not this computation.
+def _run_child(code: str) -> dict:
+    """Run ``code`` in a fresh interpreter (this test's import path, repo root as cwd); its last stdout line is
+    JSON."""
     import os
     import subprocess
 
     root = Path(__file__).resolve().parents[2]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
-    proc = subprocess.run([sys.executable, "-c", _AC14_CHILD], cwd=root, env=env,
+    proc = subprocess.run([sys.executable, "-c", code], cwd=root, env=env,
                           capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr[-2000:]
-    report = json.loads(proc.stdout.strip().splitlines()[-1])
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_child_peak_excludes_the_parents_high_water_mark():
+    # The CI failure mode of AC14 (x86 run 43837324340: 8.7-13 GB reported for a ~110 MB computation): the
+    # spawning process's peak must not leak into the child's measurement.
+    blob = np.ones(64 * 1024 ** 2)      # 512 MiB touched in this process
+    del blob
+    report = _run_child("import json, resource, sys" + _PEAK_BYTES + "print(json.dumps({'peak_bytes': peak_bytes()}))")
+    assert report["peak_bytes"] < 256 * 1024 ** 2
+
+
+@pytest.mark.slow
+def test_ac14_full_risk_byte_identical_and_memory_bounded():
+    # A fresh interpreter, and a peak that is its own (see _PEAK_BYTES): measured inside an xdist worker,
+    # ru_maxrss reported the worker's earlier tests (8.6 GB, run 43695238886); measured as ru_maxrss in a
+    # child, Linux still reported them, carried across execve (8.7-13 GB, run 43837324340).
+    report = _run_child(_AC14_CHILD)
     assert report["identical"]
     assert report["peak_bytes"] < 8 * 1024 ** 3
