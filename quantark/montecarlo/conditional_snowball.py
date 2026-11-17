@@ -14,16 +14,22 @@ payoff is not represented by that interval decomposition.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 from scipy.special import log_ndtr, ndtr
 
-from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import Tolerance
+
+if TYPE_CHECKING:
+    # ``montecarlo`` sits below ``asset``: equity MC engines import this
+    # module, so a runtime import of the product here closes a cycle.
+    from quantark.asset.equity.product.option.snowball_option import (
+        SnowballOption,
+    )
 
 
 @dataclass(frozen=True)
@@ -69,6 +75,11 @@ def _truncated_lognormal_first_moment(
 
 
 def _validate_supported_product(product: SnowballOption) -> None:
+    # Deferred: see the TYPE_CHECKING import above.
+    from quantark.asset.equity.product.option.snowball_option import (
+        SnowballOption,
+    )
+
     if not isinstance(product, SnowballOption):
         raise ValidationError("affine spot conditioning requires SnowballOption")
     if product.is_reverse:
