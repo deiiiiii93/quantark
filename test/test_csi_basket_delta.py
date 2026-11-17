@@ -684,6 +684,21 @@ class TestReport:
         assert "Index rebalance vs hedge rebalance" in report_page
         assert 'class="eq"' in report_page
 
+    def test_formulas_are_mathml(self, report_page):
+        assert report_page.count('<math display="block">') >= 6
+        assert "<mfrac>" in report_page and "<munder><mo>∑</mo>" in report_page
+        assert "Δ_I" not in report_page and "I_T" not in report_page
+        assert "<sub>" not in report_page
+
+    def test_tex_converter(self):
+        mod = _load_report()
+        assert mod.mx("S_i") == "<math><msub><mi>S</mi><mi>i</mi></msub></math>"
+        assert mod.mx(r"\frac{a}{b}") == "<math><mfrac><mrow><mi>a</mi></mrow><mrow><mi>b</mi></mrow></mfrac></math>"
+        assert '<mo stretchy="false">(</mo>' in mod.mx("f(x)")
+        assert "<mo>−</mo>" in mod.mx("a - b")
+        with pytest.raises(ValueError):
+            mod.mx(r"\nope{x}")
+
     def test_main_writes_file(self, tmp_path, monkeypatch):
         mod = _load_report()
         out = tmp_path / "report.html"

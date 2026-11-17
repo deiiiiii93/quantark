@@ -319,10 +319,135 @@ def gk(text: str) -> str:
     return re.sub("([α-ω])", r'<span class="gk">\1</span>', text)
 
 
+# ---------------------------------------------------------------------------
+# Math: a small LaTeX subset -> native MathML (no CDN; the page stays one self-contained file)
+# ---------------------------------------------------------------------------
+
+_MATH_OPS = set("+−-=()[],·≈′/∂<>|:×∈⟹")
+_UPRIGHT_GREEK = set("ΓΔΘΛΞΠΣΦΨΩ")
+
+
+class _Tex:
+    """Recursive-descent parser for: letters, numbers, operators, x_a, x^b, {groups}, \\frac{}{}, \\sum,
+    \\sqrt{}, \\bar x, \\up{E} (upright identifier, any length), \\text{...}, \\, and \\quad.  Scripts must touch their base."""
+
+    def __init__(self, src: str):
+        self.s, self.i = src, 0
+
+    def parse(self) -> str:
+        out = self.expr()
+        if self.i != len(self.s):
+            raise ValueError(f"unparsed math at {self.i}: {self.s!r}")
+        return out
+
+    def expr(self) -> str:
+        out = []
+        while True:
+            while self.i < len(self.s) and self.s[self.i] == " ":
+                self.i += 1
+            if self.i >= len(self.s) or self.s[self.i] == "}":
+                return "".join(out)
+            out.append(self.atom())
+
+    def atom(self) -> str:
+        base, sub, sup = self.base(), None, None
+        while self.i < len(self.s) and self.s[self.i] in "_^":
+            mark = self.s[self.i]
+            self.i += 1
+            if mark == "_":
+                sub = self.base()
+            else:
+                sup = self.base()
+        tag_under = base == "<mo>∑</mo>"
+        if sub and sup:
+            return f"<{'munderover' if tag_under else 'msubsup'}>{base}{sub}{sup}</{'munderover' if tag_under else 'msubsup'}>"
+        if sub:
+            return f"<munder>{base}{sub}</munder>" if tag_under else f"<msub>{base}{sub}</msub>"
+        if sup:
+            return f"<msup>{base}{sup}</msup>"
+        return base
+
+    def group(self) -> str:
+        if self.s[self.i] != "{":
+            raise ValueError(f"expected {{ at {self.i}: {self.s!r}")
+        self.i += 1
+        inner = self.expr()
+        self.i += 1
+        return f"<mrow>{inner}</mrow>"
+
+    def raw(self) -> str:
+        end = self.s.index("}", self.i)
+        text = self.s[self.i + 1:end]
+        self.i = end + 1
+        return html.escape(text)
+
+    def base(self) -> str:
+        c = self.s[self.i]
+        if c == "{":
+            return self.group()
+        if c == "\\":
+            cmd = re.match(r"\\([a-zA-Z]+|.)", self.s[self.i:])
+            if cmd is None:
+                raise ValueError(f"dangling backslash at {self.i}: {self.s!r}")
+            name = cmd.group(1)
+            self.i += 1 + len(name)
+            if name == "frac":
+                num_, den = self.group(), self.group()
+                return f"<mfrac>{num_}{den}</mfrac>"
+            if name == "sum":
+                return "<mo>∑</mo>"
+            if name == "sqrt":
+                return f"<msqrt>{self.group()}</msqrt>"
+            if name == "bar":
+                return f'<mover accent="true">{self.base()}<mo>¯</mo></mover>'
+            if name == "up":
+                return f'<mi mathvariant="normal">{self.raw()}</mi>'
+            if name == "text":
+                return f"<mtext>{self.raw()}</mtext>"
+            if name == ",":
+                return '<mspace width="0.17em"></mspace>'
+            if name == "quad":
+                return '<mspace width="1em"></mspace>'
+            raise ValueError(f"unknown math command \\{name}")
+        num_match = re.match(r"\d+(?:\.\d+)?", self.s[self.i:])
+        if num_match:
+            self.i += len(num_match.group(0))
+            return f"<mn>{num_match.group(0)}</mn>"
+        self.i += 1
+        if c in "()[]|":
+            return f'<mo stretchy="false">{c}</mo>'     # fences never stretch: no formula here needs it
+        if c == "′":
+            return '<mo lspace="0" rspace="0">′</mo>'
+        if c in _MATH_OPS:
+            return f"<mo>{html.escape(MINUS if c == '-' else c)}</mo>"
+        if c in _UPRIGHT_GREEK:
+            return f'<mi mathvariant="normal">{c}</mi>'
+        return f"<mi>{html.escape(c)}</mi>"
+
+
+def mx(src: str) -> str:
+    """Inline formula."""
+    return f"<math>{_Tex(src).parse()}</math>"
+
+
+def with_math(text: str) -> str:
+    """Typeset the plain-text symbols that recur in labels and notes (already HTML-escaped text)."""
+    return text.replace("Δ_I", DI).replace("I_T", IT)
+
+
+def mxb(*lines: str) -> str:
+    """Display formula block; several lines stack, each centred on its own row."""
+    rows = "".join(f'<math display="block">{_Tex(s).parse()}</math>' for s in lines)
+    return f'<div class="eq">{rows}</div>'
+
+
+DI, IT = mx("Δ_I"), mx("I_T")
+
+
 def table(headers, rows, note="", text=False):
-    head = "".join(f"<th>{gk(html.escape(h))}</th>" for h in headers)
+    head = "".join(f"<th>{with_math(gk(html.escape(h)))}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
-    foot = f'<p class="note">{note}</p>' if note else ""
+    foot = f'<p class="note">{with_math(note)}</p>' if note else ""
     cls = ' class="text"' if text else ""
     return f'<div class="scroll"><table{cls}><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>{foot}'
 
@@ -477,7 +602,7 @@ def section_summary(st: Study) -> str:
         ["M1 gap · GOLD", f"{gap_cell(m['M1'], gold, rel=True)} of its delta",
          f"{gap_cell(m['M1'], gold)} CNY/1%"],
         ["Σ M1 gaps over names", "total delta notional", f"{signed(sum(m['M1']['gap_cash_per_pct']))} CNY/1%"],
-    ] + [[f"residual σ · {k}", METHOD_NOTES[k][0], f"{sigma_cell(m[k])} CNY/day"] for k in ("M1", "M3", "M4", "M5")]
+    ] + [[f"residual σ · {k}", with_math(html.escape(METHOD_NOTES[k][0])), f"{sigma_cell(m[k])} CNY/day"] for k in ("M1", "M3", "M4", "M5")]
     delta_tbl = table(["base 5-name, fixed shares, 1Y ATM call", "", "value"], delta_rows,
                       note="Gaps are method − REF in CNY per 1% move of the name, ± paired SE, on 1e8 CNY of "
                            "index notional. Residual σ: daily P&L σ of the mis-split, CNY.")
@@ -544,7 +669,7 @@ CNY/day against {num(min(m1_sig)) if m1_sig else "–"}–{num(max(m1_sig)) if m
 delta on TECH than the reference. M3's residual is {sigma_text(m['M3'])} CNY/day. The total delta notional is the
 same under M1, M2 and REF (Euler; the M1 gaps sum to {signed(sum(m['M1']['gap_cash_per_pct']))} CNY/1%): only the split differs.</li>
 <li><b>(d) The moment-matched per-name model (M5) is a cheap middle ground.</b> Its residual σ on the base case is
-{sigma_text(m['M5'])} CNY/day against M1's {sigma_text(m['M1'])}. It inherits the MM model's own Δ_I error (section 8).
+{sigma_text(m['M5'])} CNY/day against M1's {sigma_text(m['M1'])}. It inherits the MM model's own {DI} error (section 8).
 Among resolved M5 gaps in sweep 1, {worst_m5}.</li>
 <li><b>(e) Quote PV off the multi-name MC.</b> The fast single-index (moment-matched) model is not safe for quoting
 baskets that mix equities with hedge-like or negatively correlated assets: it is {pv_text(bp)} off on the base ATM
@@ -598,15 +723,19 @@ def section_setup(st: Study) -> str:
         [n, pct(w, 0), pct(v, 0), pct(q, 1)]
         for n, w, v, q in zip(b["names"], b["target_weights"], b["vols"], b["div_yields"])])
     corr = table([""] + b["names"], [[n] + [num(c, 2) for c in row] for n, row in zip(b["names"], b["corr"])])
-    methods = table(["method", "what it is", "how"], [[k, html.escape(METHOD_NOTES[k][0]), html.escape(METHOD_NOTES[k][1])]
+    methods = table(["method", "what it is", "how"], [[k, with_math(html.escape(METHOD_NOTES[k][0])),
+                                                       with_math(html.escape(METHOD_NOTES[k][1]))]
                                                      for k in ("REF",) + METHODS], text=True)
     notional = b["units"] * b["index_level"]
+    f_index, f_reset = mx(r"I(t) = \sum_i n_i S_i(t)"), mx(r"n_i = w_i I / S_i")
+    f_gap = mx(r"(Δ_i^{m} - Δ_i^{\up{ref}})\, S_i × \up{units} × 1%")
+    f_resid, f_q = mx(r"\sqrt{e^⊤Σe}"), mx(r"Q = \bar{e}^⊤Σ\bar{e} - \up{tr}(Σ\,\up{Cov}(\bar{e}))")
     return section(2, "SETUP", "Basket, methods and metrics", f"""
 <p class="lead">A stylised 5-name customized strategy index (synthetic, no desk data), European options struck today on
 {num(notional)} CNY of index notional. Prices and deltas from {b['n_paths']:,} paths × {b['n_batches']} RQMC batches per
 scenario.</p>
 <dl class="spec">
-<dt>Index</dt><dd>Price return. Between rebalances I(t) = Σ nᵢSᵢ(t); at a rebalance nᵢ resets to wᵢ·I/Sᵢ. Rule A
+<dt>Index</dt><dd>Price return. Between rebalances {f_index}; at a rebalance the counts reset to {f_reset}. Rule A
 (fixed shares) has no rebalance in the option's life.</dd>
 <dt>Dynamics</dt><dd>Multi-name GBM, per-name vol σᵢ and yield qᵢ, flat rate, correlation ρ below. Exact sampling at
 the stub end, each rebalance date and expiry.</dd>
@@ -620,12 +749,12 @@ the stub end, each rebalance date and expiry.</dd>
 {methods}
 <h3 class="sub">Metrics</h3>
 <dl class="spec">
-<dt>Gap, CNY/1%</dt><dd>(Δᵢᵐ − Δᵢʳᵉᶠ) · Sᵢ · units · 1%: the hedge error per 1% move of name i.</dd>
+<dt>Gap, CNY/1%</dt><dd>{f_gap}: the hedge error per 1% move of name {mx("i")}.</dd>
 <dt>Paired SE</dt><dd>SE across RQMC batches of the difference itself (same paths), not root-sum-of-squares.</dd>
 <dt>3-SE rule</dt><dd>A gap is resolved only if |gap| &gt; 3 paired SE (plus the FD bias allowance for M3).
 Everything else prints as <span class="nr">not resolved</span>.</dd>
-<dt>Residual σ</dt><dd>√(eᵀΣe) with eᵢ the cash-delta error and Σ the daily return covariance (244-day year):
-the daily P&amp;L σ of using method m instead of REF. Bias-corrected (Q = ēᵀΣē − tr(Σ·Cov ē)), resolved only if
+<dt>Residual σ</dt><dd>{f_resid} with {mx("e_i")} the cash-delta error and {mx("Σ")} the daily return covariance
+(244-day year): the daily P&amp;L σ of using method m instead of REF. Bias-corrected ({f_q}), resolved only if
 Q &gt; 3·SE(Q); unresolved values show their 3-SE upper bound.</dd>
 <dt>PV error</dt><dd>(MM − MC) × units in CNY, resolved when |MM − MC| &gt; 3 MC SE (MM is deterministic).</dd>
 </dl>
@@ -664,17 +793,20 @@ def section_sanity(st: Study) -> str:
     cm1 = conc["methods"]["M1"]
     conc_rows = [[n, pct(conc["target_weights"][i], 0), num(conc["ref_cash_per_pct"][i]), gap_cell(cm1, i),
                   gap_cell(cm1, i, rel=True), gap_cell(conc["methods"]["M3"], i)] for i, n in enumerate(conc["names"])]
+    f_euler = mx(r"\sum_i S_i \frac{∂I_T}{∂S_i} = I_T")
+    f_euler_err = mx(r"|\sum_i S_i ∂I_T/∂S_i - I_T| / I_T")
+    euler_rows = [["max over paths " + f_euler_err, sci(eu["euler_max_rel_err_per_path"])],
+                  [mx(r"\sum_i S_i Δ_i^{\up{ref}}"), num(eu["sum_S_delta"], 6)], [mx(r"I\,Δ_I"), num(eu["I_delta_index"], 6)]]
     return section(3, "SANITY", "The pricer reproduces what it must", f"""
 <p class="lead">On one name the moment-matched model equals Black–Scholes to {sci(max_rel)} relative, and the MC sits
-within |z| ≤ {num(max_z, 2)} of it. Per path, Σ Sᵢ·∂I_T/∂Sᵢ = I_T to {sci(eu['euler_max_rel_err_per_path'])}.</p>
+within |z| ≤ {num(max_z, 2)} of it. Per path, {f_euler} to {sci(eu['euler_max_rel_err_per_path'])}.</p>
 <h3 class="sub">Single name vs Black–Scholes · per index unit</h3>
 {table(["case", "type", "BS price", "MM/BS − 1", "MC price ± SE", "z", "BS Δ", "MM Δ", "MC Δ", "z"], sn_rows)}
-<h3 class="sub">Moments of I_T · MC sample vs closed form</h3>
+<h3 class="sub">Moments of {IT} · MC sample vs closed form</h3>
 <p>{flag_txt}</p>
 {table(["case", "E[I] closed", "E[I] MC", "z", "E[I²] closed", "E[I²] MC", "z", "Euler / path", "replicates z₁ / z₂"], mo_rows)}
 <h3 class="sub">Euler identity · {lab(eu['case'])}</h3>
-{table(["check", "value"], [["max over paths |Σ Sᵢ∂I_T/∂Sᵢ − I_T| / I_T", sci(eu["euler_max_rel_err_per_path"])],
-                           ["Σ Sᵢ·Δᵢʳᵉᶠ", num(eu["sum_S_delta"], 6)], ["I·Δ_I", num(eu["I_delta_index"], 6)]])}
+{table(["check", "value"], euler_rows)}
 <h3 class="sub">Exchangeable control · all methods agree</h3>
 <p>{lab(ctrl['label'])}: {ctrl_resolved} of {5 * len(ctrl['names'])} method gaps resolved.</p>
 {table(["name", "REF, CNY/1%"] + list(METHODS), ctrl_rows)}
@@ -729,7 +861,7 @@ def section_fixed(st: Study) -> str:
     atm_by_tenor = ", ".join(f"{t} {gap_cell(st.find1(t, True, 1.0)['methods']['M1'], tech, rel=True)}"
                              for t in st.tenors)
     return section(4, "FIXED", "Fixed shares: where the split goes wrong", f"""
-<p class="lead">With no rebalance in the option's life the weights drift with prices, and splitting Δ_I by current
+<p class="lead">With no rebalance in the option's life the weights drift with prices, and splitting {DI} by current
 shares misallocates: on the 1Y ATM call M1 is {gap_cell(bt, tech, rel=True)} off on TECH and
 {gap_cell(bt, gold, rel=True)} on GOLD ({gap_cell(bt, tech)} and {gap_cell(bt, gold)} CNY/1%). At the money the TECH
 gap by tenor is {atm_by_tenor}. Per-name FD on the multi-name MC (M3) is resolved in {m3_res} of {m3_tot}
@@ -810,35 +942,50 @@ def rebalance_math(st: Study) -> str:
         i = name_idx(fixed, name)
         return f"{name} {signed(fx_p[i])} predicted vs {signed(fx_g[i])} measured ({spct(fx_p[i] / fx_g[i] - 1.0)})"
 
+    # Formulas built outside the f-string: backslashes are not allowed in f-string expressions before Python 3.12.
+    t1, ti, tt, ni = mx("t_1"), mx("t"), mx("T"), mx("n_i")
+    reset = mx(r"n_i = \frac{w_i I(t_1)}{S_i(t_1)}")
+    growth = mx(r"\sum_i w_i \frac{S_i(t_{k+1})}{S_i(t_k)}")
+    split = mx(r"I_T = I(t_1)\,G")
+    eq_value = mxb(r"V(t) = \up{E}[h(I(t_1))], \quad h(x) = e^{-r(T-t_1)}\,\up{E}[f(x\,G)]",
+                   r"I(t_1) = \sum_i n_i S_i(t_1)")
+    pathwise = mx(r"\frac{∂S_i(t_1)}{∂S_i(t)} = \frac{S_i(t_1)}{S_i(t)}")
+    eq_exact = mxb(r"\up{REF}_i - \up{M1}_i = \up{E}[h′(I(t_1))\,(n_i S_i(t_1) - w_i I(t_1))]")
+    stub = mx(r"τ = t_1 - t")
+    hprime, qbar = mx("h′"), mx(r"\bar{q}")
+    eq_first = mxb(r"\up{REF}_i - \up{M1}_i ≈ τ\, w_i\, I\, [(β_i - 1)\,σ_I^2\, I\,Γ + (\bar{q} - q_i)\,Δ]",
+                   r"β_i = \frac{{(Σw)}_i}{σ_I^2}, \quad σ_I^2 = w^⊤Σw, \quad \bar{q} = w^⊤q")
+    eq_limit = mxb(r"\frac{\up{d}I}{I} = \sum_i w_i \frac{\up{d}S_i}{S_i} \quad ⟹ \quad \frac{∂V}{∂S_i} = V_I\, n_i")
     terms = [
-        ["τ", "the error scales with the time to the <b>next rebalance date</b>, not to maturity"],
-        ["β<sub>i</sub> − 1", "high-β TECH is under-hedged (gap &lt; 0); low-β GOLD is over-hedged"],
-        ["β<sub>i</sub> from w<sub>i</sub> alone",
-         "equal vols with unequal weights still open a gap: the heaviest name has β &gt; 1 (section 3)"],
-        ["q̄ − q<sub>i</sub>", "yield dispersion splits even a deep in-the-money call, where Γ ≈ 0 (section 7)"],
-        ["I·Γ", "the vol term is a gamma term: largest near the money and for long stubs"],
+        [mx("τ"), "the error scales with the time to the <b>next rebalance date</b>, not to maturity"],
+        [mx("β_i - 1"), "high-β TECH is under-hedged (gap &lt; 0); low-β GOLD is over-hedged"],
+        [f"{mx('β_i')} from {mx('w_i')} alone",
+         f"equal vols with unequal weights still open a gap: the heaviest name has {mx('β > 1')} (section 3)"],
+        [mx(r"\bar{q} - q_i"), f"yield dispersion splits even a deep in-the-money call, where {mx('Γ ≈ 0')} (section 7)"],
+        [mx(r"I\,Γ"), "the vol term is a gamma term: largest near the money and for long stubs"],
     ]
     return f"""
 <h3 class="sub">Why it works · the error lives only until the next rebalance date</h3>
-<p><b>1. After a rebalance, only the index level matters.</b> At the next rebalance date t₁ the share counts reset to
-w<sub>i</sub>·I(t₁)/S<sub>i</sub>(t₁). From then on, each period's growth is Σ w<sub>i</sub>·S<sub>i</sub>(t<sub>k+1</sub>)/S<sub>i</sub>(t<sub>k</sub>):
-it depends on returns, not on price levels, and under GBM those returns are independent of everything before t₁. So
-I<sub>T</sub> = I(t₁)·G with G independent of the state at t₁, and</p>
-<div class="eq">V(t) = E[ h(I(t₁)) ],&nbsp;&nbsp; h(x) = e<sup>−r(T−t₁)</sup>·E[ f(x·G) ],&nbsp;&nbsp; I(t₁) = Σ n<sub>i</sub>·S<sub>i</sub>(t₁) with today's n<sub>i</sub></div>
-<p>Today's individual prices can affect V only through the stub up to t₁. Everything after t₁ sees only the index level.</p>
-<p><b>2. The exact error is a covariance over the stub.</b> Differentiating each path, with ∂S<sub>i</sub>(t₁)/∂S<sub>i</sub>(t) = S<sub>i</sub>(t₁)/S<sub>i</sub>(t):</p>
-<div class="eq">REF<sub>i</sub> − M1<sub>i</sub> = E[ h′(I(t₁)) · ( n<sub>i</sub>S<sub>i</sub>(t₁) − w<sub>i</sub>·I(t₁) ) ]&nbsp;&nbsp;&nbsp;(cash delta; w = current weights)</div>
+<p><b>1. After a rebalance, only the index level matters.</b> At the next rebalance date {t1} the share counts reset
+to {reset}. From then on, each period's growth is {growth}. It depends on returns, not on price levels, and under GBM
+those returns are independent of everything before {t1}. So {split} with {mx("G")} independent of the state at {t1}, and</p>
+{eq_value}
+<p>with today's {ni} in the sum. Today's individual prices can affect {mx("V")} only through the stub from {ti} to {t1};
+everything after {t1} sees only the index level.</p>
+<p><b>2. The exact error is a covariance over the stub.</b> Differentiate each path, using {pathwise}. In cash delta per
+index unit, with {mx("w")} the current weights:</p>
+{eq_exact}
 <p>It sums to zero over the names, because the weights sum to one. That is the Euler identity: every method carries the same
 total delta, and only the split differs.</p>
-<p><b>3. To first order in the stub τ = t₁ − t.</b> Expand h′ around today's index. The drift of the weights cancels the
-Δ that a naive expansion leaves in the vol term, so the vol term carries gamma only:</p>
-<div class="eq">REF<sub>i</sub> − M1<sub>i</sub> ≈ τ · w<sub>i</sub> · I · [ (β<sub>i</sub> − 1)·σ<sub>I</sub>²·I·Γ + (q̄ − q<sub>i</sub>)·Δ ]<br>
-β<sub>i</sub> = (Σw)<sub>i</sub> / σ<sub>I</sub>²,&nbsp;&nbsp; σ<sub>I</sub>² = wᵀΣw,&nbsp;&nbsp; q̄ = wᵀq,&nbsp;&nbsp; Δ, Γ = index delta and gamma</div>
+<p><b>3. To first order in the stub {stub}.</b> Expand {hprime} around today's index. The drift of the weights cancels the
+{mx("Δ")} that a naive expansion leaves in the vol term, so the vol term carries gamma only:</p>
+{eq_first}
+<p>Here {mx("Δ")} and {mx("Γ")} are the index delta and gamma, and {qbar} is the weighted yield.</p>
 {table(["term", "what it explains"], terms, text=True)}
-<p><b>4. The limit.</b> As the rebalance interval goes to zero the index becomes a constant mix,
-dI/I = Σ w<sub>i</sub>·dS<sub>i</sub>/S<sub>i</sub>. I is then itself a GBM with σ<sub>I</sub>² = wᵀΣw, and
-∂V/∂S<sub>i</sub> = V<sub>I</sub>·n<sub>i</sub> exactly: the whole-index order is no longer an approximation. Daily
-rebalancing is one trading day away from that limit. The same limit makes I exactly lognormal, so the fast model's PV
+<p><b>4. The limit.</b> As the rebalance interval goes to zero the index becomes a constant mix. {mx("I")} is then itself a
+GBM with {mx(r"σ_I^2 = w^⊤Σw")}, and the whole-index order is exact rather than an approximation:</p>
+{eq_limit}
+<p>Daily rebalancing is one trading day away from that limit. The same limit makes {mx("I")} exactly lognormal, so the fast model's PV
 error should shrink with it too. That is a prediction: section 8 measures PV on fixed-share baskets only.</p>
 <p><b>The closed form against the measured gaps.</b> On every rebalanced row the prediction matches the MC gap on every
 name to within {num(worst_rebal, 1)} paired SE. On fixed shares the stub is the whole year, so higher-order terms show:
@@ -855,7 +1002,7 @@ def rebalance_roles(st: Study) -> str:
     """Index rebalance (a rulebook rule) vs hedge rebalance (desk trading): what this study varies and why it matters."""
     rows = [
         ["Who does it", "the index calculation agent, following the CSI rulebook", "the trading desk"],
-        ["What changes", "the index's own share counts n<sub>i</sub> reset to w<sub>i</sub>·I/S<sub>i</sub>",
+        ["What changes", f"the index's own share counts {mx('n_i')} reset to {mx('w_i I / S_i')}",
          "the desk's hedge positions, to match the new deltas"],
         ["Effect on the option", "changes <b>what the underlying is</b>: payoff, PV and deltas",
          "none: only how closely the desk tracks the option"],
@@ -872,7 +1019,7 @@ about how often the desk re-hedges. Re-hedging a fixed-share index every day doe
 weight split is recomputed with the same mis-allocation, and only a correct per-name delta (M3) fixes it.</p>
 {table(["", "Index rebalance (what this section varies)", "Hedge rebalance (desk activity)"], rows, text=True)}
 <ul class="points">
-<li><b>Frequent index rebalancing (daily, weekly).</b> One basket order sized by Δ_I (M1) is close to exact: M1 residual σ
+<li><b>Frequent index rebalancing (daily, weekly).</b> One basket order sized by {DI} (M1) is close to exact: M1 residual σ
 {sigma_text(d)} CNY/day under daily rebalance. No per-name model is needed for deltas, and the single-index lognormal is close to
 right. The cost: the index trades often, and the desk replicating it makes the same trades. Rulebooks usually pass that
 cost to the client through a decrement d (0 in every sweep here), which makes the product less attractive.</li>
@@ -1061,7 +1208,7 @@ def section_mm(st: Study) -> str:
              f"{pv_text(pv(five_lo))} at ρ = {sgn(five_lo['rho'], 2)}; vol dispersion {pv_text(pv(lam_lo))} at "
              f"λ = {num(lam_lo['lambda'], 1)} and {pv_text(pv(lam_hi))} at λ = {num(lam_hi['lambda'], 1)}.")
     skew, skew_read = pv_skew_text(sk)
-    return section(8, "MM", "PV and Δ_I: fast model vs multi-name MC", f"""
+    return section(8, "MM", f"PV and {DI}: fast model vs multi-name MC", f"""
 <p class="lead">The moment-matched lognormal is the desk-style fast single-index model. On the base 1Y ATM call it
 misprices PV by {pv_text(pv(b))} and its total delta by {total_delta_text} per 1% index move.
 {skew} {trend}</p>
@@ -1231,8 +1378,12 @@ section{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:2
 .body{grid-column:4/13;min-width:0}
 .lead{margin:0 0 28px;font-size:17px;max-width:68ch}
 .body p{max-width:72ch}
-.eq{margin:14px 0 20px;padding:12px 16px;border-left:2px solid var(--amber);background:var(--panel);
-  font:13.5px/1.7 var(--mono);color:var(--ink);overflow-x:auto;max-width:none}
+math{font-family:"STIX Two Math","Cambria Math","Latin Modern Math","Noto Sans Math",math;font-size:1.06em;
+  color:var(--ink)}
+.eq{margin:14px 0 20px;padding:14px 18px;border-left:2px solid var(--amber);background:var(--panel);
+  overflow-x:auto;max-width:none}
+.eq math{font-size:1.2em;margin:6px 0}
+table.text td math{font-size:1.1em}
 h3.sub{margin:36px 0 8px;font:11px/1 var(--mono);letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
 
 dl.spec{display:grid;grid-template-columns:160px minmax(0,1fr);margin:0 0 24px;border-top:1px solid var(--line)}
