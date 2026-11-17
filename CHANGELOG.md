@@ -7,6 +7,22 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-11-17
+
+### Fixed
+
+- **`import quantark.montecarlo` failed when it was the first quantark import.**
+  `montecarlo/conditional_snowball.py` imported `SnowballOption` from `quantark.asset` at module load.
+  That ran `asset/__init__`, whose equity MC engines import back from the half-initialised
+  `conditional_snowball`, raising `ImportError`. Importing `quantark.asset` first hid the cycle.
+  `SnowballOption` is now a type-checking-only import, and the one runtime use (the product-type guard)
+  imports it locally. `quantark.montecarlo` no longer loads anything under `quantark.asset`.
+
+### Tests
+
+- `test/montecarlo/test_montecarlo_import_order.py` imports both `montecarlo` entry points in a fresh
+  interpreter and asserts the package loads nothing under `quantark.asset`.
+
 ## [0.11.2] - 2026-11-17
 
 ### Fixed
