@@ -840,3 +840,114 @@ def residual_daily_pnl_sigma(
         q_se=q_se,
         resolved=bool(q_val > 3.0 * q_se),
     )
+
+
+# ----------------------------------------------------------------------------
+# Scenario evaluation -> JSON-ready dict (used by scripts 01-04)
+# ----------------------------------------------------------------------------
+
+STUDY_PATHS = 2**14
+STUDY_BATCHES = 32  # spec D17: >= 30 for study runs
+STUDY_SEED = 20261117
+SE_MULTIPLE = 3.0
+
+
+def _floats(x) -> list:
+    return [float(v) for v in np.atleast_1d(x)]
+
+
+def evaluate_scenario(
+    basket: CSIBasket,
+    state: CSIState,
+    option: CSIOption,
+    label: str = "",
+    n_paths: int = STUDY_PATHS,
+    n_batches: int = STUDY_BATCHES,
+    seed: int = STUDY_SEED,
+) -> Dict[str, Any]:
+    """Price one scenario both ways and score M1..M5 against REF.
+
+    Returns a JSON-ready dict.  Cash figures are CNY per 1% move of a name on
+    ``option.notional_cny`` of index notional.  A gap is ``resolved`` when
+    |gap| > 3 paired SE (+ the D18 FD bias allowance for M3), spec D7/AC12.
+    """
+    q = state_quantities(basket, state)
+    units = option.units(q.index_level)
+    mc = mc_price_and_deltas(basket, state, option, n_paths=n_paths, n_batches=n_batches, seed=seed)
+    mm = mm_price_and_deltas(basket, state, option)
+    methods = delta_methods(basket, state, option, mc, mm)
+    bias = fd_bias_allowance(basket, state, option, mc.fd_bump)
+    cash_scale = q.spots * units * 0.01
+    cov = basket.covariance_daily()
+
+    method_out: Dict[str, Any] = {}
+    for key in ("M1", "M2", "M3", "M4", "M5"):
+        gap, se = delta_cash_error_per_pct(methods[key], q.spots, units)
+        allow = bias * cash_scale if key == "M3" else np.zeros_like(gap)
+        resolved = np.abs(gap) > SE_MULTIPLE * se + allow
+        rs = residual_daily_pnl_sigma(cash_error_batches(methods[key], q.spots, units), cov)
+        method_out[key] = {
+            "label": METHOD_LABELS[key],
+            "gap_cash_per_pct": _floats(gap),
+            "gap_se": _floats(se),
+            "gap_rel_to_ref": _floats(methods[key].diff_mean / mc.deltas_pathwise),
+            "resolved": [bool(v) for v in resolved],
+            "residual_sigma_cny": rs.sigma,
+            "residual_q": rs.q,
+            "residual_q_se": rs.q_se,
+            "residual_resolved": rs.resolved,
+        }
+    return {
+        "label": label,
+        "names": list(basket.names),
+        "rebalance": basket.rebalance,
+        "decrement": basket.decrement,
+        "vols": _floats(basket.vols),
+        "div_yields": _floats(basket.div_yields),
+        "target_weights": _floats(basket.target_weights),
+        "current_weights": _floats(q.current_weights),
+        "corr": [_floats(row) for row in basket.corr],
+        "elapsed": float(state.elapsed),
+        "moves": _floats(state.moves),
+        "moneyness": option.moneyness,
+        "maturity": option.maturity,
+        "is_call": option.is_call,
+        "index_level": q.index_level,
+        "units": units,
+        "strike": mc.strike,
+        "n_paths": n_paths,
+        "n_batches": n_batches,
+        "price": {"mc": mc.price, "mc_se": mc.price_se, "mm": mm.price,
+                  "mm_minus_mc": mm.price - mc.price},
+        "delta_index": {"mc": mc.delta_index, "mc_se": mc.delta_index_se, "mm": mm.delta_index},
+        "total_delta_cash_per_pct": {
+            "mc": mc.delta_index * q.index_level * units * 0.01,
+            "mc_se": mc.delta_index_se * q.index_level * units * 0.01,
+            "mm": mm.delta_index * q.index_level * units * 0.01,
+        },
+        "sigma_eff_mm": mm.sigma_eff,
+        "ref_cash_per_pct": _floats(mc.deltas_pathwise * cash_scale),
+        "ref_se": _floats(mc.deltas_pathwise_se * cash_scale),
+        "fd_bias_cash_per_pct": _floats(bias * cash_scale),
+        "euler_max_rel_err": mc.euler_max_rel_err,
+        "methods": method_out,
+    }
+
+
+def ref_corr_band(
+    basket: CSIBasket,
+    state: CSIState,
+    option: CSIOption,
+    corr_up: np.ndarray,
+    corr_dn: np.ndarray,
+    n_paths: int = STUDY_PATHS,
+    n_batches: int = STUDY_BATCHES,
+    seed: int = STUDY_SEED,
+) -> list:
+    """D13: |REF(rho+0.1) - REF(rho-0.1)| / 2, CNY per 1%, same seed."""
+    q = state_quantities(basket, state)
+    units = option.units(q.index_level)
+    k = option.strike(q.index_level)
+    up = mc_price_and_deltas(replace(basket, corr=corr_up), state, option, n_paths, n_batches, seed, strike=k)
+    dn = mc_price_and_deltas(replace(basket, corr=corr_dn), state, option, n_paths, n_batches, seed, strike=k)
+    return _floats(np.abs(up.deltas_pathwise - dn.deltas_pathwise) / 2.0 * q.spots * units * 0.01)

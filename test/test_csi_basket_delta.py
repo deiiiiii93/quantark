@@ -458,6 +458,40 @@ class TestRebalanceOrderingAndFD:
         assert _within(methods["M3"].diff_mean, methods["M3"].diff_se, extra=bias)
 
 
+class TestEvaluateScenario:
+    """T3: the JSON-ready scenario record the sweep scripts write."""
+
+    def test_record_is_json_and_consistent(self):
+        import json
+
+        basket = cm.concentration_basket()
+        state = cm.default_state(basket)
+        option = cm.CSIOption(1.0, 1.0)
+        rec = cm.evaluate_scenario(basket, state, option, "conc", n_paths=2**12, n_batches=16)
+        json.dumps(rec)
+        m1 = rec["methods"]["M1"]
+        etf = rec["names"].index("ETF")
+        assert m1["resolved"][etf] and m1["gap_cash_per_pct"][etf] < 0.0
+        for key in ("M1", "M2", "M3", "M4", "M5"):
+            gap = np.array(rec["methods"][key]["gap_cash_per_pct"])
+            se = np.array(rec["methods"][key]["gap_se"])
+            allow = np.array(rec["fd_bias_cash_per_pct"]) if key == "M3" else 0.0
+            assert np.array_equal(
+                np.array(rec["methods"][key]["resolved"]), np.abs(gap) > 3.0 * se + allow
+            )
+        tot = rec["total_delta_cash_per_pct"]["mc"]
+        assert is_close(sum(rec["ref_cash_per_pct"]), tot, rel_tol=1e-10)
+
+    def test_corr_band_zero_when_unchanged(self):
+        basket = cm.base_basket()
+        state = cm.default_state(basket)
+        option = cm.CSIOption(1.0, 1.0)
+        band = cm.ref_corr_band(
+            basket, state, option, basket.corr, basket.corr, n_paths=2**10, n_batches=4
+        )
+        assert band == [0.0] * 5
+
+
 def test_common_imports_in_fresh_interpreter():
     """Scripts load _common.py first; it must not hit the montecarlo import cycle."""
     import subprocess
