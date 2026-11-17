@@ -1,0 +1,538 @@
+"""
+Shared pricer for the CSI basket-delta case study.
+
+A customized strategy index (CSI) is a weighted basket of names (shares,
+ETFs, indices).  The desk sells a European option on the index level and must
+decide how to split its delta across the names.  This module prices that
+option two ways and returns per-name deltas:
+
+* a moment-matched (MM) lognormal on the index, the desk-style fast model,
+  with an analytic per-name chain rule;
+* an exact Monte Carlo reference (added in the MC section below) with
+  pathwise per-name deltas.
+
+Index rule
+----------
+Between rebalances the index holds fixed share counts ``n_i``; at each
+rebalance date the counts reset to ``w_i * I / S_i``.  A continuous decrement
+``d`` p.a. accrues on the level::
+
+    I(t) = exp(-d (t - t_k)) * sum_i n_i(k) S_i(t)          t in [t_k, t_k+1)
+
+Rebalance ``none`` is the fixed-share basket; ``daily`` is (close to) a
+constant mix.  The current state is part-way through a period: the
+decrement accrued since the last rebalance is folded into ``n_i`` so that
+``I(now) = sum_i n_i S_i(now)`` holds exactly (spec D5).
+
+Hedge-delta invariant (spec D14)
+--------------------------------
+Every delta holds the strike ``K`` and the unit count at the *unbumped*
+``I(now)``.  A bump moves one name's price through ``CSIState.moves`` and the
+strike is passed explicitly.
+
+All times are year fractions on a 244-trading-day year (spec D4).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from typing import Any, Dict, Optional, Tuple
+
+import numpy as np
+from scipy.stats import norm
+
+from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import (
+    Tolerance,
+    is_close,
+    is_zero,
+    safe_exp,
+    safe_log,
+    safe_sqrt,
+)
+
+TRADING_DAYS = 244
+
+PERIODS: Dict[str, Optional[float]] = {
+    "none": None,
+    "quarterly": 0.25,
+    "monthly": 1.0 / 12.0,
+    "weekly": 5.0 / TRADING_DAYS,
+    "daily": 1.0 / TRADING_DAYS,
+}
+
+
+def period_length(rebalance: str) -> Optional[float]:
+    """Rebalance period in years, or ``None`` for a fixed-share basket."""
+    if rebalance not in PERIODS:
+        raise ValidationError(
+            f"unknown rebalance '{rebalance}', expected one of {sorted(PERIODS)}"
+        )
+    return PERIODS[rebalance]
+
+
+def _frozen_array(values, name: str, ndim: int) -> np.ndarray:
+    arr = np.array(values, dtype=float, copy=True)
+    if arr.ndim != ndim:
+        raise ValidationError(f"{name} must be {ndim}-dimensional, got shape {arr.shape}")
+    if not np.all(np.isfinite(arr)):
+        raise ValidationError(f"{name} must be finite")
+    arr.setflags(write=False)
+    return arr
+
+
+def corr_factor(corr: np.ndarray) -> np.ndarray:
+    """Symmetric eigen square root ``F`` with ``F @ F.T == corr``.
+
+    Works for singular PSD matrices (e.g. uniform rho = 1), where Cholesky
+    fails.  Eigenvalues are clipped at zero; callers validate PSD first, so
+    the clip only removes rounding noise.
+    """
+    vals, vecs = np.linalg.eigh(np.asarray(corr, dtype=float))
+    vals = np.clip(vals, 0.0, None)
+    return vecs @ np.diag(np.sqrt(vals)) @ vecs.T
+
+
+# ----------------------------------------------------------------------------
+# Contract objects
+# ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, eq=False)
+class CSIBasket:
+    """Index definition and per-name GBM dynamics.
+
+    Attributes:
+        names: Constituent labels.
+        target_weights: Weights restored at each rebalance; sum to 1.
+        vols: Lognormal vols, > 0.
+        div_yields: Continuous dividend yields.
+        corr: Correlation matrix (symmetric, unit diagonal, PSD; may be
+            singular).
+        rate: Flat continuously-compounded rate.
+        decrement: Index decrement, p.a. (continuous).
+        rebalance: One of ``none, quarterly, monthly, weekly, daily``.
+    """
+
+    names: Tuple[str, ...]
+    target_weights: np.ndarray
+    vols: np.ndarray
+    div_yields: np.ndarray
+    corr: np.ndarray
+    rate: float
+    decrement: float = 0.0
+    rebalance: str = "none"
+
+    def __post_init__(self) -> None:
+        names = tuple(self.names)
+        n = len(names)
+        if n == 0:
+            raise ValidationError("basket must have at least one name")
+        object.__setattr__(self, "names", names)
+        for attr in ("target_weights", "vols", "div_yields"):
+            arr = _frozen_array(getattr(self, attr), attr, 1)
+            if arr.shape != (n,):
+                raise ValidationError(f"{attr} must have length {n}, got {arr.shape}")
+            object.__setattr__(self, attr, arr)
+        corr = _frozen_array(self.corr, "corr", 2)
+        if corr.shape != (n, n):
+            raise ValidationError(f"corr must be {n}x{n}, got {corr.shape}")
+        object.__setattr__(self, "corr", corr)
+
+        if not is_close(float(np.sum(self.target_weights)), 1.0, rel_tol=Tolerance.RELATIVE):
+            raise ValidationError(
+                f"target_weights must sum to 1, got {np.sum(self.target_weights)}"
+            )
+        if np.any(self.target_weights <= 0.0):
+            raise ValidationError("target_weights must be positive")
+        if np.any(self.vols <= 0.0):
+            raise ValidationError("vols must be positive")
+        if not np.allclose(corr, corr.T, rtol=0.0, atol=Tolerance.ZERO):
+            raise ValidationError("corr must be symmetric")
+        if not np.allclose(np.diag(corr), 1.0, rtol=0.0, atol=Tolerance.ZERO):
+            raise ValidationError("corr must have a unit diagonal")
+        if np.any(np.abs(corr) > 1.0 + Tolerance.ZERO):
+            raise ValidationError("corr entries must lie in [-1, 1]")
+        min_eig = float(np.min(np.linalg.eigvalsh(corr)))
+        if min_eig < -Tolerance.EIGENVALUE_MIN:
+            raise ValidationError(
+                f"corr must be positive semi-definite, min eigenvalue {min_eig:.3e}"
+            )
+        if self.decrement < 0.0:
+            raise ValidationError("decrement must be non-negative")
+        period_length(self.rebalance)
+
+    @property
+    def n_names(self) -> int:
+        return len(self.names)
+
+    def covariance_daily(self) -> np.ndarray:
+        """Daily log-return covariance diag(sigma) rho diag(sigma) / 244."""
+        s = np.diag(self.vols)
+        return s @ self.corr @ s / TRADING_DAYS
+
+
+@dataclass(frozen=True, eq=False)
+class CSIState:
+    """Where we are inside the current rebalance period.
+
+    Attributes:
+        index_at_rebalance: Index level at the last rebalance, I(t0-).
+        spots_at_rebalance: Name prices at the last rebalance.
+        moves: S_i(now) / S_i(t0-); ones by default.
+        elapsed: Years since the last rebalance (for ``none``: since launch,
+            used only to fold the decrement).
+    """
+
+    index_at_rebalance: float
+    spots_at_rebalance: np.ndarray
+    moves: Optional[np.ndarray] = None
+    elapsed: float = 0.0
+
+    def __post_init__(self) -> None:
+        spots = _frozen_array(self.spots_at_rebalance, "spots_at_rebalance", 1)
+        object.__setattr__(self, "spots_at_rebalance", spots)
+        moves = np.ones_like(spots) if self.moves is None else self.moves
+        moves = _frozen_array(moves, "moves", 1)
+        if moves.shape != spots.shape:
+            raise ValidationError("moves must match spots_at_rebalance")
+        object.__setattr__(self, "moves", moves)
+        if self.index_at_rebalance <= 0.0 or np.any(spots <= 0.0) or np.any(moves <= 0.0):
+            raise ValidationError("index level, spots and moves must be positive")
+        if self.elapsed < 0.0:
+            raise ValidationError("elapsed must be non-negative")
+
+
+@dataclass(frozen=True)
+class CSIOption:
+    """European option on the index, struck today (spec D3).
+
+    Attributes:
+        moneyness: K / I(now).
+        maturity: Years to expiry.
+        is_call: Call if True, put otherwise.
+        notional_cny: Index notional today; units = notional / I(now).
+    """
+
+    moneyness: float
+    maturity: float
+    is_call: bool = True
+    notional_cny: float = 1e8
+
+    def __post_init__(self) -> None:
+        if self.moneyness <= 0.0:
+            raise ValidationError("moneyness must be positive")
+        if self.maturity <= 0.0 or is_zero(self.maturity):
+            raise ValidationError("maturity must be positive")
+        if self.notional_cny <= 0.0:
+            raise ValidationError("notional_cny must be positive")
+
+    def strike(self, index_now: float) -> float:
+        return self.moneyness * index_now
+
+    def units(self, index_now: float) -> float:
+        return self.notional_cny / index_now
+
+
+@dataclass(frozen=True)
+class StateQuantities:
+    """Derived current-state quantities."""
+
+    shares: np.ndarray
+    spots: np.ndarray
+    index_level: float
+    current_weights: np.ndarray
+
+
+def state_quantities(basket: CSIBasket, state: CSIState) -> StateQuantities:
+    """Current share counts (decrement folded in), prices, level and weights."""
+    if state.spots_at_rebalance.shape != (basket.n_names,):
+        raise ValidationError("state has the wrong number of names for the basket")
+    period = period_length(basket.rebalance)
+    if period is not None and not (0.0 <= state.elapsed < period - Tolerance.ZERO):
+        raise ValidationError(
+            f"elapsed {state.elapsed} outside [0, {period}) for rebalance '{basket.rebalance}'"
+        )
+    shares = (
+        safe_exp(-basket.decrement * state.elapsed)
+        * basket.target_weights
+        * state.index_at_rebalance
+        / state.spots_at_rebalance
+    )
+    spots = state.spots_at_rebalance * state.moves
+    level = float(np.dot(shares, spots))
+    return StateQuantities(
+        shares=shares,
+        spots=spots,
+        index_level=level,
+        current_weights=shares * spots / level,
+    )
+
+
+def bump_state(state: CSIState, i: int, rel_bump: float) -> CSIState:
+    """Same state with name ``i``'s price scaled by ``1 + rel_bump``."""
+    moves = np.array(state.moves, dtype=float)
+    moves[i] *= 1.0 + rel_bump
+    return replace(state, moves=moves)
+
+
+def scale_state(state: CSIState, factor: float) -> CSIState:
+    """Same state with every name's price scaled by ``factor``."""
+    return replace(state, moves=np.array(state.moves, dtype=float) * factor)
+
+
+def schedule_times(basket: CSIBasket, state: CSIState, maturity: float) -> np.ndarray:
+    """Simulation dates from now: ``[t1, rebalance dates..., T]``.
+
+    ``t1`` is the end of the current (stub) period, or ``T`` if the stub
+    reaches maturity.  Dates are ``t1 + k P``; any date within tolerance of
+    ``T`` is dropped so there is no sliver period (spec D19).
+    """
+    period = period_length(basket.rebalance)
+    if period is None:
+        return np.array([maturity])
+    t1 = period - state.elapsed
+    if t1 > maturity or is_close(t1, maturity, rel_tol=Tolerance.RELATIVE):
+        return np.array([maturity])
+    n_max = int(np.floor((maturity - t1) / period)) + 1
+    dates = t1 + period * np.arange(n_max)
+    keep = [
+        t for t in dates if t < maturity and not is_close(t, maturity, rel_tol=Tolerance.RELATIVE)
+    ]
+    return np.array(keep + [maturity])
+
+
+# ----------------------------------------------------------------------------
+# Moment-matched lognormal (desk-style fast model)
+# ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MMResult:
+    """Moment-matched price and deltas (per one index-unit option).
+
+    Attributes:
+        price: Option value per index unit.
+        strike: Strike used.
+        forward: E[I_T] (= m1).
+        sigma_eff: Matched lognormal vol, sqrt(ln(m2/m1^2)/T).
+        m1, m2: First two moments of I_T.
+        delta_index: dV/dI along a proportional bump of all names.
+        deltas: dV/dS_i, per name, strike held fixed.
+    """
+
+    price: float
+    strike: float
+    forward: float
+    sigma_eff: float
+    m1: float
+    m2: float
+    delta_index: float
+    deltas: np.ndarray
+
+
+def _moments_and_gradients(
+    basket: CSIBasket, q: StateQuantities, times: np.ndarray
+) -> Tuple[float, float, np.ndarray, np.ndarray]:
+    """m1, m2 of I_T and their gradients in S_i(now) (shares held fixed)."""
+    r, d = basket.rate, basket.decrement
+    carry = r - basket.div_yields
+    cov = np.outer(basket.vols, basket.vols) * basket.corr
+
+    # stub [0, t1] with current shares
+    tau = float(times[0])
+    a = q.shares * q.spots * safe_exp(carry * tau)
+    e = np.exp(cov * tau)
+    ea = e @ a
+    m1 = safe_exp(-d * tau) * float(np.sum(a))
+    m2 = safe_exp(-2.0 * d * tau) * float(a @ ea)
+    dm1 = safe_exp(-d * tau) * a / q.spots
+    dm2 = safe_exp(-2.0 * d * tau) * 2.0 * (a / q.spots) * ea
+
+    # full periods with target weights: independent factors
+    f1_total, f2_total = 1.0, 1.0
+    for dt in np.diff(times):
+        aw = basket.target_weights * safe_exp(carry * dt)
+        ew = np.exp(cov * dt)
+        f1_total *= safe_exp(-d * dt) * float(np.sum(aw))
+        f2_total *= safe_exp(-2.0 * d * dt) * float(aw @ ew @ aw)
+    return float(m1 * f1_total), float(m2 * f2_total), dm1 * f1_total, dm2 * f2_total
+
+
+def mm_price_and_deltas(
+    basket: CSIBasket,
+    state: CSIState,
+    option: CSIOption,
+    strike: Optional[float] = None,
+) -> MMResult:
+    """Moment-matched lognormal price and analytic per-name deltas.
+
+    Args:
+        basket: Index definition.
+        state: Current state.
+        option: The option; strike = moneyness * I(now) unless given.
+        strike: Explicit strike (used by bumped revaluations, spec D14).
+    """
+    q = state_quantities(basket, state)
+    k = option.strike(q.index_level) if strike is None else float(strike)
+    t = option.maturity
+    times = schedule_times(basket, state, t)
+    m1, m2, dm1, dm2 = _moments_and_gradients(basket, q, times)
+
+    v = float(safe_log(m2 / (m1 * m1)))
+    if v <= 0.0 or is_zero(v):
+        # TODO: zero matched variance needs its own intrinsic-forward branch;
+        # no study scenario reaches it (all vols > 0).
+        raise NumericalError(f"matched total variance {v:.3e} is not positive")
+    sv = safe_sqrt(v)
+    df = safe_exp(-basket.rate * t)
+    d1 = (safe_log(m1 / k) + 0.5 * v) / sv
+    d2 = d1 - sv
+    if option.is_call:
+        price = df * (m1 * norm.cdf(d1) - k * norm.cdf(d2))
+        v_f = df * norm.cdf(d1)
+    else:
+        price = df * (k * norm.cdf(-d2) - m1 * norm.cdf(-d1))
+        v_f = -df * norm.cdf(-d1)
+    v_v = df * m1 * norm.pdf(d1) / (2.0 * sv)
+
+    dv = dm2 / m2 - 2.0 * dm1 / m1
+    deltas = v_f * dm1 + v_v * dv
+    delta_index = v_f * m1 / q.index_level
+    return MMResult(
+        price=float(price),
+        strike=k,
+        forward=m1,
+        sigma_eff=float(safe_sqrt(v / t)),
+        m1=m1,
+        m2=m2,
+        delta_index=float(delta_index),
+        deltas=deltas,
+    )
+
+
+def mm_fd_deltas(
+    basket: CSIBasket, state: CSIState, option: CSIOption, bump: float = 1e-5
+) -> np.ndarray:
+    """Central FD of the MM price in each S_i, strike held fixed (AC8)."""
+    q = state_quantities(basket, state)
+    k = option.strike(q.index_level)
+    out = np.empty(basket.n_names)
+    for i in range(basket.n_names):
+        up = mm_price_and_deltas(basket, bump_state(state, i, bump), option, strike=k).price
+        dn = mm_price_and_deltas(basket, bump_state(state, i, -bump), option, strike=k).price
+        out[i] = (up - dn) / (2.0 * bump * q.spots[i])
+    return out
+
+
+def mm_third_derivatives(
+    basket: CSIBasket, state: CSIState, option: CSIOption, bump: float = 1e-3
+) -> np.ndarray:
+    """d^3 V^MM / dS_i^3 by FD of the analytic delta (for the D18 allowance)."""
+    q = state_quantities(basket, state)
+    k = option.strike(q.index_level)
+    out = np.empty(basket.n_names)
+    for i in range(basket.n_names):
+        h = bump * q.spots[i]
+        up = mm_price_and_deltas(basket, bump_state(state, i, bump), option, strike=k).deltas[i]
+        mid = mm_price_and_deltas(basket, state, option, strike=k).deltas[i]
+        dn = mm_price_and_deltas(basket, bump_state(state, i, -bump), option, strike=k).deltas[i]
+        out[i] = (up - 2.0 * mid + dn) / (h * h)
+    return out
+
+
+# ----------------------------------------------------------------------------
+# Scenario factories (design section 5)
+# ----------------------------------------------------------------------------
+
+BASE_NAMES = ("LC1", "LC2", "TECH", "ETF", "GOLD")
+BASE_WEIGHTS = np.array([0.25, 0.20, 0.15, 0.30, 0.10])
+BASE_VOLS = np.array([0.25, 0.25, 0.45, 0.18, 0.10])
+BASE_DIVS = np.array([0.025, 0.030, 0.003, 0.015, 0.0])
+BASE_SPOTS = np.array([20.0, 35.0, 80.0, 4.0, 6.0])
+BASE_RATE = 0.02
+
+
+def base_corr() -> np.ndarray:
+    """Equities/ETF at 0.6, ETF vs large caps 0.85, GOLD at 0.05."""
+    c = np.full((5, 5), 0.6)
+    c[3, 0] = c[0, 3] = 0.85
+    c[3, 1] = c[1, 3] = 0.85
+    c[4, :] = c[:, 4] = 0.05
+    np.fill_diagonal(c, 1.0)
+    return c
+
+
+def uniform_corr(n: int, rho: float) -> np.ndarray:
+    c = np.full((n, n), float(rho))
+    np.fill_diagonal(c, 1.0)
+    return c
+
+
+def base_basket(rebalance: str = "none", decrement: float = 0.0, **over) -> CSIBasket:
+    """The stylised 5-name CSI."""
+    kw: Dict[str, Any] = dict(
+        names=BASE_NAMES,
+        target_weights=BASE_WEIGHTS,
+        vols=BASE_VOLS,
+        div_yields=BASE_DIVS,
+        corr=base_corr(),
+        rate=BASE_RATE,
+        decrement=decrement,
+        rebalance=rebalance,
+    )
+    kw.update(over)
+    return CSIBasket(**kw)
+
+
+def control_basket(rebalance: str = "none") -> CSIBasket:
+    """Exchangeable control: equal weights, vols, yields and correlation."""
+    return CSIBasket(
+        names=BASE_NAMES,
+        target_weights=np.full(5, 0.2),
+        vols=np.full(5, 0.25),
+        div_yields=np.full(5, 0.015),
+        corr=uniform_corr(5, 0.5),
+        rate=BASE_RATE,
+        rebalance=rebalance,
+    )
+
+
+def concentration_basket(rebalance: str = "none") -> CSIBasket:
+    """Control dynamics with the base (unequal) weights: NOT a control."""
+    return CSIBasket(
+        names=BASE_NAMES,
+        target_weights=BASE_WEIGHTS,
+        vols=np.full(5, 0.25),
+        div_yields=np.full(5, 0.015),
+        corr=uniform_corr(5, 0.5),
+        rate=BASE_RATE,
+        rebalance=rebalance,
+    )
+
+
+def two_name_basket(rho: float, rebalance: str = "none") -> CSIBasket:
+    """EQ (30%, w 0.6) + HEDGE (15%, w 0.4): the only place rho = -1 is feasible."""
+    return CSIBasket(
+        names=("EQ", "HEDGE"),
+        target_weights=np.array([0.6, 0.4]),
+        vols=np.array([0.30, 0.15]),
+        div_yields=np.array([0.02, 0.0]),
+        corr=uniform_corr(2, rho),
+        rate=BASE_RATE,
+        rebalance=rebalance,
+    )
+
+
+def default_state(basket: CSIBasket, elapsed: float = 0.0, moves=None) -> CSIState:
+    """Index 1000 at the last rebalance, stylised spots (base basket prices)."""
+    n = basket.n_names
+    spots = BASE_SPOTS[:n] if n <= len(BASE_SPOTS) else np.full(n, 10.0)
+    if n == 2:
+        spots = np.array([30.0, 5.0])
+    return CSIState(
+        index_at_rebalance=1000.0,
+        spots_at_rebalance=spots,
+        moves=moves,
+        elapsed=elapsed,
+    )
