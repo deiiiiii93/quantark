@@ -793,6 +793,38 @@ def cash_error_batches(method: MethodDeltas, spots: np.ndarray, units: float) ->
     return method.diff_batches * (spots * units)[None, :]
 
 
+def first_order_m1_gap(
+    basket: CSIBasket, state: CSIState, option: CSIOption, rel_bump: float = 1e-3
+) -> np.ndarray:
+    """Closed-form M1 - REF to first order in the stub, CNY per 1% move.
+
+    After the next rebalance date t1 the option depends on the names only
+    through I(t1), so the whole error comes from the stub tau = t1 - t:
+
+        REF_i - M1_i = tau w_i I [ (beta_i - 1) sigma_I^2 I Gamma + (qbar - q_i) Delta ]
+
+    (cash delta per index unit), with current weights w, beta_i =
+    (Sigma w)_i / sigma_I^2, sigma_I^2 = w' Sigma w, qbar = w'q, and Delta,
+    Gamma the MM index delta and gamma (strike fixed).  The Ito drift of the
+    weights cancels the Delta that a naive expansion puts in the vol term.
+    """
+    q = state_quantities(basket, state)
+    w, level = q.current_weights, q.index_level
+    tau = float(schedule_times(basket, state, option.maturity)[0])
+    sig = np.diag(basket.vols) @ basket.corr @ np.diag(basket.vols)
+    var_index = float(w @ sig @ w)
+    beta = sig @ w / var_index
+    q_bar = float(w @ basket.div_yields)
+    mm = mm_price_and_deltas(basket, state, option)
+    up = mm_price_and_deltas(basket, scale_state(state, 1 + rel_bump), option, strike=mm.strike).price
+    dn = mm_price_and_deltas(basket, scale_state(state, 1 - rel_bump), option, strike=mm.strike).price
+    gamma = (up - 2.0 * mm.price + dn) / (level * rel_bump) ** 2
+    ref_minus_m1 = tau * w * level * (
+        (beta - 1.0) * var_index * level * gamma + (q_bar - basket.div_yields) * mm.delta_index
+    )
+    return -ref_minus_m1 * option.units(level) * 0.01
+
+
 def fd_bias_allowance(
     basket: CSIBasket, state: CSIState, option: CSIOption, fd_bump: float
 ) -> np.ndarray:

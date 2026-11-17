@@ -48,6 +48,7 @@ def sweep_frequency() -> list:
             rec = cm.evaluate_scenario(basket, state, option, f"{rule}, {pos} of period")
             rec["position"] = pos
             rec["stub_years"] = float(cm.schedule_times(basket, state, 1.0)[0])
+            rec["first_order_m1_gap"] = cm._floats(cm.first_order_m1_gap(basket, state, option))
             rows.append(rec)
     return rows
 

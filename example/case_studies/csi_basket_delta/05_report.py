@@ -777,12 +777,114 @@ every resolved row, from {sigma_text(st.freq_row('none', 'start')['methods']['M1
 {sigma_text(st.freq_row('daily', 'start')['methods']['M1'])} under daily rebalance.</p>
 {figure(chart, "M1 residual σ vs rebalance rule", "Base basket, 1Y ATM call. Log scale. " + HOLLOW_SIGMA)}
 {table(["rule", "position", "stub, days", "M1 σ, CNY/day", "M1 gap · TECH, CNY/1%", "M3 σ", "M5 σ"], rows)}
+{rebalance_math(st)}
 <h3 class="sub">Drift since the last rebalance · target-weight shortcut</h3>
 <p>Quarterly rule, mid-period, TECH moved since the last rebalance. Current weights now differ from target weights, so
 the target-weight split (M2) stops being the whole-index order.</p>
 {table(["TECH move", "TECH weight now", "target", "M1 σ", "M2 σ", "M1 gap · TECH", "M2 gap · TECH", "M2 / REF"], drows,
        "σ in CNY/day; gaps in CNY/1%.")}
+{rebalance_roles(st)}
 """)
+
+
+def _worst_z(r: dict) -> float:
+    """Largest |first-order prediction − measured M1 gap| across names, in paired SEs."""
+    m = r["methods"]["M1"]
+    return max(abs(p - g) / s for p, g, s in zip(r["first_order_m1_gap"], m["gap_cash_per_pct"], m["gap_se"]))
+
+
+def rebalance_math(st: Study) -> str:
+    """Why the gap is linear in the stub: derivation plus the closed form checked against every sweep-2 row."""
+    rows = []
+    for r in st.freq:
+        tech, gold = name_idx(r, "TECH"), name_idx(r, "GOLD")
+        m, p = r["methods"]["M1"], r["first_order_m1_gap"]
+        rows.append([r["rebalance"], r["position"], num(r["stub_years"] * TRADING_DAYS, 2),
+                     signed(p[tech]), gap_cell(m, tech), signed(p[gold]), gap_cell(m, gold), num(_worst_z(r), 1)])
+    rebal = [r for r in st.freq if r["rebalance"] != "none"]
+    worst_rebal = max(_worst_z(r) for r in rebal)
+    fixed = st.freq_row("none", "start")
+    fx_p, fx_g = fixed["first_order_m1_gap"], fixed["methods"]["M1"]["gap_cash_per_pct"]
+
+    def fx_say(name):
+        i = name_idx(fixed, name)
+        return f"{name} {signed(fx_p[i])} predicted vs {signed(fx_g[i])} measured ({spct(fx_p[i] / fx_g[i] - 1.0)})"
+
+    terms = [
+        ["τ", "the error scales with the time to the <b>next rebalance date</b>, not to maturity"],
+        ["β<sub>i</sub> − 1", "high-β TECH is under-hedged (gap &lt; 0); low-β GOLD is over-hedged"],
+        ["β<sub>i</sub> from w<sub>i</sub> alone",
+         "equal vols with unequal weights still open a gap: the heaviest name has β &gt; 1 (section 3)"],
+        ["q̄ − q<sub>i</sub>", "yield dispersion splits even a deep in-the-money call, where Γ ≈ 0 (section 7)"],
+        ["I·Γ", "the vol term is a gamma term: largest near the money and for long stubs"],
+    ]
+    return f"""
+<h3 class="sub">Why it works · the error lives only until the next rebalance date</h3>
+<p><b>1. After a rebalance, only the index level matters.</b> At the next rebalance date t₁ the share counts reset to
+w<sub>i</sub>·I(t₁)/S<sub>i</sub>(t₁). From then on, each period's growth is Σ w<sub>i</sub>·S<sub>i</sub>(t<sub>k+1</sub>)/S<sub>i</sub>(t<sub>k</sub>):
+it depends on returns, not on price levels, and under GBM those returns are independent of everything before t₁. So
+I<sub>T</sub> = I(t₁)·G with G independent of the state at t₁, and</p>
+<div class="eq">V(t) = E[ h(I(t₁)) ],&nbsp;&nbsp; h(x) = e<sup>−r(T−t₁)</sup>·E[ f(x·G) ],&nbsp;&nbsp; I(t₁) = Σ n<sub>i</sub>·S<sub>i</sub>(t₁) with today's n<sub>i</sub></div>
+<p>Today's individual prices can affect V only through the stub up to t₁. Everything after t₁ sees only the index level.</p>
+<p><b>2. The exact error is a covariance over the stub.</b> Differentiating each path, with ∂S<sub>i</sub>(t₁)/∂S<sub>i</sub>(t) = S<sub>i</sub>(t₁)/S<sub>i</sub>(t):</p>
+<div class="eq">REF<sub>i</sub> − M1<sub>i</sub> = E[ h′(I(t₁)) · ( n<sub>i</sub>S<sub>i</sub>(t₁) − w<sub>i</sub>·I(t₁) ) ]&nbsp;&nbsp;&nbsp;(cash delta; w = current weights)</div>
+<p>It sums to zero over the names, because the weights sum to one. That is the Euler identity: every method carries the same
+total delta, and only the split differs.</p>
+<p><b>3. To first order in the stub τ = t₁ − t.</b> Expand h′ around today's index. The drift of the weights cancels the
+Δ that a naive expansion leaves in the vol term, so the vol term carries gamma only:</p>
+<div class="eq">REF<sub>i</sub> − M1<sub>i</sub> ≈ τ · w<sub>i</sub> · I · [ (β<sub>i</sub> − 1)·σ<sub>I</sub>²·I·Γ + (q̄ − q<sub>i</sub>)·Δ ]<br>
+β<sub>i</sub> = (Σw)<sub>i</sub> / σ<sub>I</sub>²,&nbsp;&nbsp; σ<sub>I</sub>² = wᵀΣw,&nbsp;&nbsp; q̄ = wᵀq,&nbsp;&nbsp; Δ, Γ = index delta and gamma</div>
+{table(["term", "what it explains"], terms, text=True)}
+<p><b>4. The limit.</b> As the rebalance interval goes to zero the index becomes a constant mix,
+dI/I = Σ w<sub>i</sub>·dS<sub>i</sub>/S<sub>i</sub>. I is then itself a GBM with σ<sub>I</sub>² = wᵀΣw, and
+∂V/∂S<sub>i</sub> = V<sub>I</sub>·n<sub>i</sub> exactly: the whole-index order is no longer an approximation. Daily
+rebalancing is one trading day away from that limit. The same limit makes I exactly lognormal, so the fast model's PV
+error should shrink with it too. That is a prediction: section 8 measures PV on fixed-share baskets only.</p>
+<p><b>The closed form against the measured gaps.</b> On every rebalanced row the prediction matches the MC gap on every
+name to within {num(worst_rebal, 1)} paired SE. On fixed shares the stub is the whole year, so higher-order terms show:
+{fx_say('TECH')}, {fx_say('GOLD')}. The MC resolves those misses at tens of SE, but on the two names that carry the
+gap they are a few percent: the first-order form still explains the fixed-share result.</p>
+{table(["rule", "position", "stub, days", "TECH · formula", "TECH · MC gap", "GOLD · formula", "GOLD · MC gap",
+        "worst name, SE"], rows,
+       "M1 − REF in CNY per 1% move, 1Y ATM call on 1e8 CNY. Formula: MM Δ and Γ with the strike held fixed. "
+       "Worst name: max over the five names of |formula − MC| / paired SE.")}
+"""
+
+
+def rebalance_roles(st: Study) -> str:
+    """Index rebalance (a rulebook rule) vs hedge rebalance (desk trading): what this study varies and why it matters."""
+    rows = [
+        ["Who does it", "the index calculation agent, following the CSI rulebook", "the trading desk"],
+        ["What changes", "the index's own share counts n<sub>i</sub> reset to w<sub>i</sub>·I/S<sub>i</sub>",
+         "the desk's hedge positions, to match the new deltas"],
+        ["Effect on the option", "changes <b>what the underlying is</b>: payoff, PV and deltas",
+         "none: only how closely the desk tracks the option"],
+        ["In this study", "<code>rebalance=</code> on the basket: none · quarterly · monthly · weekly · daily",
+         "not simulated: deltas are compared at one point in time"],
+    ]
+    fixed = st.freq_row("none", "start")["methods"]["M1"]
+    q = st.freq_row("quarterly", "start")["methods"]["M1"]
+    d = st.freq_row("daily", "start")["methods"]["M1"]
+    return f"""
+<h3 class="sub">Index rebalance vs hedge rebalance</h3>
+<p>The rebalance rule in this section is part of how the CSI itself is built: it is written in the index rulebook. It is not
+about how often the desk re-hedges. Re-hedging a fixed-share index every day does not close the gap. Each day the
+weight split is recomputed with the same mis-allocation, and only a correct per-name delta (M3) fixes it.</p>
+{table(["", "Index rebalance (what this section varies)", "Hedge rebalance (desk activity)"], rows, text=True)}
+<ul class="points">
+<li><b>Frequent index rebalancing (daily, weekly).</b> One basket order sized by Δ_I (M1) is close to exact: M1 residual σ
+{sigma_text(d)} CNY/day under daily rebalance. No per-name model is needed for deltas, and the single-index lognormal is close to
+right. The cost: the index trades often, and the desk replicating it makes the same trades. Rulebooks usually pass that
+cost to the client through a decrement d (0 in every sweep here), which makes the product less attractive.</li>
+<li><b>Fixed shares or infrequent rebalancing (none, quarterly).</b> Cheaper to run and easier to explain, but the desk
+needs a multi-name model and per-name deltas. With the whole-index order alone it carries {sigma_text(q)} CNY/day of residual σ
+at quarterly and {sigma_text(fixed)} with no rebalance, per 1e8 CNY.</li>
+<li><b>Rebalance dates always need a trade.</b> Whatever the rule, the index's share counts jump on its rebalance dates,
+so a per-name hedge must trade on those dates to stay aligned.</li>
+<li><b>Next step.</b> A hedge backtest with daily re-hedging, A-share lot sizes and trading costs would put one CNY cost on
+each rule, combining split error and turnover, and make the rebalance frequency a priceable design choice.</li>
+</ul>
+"""
 
 
 def section_drivers(st: Study) -> str:
@@ -1129,6 +1231,8 @@ section{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:2
 .body{grid-column:4/13;min-width:0}
 .lead{margin:0 0 28px;font-size:17px;max-width:68ch}
 .body p{max-width:72ch}
+.eq{margin:14px 0 20px;padding:12px 16px;border-left:2px solid var(--amber);background:var(--panel);
+  font:13.5px/1.7 var(--mono);color:var(--ink);overflow-x:auto;max-width:none}
 h3.sub{margin:36px 0 8px;font:11px/1 var(--mono);letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
 
 dl.spec{display:grid;grid-template-columns:160px minmax(0,1fr);margin:0 0 24px;border-top:1px solid var(--line)}

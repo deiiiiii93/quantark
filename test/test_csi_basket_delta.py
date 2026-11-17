@@ -553,6 +553,39 @@ class TestResidualSigma:
         assert not cm.residual_daily_pnl_sigma(e, cov).resolved
 
 
+class TestFirstOrderGap:
+    """Closed-form M1 - REF to first order in the stub tau (report section 5).
+
+    e_i = tau w_i I [ (beta_i - 1) sigma_I^2 I Gamma + (qbar - q_i) Delta ].
+    """
+
+    OPT = cm.CSIOption(1.0, 1.0)
+
+    def _gap(self, basket, elapsed=0.0):
+        return cm.first_order_m1_gap(basket, cm.default_state(basket, elapsed=elapsed), self.OPT)
+
+    def test_sums_to_zero_by_euler(self):
+        gap = self._gap(cm.base_basket("quarterly"))
+        assert abs(gap.sum()) < 1e-9 * np.abs(gap).max()
+
+    def test_exchangeable_control_is_zero(self):
+        assert np.abs(self._gap(cm.control_basket("monthly"))).max() < 1e-9
+
+    def test_linear_in_stub(self):
+        start = self._gap(cm.base_basket("quarterly"))
+        mid = self._gap(cm.base_basket("quarterly"), elapsed=0.125)
+        np.testing.assert_allclose(mid, 0.5 * start, rtol=0.02)
+
+    def test_matches_measured_rebalanced_gaps(self):
+        rows = [r for r in _results("03_rebalance")["sweep2_frequency"] if r["rebalance"] != "none"]
+        assert len(rows) == 12
+        for r in rows:
+            pred = np.array(r["first_order_m1_gap"])
+            meas = np.array(r["methods"]["M1"]["gap_cash_per_pct"])
+            se = np.array(r["methods"]["M1"]["gap_se"])
+            assert np.all(np.abs(pred - meas) <= 3.0 * se + 0.02 * np.abs(meas)), r["label"]
+
+
 # ----------------------------------------------------------------------------
 # T5: 05_report.py renders the HTML report from results/*.json only
 # ----------------------------------------------------------------------------
@@ -639,6 +672,17 @@ class TestReport:
             if r["tenor"] == "1Y" and r["is_call"] and r["moneyness"] == 1.0
         )
         assert _cny(rec["price"]["mm_minus_mc"] * rec["units"]) in report_page
+
+    def test_rebalance_math_and_roles_shown(self, report_page):
+        rec = next(
+            r for r in _results("03_rebalance")["sweep2_frequency"]
+            if r["rebalance"] == "quarterly" and r["position"] == "start"
+        )
+        tech = rec["names"].index("TECH")
+        assert "the error lives only until the next rebalance date" in report_page
+        assert _cny(rec["first_order_m1_gap"][tech]) in report_page
+        assert "Index rebalance vs hedge rebalance" in report_page
+        assert 'class="eq"' in report_page
 
     def test_main_writes_file(self, tmp_path, monkeypatch):
         mod = _load_report()
