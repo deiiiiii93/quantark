@@ -521,3 +521,98 @@ class TestResidualSigma:
         cov = np.eye(3) * 1e-4
         e = rng.normal(size=(40, 3))
         assert not cm.residual_daily_pnl_sigma(e, cov).resolved
+
+
+# ----------------------------------------------------------------------------
+# T5: 05_report.py renders the HTML report from results/*.json only
+# ----------------------------------------------------------------------------
+
+
+def _load_report():
+    path = STUDY_DIR / "05_report.py"
+    spec = importlib.util.spec_from_file_location("csi_basket_delta_report", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _results(stage):
+    import json
+
+    return json.loads((STUDY_DIR / "results" / f"{stage}.json").read_text())
+
+
+def _cny(v):
+    """The report's signed whole-CNY format: rounded first, true minus."""
+    v = int(round(v))
+    return "0" if v == 0 else f"{v:+,}".replace("-", "−")
+
+
+@pytest.fixture(scope="module")
+def report_page():
+    return _load_report().build_html()
+
+
+class TestReport:
+    """AC11, AC12, AC15, AC16 for the rendered page."""
+
+    def test_frozen_nav_block(self, report_page):
+        assert "position:sticky" in report_page
+        assert '<nav class="menu" id="menu">' in report_page
+        assert "IntersectionObserver" in report_page
+        assert "scroll-padding-top" in report_page
+
+    def test_theme_switch_with_guarded_storage(self, report_page):
+        import re
+
+        assert 'id="theme"' in report_page and "<button" in report_page
+        uses = report_page.count("localStorage")
+        guarded = re.findall(r"try\{[^}]*localStorage[^}]*\}catch", report_page)
+        assert uses >= 2 and len(guarded) == uses
+        assert "prefers-color-scheme" in report_page
+        assert 'data-theme="light"' in report_page
+
+    def test_no_negative_zero(self, report_page):
+        import re
+
+        assert "-0.000" not in report_page and "−0.000" not in report_page
+        assert not re.search("−0(?:\\.0+)?(?![\\d.,])", report_page)
+
+    def test_every_section_present(self, report_page):
+        for n in range(1, 10):
+            assert f'id="s{n}"' in report_page
+            assert f'href="#s{n}"' in report_page
+
+    def test_resolved_gap_shown_in_cny(self, report_page):
+        rec = next(
+            r for r in _results("02_fixed_shares")["sweep1_moneyness_maturity"]
+            if r["tenor"] == "1Y" and r["is_call"] and r["moneyness"] == 1.0
+        )
+        tech = rec["names"].index("TECH")
+        m1 = rec["methods"]["M1"]
+        assert m1["resolved"][tech]
+        assert _cny(m1["gap_cash_per_pct"][tech]) in report_page
+        assert "not resolved" in report_page
+
+    def test_corr_band_next_to_gaps(self, report_page):
+        rec = next(
+            r for r in _results("04_dispersion_correlation")["sweep5_corr_five_names"]
+            if r["corr_band_cash_per_pct"] is not None
+        )
+        assert f"{round(max(rec['corr_band_cash_per_pct'])):,}" in report_page
+        assert "within correlation model risk" in report_page
+
+    def test_base_pv_error_shown(self, report_page):
+        rec = next(
+            r for r in _results("02_fixed_shares")["sweep1_moneyness_maturity"]
+            if r["tenor"] == "1Y" and r["is_call"] and r["moneyness"] == 1.0
+        )
+        assert _cny(rec["price"]["mm_minus_mc"] * rec["units"]) in report_page
+
+    def test_main_writes_file(self, tmp_path, monkeypatch):
+        mod = _load_report()
+        out = tmp_path / "report.html"
+        monkeypatch.setattr(mod, "REPORT_PATH", out)
+        mod.main()
+        assert out.read_text(encoding="utf-8").startswith("<!doctype html>")
