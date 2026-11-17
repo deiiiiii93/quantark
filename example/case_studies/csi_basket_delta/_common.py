@@ -41,6 +41,12 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 from scipy.stats import norm
 
+# `import quantark.montecarlo` as the first quantark import hits a library
+# import cycle (montecarlo.conditional_snowball -> asset -> snowball MC engine
+# -> montecarlo.conditional_snowball).  Importing quantark.asset first breaks
+# it; the cycle itself is out of scope for this study.
+import quantark.asset  # noqa: F401  (import order, see above)
+from quantark.montecarlo import SobolNormalGenerator, apply_brownian_bridge_multi_asset
 from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -52,6 +58,7 @@ from quantark.util.numerical import (
 )
 
 TRADING_DAYS = 244
+SOBOL_MAX_DIM = 21201  # scipy's Sobol direction-number table
 
 PERIODS: Dict[str, Optional[float]] = {
     "none": None,
@@ -535,4 +542,301 @@ def default_state(basket: CSIBasket, elapsed: float = 0.0, moves=None) -> CSISta
         spots_at_rebalance=spots,
         moves=moves,
         elapsed=elapsed,
+    )
+
+
+# ----------------------------------------------------------------------------
+# Monte Carlo reference (exact sampling at the schedule dates)
+# ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MCResult:
+    """RQMC estimates per one index-unit option, each with its SE across batches.
+
+    ``batches`` holds the per-batch arrays (keys ``price``, ``delta_index``,
+    ``deltas_pathwise``, ``deltas_fd``, ``m1``, ``m2``) so paired differences
+    can be formed on the same paths (spec D7).
+    """
+
+    price: float
+    price_se: float
+    delta_index: float
+    delta_index_se: float
+    deltas_pathwise: np.ndarray
+    deltas_pathwise_se: np.ndarray
+    deltas_fd: np.ndarray
+    deltas_fd_se: np.ndarray
+    sample_m1: float
+    sample_m1_se: float
+    sample_m2: float
+    sample_m2_se: float
+    euler_max_rel_err: float
+    strike: float
+    fd_bump: float
+    n_paths: int
+    n_batches: int
+    batches: Dict[str, np.ndarray] = field(repr=False, default_factory=dict)
+
+
+def _mean_se(x: np.ndarray) -> Tuple[Any, Any]:
+    """Mean and SE over axis 0 (batches)."""
+    x = np.asarray(x, dtype=float)
+    mean = x.mean(axis=0)
+    if x.shape[0] < 2:
+        return mean, np.full_like(mean, np.nan)
+    return mean, x.std(axis=0, ddof=1) / np.sqrt(x.shape[0])
+
+
+def _simulate_batch(
+    basket: CSIBasket,
+    q: StateQuantities,
+    times: np.ndarray,
+    factor: np.ndarray,
+    gen: Any,
+    n_paths: int,
+    batch_id: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """One RQMC batch: returns (I_T (P,), stub growth G1 (N, P), later product (P,)).
+
+    One batch is exactly one ``SobolNormalGenerator.normal`` call (spec D17).
+    Sobol dimension ``k * N + i`` drives bridge level ``k`` of name ``i``.
+    """
+    n, steps = basket.n_names, len(times)
+    z = gen.normal(n_paths, n * steps, batch_id=batch_id)
+    z = z.reshape(n_paths, steps, n).transpose(2, 0, 1)  # (N, P, S)
+    dw = apply_brownian_bridge_multi_asset(z, times)
+    del z
+    dw = np.einsum("ij,jps->ips", factor, dw)  # correlate names per step
+    dt = np.diff(np.concatenate(([0.0], times)))
+    carry = basket.rate - basket.div_yields
+    drift = (carry - 0.5 * basket.vols**2)[:, None] * dt[None, :]  # (N, S)
+    g = np.exp(drift[:, None, :] + basket.vols[:, None, None] * dw)
+    del dw
+
+    d = basket.decrement
+    g1 = g[:, :, 0]
+    i1 = safe_exp(-d * times[0]) * np.einsum("i,ip->p", q.shares * q.spots, g1)
+    if steps > 1:
+        per = np.einsum("i,ips->ps", basket.target_weights, g[:, :, 1:])
+        per *= np.exp(-d * dt[1:])[None, :]
+        later = np.prod(per, axis=1)
+    else:
+        later = np.ones(n_paths)
+    return i1 * later, g1, later
+
+
+def mc_price_and_deltas(
+    basket: CSIBasket,
+    state: CSIState,
+    option: CSIOption,
+    n_paths: int = 2**14,
+    n_batches: int = 32,
+    seed: int = 20261117,
+    fd_bump: float = Tolerance.BUMP_SPOT,
+    strike: Optional[float] = None,
+) -> MCResult:
+    """Exact-sampling RQMC price, pathwise per-name deltas, Delta_I and CRN FD.
+
+    The pathwise derivative only touches the stub (later periods restart from
+    target weights)::
+
+        dI_T/dS_i = exp(-d tau) n_i G_i I_T / I(t1)
+
+    so ``sum_i S_i dI_T/dS_i = I_T`` holds on every path (Euler identity).
+    The FD deltas (method M3) bump name ``i``'s price by ``fd_bump`` on the
+    same paths, strike held fixed (spec D8, D14).
+
+    Args:
+        n_paths: Paths per RQMC batch; must be a power of two.
+        n_batches: Independent scrambles; SEs are taken across batches.
+    """
+    if n_paths < 2 or n_batches < 1:
+        raise ValidationError("need n_paths >= 2 and n_batches >= 1")
+    q = state_quantities(basket, state)
+    k = option.strike(q.index_level) if strike is None else float(strike)
+    t = option.maturity
+    times = schedule_times(basket, state, t)
+    if basket.n_names * len(times) > SOBOL_MAX_DIM:
+        raise ValidationError(f"Sobol dimension cap ({SOBOL_MAX_DIM}) exceeded")
+    factor = corr_factor(basket.corr)
+    gen = SobolNormalGenerator()
+    gen.base_seed = int(seed)
+    gen.strict_power_of_two = True
+    df = safe_exp(-basket.rate * t)
+    stub_dec = safe_exp(-basket.decrement * times[0])
+    sign = 1.0 if option.is_call else -1.0
+
+    keys = ("price", "delta_index", "deltas_pathwise", "deltas_fd", "m1", "m2")
+    out: Dict[str, list] = {key: [] for key in keys}
+    euler = 0.0
+    for b in range(n_batches):
+        i_t, g1, later = _simulate_batch(basket, q, times, factor, gen, n_paths, b)
+        payoff = np.maximum(sign * (i_t - k), 0.0)
+        itm = (sign * (i_t - k)) > 0.0
+        d_it = stub_dec * (q.shares[:, None] * g1) * later[None, :]  # (N, P)
+        euler = max(euler, float(np.max(np.abs(q.spots @ d_it - i_t) / i_t)))
+        out["price"].append(df * payoff.mean())
+        out["delta_index"].append(df * sign * np.mean(itm * i_t) / q.index_level)
+        out["deltas_pathwise"].append(df * sign * np.mean(itm[None, :] * d_it, axis=1))
+        fd = np.empty(basket.n_names)
+        for i in range(basket.n_names):
+            shift = stub_dec * q.shares[i] * fd_bump * q.spots[i] * g1[i] * later
+            up = np.maximum(sign * (i_t + shift - k), 0.0)
+            dn = np.maximum(sign * (i_t - shift - k), 0.0)
+            fd[i] = df * np.mean(up - dn) / (2.0 * fd_bump * q.spots[i])
+        out["deltas_fd"].append(fd)
+        out["m1"].append(i_t.mean())
+        out["m2"].append(np.mean(i_t * i_t))
+
+    batches = {key: np.asarray(val, dtype=float) for key, val in out.items()}
+    est = {key: _mean_se(val) for key, val in batches.items()}
+    return MCResult(
+        price=float(est["price"][0]),
+        price_se=float(est["price"][1]),
+        delta_index=float(est["delta_index"][0]),
+        delta_index_se=float(est["delta_index"][1]),
+        deltas_pathwise=est["deltas_pathwise"][0],
+        deltas_pathwise_se=est["deltas_pathwise"][1],
+        deltas_fd=est["deltas_fd"][0],
+        deltas_fd_se=est["deltas_fd"][1],
+        sample_m1=float(est["m1"][0]),
+        sample_m1_se=float(est["m1"][1]),
+        sample_m2=float(est["m2"][0]),
+        sample_m2_se=float(est["m2"][1]),
+        euler_max_rel_err=euler,
+        strike=k,
+        fd_bump=fd_bump,
+        n_paths=n_paths,
+        n_batches=n_batches,
+        batches=batches,
+    )
+
+
+# ----------------------------------------------------------------------------
+# Delta methods (design section 4) and metrics
+# ----------------------------------------------------------------------------
+
+METHOD_LABELS = {
+    "REF": "MC pathwise reference",
+    "M1": "Delta_I x current shares (whole-index order)",
+    "M2": "Delta_I x target weights (shortcut)",
+    "M3": "per-name FD, MC with common random numbers",
+    "M4": "Delta_I x current shares, moment-matched",
+    "M5": "per-name derivative, moment-matched",
+}
+
+
+@dataclass(frozen=True)
+class MethodDeltas:
+    """Per-name deltas of one method and its paired gap to the reference.
+
+    Attributes:
+        key: ``REF`` or ``M1``..``M5``.
+        deltas: dV/dS_i per index-unit option (mean over batches for MC).
+        diff_batches: Per-batch (method - REF), shape (B, N).
+        diff_mean: Mean gap to REF.
+        diff_se: Paired SE of that gap (spec D7).
+    """
+
+    key: str
+    deltas: np.ndarray
+    diff_batches: np.ndarray
+    diff_mean: np.ndarray
+    diff_se: np.ndarray
+
+
+def delta_methods(
+    basket: CSIBasket,
+    state: CSIState,
+    option: CSIOption,
+    mc: MCResult,
+    mm: MMResult,
+) -> Dict[str, MethodDeltas]:
+    """REF and M1..M5 per design section 4, with paired gaps to REF."""
+    q = state_quantities(basket, state)
+    ref_b = mc.batches["deltas_pathwise"]
+    di_b = mc.batches["delta_index"][:, None]
+    target_shares = basket.target_weights * q.index_level / q.spots
+    per_batch = {
+        "REF": ref_b,
+        "M1": di_b * q.shares[None, :],
+        "M2": di_b * target_shares[None, :],
+        "M3": mc.batches["deltas_fd"],
+    }
+    fixed = {
+        "M4": mm.delta_index * q.shares,
+        "M5": np.asarray(mm.deltas, dtype=float),
+    }
+    result: Dict[str, MethodDeltas] = {}
+    for key, arr in per_batch.items():
+        diff = arr - ref_b
+        dm, ds = _mean_se(diff)
+        result[key] = MethodDeltas(key, arr.mean(axis=0), diff, dm, ds)
+    for key, vec in fixed.items():
+        diff = vec[None, :] - ref_b
+        dm, ds = _mean_se(diff)
+        result[key] = MethodDeltas(key, vec, diff, dm, ds)
+    return result
+
+
+def delta_cash_error_per_pct(
+    method: MethodDeltas, spots: np.ndarray, units: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Gap to REF in CNY per 1% move of each name: (mean, SE)."""
+    scale = spots * units * 0.01
+    return method.diff_mean * scale, method.diff_se * scale
+
+
+def cash_error_batches(method: MethodDeltas, spots: np.ndarray, units: float) -> np.ndarray:
+    """Per-batch delta-cash errors (B, N), CNY per unit return of each name."""
+    return method.diff_batches * (spots * units)[None, :]
+
+
+def fd_bias_allowance(
+    basket: CSIBasket, state: CSIState, option: CSIOption, fd_bump: float
+) -> np.ndarray:
+    """D18: |(h S_i)^2 / 6 * d^3V^MM/dS_i^3| per name (central-FD bias)."""
+    q = state_quantities(basket, state)
+    third = mm_third_derivatives(basket, state, option)
+    return np.abs((fd_bump * q.spots) ** 2 / 6.0 * third)
+
+
+@dataclass(frozen=True)
+class ResidualSigma:
+    """Daily P&L sigma of a delta mismatch (spec D16).
+
+    Attributes:
+        sigma: sqrt(max(q, 0)) in CNY.
+        q: Bias-corrected e'Ce - tr(C Cov(e_bar)).
+        q_se: Delta-method SE of q.
+        resolved: q > 3 q_se.
+    """
+
+    sigma: float
+    q: float
+    q_se: float
+    resolved: bool
+
+
+def residual_daily_pnl_sigma(
+    err_cash_batches: np.ndarray, cov_daily: np.ndarray
+) -> ResidualSigma:
+    """Bias-corrected sqrt(e' C e) from per-batch cash-delta errors (B, N)."""
+    e = np.asarray(err_cash_batches, dtype=float)
+    c = np.asarray(cov_daily, dtype=float)
+    b = e.shape[0]
+    e_bar = e.mean(axis=0)
+    if b > 1:
+        cov_mean = np.atleast_2d(np.cov(e, rowvar=False, ddof=1)) / b
+    else:
+        cov_mean = np.zeros_like(c)
+    q_val = float(e_bar @ c @ e_bar) - float(np.trace(c @ cov_mean))
+    var_q = 4.0 * float(e_bar @ c @ cov_mean @ c @ e_bar)
+    q_se = float(np.sqrt(max(var_q, 0.0)))
+    return ResidualSigma(
+        sigma=float(np.sqrt(max(q_val, 0.0))),
+        q=q_val,
+        q_se=q_se,
+        resolved=bool(q_val > 3.0 * q_se),
     )
