@@ -7,6 +7,30 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-11-17
+
+### Fixed
+
+- **The rest of the 0.11.0 performance regression.** 0.11.1 removed the per-record calendar copies in
+  `time_shift`; two copy costs remained on every product copy (QUAD V2 `prepare`, theta, greek bumps):
+  - The calendar's identity (one string per holiday) sits inside every record's accrual terms key.
+    `copy.deepcopy` never memoises a tuple it returns unchanged, so that identity was walked again for
+    each distinct key. It is now a tuple subclass that a copy shares; equality and hashing are the
+    tuple's, so the stale-terms checks are unchanged.
+  - `AccrualPeriod`, `AccrualBasis` and `KnockInAnchor` were rebuilt field by field. A copy now shares
+    their immutable members and copies the calendar once through the memo, so it stays independent of
+    the original.
+
+  One copy of a 750-record contract with a 1,350-holiday calendar: 13.0 ms (0.11.1) → 7.2 ms. A desk
+  benchmark (97 trades with cash legs, full PV and greeks, four workers) is back at 0.5.0's time:
+  0.5.0 63.1 s, 0.11.0 124.7 s, 0.11.1 84.2 s, 0.11.2 63.4 s. Prices and greeks are bitwise unchanged.
+
+### Tests
+
+- `test_ac14` (local-vol transition QUAD case study) measures its child process's own peak memory on
+  Linux (`VmHWM`). `ru_maxrss` survives `execve` there, so the check reported the spawning xdist
+  worker's peak (8.7–13 GB) for a computation that peaks at about 110 MB.
+
 ## [0.11.1] - 2026-11-17
 
 ### Fixed
