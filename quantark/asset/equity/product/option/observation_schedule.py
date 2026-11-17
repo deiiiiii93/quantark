@@ -406,8 +406,11 @@ class ObservationSchedule:
             return self
 
         updated_records = []
+        # One memo for the whole schedule: the records share their accrual basis (calendar) and terms key, and a
+        # memo per record would copy that metadata once per record (0.11.0 regression: 716 calendar copies).
+        memo: dict = {}
         for rec in self.records:
-            rec_copy = deepcopy(rec)
+            rec_copy = deepcopy(rec, memo)
             if not keep_landing:
                 # lifecycle aging: today's comparisons verbatim (R2, byte-identical)
                 if getattr(rec_copy, "observation_date", None) is not None:
