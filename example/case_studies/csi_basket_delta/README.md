@@ -31,8 +31,8 @@ choices give different per-name hedges, by how much in CNY, and why.
     **−12.1%** of its true delta.
   - GOLD (10% vol) is over-hedged by **6.8k CNY per 1%**, which is **+14.7%**.
   - The resulting daily P&L noise is **28.8k CNY** (1σ).
-  - Per-name FD on a multi-name Monte Carlo removes it: 48 CNY/day, which is
-    noise.
+  - Per-name FD on a multi-name Monte Carlo removes it: its residual σ is
+    not resolved (< 132 CNY/day at 3 SE).
 - **Rebalancing turns the gap off.** A bump only lives until the next
   rebalance; after that the weights reset to target. So the gap scales with
   the time left in the current period. Measured as daily residual σ at the
@@ -47,8 +47,9 @@ choices give different per-name hedges, by how much in CNY, and why.
   The weight-split error it is compared against is 10–13k. Across uniform
   correlations from −0.25 (the lowest possible for 5 names) to +1, the
   weight-split residual σ stays between 25k and 31k CNY/day. In a 2-name
-  basket, ρ = −1 makes the error about 4× larger than ρ = +1 (115k vs 11k
-  CNY/day).
+  basket the sign of ρ matters. At ρ = −1 the per-name split error is
+  about 3.5× its ρ = +1 value: 40k vs 11k CNY per 1%. The residual σ is
+  about 10× larger: 115k vs 11k CNY/day.
 - **The fast single-index model misprices the smile, not just the level.**
   Matching an index lognormal to the basket's first two moments gives the
   wrong PV.
@@ -160,11 +161,14 @@ The full tables and charts are in `results/csi_basket_delta_report.html`.
 6. **PV and Δ_I: fast model vs multi-name MC.**
    - 83 of 96 scenario PVs differ by more than 3 SE. The fast model is high in
      61 of them and low in 22, and every low case is a high-strike option.
-   - In relative terms the error peaks on low-premium wings: 6M 80% put
-     +13%, 3M 120% call −8.5%. In CNY it peaks where vols disperse or
-     correlation turns negative: up to 942k CNY per 1e8 at double the vol
-     spread.
-   - Its Δ_I differs from MC by up to 17% (2-name, ρ = −1).
+   - **Relative errors are largest on near-worthless short-dated wings.**
+     The 1M 80% put is +168%, but only 60 CNY. The 1M 120% call is −19.6%.
+     The 3M 80% put is +19.1%.
+   - **In CNY the error peaks where vols disperse or correlation turns
+     negative:** up to 942k CNY per 1e8 at double the vol spread.
+   - **Its Δ_I is off by up to 17% on at-the-money options** (2-name,
+     ρ = −1). On short-dated wings, where Δ_I is close to zero, it is off by
+     up to 62% (1M 80% put).
    - Use it for speed and as a control variate, not as the reference for PV or
      deltas.
 
@@ -174,6 +178,14 @@ The full tables and charts are in `results/csi_basket_delta_report.html`.
 - Some resolved gaps are also immaterial. Example: a 2 CNY gap on a deep
   in-the-money call is statistically real but meaningless for hedging.
 - Read the CNY size, not just the flag.
+
+**One-factor caveat.** With a single name, or with ρ = ±1, one shock drives
+the whole basket, so the Sobol estimate is effectively one-dimensional. The
+payoff kink then falls in a single stratum, and the batch SE of a delta
+becomes unreliable: in tests it swung 15× across seeds. No conclusion here
+depends on it. Those scenarios show either large, clearly resolved gaps or
+"not resolved" FD gaps. The single-name tests allow the one stratum the kink
+falls in, df·(K/S)/N.
 
 ## How to run
 

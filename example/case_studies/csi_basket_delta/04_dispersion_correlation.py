@@ -32,6 +32,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _common as cm  # noqa: E402
+from quantark.util.numerical import is_greater_than_or_close, is_less_than_or_close  # noqa: E402
 
 RESULTS = HERE / "results"
 LAMBDAS = [0.0, 0.5, 1.0, 1.5, 2.0]
@@ -59,7 +60,7 @@ def sweep_dispersion() -> list:
 
 
 def _feasible(n: int, rho: float) -> bool:
-    return -1.0 / (n - 1) - 1e-12 <= rho <= 1.0 + 1e-12
+    return is_greater_than_or_close(rho, -1.0 / (n - 1)) and is_less_than_or_close(rho, 1.0)
 
 
 def _with_band(make, n: int, rho: float, label: str) -> dict:

@@ -177,6 +177,12 @@ def max_abs_resolved(m: dict):
     return max(abs(g) for g in m["gap_cash_per_pct"]), True
 
 
+def max_gap_cell(m: dict) -> str:
+    """Table cell for the largest resolved gap; NR when no name is resolved (AC12)."""
+    value, hollow = max_abs_resolved(m)
+    return NR if hollow else num(value)
+
+
 # ---------------------------------------------------------------------------
 # SVG charts (from the snowball_ftp_study reference, plus gaps/hollow/log-y)
 # ---------------------------------------------------------------------------
@@ -791,7 +797,7 @@ def section_drivers(st: Study) -> str:
                            tipfmt=lambda v: num(v) + " CNY/day", ydomain=(0, max(max(s) for _, s in ser)),
                            label="Residual sigma vs vol dispersion")
     lam_rows = [[num(r["lambda"], 1), f"{pct(min(r['vols']), 1)}–{pct(max(r['vols']), 1)}",
-                 num(max_abs_resolved(r["methods"]["M1"])[0])] + [sigma_cell(r["methods"][k]) for k in METHODS]
+                 max_gap_cell(r["methods"]["M1"])] + [sigma_cell(r["methods"][k]) for k in METHODS]
                 for r in lam]
 
     def rho_chart(rows, idx_name, xl, aria):
@@ -834,8 +840,8 @@ def section_drivers(st: Study) -> str:
                 verdict = "outside the band"
             band_rows.append([lab(r["label"]), n, gap_cell(m1, i), gap_cell(r["methods"]["M3"], i),
                               gap_cell(r["methods"]["M5"], i), "–" if bnd is None else num(bnd[i]), verdict])
-    five_rows = [[sgn(r["rho"], 2), sigma_cell(r["methods"]["M1"]), num(max_abs_resolved(r["methods"]["M1"])[0]),
-                  num(max_abs_resolved(r["methods"]["M5"])[0]),
+    five_rows = [[sgn(r["rho"], 2), sigma_cell(r["methods"]["M1"]), max_gap_cell(r["methods"]["M1"]),
+                  max_gap_cell(r["methods"]["M5"]),
                   "–" if r["corr_band_cash_per_pct"] is None else num(max(r["corr_band_cash_per_pct"]))]
                  for r in st.five]
     two_rows = [[sgn(r["rho"], 1), sigma_cell(r["methods"]["M1"]), gap_cell(r["methods"]["M1"], 0),
@@ -947,13 +953,15 @@ def section_mm(st: Study) -> str:
     lam_lo, lam_hi = st.lam[0], st.lam[-1]
     b = st.base
     btd = b["total_delta_cash_per_pct"]
+    btd_gap = btd["mm"] - btd["mc"]
+    total_delta_text = (signed(btd_gap) + " CNY") if abs(btd_gap) > SE_MULTIPLE * btd["mc_se"] else NR
     trend = (f"On the 1Y ATM call: 5 names {pv_text(pv(five_hi))} at ρ = {sgn(five_hi['rho'], 2)} and "
              f"{pv_text(pv(five_lo))} at ρ = {sgn(five_lo['rho'], 2)}; vol dispersion {pv_text(pv(lam_lo))} at "
              f"λ = {num(lam_lo['lambda'], 1)} and {pv_text(pv(lam_hi))} at λ = {num(lam_hi['lambda'], 1)}.")
     skew, skew_read = pv_skew_text(sk)
     return section(8, "MM", "PV and Δ_I: fast model vs multi-name MC", f"""
 <p class="lead">The moment-matched lognormal is the desk-style fast single-index model. On the base 1Y ATM call it
-misprices PV by {pv_text(pv(b))} and its total delta by {signed(btd['mm'] - btd['mc'])} CNY per 1% index move.
+misprices PV by {pv_text(pv(b))} and its total delta by {total_delta_text} per 1% index move.
 {skew} {trend}</p>
 {skew_read}
 {multiples("MM − MC PV by moneyness and tenor", "CNY on the scenario notional; shared y-axis. Base basket, rule A. Call and put lines "

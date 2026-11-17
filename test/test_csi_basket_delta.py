@@ -186,8 +186,15 @@ class TestMomentMatchedChainRule:
         bumped = cm.bump_state(state, 0, 0.01)
         res_b = cm.mm_price_and_deltas(basket, bumped, option, strike=k0)
         res_0 = cm.mm_price_and_deltas(basket, state, option)
+        restruck = cm.mm_price_and_deltas(basket, bumped, option)
         assert res_b.strike == k0 == res_0.strike
+        assert restruck.strike > k0  # without an explicit strike the bump re-strikes
         assert res_b.price > res_0.price  # call, positive delta
+        # the fixed-strike difference is the hedge delta; re-striking is not
+        hedge = (res_b.price - res_0.price) / (0.01 * cm.state_quantities(basket, state).spots[0])
+        sticky = (restruck.price - res_0.price) / (0.01 * cm.state_quantities(basket, state).spots[0])
+        assert is_close(hedge, res_0.deltas[0], rel_tol=2e-2)
+        assert not is_close(sticky, res_0.deltas[0], rel_tol=2e-2)
 
 
 class TestValidation:
@@ -336,21 +343,39 @@ def _within(diff, se, k=3.0, extra=0.0):
 class TestMCSingleName:
     """AC1 (MC part)."""
 
+    @pytest.mark.parametrize("is_call", [True, False])
     @pytest.mark.parametrize(
         "rebalance,decrement,elapsed_frac,move",
         [("none", 0.0, 0.0, 1.0), ("monthly", 0.05, 0.4, 1.07)],
     )
-    def test_mc_matches_bs(self, rebalance, decrement, elapsed_frac, move):
+    def test_mc_matches_bs(self, rebalance, decrement, elapsed_frac, move, is_call):
         basket = _single_name(rebalance=rebalance, decrement=decrement)
         period = cm.period_length(rebalance) or 0.0
         state = _single_state(elapsed=elapsed_frac * period, move=move)
-        option = cm.CSIOption(moneyness=1.0, maturity=1.0)
+        option = cm.CSIOption(moneyness=1.0, maturity=1.0, is_call=is_call)
         mc = _mc(basket, state, option)
         q = cm.state_quantities(basket, state)
         n, s = q.shares[0], q.spots[0]
-        price, delta = _bs_call(s, option.strike(q.index_level) / n, 1.0, 0.3, 0.025, 0.02 + decrement)
+        k = option.strike(q.index_level) / n
+        q_eff = 0.02 + decrement
+        price, delta = _bs_call(s, k, 1.0, 0.3, 0.025, q_eff)
+        if not is_call:  # parity
+            price -= s * math.exp(-q_eff) - k * math.exp(-0.025)
+            delta -= math.exp(-q_eff)
+        # One name => the bridge puts the whole terminal value on Sobol dim 0, so
+        # the estimate is a 1-D stratified sample and the payoff kink sits in a
+        # single stratum: each batch's delta error is ~one Bernoulli draw of size
+        # df*(K/S)/N and the batch SE is unreliable.  Allow that one point.
+        kink = math.exp(-0.025) * option.strike(q.index_level) / s / PATHS
         assert _within(mc.price - n * price, mc.price_se)
-        assert _within(mc.deltas_pathwise[0] - n * delta, mc.deltas_pathwise_se[0])
+        assert _within(mc.deltas_pathwise[0] - n * delta, mc.deltas_pathwise_se[0], extra=kink)
+        assert _within(
+            mc.delta_index * q.index_level - n * delta * s,
+            mc.delta_index_se * q.index_level,
+            extra=kink * s,
+        )
+        bias = cm.fd_bias_allowance(basket, state, option, mc.fd_bump)
+        assert _within(mc.deltas_fd[0] - n * delta, mc.deltas_fd_se[0], extra=bias[0] + kink)
 
 
 class TestEuler:
@@ -406,21 +431,26 @@ class TestMoments:
     """AC5 and AC14 (moment part)."""
 
     @pytest.mark.parametrize(
-        "basket_fn,elapsed_frac",
+        "basket_fn,elapsed_frac,tech_move",
         [
-            (lambda: cm.base_basket("none"), 0.0),
-            (lambda: cm.base_basket("monthly"), 0.0),
-            (lambda: cm.base_basket("daily"), 0.0),
-            (lambda: cm.base_basket("monthly", decrement=0.05), 0.4),
-            (lambda: cm.base_basket("none", corr=cm.uniform_corr(5, 1.0)), 0.0),
-            (lambda: cm.two_name_basket(-1.0), 0.0),
-            (lambda: cm.two_name_basket(-1.0, rebalance="monthly"), 0.4),
+            (lambda: cm.base_basket("none"), 0.0, 1.0),
+            (lambda: cm.base_basket("monthly"), 0.0, 1.0),
+            (lambda: cm.base_basket("daily"), 0.0, 1.0),
+            (lambda: cm.base_basket("monthly", decrement=0.05), 0.4, 1.0),
+            # drifted stub: current weights != target weights in both pricers
+            (lambda: cm.base_basket("monthly"), 0.4, 1.3),
+            (lambda: cm.base_basket("none", corr=cm.uniform_corr(5, 1.0)), 0.0, 1.0),
+            (lambda: cm.two_name_basket(-1.0), 0.0, 1.0),
+            (lambda: cm.two_name_basket(-1.0, rebalance="monthly"), 0.4, 1.0),
         ],
     )
-    def test_sample_moments_match_closed_form(self, basket_fn, elapsed_frac):
+    def test_sample_moments_match_closed_form(self, basket_fn, elapsed_frac, tech_move):
         basket = basket_fn()
         period = cm.period_length(basket.rebalance) or 0.0
-        state = cm.default_state(basket, elapsed=elapsed_frac * period)
+        moves = np.ones(basket.n_names)
+        if "TECH" in basket.names:
+            moves[basket.names.index("TECH")] = tech_move
+        state = cm.default_state(basket, elapsed=elapsed_frac * period, moves=moves)
         option = cm.CSIOption(1.0, 1.0)
         mc = _mc(basket, state, option, paths=2**11, batches=16)
         mm = cm.mm_price_and_deltas(basket, state, option)
