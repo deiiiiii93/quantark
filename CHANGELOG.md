@@ -7,6 +7,19 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-17
+
+### Fixed
+
+- **Performance regression from 0.11.0 accrual periods.** `ObservationSchedule.time_shift` (theta,
+  lifecycle ageing) deep-copied each record with its own memo. Every record's `AccrualPeriod`
+  shares one accrual basis (with its calendar) and one terms key (with the calendar's full holiday
+  identity), so a shift copied that metadata once per record, and every later `deepcopy(product)`
+  (engine prepare, greek bumps) paid for all the copies. On a 750-record dated snowball with a
+  1,350-holiday calendar, one shift took 1.07 s instead of 10 ms, and QUAD V2 price plus greeks
+  roughly doubled. The records of a shifted schedule now share that metadata as the original's do;
+  the copy stays independent of the original. Prices and greeks are bitwise unchanged.
+
 ## [0.11.0] - 2026-11-14
 
 > **Version numbering.** This release follows 0.5.5. It is numbered 0.11.0, not 0.6.0, because
