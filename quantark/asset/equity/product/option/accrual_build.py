@@ -30,6 +30,22 @@ def _detach(schedule: Optional[ObservationSchedule]) -> Optional[ObservationSche
     return replace(schedule, records=[replace(r) for r in schedule.records])
 
 
+class _CalendarIdentity(tuple):
+    """A calendar's value identity inside a terms key: a tuple of strings, immutable, so a deep copy shares it.
+
+    ``copy.deepcopy`` never memoises a tuple it returns unchanged, so a plain identity (one string per holiday) was
+    walked again for every distinct terms key, every KO record's among them, on every product copy. Equality and
+    hashing are the tuple's: a key holding one compares equal to a key holding the plain tuple."""
+
+    __slots__ = ()
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __copy__(self):
+        return self
+
+
 def _calendar_key(calendar):
     """``calendar.identity()``, cached on the calendar: it sorts every holiday, and the stale-terms check reads it
     on each resolver call. The cache is refreshed when the holiday count or the weekend changes."""
@@ -38,7 +54,7 @@ def _calendar_key(calendar):
     stamp = (len(calendar.holidays), tuple(sorted(calendar.weekend_days)))
     cached = getattr(calendar, "_accrual_identity_cache", None)
     if cached is None or cached[0] != stamp:
-        cached = (stamp, calendar.identity())
+        cached = (stamp, _CalendarIdentity(calendar.identity()))
         calendar._accrual_identity_cache = cached
     return cached[1]
 
