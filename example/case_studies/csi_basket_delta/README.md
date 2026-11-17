@@ -151,6 +151,34 @@ The full tables and charts are in `results/csi_basket_delta_report.html`.
 4. **Rebalancing** (`03_rebalance.py`). The gap is linear in the time left in
    the current period.
    - Mid-period is half the start-of-period value, and the last 5% is 5% of it.
+   - **Why.** At the next rebalance date t₁ the counts reset to
+     wᵢ·I(t₁)/Sᵢ(t₁). After that, each period's growth depends only on
+     returns, so V = E[h(I(t₁))]: today's individual prices matter only
+     through the stub τ = t₁ − t. The exact error is
+     REF − M1 = E[h′(I(t₁))·(nᵢSᵢ(t₁) − wᵢ·I(t₁))], with w the current
+     weights. It sums to zero over the names: the Euler identity. To first
+     order in τ, as cash delta per index unit:
+
+     REF − M1 ≈ τ·wᵢ·I·[(βᵢ − 1)·σ_I²·I·Γ + (q̄ − qᵢ)·Δ]
+
+     where βᵢ = (Σw)ᵢ/σ_I², σ_I² = wᵀΣw, q̄ = wᵀq, and Δ, Γ are the index
+     delta and gamma. The drift of the weights cancels a Δ that a naive
+     expansion leaves in the vol term, so that term is pure gamma.
+   - The terms explain the findings. High-β TECH is under-hedged and low-β
+     GOLD over-hedged. Concentration alone gives the heaviest name β > 1.
+     Yield dispersion splits even a deep in-the-money call. The gap grows
+     near the money.
+   - **The formula against the MC** (`first_order_m1_gap` in `_common.py`,
+     stored per row in the stage-03 JSON):
+     - On all 12 rebalanced rows it matches every name's gap within 3.6
+       paired SE.
+     - On fixed shares, where τ is the whole year, it misses by −1.2% on
+       TECH (−10,740 vs −10,875 CNY per 1%) and −3.1% on GOLD.
+   - In the limit of continuous rebalancing (constant mix), I is a GBM and
+     the whole-index order is exact.
+   - The rebalance here is the **index rule** in the CSI rulebook, not how
+     often the desk re-hedges. Re-hedging a fixed-share index daily repeats
+     the same mis-split every day.
    - After drift, the target-weight shortcut breaks: TECH +30% gives a −21%
      TECH error and 49k CNY/day.
 5. **Drivers** (`04_dispersion_correlation.py`).
