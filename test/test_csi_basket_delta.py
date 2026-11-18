@@ -553,6 +553,52 @@ class TestResidualSigma:
         assert not cm.residual_daily_pnl_sigma(e, cov).resolved
 
 
+class TestExplicitSchedule:
+    """Optional explicit schedule for real-calendar callers (csi_real_data spec D10, AC6)."""
+
+    OPT = cm.CSIOption(1.0, 1.0)
+
+    def test_default_schedule_is_bit_identical(self):
+        b = cm.base_basket("quarterly")
+        st = cm.default_state(b, elapsed=0.1)
+        sched = cm.schedule_times(b, st, self.OPT.maturity)
+        a = cm.mc_price_and_deltas(b, st, self.OPT, n_paths=2**10, n_batches=4)
+        e = cm.mc_price_and_deltas(b, st, self.OPT, n_paths=2**10, n_batches=4, schedule=sched)
+        assert a.price == e.price and a.delta_index == e.delta_index
+        assert np.array_equal(a.deltas_pathwise, e.deltas_pathwise)
+        assert np.array_equal(a.deltas_fd, e.deltas_fd)
+
+    def test_stub_longer_than_engine_period_is_accepted(self):
+        b = cm.base_basket("quarterly")
+        st = cm.default_state(b, elapsed=0.0)
+        stub = 64.0 / cm.TRADING_DAYS                     # a 64-session real quarter
+        sched = np.array([stub, stub + 0.25, stub + 0.5, 1.0])
+        res = cm.mc_price_and_deltas(b, st, self.OPT, n_paths=2**10, n_batches=4, schedule=sched)
+        assert res.price > 0.0
+
+    def test_last_time_must_be_maturity(self):
+        b = cm.base_basket("monthly")
+        st = cm.default_state(b)
+        with pytest.raises(ValidationError):
+            cm.mc_price_and_deltas(b, st, self.OPT, n_paths=2**10, n_batches=4,
+                                   schedule=np.array([0.1, 0.9]))
+        with pytest.raises(ValidationError):
+            cm.mc_price_and_deltas(b, st, self.OPT, n_paths=2**10, n_batches=4,
+                                   schedule=np.array([0.5, 0.3, 1.0]))
+
+    def test_anchor_encoding_returns_given_shares(self):
+        b = cm.base_basket("monthly")
+        shares = np.array([0.3, 1.1, 2.0, 50.0, 7.5])
+        spots = np.array([1500.0, 35.0, 48.0, 4.1, 6.2])
+        level = float(shares @ spots)
+        anchor = b.target_weights * level / shares
+        st = cm.CSIState(level, anchor, spots / anchor, 0.0)
+        q = cm.state_quantities(b, st)
+        np.testing.assert_allclose(q.shares, shares, rtol=1e-12)
+        np.testing.assert_allclose(q.spots, spots, rtol=1e-12)
+        assert is_close(q.index_level, level, rel_tol=1e-12)
+
+
 class TestFirstOrderGap:
     """Closed-form M1 - REF to first order in the stub tau (report section 5).
 

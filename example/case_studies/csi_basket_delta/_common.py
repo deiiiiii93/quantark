@@ -626,6 +626,16 @@ def _simulate_batch(
     return i1 * later, g1, later
 
 
+def _checked_schedule(schedule, maturity: float) -> np.ndarray:
+    """Validate an explicit schedule: positive, strictly increasing, ends at maturity."""
+    times = np.asarray(schedule, dtype=float).ravel()
+    if times.size == 0 or times[0] <= 0.0 or np.any(np.diff(times) <= 0.0):
+        raise ValidationError("schedule must be positive and strictly increasing")
+    if not is_close(float(times[-1]), float(maturity)):
+        raise ValidationError(f"schedule must end at the option maturity {maturity}, got {times[-1]}")
+    return times
+
+
 def mc_price_and_deltas(
     basket: CSIBasket,
     state: CSIState,
@@ -635,6 +645,7 @@ def mc_price_and_deltas(
     seed: int = 20261117,
     fd_bump: float = Tolerance.BUMP_SPOT,
     strike: Optional[float] = None,
+    schedule: Optional[np.ndarray] = None,
 ) -> MCResult:
     """Exact-sampling RQMC price, pathwise per-name deltas, Delta_I and CRN FD.
 
@@ -650,13 +661,17 @@ def mc_price_and_deltas(
     Args:
         n_paths: Paths per RQMC batch; must be a power of two.
         n_batches: Independent scrambles; SEs are taken across batches.
+        schedule: Optional simulation dates ``[t1, rebalance dates..., T]`` in
+            years from now, replacing ``schedule_times`` (real-calendar callers,
+            csi_real_data spec D10).  Strictly increasing, positive, last
+            element equal to ``option.maturity``.
     """
     if n_paths < 2 or n_batches < 1:
         raise ValidationError("need n_paths >= 2 and n_batches >= 1")
     q = state_quantities(basket, state)
     k = option.strike(q.index_level) if strike is None else float(strike)
     t = option.maturity
-    times = schedule_times(basket, state, t)
+    times = schedule_times(basket, state, t) if schedule is None else _checked_schedule(schedule, t)
     if basket.n_names * len(times) > SOBOL_MAX_DIM:
         raise ValidationError(f"Sobol dimension cap ({SOBOL_MAX_DIM}) exceeded")
     factor = corr_factor(basket.corr)
