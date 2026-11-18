@@ -1,6 +1,6 @@
 # CSI on real data: rebalancing, a single-underlying desk model, and its hedge
 
-Date: 2026-11-18 · Status: approved (built via /ship; refinements in the run spec D9–D14) · Follows `2026-11-17-csi-basket-delta-design.md`
+Date: 2026-11-18 · Status: approved and built (see "Build notes" at the end) · Follows `2026-11-17-csi-basket-delta-design.md`
 (the synthetic study, landed separately as `example/case_studies/csi_basket_delta/`).
 
 ## Intent
@@ -185,3 +185,23 @@ the stated noise budget, chart choices within the UI language.
 
 A-share 100-share lots and transaction costs in Stage B; implied-vol inputs; price-return index with
 an explicit dividend model.
+
+## Build notes (decisions taken while building)
+
+- **Fixed contract in Stage B**: strike and units are fixed at the start date; the engine's option is
+  never rebuilt from today's index level.
+- **Real-date engine state**: `elapsed = 0`, current shares encoded through the rebalance anchor; the
+  engine gained an optional explicit `schedule=` (default path bit-identical).
+- **Reference deltas**: Stage B's reference arm uses the CRN bump deltas; the exact gap decomposition
+  uses the pathwise deltas (Euler identity holds exactly for them).
+- **First-order split inputs**: τ = stub to the next rebalance, β and σ_I² = wᵀΣw from the per-name
+  calibration, Γ from Black at σ_I; not meaningful for rule `none`.
+- **Calibration convention**: demeaned daily log returns, ddof = 1, ×244, for both models.
+- **Daily P&L**: in excess of financing and marked to the reference PV, so paired differences are pure
+  hedge differences; a third "attribution" arm (reference Δ_I split by weights) separates the split
+  from the total-delta error.
+- **Noise budget → noise correction**: the "< 10% MC-noise share" budget above was not met at an
+  affordable path count (measured share ≈ 0.4–0.46). Instead each paired difference's per-observation
+  MC-noise variance (from the engine's batch covariance) is subtracted, with a calendar-block bootstrap
+  CI, and an independent-seed probe with twice the paths validates the predicted noise (ratio 1.05).
+- **Data cut-off**: a bar fetched before 15:30 Beijing time is intraday and is dropped.

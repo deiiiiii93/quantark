@@ -322,12 +322,10 @@ rebalancing; by point estimate, from smallest to largest: daily, weekly, monthly
 <div class="scroll"><table><thead><tr><th>rule</th><th>ref − test <span class="gk">σ</span>, CNY/day</th><th>÷ ref arm <span class="gk">σ</span></th><th>× √244, CNY</th><th>÷ premium</th><th>mean premium</th><th>premium gap</th><th>split <span class="gk">σ</span></th><th>total-Δ <span class="gk">σ</span></th></tr></thead><tbody><tr><td>none</td><td>14,366</td><td>23.6%</td><td>224k</td><td>3.25%</td><td>6.9m</td><td><span class="up">+266,545</span></td><td>14,772</td><td>6,706</td></tr><tr><td>quarterly</td><td>2,557</td><td>4.1%</td><td>40k</td><td>0.58%</td><td>6.9m</td><td><span class="dn">−25,220</span></td><td>2,310</td><td>1,847</td></tr><tr><td>monthly</td><td>1,147</td><td>1.8%</td><td>18k</td><td>0.26%</td><td>6.9m</td><td><span class="up">+14,341</span></td><td>791</td><td>808</td></tr><tr><td>weekly</td><td>806</td><td>1.3%</td><td>13k</td><td>0.18%</td><td>6.9m</td><td><span class="up">+21,359</span></td><td>230</td><td>759</td></tr><tr><td>daily</td><td>338</td><td>0.5%</td><td>5.3k</td><td>0.08%</td><td>6.9m</td><td><span class="up">+10,782</span></td><td>77</td><td>319</td></tr></tbody></table></div><p class="note">√244 scaling assumes independent days: an order of magnitude for a year's accumulated hedge difference, not a measurement. Premium: mean reference PV of the ATM call at the starts. Split σ = reference − attribution; total-Δ σ = attribution − test.</p>
 <ul class="points">
 <li><b>Where the single-underlying model is enough.</b> Under weekly, daily the per-name split
-adds less than the total-delta part: the index-level order is the right structure, and the remaining gap is the
-index vol and <math><msub><mi mathvariant="normal">Δ</mi><mi>I</mi></msub></math>, which a better vol estimate addresses without a per-name model.</li>
-<li><b>What the reference buys for the rest.</b> Under none the split dominates. A
-per-name model (or at least per-name deltas from it) removes split noise of 14,772 CNY/day
-under none. The quote is affected too: the premium gap averages
-<span class="up">+266,545</span> CNY under none.</li>
+adds less than the total-delta part: the index-level order is the right structure, and the remaining gap sits in
+<math><msub><mi mathvariant="normal">Δ</mi><mi>I</mi></msub></math> (the index vol and the index-level model), not in the split. Whether a better index-vol estimate closes
+it is not measured here.</li>
+<li><b>What the reference buys for the rest.</b> Under none the split dominates. A per-name model (or at least per-name deltas from it) removes split noise of 14,772 CNY/day under none. The quote is affected too: the premium gap averages <span class="up">+266,545</span> CNY under none.</li>
 <li><b>In between.</b> Under quarterly, monthly the split and total-delta parts are comparable (90% CIs overlap): both a per-name split and a better index vol would help.</li>
 
 <li><b>No pass/fail line.</b> The figures sit next to the premium; what is good enough is the desk's call.</li>

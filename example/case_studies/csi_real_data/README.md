@@ -41,18 +41,21 @@ path.
   - Its per-name hedge under-hedges high-beta iFlytek by 8.1k CNY per 1% move on average.
   - Hedged daily on the real path, its P&L differs from the reference's by **14.4k CNY/day** (σ,
     noise-corrected; 90% CI 12.0–16.4k).
-  - Most of that is the **split** across names (14.8k CNY/day), which only a per-name model fixes.
+  - The **split** part across names alone is 14.8k CNY/day; the split and total-delta parts partly
+    offset. Only a per-name model fixes the split.
 - **Frequent rebalancing: it is close to the reference.** The daily hedge difference shrinks with
   the rebalance frequency: 2.6k (quarterly), 1.1k (monthly), 0.8k (weekly) and **0.34k (daily)**
-  CNY/day. The ATM PV gap is about 0.1–0.2%.
-  - Under weekly and daily rebalancing what remains is mostly the **total-delta** part. It comes from
-    the index vol and Black's Δ_I, not from the split: 0.76k vs 0.23k (weekly) and 0.32k vs 0.08k
-    (daily) CNY/day. A better index-vol estimate addresses it, with no per-name model needed.
+  CNY/day. The mean ATM PV gap is −0.02% (quarterly, range −1.2% to +2.3%), +0.15% (monthly),
+  +0.14% (weekly) and +0.08% (daily).
+  - Under weekly and daily rebalancing what remains is mostly the **total-delta** part, not the
+    split: 0.76k vs 0.23k (weekly) and 0.32k vs 0.08k (daily) CNY/day. That gap sits in Δ_I, from the
+    index vol and the index-level model, so it needs no per-name split. Whether a better index-vol
+    estimate closes it was not measured.
   - Under quarterly and monthly the two parts are comparable: their 90% CIs overlap.
-- **The synthetic study's closed form holds on real calibrations.** The split error is predicted to
-  first order by τ·wᵢ·I·[(βᵢ − 1)·σ_I²·I·Γ], where τ is the time left until the next rebalance date.
-  On every rebalanced rule, regressing the measured split part on that formula gives a slope of
-  0.99–1.00, with an rms residual of 1–12 CNY per 1%.
+- **The synthetic study's closed form holds on real calibrations.** The split error (M1 − reference)
+  is predicted to first order by −τ·wᵢ·I·[(βᵢ − 1)·σ_I²·I·Γ], where τ is the time left until the next
+  rebalance date. On every rebalanced rule, regressing the measured split part on that formula gives
+  a slope of 0.99–1.00, with an rms residual of 1–10 CNY per 1%.
 - **Every model difference above is small next to the hedging noise itself.** Each arm's daily hedge
   P&L has a σ of about 62k CNY/day under every rule. That is the noise of discrete daily delta
   hedging and daily re-marking, which both models share.
@@ -98,7 +101,8 @@ ddof = 1, annualised ×244.
   paths.
 - The per-name gap (test − reference) splits exactly into two parts:
   - a **total-delta** part: wᵢ·I·(Δ_I^test − Δ_I^ref);
-  - a **split** part: wᵢ·I·Δ_I^ref − Sᵢ·Δᵢ^ref.
+  - a **split** part: wᵢ·I·Δ_I^ref − Sᵢ·Δᵢ^pw, with the reference's pathwise per-name deltas (exact
+    Euler identity, so the split parts sum to zero).
 
 **Stage B.**
 - One ATM call is sold on each start date. Its strike and units are fixed at the start.

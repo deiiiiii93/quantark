@@ -764,6 +764,14 @@ def section_business(st: Study) -> str:
     pn, pd_ = st.pair(none, "reference-test"), st.pair(daily, "reference-test")
     ordered = sorted(st.rules, key=lambda r: st.pair(r, "reference-test")["v"])
     split_dom, vol_dom, comparable, unres_rules = st.dominance()
+    if split_dom:
+        split_txt = "; ".join(f"{pair_text(st.pair(r, 'reference-attribution'))} under {r}" for r in split_dom)
+        gap_txt = "; ".join(f"{signed(_mean(st.summary[r]['premium_gap_cny']))} CNY under {r}" for r in split_dom)
+        buys_li = (f"<li><b>What the reference buys for the rest.</b> Under {', '.join(split_dom)} the split "
+                   f"dominates. A per-name model (or at least per-name deltas from it) removes split noise of "
+                   f"{split_txt}. The quote is affected too: the premium gap averages {gap_txt}.</li>")
+    else:
+        buys_li = ""
     comp_li = (f"<li><b>In between.</b> Under {', '.join(comparable)} the split and total-delta parts are "
                "comparable (90% CIs overlap): both a per-name split and a better index vol would help.</li>"
                if comparable else "")
@@ -780,12 +788,10 @@ rebalancing; by point estimate, from smallest to largest: {", ".join(ordered)}.<
        "attribution; total-Δ σ = attribution − test.")}
 <ul class="points">
 <li><b>Where the single-underlying model is enough.</b> Under {", ".join(vol_dom) or "no rule"} the per-name split
-adds less than the total-delta part: the index-level order is the right structure, and the remaining gap is the
-index vol and {mx("Δ_I")}, which a better vol estimate addresses without a per-name model.</li>
-<li><b>What the reference buys for the rest.</b> Under {", ".join(split_dom) or "no rule"} the split dominates. A
-per-name model (or at least per-name deltas from it) removes split noise of {pair_text(st.pair(none, "reference-attribution"))}
-under {none}. The quote is affected too: the premium gap averages
-{signed(_mean(st.summary[none]["premium_gap_cny"]))} CNY under {none}.</li>
+adds less than the total-delta part: the index-level order is the right structure, and the remaining gap sits in
+{mx("Δ_I")} (the index vol and the index-level model), not in the split. Whether a better index-vol estimate closes
+it is not measured here.</li>
+{buys_li}
 {comp_li}
 {unres_txt}
 <li><b>No pass/fail line.</b> The figures sit next to the premium; what is good enough is the desk's call.</li>
