@@ -646,13 +646,18 @@ def section_hedge(st: Study) -> str:
     ], text=True)
     arm_rows = [[r] + [num(st.summary[r]["arm_daily_std_cny"][a]) for a in ARMS] + [num(st.summary[r]["n_obs"])]
                 for r in st.rules]
+    pm_ratio = st.hedge["noise_probe"].get("predicted_over_measured")
     pair_rows = []
     for r in st.rules:
         for key in PAIRS:
             p = st.pair(r, key)
             res = "–" if p["resolved"] is None else ("yes" if p["resolved"] else NR)
+            if p["noise"] is None or not pm_ratio:
+                scaled = "–"
+            else:   # sensitivity: the predicted noise scaled up to the probe's measured level (CP3 review)
+                scaled = num(math.sqrt(max(p["raw"] ** 2 - (p["noise"] / pm_ratio) ** 2, 0.0)))
             pair_rows.append([r, html.escape(PAIR_NOTES[key].split(" · ")[0]), num(p["v"]), f"{num(p['lo'])} – {num(p['hi'])}", res,
-                              num(p["raw"]), "–" if p["noise"] is None else num(p["noise"]), signed(p["mean"])])
+                              scaled, num(p["raw"]), "–" if p["noise"] is None else num(p["noise"]), signed(p["mean"])])
     ci = ci_chart(st.rules, [(PAIR_NOTES[k].split(" · ")[0], COLOURS[j], [st.pair(r, k) for r in st.rules])
                              for j, k in enumerate(PAIRS)],
                   ylabel="PAIRED DAILY σ, CNY/DAY (LOG)", xlabel="REBALANCE RULE", yfmt=compact,
@@ -719,9 +724,12 @@ blocks of {hm['block']} calendar sessions ({hm['n_boot']:,} draws), keeping ever
 A pair is resolved only when the CI's lower end is above 0.</p>
 {corr_note}
 {figure(ci, "Paired daily hedge-P&L σ by rule", "Point = σ, whisker = 90% CI, log scale. Hollow: not resolved (CI reaches 0).")}
-{table(["rule", "pair", "σ, CNY/day", "90% CI", "resolved", "raw σ", "noise σ", "mean"], pair_rows,
+{table(["rule", "pair", "σ, CNY/day", "90% CI", "resolved", "σ at measured noise", "raw σ", "noise σ", "mean"],
+       pair_rows,
        "CNY/day per 1e8 notional. " + "; ".join(html.escape(PAIR_NOTES[k]) for k in PAIRS)
-       + ". Raw σ includes MC noise; noise σ = √(mean per-observation noise variance).")}
+       + ". Raw σ includes MC noise; noise σ = √(mean per-observation noise variance), predicted from the engine's "
+       "batch covariance. σ at measured noise: the same correction with the noise scaled by the probe's "
+       "measured/predicted ratio — a sensitivity, largest where the noise is a big share of the raw σ (weekly, daily).")}
 <h3 class="sub">MC noise probe</h3>
 {probe}
 <h3 class="sub">When the gap happens</h3>

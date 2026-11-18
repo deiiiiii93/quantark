@@ -56,6 +56,7 @@ EVAL_START = pd.Timestamp("2024-01-01")
 EVAL_SESSION = 10            # the 10th session of each month (spec D8)
 N_PATHS, N_BATCHES = 2**13, 32
 SEED = 20261118
+SEED_STRIDE = 1000           # per date; each call uses N_BATCHES consecutive scramble seeds, so stride ≥ N_BATCHES
 WORKERS = 4                  # memory: never wide pools on this machine (spec C7)
 
 
@@ -92,7 +93,7 @@ def evaluate_date(prices: pd.DataFrame, level: pd.Series, shares: pd.DataFrame, 
     out = []
     for m in moneyness:
         k = m * lvl
-        pv_t, di_t, _ = _models.black_call(lvl, k, 1.0, cal.index_vol, rate)
+        pv_t, di_t, _ = _models.black_call(lvl, k, float(sched[-1]), cal.index_vol, rate)
         ref = _models.reference_call(spots, n, w_tgt, cal, rule, k, sched, rate, n_paths, n_batches, seed)
         test_cash = w_now * lvl * di_t * scale
         bump = spots * ref.deltas_bump * scale
@@ -144,7 +145,7 @@ def main() -> None:
     for rule in _index.RULES:
         path = _index.build_index(prices, w, rule, prices.index[0])
         for k, d in enumerate(dates):
-            tasks.append((prices, path.level, path.shares, path.weights, calendar, rule, d, SEED + k))
+            tasks.append((prices, path.level, path.shares, path.weights, calendar, rule, d, SEED + SEED_STRIDE * k))
     # Daily-rule tasks are the slowest; submit them first so the pool drains evenly.
     tasks.sort(key=lambda t: {"daily": 0, "weekly": 1}.get(t[5], 2))
     with ProcessPoolExecutor(max_workers=WORKERS, mp_context=get_context("spawn")) as pool:
@@ -153,7 +154,7 @@ def main() -> None:
     out = {
         "stage": "03_gap_through_time",
         "meta": {"rate": RATE, "window": WINDOW, "moneyness": list(MONEYNESS), "eval_session": EVAL_SESSION,
-                 "n_paths": N_PATHS, "n_batches": N_BATCHES, "seed_base": SEED, "notional_cny": NOTIONAL,
+                 "n_paths": N_PATHS, "n_batches": N_BATCHES, "seed_base": SEED, "seed_stride": SEED_STRIDE, "notional_cny": NOTIONAL,
                  "dates": [d.strftime("%Y-%m-%d") for d in dates], "rules": list(_index.RULES),
                  "names": [n.code for n in _data.BASKET], "seconds": round(time.time() - t0, 1),
                  "calendar_horizon": _data.load_meta().get("calendar_horizon")},

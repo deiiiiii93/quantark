@@ -64,6 +64,8 @@ WINDOW = 244
 SESSIONS = 244               # 1Y option life in sessions (spec D2)
 N_PATHS, N_BATCHES = 2**12, 16
 SEED = 20261119
+START_STRIDE = 10**6         # per start; day j of a start uses seeds base + N_BATCHES·j … + N_BATCHES·j + N_BATCHES − 1
+PROBE_OFFSET = 10**9         # independent seeds for the 2N noise probe
 WORKERS = 4                  # spec C7
 BLOCK = 20                   # bootstrap block, sessions
 N_BOOT = 2000
@@ -192,7 +194,7 @@ def run_start(prices: pd.DataFrame, level: pd.Series, shares: pd.DataFrame, cale
         n_t = shares.loc[t].to_numpy(dtype=float)
         pv_t, d_t, _ = _models.black_call(lvl, k, float(sched[-1]), cal.index_vol, rate)
         ref = _models.reference_call(spots[j], n_t, w_tgt, cal, rule, k, sched, rate, n_paths, n_batches,
-                                     seed + j)
+                                     seed + n_batches * j)
         hold["test"][j] = d_t * n_t * units
         hold["reference"][j] = ref.deltas_bump * units
         hold["attribution"][j] = ref.delta_index * n_t * units
@@ -265,11 +267,11 @@ def main() -> None:
     pos = {d: i for i, d in enumerate(prices.index)}
     starts = [d for d in _stage_a.eval_dates(prices.index, _stage_a.EVAL_START) if pos[d] + SESSIONS <= pos[last]]
     paths = {rule: _index.build_index(prices, w, rule, prices.index[0]) for rule in _index.RULES}
-    tasks = [(prices, paths[r].level, paths[r].shares, calendar, r, s, N_PATHS, N_BATCHES, SEED + 1000 * k)
+    tasks = [(prices, paths[r].level, paths[r].shares, calendar, r, s, N_PATHS, N_BATCHES, SEED + START_STRIDE * k)
              for r in _index.RULES for k, s in enumerate(starts)]
     probe_starts = [starts[0], starts[len(starts) // 2], starts[-1]]
     probe = [(prices, paths[PROBE_RULE].level, paths[PROBE_RULE].shares, calendar, PROBE_RULE, s,
-              2 * N_PATHS, N_BATCHES, SEED + 500_000 + 1000 * k) for k, s in enumerate(probe_starts)]
+              2 * N_PATHS, N_BATCHES, SEED + PROBE_OFFSET + START_STRIDE * k) for k, s in enumerate(probe_starts)]
     order = {"daily": 0, "weekly": 1}
     tasks.sort(key=lambda t: order.get(t[4], 2))
     with ProcessPoolExecutor(max_workers=WORKERS, mp_context=get_context("spawn")) as pool:
@@ -296,7 +298,11 @@ def main() -> None:
                         "n_paths": N_PATHS, "n_paths_2n": 2 * N_PATHS, "share": share,
                         "noise_std_measured_cny": measured, "noise_std_predicted_cny": predicted,
                         "predicted_over_measured": predicted / measured,
-                        "validates": bool(0.75 <= predicted / measured <= 1.33)},
+                        "validates": bool(0.75 <= predicted / measured <= 1.33),
+                        "seed_scheme": {"main": f"{SEED} + {START_STRIDE}·k + {N_BATCHES}·j",
+                                        "probe_2n": f"{SEED} + {PROBE_OFFSET} + {START_STRIDE}·k + {N_BATCHES}·j",
+                                        "k": "start index (main) / probe start index", "j": "session index within the start",
+                                        "batches_per_call": N_BATCHES}},
         "summary": {r: summarize(by_rule[r]) for r in _index.RULES},
         "runs": by_rule,
     }
