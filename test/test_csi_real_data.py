@@ -702,3 +702,11 @@ class TestReport:
             walk(_results(stage), stage)
         for rule in _results("02_indices")["rules"].values():
             assert "shares" not in rule                                   # D14: shares withheld
+
+
+def test_readme_covers_run_provenance_and_limits():
+    """AC16."""
+    text = (STUDY_DIR / "README.md").read_text(encoding="utf-8")
+    for needle in ("pip install akshare", "hfq", "stock_zh_a_hist_em", "## How to run", "## Limits",
+                   "2026-11-18-csi-real-data-design.md", "../csi_basket_delta/"):
+        assert needle in text, needle
