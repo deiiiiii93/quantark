@@ -251,6 +251,12 @@ class TestSchedule:
         expiry, fallback = models.expiry_date(self.CAL, "2024-01-15", 5)
         assert not fallback and self._n("2024-01-15", expiry) == 5
 
+    def test_non_session_dates_raise_validation_error(self):
+        with pytest.raises(ValidationError):
+            models.remaining_schedule(self.CAL, "monthly", "2024-04-01", "2024-05-10")
+        with pytest.raises(ValidationError):
+            models.expiry_date(self.CAL, "2024-01-01", 5)
+
     def test_extended_calendar_appends_weekdays(self):
         ext = models.extended_calendar(self.CAL, pd.Timestamp("2024-07-05"))
         assert ext[-1] == pd.Timestamp("2024-07-05") and ext[: len(self.CAL)].equals(self.CAL)
@@ -273,6 +279,11 @@ class TestCalibration:
         ri = np.diff(np.log(level.loc[:asof].iloc[-41:].to_numpy()))
         assert abs(cal.index_vol - np.std(ri, ddof=1) * np.sqrt(244)) < 1e-14
         assert cal.n_obs == 40 and not cal.psd_repaired
+
+    def test_non_session_asof_raises(self):
+        level = index.build_index(self.PRICES, data.target_weights(), "none", self.CAL[0]).level
+        with pytest.raises(ValidationError):
+            models.calibrate(self.PRICES, level, pd.Timestamp("2024-04-01"), window=40)   # a holiday
 
     def test_short_history_raises(self):
         level = index.build_index(self.PRICES, data.target_weights(), "none", self.CAL[0]).level

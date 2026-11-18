@@ -16,6 +16,7 @@ Clock: one year = 244 sessions; every time is (sessions from the as-of date) /
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,14 +26,25 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "csi_basket_delta"))
-import _common as cm  # noqa: E402  (the synthetic study's engine)
-import _index  # noqa: E402
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import Tolerance, safe_exp, safe_log, safe_sqrt
 
-from quantark.util.exceptions import ValidationError  # noqa: E402
-from quantark.util.numerical import safe_exp, safe_log, safe_sqrt  # noqa: E402
+HERE = Path(__file__).resolve().parent
+
+
+def load_module(alias: str, path: Path):
+    """Load a sibling file under a unique module name (other studies also have ``_common`` etc.)."""
+    if alias in sys.modules:
+        return sys.modules[alias]
+    spec = importlib.util.spec_from_file_location(alias, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[alias] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+cm = load_module("csi_basket_delta_common", HERE.parent / "csi_basket_delta" / "_common.py")
+_index = load_module("csi_real_data_index", HERE / "_index.py")
 
 TRADING_DAYS = _index.TRADING_DAYS
 
@@ -40,6 +52,13 @@ TRADING_DAYS = _index.TRADING_DAYS
 # ---------------------------------------------------------------------------
 # Calendar and schedule
 # ---------------------------------------------------------------------------
+
+
+def _position(cal: pd.DatetimeIndex, day) -> int:
+    day = pd.Timestamp(day)
+    if day not in cal:
+        raise ValidationError(f"{day.date()} is not a session of the calendar")
+    return int(cal.get_loc(day))
 
 
 def extended_calendar(calendar: pd.DatetimeIndex, until) -> pd.DatetimeIndex:
@@ -56,7 +75,7 @@ def expiry_date(calendar: pd.DatetimeIndex, start, sessions: int = TRADING_DAYS)
     """The session ``sessions`` after ``start`` (spec D2) and whether the weekday fallback was used."""
     cal = pd.DatetimeIndex(calendar).sort_values()
     start = pd.Timestamp(start)
-    pos = int(cal.get_loc(start))
+    pos = _position(cal, start)
     if pos + sessions < len(cal):
         return cal[pos + sessions], False
     ext = extended_calendar(cal, start + pd.Timedelta(days=int(sessions * 1.6) + 30))
@@ -65,7 +84,7 @@ def expiry_date(calendar: pd.DatetimeIndex, start, sessions: int = TRADING_DAYS)
 
 def sessions_between(calendar: pd.DatetimeIndex, a, b) -> int:
     cal = extended_calendar(calendar, b)
-    return int(cal.get_loc(pd.Timestamp(b)) - cal.get_loc(pd.Timestamp(a)))
+    return _position(cal, b) - _position(cal, a)
 
 
 def remaining_schedule(calendar: pd.DatetimeIndex, rule: str, asof, expiry) -> np.ndarray:
@@ -79,8 +98,8 @@ def remaining_schedule(calendar: pd.DatetimeIndex, rule: str, asof, expiry) -> n
     cal = extended_calendar(calendar, expiry)
     rebs = _index.rebalance_dates(cal, rule, asof, expiry)
     rebs = rebs[rebs < expiry]
-    p0 = cal.get_loc(asof)
-    counts = [int(cal.get_loc(d) - p0) for d in rebs] + [int(cal.get_loc(expiry) - p0)]
+    p0 = _position(cal, asof)
+    counts = [_position(cal, d) - p0 for d in rebs] + [_position(cal, expiry) - p0]
     return np.asarray(counts, dtype=float) / TRADING_DAYS
 
 
@@ -102,7 +121,7 @@ class Calibration:
 
 def _psd_corr(corr: np.ndarray) -> Tuple[np.ndarray, bool]:
     vals, vecs = np.linalg.eigh(corr)
-    if vals.min() >= 0.0:
+    if vals.min() >= -Tolerance.EIGENVALUE_MIN:          # rounding-level negatives are accepted by the engine
         return corr, False
     fixed = (vecs * np.clip(vals, 0.0, None)) @ vecs.T
     d = np.sqrt(np.diag(fixed))
@@ -116,6 +135,8 @@ def calibrate(prices: pd.DataFrame, index_level: pd.Series, asof, window: int = 
     lv = index_level.loc[:asof]
     if len(px) < window + 1 or len(lv) < window + 1:
         raise ValidationError(f"need {window + 1} closes up to {asof.date()}, have {min(len(px), len(lv))}")
+    if px.index[-1] != asof or not px.index[-(window + 1):].equals(lv.index[-(window + 1):]):
+        raise ValidationError(f"{asof.date()} is not a price session, or prices and index levels misalign")
     r = np.diff(np.log(px.iloc[-(window + 1):].to_numpy(dtype=float)), axis=0)
     cov = np.cov(r, rowvar=False, ddof=1) * TRADING_DAYS
     vols = np.sqrt(np.diag(cov))
