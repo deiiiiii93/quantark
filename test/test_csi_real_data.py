@@ -34,6 +34,24 @@ def _load(name: str):
 
 
 data = _load("_data")
+index = _load("_index")
+
+RULES = ("none", "quarterly", "monthly", "weekly", "daily")
+
+
+def _holiday_calendar():
+    """2023-12 .. 2024-06 business days minus a few holidays (incl. Mon 2024-01-01, 2024-04-01, May 1-3)."""
+    days = pd.bdate_range("2023-12-01", "2024-06-28")
+    holidays = pd.DatetimeIndex(["2024-01-01", "2024-04-01", "2024-04-04", "2024-05-01", "2024-05-02", "2024-05-03"])
+    return days.difference(holidays)
+
+
+def _price_frame(sessions, seed=3):
+    rng = np.random.default_rng(seed)
+    vols = np.array([0.25, 0.25, 0.45, 0.18, 0.10]) / np.sqrt(244)
+    steps = rng.standard_normal((len(sessions), 5)) * vols
+    levels = np.array([1500.0, 35.0, 48.0, 4.1, 6.2]) * np.exp(np.cumsum(steps, axis=0))
+    return pd.DataFrame(levels, index=sessions, columns=[n.code for n in data.BASKET])
 
 
 def _sessions(start="2024-01-02", n=30):
@@ -105,3 +123,83 @@ class TestDataLayer:
         assert len(prices) == 30
         assert list(data.load_calendar()) == list(sessions)
         assert data.load_meta()["akshare"] == "test"
+
+
+# ----------------------------------------------------------------------------
+# T3: index construction
+# ----------------------------------------------------------------------------
+
+
+class TestRebalanceDates:
+    """AC3."""
+
+    CAL = _holiday_calendar()
+    START, END = pd.Timestamp("2023-12-01"), pd.Timestamp("2024-06-28")
+
+    def _dates(self, rule):
+        return list(index.rebalance_dates(self.CAL, rule, self.START, self.END).strftime("%Y-%m-%d"))
+
+    def test_quarterly_first_session_of_quarter(self):
+        assert self._dates("quarterly") == ["2024-01-02", "2024-04-02"]
+
+    def test_monthly_first_session_of_month_skips_holidays(self):
+        assert self._dates("monthly") == ["2024-01-02", "2024-02-01", "2024-03-01", "2024-04-02",
+                                          "2024-05-06", "2024-06-03"]
+
+    def test_weekly_first_session_of_iso_week(self):
+        weekly = self._dates("weekly")
+        assert "2024-01-02" in weekly and "2024-01-01" not in weekly       # week starting on a holiday
+        assert "2024-05-06" in weekly and "2024-04-29" in weekly
+        assert all(pd.Timestamp(d).isocalendar()[1] != pd.Timestamp(e).isocalendar()[1]
+                   for d, e in zip(weekly, weekly[1:]))
+
+    def test_daily_and_none(self):
+        assert len(self._dates("daily")) == len(self.CAL) - 1               # base date excluded
+        assert self._dates("none") == []
+
+    def test_base_date_is_not_a_rebalance(self):
+        assert "2023-12-01" not in self._dates("monthly")
+
+
+class TestBuildIndex:
+    """AC4."""
+
+    CAL = _holiday_calendar()
+    PRICES = _price_frame(CAL)
+    W = data.target_weights()
+
+    def _build(self, rule):
+        return index.build_index(self.PRICES, self.W, rule, self.CAL[0], 1000.0)
+
+    @pytest.mark.parametrize("rule", RULES)
+    def test_level_identity_with_shares_before_the_close(self, rule):
+        path = self._build(rule)
+        assert path.level.iloc[0] == 1000.0
+        held = path.shares.shift(1).iloc[1:]                                # shares held into each close
+        recomputed = (held * self.PRICES.iloc[1:]).sum(axis=1)
+        np.testing.assert_allclose(recomputed.values, path.level.iloc[1:].values, rtol=1e-12)
+
+    @pytest.mark.parametrize("rule", ["quarterly", "monthly", "weekly", "daily"])
+    def test_weights_reset_to_target_on_rebalance_dates(self, rule):
+        path = self._build(rule)
+        assert len(path.rebalance_dates) > 0
+        for d in path.rebalance_dates:
+            np.testing.assert_allclose(path.weights.loc[d].values, self.W.values, rtol=1e-12)
+
+    def test_daily_rule_return_is_weighted_name_return(self):
+        path = self._build("daily")
+        ret = path.level.pct_change().iloc[1:]
+        expected = (self.PRICES.pct_change().iloc[1:] * self.W.values).sum(axis=1)
+        np.testing.assert_allclose(ret.values, expected.values, rtol=1e-11, atol=1e-14)
+
+    def test_none_rule_keeps_shares_and_drifts_weights(self):
+        path = self._build("none")
+        assert (path.shares.nunique() == 1).all()
+        assert np.abs(path.weights.iloc[-1].values - self.W.values).max() > 1e-3
+
+    def test_rebalance_does_not_move_the_level(self):
+        path = self._build("monthly")
+        d = path.rebalance_dates[1]
+        before = float(path.shares.shift(1).loc[d] @ self.PRICES.loc[d])
+        after = float(path.shares.loc[d] @ self.PRICES.loc[d])
+        assert abs(after / before - 1.0) < 1e-12
