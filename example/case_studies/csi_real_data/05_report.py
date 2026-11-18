@@ -147,16 +147,19 @@ class Study:
 
     def dominance(self) -> tuple:
         """Rules where the split part (reference − attribution) or the total-delta part (attribution − test)
-        is the larger paired σ; a rule whose larger part is not resolved goes to the third list."""
-        split, vol, unres = [], [], []
+        dominates — its 90% CI lies wholly above the other's — then rules where the CIs overlap
+        (comparable), then rules whose larger part is not resolved from MC noise."""
+        split, vol, comparable, unres = [], [], [], []
         for r in self.rules:
             s, v = self.pair(r, "reference-attribution"), self.pair(r, "attribution-test")
-            big = s if s["v"] > v["v"] else v
+            big, small = (s, v) if s["v"] > v["v"] else (v, s)
             if big["resolved"] is False:
                 unres.append(r)
-            else:
+            elif big["lo"] > small["hi"]:
                 (split if big is s else vol).append(r)
-        return split, vol, unres
+            else:
+                comparable.append(r)
+        return split, vol, comparable, unres
 
     def corrected(self) -> bool:
         return all("corrected_std_cny" in p for s in self.summary.values() for p in s["pairs"].values())
@@ -404,8 +407,10 @@ def section_summary(st: Study) -> str:
                      "the start, mean over starts.")
     none, daily = st.rules[0], st.rules[-1]
     split = {r: st.pair(r, "reference-attribution") for r in st.rules}
-    split_dom, vol_dom, unres = st.dominance()
+    split_dom, vol_dom, comparable, unres = st.dominance()
     unres_txt = f" Under {', '.join(unres)} neither part is resolved from MC noise." if unres else ""
+    comp_txt = (f" Under {', '.join(comparable)} the two parts are comparable (their 90% CIs overlap)."
+                if comparable else "")
     fits = [st.split_fit(r) for r in st.rules if r != none]
     pv_none = [st.pv_gap(r) for r in st.atm(none)]
     pv_daily = [st.pv_gap(r) for r in st.atm(daily)]
@@ -416,9 +421,10 @@ attribution) is {pair_text(split[none])} on fixed shares ({none}) and {pair_text
 {daily} rebalancing. In Stage A the mean |split part| per name falls from
 {num(_mean(abs(v) for r in st.rule_recs(none) for v in r["gap_split_part"]))} to
 {num(_mean(abs(v) for r in st.rule_recs(daily) for v in r["gap_split_part"]))} CNY/1%.</li>
-<li><b>Where the split dominates, the desk needs a per-name model.</b> The split part is larger than the
-total-delta part under {", ".join(split_dom) or "no rule"}; the total-delta (index-vol) part is the larger one
-under {", ".join(vol_dom) or "no rule"}. That part does not need a per-name model, only a better {mx("Δ_I")}.{unres_txt}</li>
+<li><b>Where the split dominates, the desk needs a per-name model.</b> The split part dominates the
+total-delta part (90% CIs apart) under {", ".join(split_dom) or "no rule"}; the total-delta (index-vol) part
+dominates under {", ".join(vol_dom) or "no rule"}. That part does not need a per-name model, only a better
+{mx("Δ_I")}.{comp_txt}{unres_txt}</li>
 <li><b>The first-order closed form predicts the split on real calibrations.</b> On the rebalanced rules the fitted
 slope of the measured split part on the formula is {num(min(x["slope"] for x in fits), 3)}–{num(max(x["slope"] for x in fits), 3)}
 (1 = exact), with an rms residual of {num(min(x["rms_resid"] for x in fits), 1)}–{num(max(x["rms_resid"] for x in fits), 1)} CNY/1%.</li>
@@ -749,7 +755,10 @@ def section_business(st: Study) -> str:
     none, daily = st.rules[0], st.rules[-1]
     pn, pd_ = st.pair(none, "reference-test"), st.pair(daily, "reference-test")
     ordered = sorted(st.rules, key=lambda r: st.pair(r, "reference-test")["v"])
-    split_dom, vol_dom, unres_rules = st.dominance()
+    split_dom, vol_dom, comparable, unres_rules = st.dominance()
+    comp_li = (f"<li><b>In between.</b> Under {', '.join(comparable)} the split and total-delta parts are "
+               "comparable (90% CIs overlap): both a per-name split and a better index vol would help.</li>"
+               if comparable else "")
     unres_txt = (f"<li><b>Below the MC noise.</b> Under {', '.join(unres_rules)} neither part is resolved: the "
                  "reference cannot tell the models apart at these path counts.</li>" if unres_rules else "")
     return section(7, "BUSINESS", "Business read", f"""
@@ -769,6 +778,7 @@ index vol and {mx("Δ_I")}, which a better vol estimate addresses without a per-
 per-name model (or at least per-name deltas from it) removes split noise of {pair_text(st.pair(none, "reference-attribution"))}
 under {none}. The quote is affected too: the premium gap averages
 {signed(_mean(st.summary[none]["premium_gap_cny"]))} CNY under {none}.</li>
+{comp_li}
 {unres_txt}
 <li><b>No pass/fail line.</b> The figures sit next to the premium; what is good enough is the desk's call.</li>
 </ul>
