@@ -548,3 +548,157 @@ class TestFixedContract:
         assert path.level.loc[start:].iloc[:21].std() > 0                    # the index did move
         assert set(res["arms"]) == {"test", "reference", "attribution"}
         assert all(len(res["arms"][a]["daily_pnl"]) == 20 for a in res["arms"])
+
+
+# ----------------------------------------------------------------------------
+# T7: the HTML report (reads the committed results JSON only)
+# ----------------------------------------------------------------------------
+
+
+RESULTS_DIR = STUDY_DIR / "results"
+RAW_PRICE_KEYS = {"close", "closes", "price", "prices", "spot", "spots"}
+
+
+def _results(stage):
+    import json
+
+    return json.loads((RESULTS_DIR / f"{stage}.json").read_text())
+
+
+def _has_new_stage_b_fields(hedge):
+    pair = hedge["summary"]["none"]["pairs"]["reference-test"]
+    return {"corrected_std_cny", "corrected_ci90", "resolved", "noise_std_cny"} <= set(pair)
+
+
+@pytest.fixture(scope="module")
+def report():
+    return _load("05_report")
+
+
+@pytest.fixture(scope="module")
+def report_page(report):
+    return report.build_html()
+
+
+class TestReport:
+    """AC13 (page built from JSON only, chrome, MathML, sections) and AC15 (no raw price series)."""
+
+    def test_build_reads_only_the_results_json(self, report, monkeypatch):
+        import builtins
+
+        opened = []
+        real_open = builtins.open
+
+        def spy(file, *args, **kwargs):
+            opened.append(str(file))
+            return real_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", spy)
+        monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: spy(self, *a, **k).read())
+        page = report.build_html()
+        assert page.startswith("<!doctype html>")
+        assert opened and all(p.endswith(".json") for p in opened)
+        assert {Path(p).name for p in opened} == {"02_indices.json", "03_gap.json", "04_hedge.json"}
+
+    def test_frozen_nav_block(self, report_page):
+        assert "position:sticky" in report_page
+        assert '<nav class="menu" id="menu">' in report_page
+        assert "IntersectionObserver" in report_page
+        assert "scroll-padding-top" in report_page
+
+    def test_theme_switch_with_guarded_storage(self, report_page):
+        import re
+
+        assert 'id="theme"' in report_page and "<button" in report_page
+        uses = report_page.count("localStorage")
+        guarded = re.findall(r"try\{[^}]*localStorage[^}]*\}catch", report_page)
+        assert uses >= 2 and len(guarded) == uses
+        assert "prefers-color-scheme" in report_page
+        assert 'data-theme="light"' in report_page
+
+    def test_mathml_and_no_sub_tags(self, report_page):
+        assert "<math" in report_page and "<mfrac>" in report_page
+        assert "<sub>" not in report_page
+
+    def test_no_negative_zero(self, report_page):
+        import re
+
+        assert "-0.000" not in report_page and "−0.000" not in report_page
+        assert not re.search("−0(?:\\.0+)?(?![\\d.,])", report_page)
+
+    def test_every_nav_section_present(self, report_page):
+        import re
+
+        hrefs = re.findall(r'<a href="#(s\d+)">', report_page)
+        assert len(hrefs) >= 7
+        for sid in hrefs:
+            assert f'<section id="{sid}"' in report_page
+        assert set(re.findall(r'<section id="(s\d+)"', report_page)) == set(hrefs)
+
+    def test_links_the_synthetic_study(self, report_page):
+        assert 'href="../../csi_basket_delta/results/csi_basket_delta_report.html"' in report_page
+
+    def test_known_stage_a_figure_appears(self, report_page):
+        rec = next(r for r in _results("03_gap")["records"] if r["rule"] == "none" and r["moneyness"] == 1.0)
+        v = round(100.0 * (rec["pv_test_cny"] / rec["pv_ref_cny"] - 1.0), 2) + 0.0
+        assert f"{v:+.2f}%".replace("-", "−") in report_page
+        assert "includes MC noise" in report_page
+
+    def test_known_index_figure_appears(self, report_page):
+        spread = _results("02_indices")["terminal_spread"]
+        assert f"{100.0 * spread:.2f}%" in report_page
+
+    def test_stage_b_noise_corrected_pairs(self, report_page):
+        hedge = _results("04_hedge")
+        if not _has_new_stage_b_fields(hedge):
+            pytest.skip("04_hedge.json predates the noise-corrected pair statistics")
+        for rule, s in hedge["summary"].items():
+            p = s["pairs"]["reference-test"]
+            assert f"{round(p['corrected_std_cny']):,}" in report_page, rule
+        if any(not p["resolved"] for s in hedge["summary"].values() for p in s["pairs"].values()):
+            assert "not resolved" in report_page
+
+    def test_stage_b_renders_new_fields_from_a_synthesised_file(self, report, tmp_path):
+        import json
+        import shutil
+
+        for stage in ("02_indices", "03_gap"):
+            shutil.copy(RESULTS_DIR / f"{stage}.json", tmp_path / f"{stage}.json")
+        hedge = _results("04_hedge")
+        for s in hedge["summary"].values():
+            for p in s["pairs"].values():
+                p.update({"noise_std_cny": 111.0, "corrected_std_cny": 98765.4,
+                          "corrected_ci90": [0.0, 123456.7], "resolved": False})
+        hedge["summary"]["daily"]["pairs"]["reference-attribution"].update(
+            {"corrected_std_cny": 0.0, "corrected_ci90": [0.0, 0.0]})         # all noise: σ and CI collapse to 0
+        hedge["noise_probe"].update({"noise_std_measured_cny": 222.0, "noise_std_predicted_cny": 333.0,
+                                     "predicted_over_measured": 1.5, "validates": False})
+        (tmp_path / "04_hedge.json").write_text(json.dumps(hedge))
+        page = report.build_html(tmp_path)
+        assert "98,765" in page and "123,457" in page
+        assert "not resolved" in page
+        assert "does not validate" in page
+
+    def test_no_raw_price_series_in_results(self):
+        """AC15: no key named like a raw price series holds a per-name daily list."""
+
+        def series_like(v):
+            if isinstance(v, list):
+                return len(v) > 1
+            if isinstance(v, dict):
+                return any(isinstance(x, (list, dict)) for x in v.values())
+            return False
+
+        def walk(node, where):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    assert not (k.lower() in RAW_PRICE_KEYS and series_like(v)), f"{where}/{k}"
+                    walk(v, f"{where}/{k}")
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    walk(v, f"{where}[{i}]")
+
+        for stage in ("02_indices", "03_gap", "04_hedge"):
+            walk(_results(stage), stage)
+        for rule in _results("02_indices")["rules"].values():
+            assert "shares" not in rule                                   # D14: shares withheld
