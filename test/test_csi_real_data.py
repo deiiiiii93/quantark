@@ -340,6 +340,16 @@ class TestReference:
         assert abs(ref.pv - pv) <= 3 * ref.pv_se + 0.005 * pv
         assert abs(ref.delta_index - delta) <= 3 * ref.delta_index_se + 0.005
 
+    def test_noise_covariance_matches_the_reported_ses(self):
+        spots, shares, w, cal = _engine_inputs()
+        level = float(shares @ spots)
+        sched = np.array([0.05, 0.05 + 1 / 12, 0.5])
+        ref = models.reference_call(spots, shares, w, cal, "monthly", level, sched, 0.018,
+                                    n_paths=2**9, n_batches=8, seed=4)
+        assert ref.noise_cov.shape == (6, 6)
+        np.testing.assert_allclose(np.diag(ref.noise_cov)[:5], ref.deltas_bump_se**2, rtol=1e-10)
+        assert abs(ref.noise_cov[5, 5] - ref.delta_index_se**2) < 1e-12 * max(1.0, ref.delta_index_se**2)
+
     def test_decomposition_is_exact_and_split_sums_to_zero(self):
         spots, shares, w, cal = _engine_inputs()
         level = float(shares @ spots)
@@ -366,3 +376,175 @@ class TestReference:
         _, valid_none = models.first_order_split(cal, weights_now, level, level, 1.0, 1.0, 0.018,
                                                  1e8 / level, "none")
         assert not valid_none
+
+
+# ----------------------------------------------------------------------------
+# T5: Stage A — the gap through time
+# ----------------------------------------------------------------------------
+
+
+stage_a = _load("03_gap_through_time")
+
+
+class TestStageA:
+    """AC11 on a small synthetic history (window 40, few paths)."""
+
+    SESSIONS = pd.bdate_range("2023-01-02", "2024-03-29")
+    PRICES = _price_frame(SESSIONS, seed=21)
+
+    def test_eval_dates_are_the_tenth_session_of_each_month(self):
+        dates = stage_a.eval_dates(self.SESSIONS, pd.Timestamp("2024-01-01"))
+        assert [d.strftime("%Y-%m-%d") for d in dates] == ["2024-01-12", "2024-02-14", "2024-03-14"]
+
+    @pytest.fixture(scope="class")
+    def records(self):
+        path = index.build_index(self.PRICES, data.target_weights(), "monthly", self.SESSIONS[0])
+        asof = pd.Timestamp("2024-02-14")
+        return stage_a.evaluate_date(self.PRICES, path.level, path.shares, path.weights, self.SESSIONS,
+                                     "monthly", asof, (0.9, 1.0, 1.1), 0.018, 2**8, 4, 5, window=40)
+
+    def test_one_record_per_moneyness_with_the_contract_fields(self, records):
+        assert [r["moneyness"] for r in records] == [0.9, 1.0, 1.1]
+        need = {"date", "rule", "moneyness", "strike", "index_level", "tau", "tau_sessions", "expiry",
+                "calendar_fallback", "index_vol_hist", "index_vol_model", "pv_test_cny", "pv_ref_cny",
+                "pv_ref_se_cny", "dindex_test", "dindex_ref", "dindex_ref_se", "weights",
+                "test_cash", "ref_bump", "ref_bump_se", "ref_pathwise", "ref_pathwise_se", "gap_bump",
+                "gap_total_part", "gap_split_part", "bump_minus_pathwise", "first_order",
+                "first_order_valid", "gap_sigma_cny_day"}
+        assert need <= set(records[0])
+
+    def test_record_invariants(self, records):
+        for r in records:
+            total = np.array(r["gap_total_part"]) + np.array(r["gap_split_part"])
+            pathwise_gap = np.array(r["test_cash"]) - np.array(r["ref_pathwise"])
+            np.testing.assert_allclose(total, pathwise_gap, rtol=1e-9, atol=1e-6)
+            assert abs(sum(r["gap_split_part"])) < 1e-6 * max(1.0, max(map(abs, r["gap_split_part"])))
+            np.testing.assert_allclose(np.array(r["test_cash"]).sum() / 1e8 * 100 / r["index_level"]
+                                       * r["index_level"], r["dindex_test"], rtol=1e-12)
+            assert r["calendar_fallback"] is True                         # the fixture calendar ends in March
+            assert 0.0 < r["tau"] <= 1.0 and r["first_order_valid"] is True
+
+
+# ----------------------------------------------------------------------------
+# T6: Stage B — hedge P&L on the real path
+# ----------------------------------------------------------------------------
+
+
+stage_b = _load("04_hedge_backtest")
+
+
+class TestHedgeAccounting:
+    """AC12 accounting (spec D3, D4, D9)."""
+
+    RATE = 0.018
+    G = float(np.exp(0.018 / 244))
+
+    def test_financed_path_gives_zero_pnl(self):
+        n = 6
+        spots = np.outer(self.G ** np.arange(n), [10.0, 20.0])
+        marks = 5.0 * self.G ** np.arange(n)
+        holdings = np.random.default_rng(0).normal(size=(n - 1, 2))
+        pnl = stage_b.daily_pnl(holdings, spots, marks, self.RATE)
+        np.testing.assert_allclose(pnl, 0.0, atol=1e-12)
+
+    def test_paired_difference_is_the_pure_hedge_difference(self):
+        rng = np.random.default_rng(1)
+        spots = 10.0 * np.exp(np.cumsum(rng.normal(0, 0.01, size=(9, 3)), axis=0))
+        marks = 3.0 + rng.normal(0, 0.1, size=9)
+        ha, hb = rng.normal(size=(8, 3)), rng.normal(size=(8, 3))
+        diff = stage_b.daily_pnl(ha, spots, marks, self.RATE) - stage_b.daily_pnl(hb, spots, marks, self.RATE)
+        expected = ((ha - hb) * (spots[1:] - self.G * spots[:-1])).sum(axis=1)
+        np.testing.assert_allclose(diff, expected, rtol=1e-12, atol=1e-12)
+
+    def test_terminal_pnl_matches_a_cash_account_simulation(self):
+        rng = np.random.default_rng(2)
+        n = 12
+        spots = 10.0 * np.exp(np.cumsum(rng.normal(0, 0.02, size=(n, 2)), axis=0))
+        marks = np.abs(rng.normal(2.0, 0.3, size=n))
+        payoff = 1.7
+        marks[-1] = payoff
+        holdings = rng.normal(size=(n - 1, 2))
+        premium = 2.2
+        cash, h_prev = premium, np.zeros(2)
+        for t in range(n - 1):                                     # rebalance at each close, finance at r
+            cash -= (holdings[t] - h_prev) @ spots[t]
+            h_prev = holdings[t]
+            cash *= self.G
+        cash += h_prev @ spots[-1] - payoff
+        pnl = stage_b.daily_pnl(holdings, spots, marks, self.RATE)
+        terminal = stage_b.terminal_pnl(premium, marks[0], pnl, self.RATE)
+        assert abs(terminal - cash) < 1e-10
+
+
+class TestStageBStatistics:
+    """AC12 statistics."""
+
+    def test_block_bootstrap_keeps_sessions_together_and_covers_the_truth(self):
+        rng = np.random.default_rng(3)
+        sessions = np.repeat(np.arange(400), 3)                    # three live starts per session
+        common = rng.normal(0, 2.0, size=400)
+        values = common[sessions] + rng.normal(0, 0.1, size=sessions.size)
+        lo, hi = stage_b.block_bootstrap_std(values, sessions, block=20, n_boot=400, seed=4)
+        assert lo < np.std(values, ddof=1) < hi
+        assert lo > 1.6 and hi < 2.4
+
+    def test_pair_noise_variance_matches_simulation(self):
+        rng = np.random.default_rng(8)
+        a = rng.normal(size=(6, 6))
+        cov = a @ a.T * 1e-6                                       # [bump_1..5, Δ_I] estimator covariance
+        x = rng.normal(0, 0.5, size=5)                              # S(t+1) − g·S(t)
+        n = np.abs(rng.normal(1.0, 0.3, size=5))
+        units = 1e5
+        nv = stage_b.pair_noise_var(cov, x, n, units)
+        eps = rng.multivariate_normal(np.zeros(6), cov, size=200_000)
+        noise = {"reference-test": units * eps[:, :5] @ x,
+                 "attribution-test": units * eps[:, 5] * (n @ x),
+                 "reference-attribution": units * (eps[:, :5] @ x - eps[:, 5] * (n @ x))}
+        for key, sample in noise.items():
+            assert abs(nv[key] / np.var(sample) - 1.0) < 0.02, key
+
+    def test_noise_corrected_std_recovers_the_signal(self):
+        rng = np.random.default_rng(9)
+        sessions = np.repeat(np.arange(500), 4)
+        signal = rng.normal(0, 1.0, size=500)[sessions] + rng.normal(0, 0.3, size=sessions.size)
+        noise_sd = rng.uniform(1.0, 2.0, size=sessions.size)
+        d = signal + rng.normal(0, 1.0, size=sessions.size) * noise_sd
+        point, lo, hi = stage_b.block_bootstrap_corrected_std(d, noise_sd**2, sessions, block=20, n_boot=300, seed=1)
+        truth = np.std(signal, ddof=1)
+        assert lo < truth < hi and abs(point / truth - 1.0) < 0.1
+
+    def test_noise_share_estimator(self):
+        rng = np.random.default_rng(5)
+        signal = rng.normal(0, 1.0, size=20000)
+        d_n = signal + rng.normal(0, 0.2, size=signal.size)             # MC noise sd 0.2 at N paths
+        d_2n = signal + rng.normal(0, 0.2 / np.sqrt(2), size=signal.size)
+        share = stage_b.mc_noise_share(d_n, d_2n)
+        assert abs(share - 0.2 / np.sqrt(1.04)) < 0.01
+
+
+class TestFixedContract:
+    """D9: strike and units are fixed at the start while the index moves."""
+
+    SESSIONS = pd.bdate_range("2023-01-02", "2024-06-28")
+    PRICES = _price_frame(SESSIONS, seed=31)
+
+    def test_strike_and_units_stay_at_their_start_values(self, monkeypatch):
+        seen = []
+
+        def fake_reference(spots, shares, w_t, cal, rule, strike, schedule, rate, n_paths, n_batches, seed):
+            seen.append((strike, schedule[-1]))
+            z = np.zeros(len(spots))
+            return models.RefResult(1.0, 0.0, 0.5, 0.0, z + 0.1, z, z + 0.1, z)
+
+        monkeypatch.setattr(stage_b._models, "reference_call", fake_reference)
+        path = index.build_index(self.PRICES, data.target_weights(), "monthly", self.SESSIONS[0])
+        start = pd.Timestamp("2024-01-12")
+        res = stage_b.run_start(self.PRICES, path.level, path.shares, self.SESSIONS, "monthly", start,
+                                0.018, n_paths=2**6, n_batches=2, seed=1, window=40, sessions=20)
+        k0 = float(path.level.loc[start])
+        assert res["strike"] == k0 and res["units"] == 1e8 / k0
+        assert len(seen) == 20 and all(s == k0 for s, _ in seen)
+        assert [round(t * 244) for _, t in seen] == list(range(20, 0, -1))   # remaining maturity shrinks
+        assert path.level.loc[start:].iloc[:21].std() > 0                    # the index did move
+        assert set(res["arms"]) == {"test", "reference", "attribution"}
+        assert all(len(res["arms"][a]["daily_pnl"]) == 20 for a in res["arms"])

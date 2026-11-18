@@ -20,7 +20,7 @@ import importlib.util
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -182,6 +182,7 @@ class RefResult:
     deltas_bump_se: np.ndarray
     deltas_pathwise: np.ndarray
     deltas_pathwise_se: np.ndarray
+    noise_cov: Optional[np.ndarray] = None   # covariance of the means of [bump deltas..., Δ_I] across batches
 
 
 def engine_basket(cal: Calibration, weights_target: np.ndarray, rule: str, rate: float) -> "cm.CSIBasket":
@@ -216,12 +217,16 @@ def reference_call(spots, shares, weights_target, cal: Calibration, rule: str, s
     option = cm.CSIOption(1.0, float(schedule[-1]), True)
     res = cm.mc_price_and_deltas(basket, state, option, n_paths=n_paths, n_batches=n_batches, seed=seed,
                                  strike=float(strike), schedule=schedule)
+    stack = np.column_stack([np.asarray(res.batches["deltas_fd"], dtype=float),
+                             np.asarray(res.batches["delta_index"], dtype=float).reshape(-1, 1)])
+    noise_cov = np.cov(stack, rowvar=False, ddof=1) / stack.shape[0]
     return RefResult(
         pv=float(res.price), pv_se=float(res.price_se),
         delta_index=float(res.delta_index), delta_index_se=float(res.delta_index_se),
         deltas_bump=np.asarray(res.deltas_fd, dtype=float), deltas_bump_se=np.asarray(res.deltas_fd_se, dtype=float),
         deltas_pathwise=np.asarray(res.deltas_pathwise, dtype=float),
         deltas_pathwise_se=np.asarray(res.deltas_pathwise_se, dtype=float),
+        noise_cov=noise_cov,
     )
 
 
