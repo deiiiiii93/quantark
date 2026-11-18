@@ -97,6 +97,8 @@ def align_prices(raw: Mapping[str, pd.Series], sessions: pd.DatetimeIndex) -> Tu
         if series.empty:
             raise MarketDataError(f"{code}: no closes")
         idx = pd.DatetimeIndex(series.index)
+        if idx.has_duplicates:
+            raise MarketDataError(f"{code}: duplicate dates {list(idx[idx.duplicated()][:3].date)}")
         off = idx.difference(sessions)
         if len(off):
             raise MarketDataError(f"{code}: closes on non-session days {list(off[:3].date)}")

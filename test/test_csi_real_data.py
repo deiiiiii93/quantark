@@ -97,7 +97,7 @@ class TestDataLayer:
         with pytest.raises(MarketDataError):
             data.align_prices({"A": a, "B": b}, sessions)
 
-    def test_name_without_close_at_the_first_session_raises(self):
+    def test_late_starter_truncates_the_range_and_empty_or_duplicate_raises(self):
         sessions = _sessions()
         a = pd.Series(1.0, index=sessions)
         b = pd.Series(1.0, index=sessions[5:])
@@ -105,6 +105,9 @@ class TestDataLayer:
         assert prices.index[0] == sessions[5]                   # range starts when every name has traded
         with pytest.raises(MarketDataError):
             data.align_prices({"A": a, "B": pd.Series(dtype=float)}, sessions)
+        dup = pd.Series(1.0, index=sessions[:3].append(sessions[2:3]))
+        with pytest.raises(MarketDataError):
+            data.align_prices({"A": a, "B": dup}, sessions)
 
     def test_intraday_bar_is_not_a_close(self):
         sessions = pd.DatetimeIndex(["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19"])

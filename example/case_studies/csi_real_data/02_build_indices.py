@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _data  # noqa: E402
 import _index  # noqa: E402
+from quantark.util.exceptions import MarketDataError  # noqa: E402
 
 RESULTS = HERE / "results"
 BASE_LEVEL = 1000.0
@@ -42,6 +43,11 @@ def main() -> None:
     fills = _data.load_fill_counts()
     w = _data.target_weights()
     base = prices.index[0]
+    cal = _data.load_calendar()
+    first_session = cal[cal >= pd.Timestamp(_data.FETCH_START)][0]
+    if base != first_session:
+        raise MarketDataError(f"base date {base.date()} is not the first session {first_session.date()} "
+                              "(spec D8): a name starts late or the cache is truncated")
     dates = prices.index
     out_rules = {}
     for rule in _index.RULES:
