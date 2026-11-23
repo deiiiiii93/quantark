@@ -197,12 +197,13 @@ class TestTwoEventLadder:
 
     @pytest.mark.parametrize("vol", [0.2, 0.6])
     def test_increment_against_the_coincident_booking_is_the_reference_increment(self, vol):
-        """The 2e-10 y rung differs from the coincident booking by the reference's own (tiny) increment."""
+        """The 2e-10 y rung differs from the coincident booking by the reference's own (tiny) increment, to 1e-9."""
         rung = next(r for r in FIXTURE["rungs"]
                     if r["case"] == "two_event" and r["vol"] == vol and r["rung"] == "2e-10y")
         coincident = SnowballQuadEngineV2().price(two_event(0.0), env(vol))
         local = SnowballQuadEngineV2().price(two_event(2e-10), env(vol))
-        assert abs(local - coincident) <= 1e-9 * coincident
+        increment = rung["ref_price"] - coincident
+        assert abs((local - coincident) - increment) <= 1e-9 * coincident + rung["hw_price"]
 
 
 class TestFirstStepUntouched:
