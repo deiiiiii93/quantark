@@ -160,3 +160,36 @@ class TestRebased:
         copy = p.with_absolute_schedule_2(0.1, anchor=knock_in_anchor_for(record, 0))
         assert times(copy.post_barrier_config.ko_observation_schedule) == [0.2, 0.3]
         assert copy.maturity == 0.3
+
+
+class TestCheckpointOneFixes:
+    def test_rebased_offsets_are_one_float_per_instant(self):
+        """CP1 #1: a schedule-2 settlement offset 1 ulp after the next observation offset is that offset, so the
+        knocked-in copy and the MC rows place both on one float."""
+        records = [
+            ObservationRecord(observation_time=0.1, barrier=95.0, return_rate=0.03, settlement_time=UP(0.2)),
+            ObservationRecord(observation_time=0.2, barrier=95.0, return_rate=0.03, settlement_time=0.25),
+        ]
+        p = KnockOutResetSnowballOption(
+            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=0.3,
+            barrier_config=barrier((0.2, 0.3), (0.1, 0.2, 0.3)), post_ko_mode=PostKOScheduleMode.REBASED,
+            post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.12,
+                                              ko_observation_schedule=ObservationSchedule(records=records)),
+        )
+        post = p.post_barrier_config.ko_observation_schedule.records
+        assert post[0].settlement_time == post[1].observation_time == 0.2
+        record = p.barrier_config.ki_observation_schedule.records[0]
+        copy = p.with_absolute_schedule_2(0.1, anchor=knock_in_anchor_for(record, 0))
+        rows = p.rebased_schedule_two_times(env(), [0.1], [0], np.array([r.observation_time for r in post]))
+        copied = copy.post_barrier_config.ko_observation_schedule.records
+        assert [r.observation_time for r in copied] == list(rows[0])
+        assert copied[0].settlement_time == copied[1].observation_time
+
+    def test_factory_ko_reset_prices_on_v2_default(self):
+        """AC5, the literal factory call of the lobe re-measure."""
+        from quantark.asset.equity.product.option.snowball_helpers import create_ko_reset_snowball
+
+        p = create_ko_reset_snowball(initial_price=100.0, strike=100.0, maturity_pre=1.0, maturity_post=1.5)
+        v2 = KOResetSnowballQuadEngineV2().price(p, env())
+        v1 = KOResetSnowballQuadEngine(QuadParams()).price(p, env())
+        assert v2 == pytest.approx(v1, rel=1e-4)

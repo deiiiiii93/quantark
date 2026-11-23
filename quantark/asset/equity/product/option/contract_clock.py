@@ -83,7 +83,8 @@ def schedule_times(maturity: float, num_observations: int) -> List[float]:
 
 
 def _is_time(value: Any) -> bool:
-    return isinstance(value, Real) and not isinstance(value, bool)
+    # ``type is float`` first: the ABC check is the slow path and nearly every time is a plain float
+    return type(value) is float or (isinstance(value, Real) and not isinstance(value, bool))
 
 
 def _time_list(value: Any) -> bool:
@@ -268,10 +269,11 @@ def canonicalize_contract_clock(product: Any) -> bool:
         ValidationError: Two distinct observation times of one schedule are one instant, or a run of times is wider
             than the tolerance.
     """
+    offsets_moved = _canonicalize_rebased_offsets(product)
     values, schedules, lists, maturity = _gather(product)
     mapping = _canonical_map(values, maturity)
     if mapping is None:
-        return False
+        return offsets_moved
     _refuse_same_schedule_collisions(schedules, mapping)
 
     product_changes: Dict[str, Any] = {}
@@ -299,7 +301,48 @@ def canonicalize_contract_clock(product: Any) -> bool:
             product_changes[name] = _moved(t, mapping)
     for name, value in product_changes.items():
         setattr(product, name, value)
-    return bool(product_changes)
+    return bool(product_changes) or offsets_moved
+
+
+def _canonicalize_rebased_offsets(product: Any) -> bool:
+    """A REBASED schedule 2's offsets (observation and settlement) on one float per offset instant, its largest
+    observation offset pinned (the REBASED maturity offset).
+
+    The offsets are not contract instants, but every absolute schedule-2 time is ``t_ki + offset``: two spellings of
+    one offset would become two spellings of one instant on the knocked-in copy (canonicalized as an ABSOLUTE contract)
+    and stay two in the MC rows. Equal offsets give equal sums on every path (CP1 finding 1).
+    """
+    if not _rebased_offsets(product, "post_barrier_config"):
+        return False
+    config = getattr(product, "post_barrier_config", None)
+    schedule = getattr(config, "ko_observation_schedule", None)
+    if schedule is None:
+        return False
+    records = _numeric_records(schedule)
+    observations = [float(r.observation_time) for r in records if _is_time(r.observation_time)]
+    if not observations:
+        return False                          # a dated REBASED schedule 2 carries calendar offsets, not floats
+    values = observations + [float(r.settlement_time) for r in records if _is_time(r.settlement_time)]
+    legacy = getattr(config, "ko_observation_dates", None)
+    if _time_list(legacy):
+        values.extend(float(t) for t in legacy)
+    mapping = _canonical_map(values, max(observations))
+    if mapping is None:
+        return False
+    path = ("post_barrier_config", "ko_observation_schedule")
+    _refuse_same_schedule_collisions([(path, schedule)], mapping)
+    changes: Dict[str, Any] = {}
+    new_schedule = _canonical_schedule(schedule, mapping)
+    if new_schedule is not schedule:
+        changes["ko_observation_schedule"] = new_schedule
+    if _time_list(legacy):
+        new_legacy = _canonical_list(legacy, mapping)
+        if new_legacy is not legacy:
+            changes["ko_observation_dates"] = new_legacy
+    if not changes:
+        return False
+    product.post_barrier_config = dataclasses.replace(config, **changes)
+    return True
 
 
 def contract_instants(product: Any) -> np.ndarray:

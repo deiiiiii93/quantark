@@ -54,6 +54,7 @@ from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
+from quantark.asset.equity.product.option.contract_clock import canonicalize_contract_clock
 from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.settlement import SettlementLagUnit
@@ -296,6 +297,9 @@ class AutocallableLifecycleTracker:
                 if accrual is not None and hasattr(accrual, "shifted"):
                     product.accrual_config = accrual.shifted(elapsed, dropped, barrier_config.ko_observation_schedule)
         self._age_extra(product, elapsed, pd.Timestamp(date).to_pydatetime(), pricing_env, initial)
+        # this path ages the configs directly, not through the decorated ``time_shift``: snap the aged clock here
+        # (a landing kept at 0.0 next to an equal settlement's ~1e-17 residue; CP1 finding 4)
+        canonicalize_contract_clock(product)
         return product
 
     # ------------------------------------------------------------------
