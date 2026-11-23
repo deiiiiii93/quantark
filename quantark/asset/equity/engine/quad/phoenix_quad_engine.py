@@ -15,6 +15,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.event_stats import CouponTable
 from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
+from quantark.asset.equity.engine.quad.first_step import pointwise_piecewise_event
 from quantark.asset.equity.engine.quad.quad_adapters import (
     resolve_structured_payment_timings,
 )
@@ -563,56 +564,52 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # not depend on the memory state (no coupon accumulated: get_maturity_payoff_v1 takes none, v0 gets 0.0),
         # so it is evaluated once and every state starts from the same arrays (T25: the same floats as one
         # evaluation per state; neither array is written below).
-        base_in_cash = np.array(
-            [
-                product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
-                for spot_value in spot_grid
-            ],
-            dtype=float,
-        )
-        base_out_cash = np.array(
-            [
-                product.get_maturity_payoff_v0(
-                    spot_value,
-                    accumulated_coupons=0.0,
-                    pricing_env=pricing_env,
-                )
-                for spot_value in spot_grid
-            ],
-            dtype=float,
-        )
-        for k in range(num_obs + 1):
-            v_in_cash, v_out_cash = base_in_cash, base_out_cash
-            if fold_terminal is not None:
-                v_in_cash = v_in_cash + fold_terminal["ki"]
-                v_out_cash = v_out_cash + fold_terminal["no_ki"]
-            v_in_k = v_in_cash * payment_timings.terminal.delay_df
-            v_out_k = v_out_cash * payment_timings.terminal.delay_df
-            v_in_list.append(v_in_k)
-            v_out_list.append(v_out_k)
+        def terminal_lists(spot_values):
+            """The per-memory-state surfaces at maturity on any points."""
+            base_in_cash = np.array(
+                [
+                    product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
+                    for spot_value in spot_values
+                ],
+                dtype=float,
+            )
+            base_out_cash = np.array(
+                [
+                    product.get_maturity_payoff_v0(
+                        spot_value,
+                        accumulated_coupons=0.0,
+                        pricing_env=pricing_env,
+                    )
+                    for spot_value in spot_values
+                ],
+                dtype=float,
+            )
+            ins, outs = [], []
+            for k in range(num_obs + 1):
+                v_in_cash, v_out_cash = base_in_cash, base_out_cash
+                if fold_terminal is not None:
+                    v_in_cash = v_in_cash + fold_terminal["ki"]
+                    v_out_cash = v_out_cash + fold_terminal["no_ki"]
+                v_in_k = v_in_cash * payment_timings.terminal.delay_df
+                v_out_k = v_out_cash * payment_timings.terminal.delay_df
+                ins.append(v_in_k)
+                outs.append(v_out_k)
+            return ins, outs
+
+        v_in_list, v_out_list = terminal_lists(spot_grid)
 
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
-        for step_index in range(len(times), 0, -1):
-            obs_time = times[step_index - 1]
+        def observe(obs_time, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out):
+            """The observation at ``obs_time`` on every memory state (and the termination surfaces), on any points
+            (the lattice, or the exact first step's quadrature nodes)."""
             discrete_ki_record = (
                 self._match_record(obs_time, ki_records) if ki_records else None
             )
             ki_applied_jointly = False
-
-            # EX-coupon recording: capture the per-memory continuation surfaces BEFORE
-            # this observation's coupon/KO jump, indexed by post-resolution memory k
-            # (= the value a path carries INTO the next period). A KO'd path is handled
-            # by the state machine (dead -> 0), so these surfaces value only survivors.
-            if record_grids:
-                self._backward_grids[float(obs_time)] = (
-                    spot_grid.copy(),
-                    [arr.copy() for arr in v_in_list],
-                    [arr.copy() for arr in v_out_list],
-                )
 
             # Identify if this time step is a KO/Coupon observation
             ko_weight = None
@@ -733,6 +730,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                             )
                             * ko_discount,
                             disable_ko_after_ki=disable_ko_after_ki,
+                            pointwise=self._pointwise_events,
                         )
                         ki_applied_jointly = discrete_ki_record is not None
                     else:
@@ -809,6 +807,49 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         smoothing_width, product.is_reverse,
                         ko_weight=ko_weight,
                     )
+
+            return v_in_list, v_out_list, w_in, w_out
+
+        first_exact = self._first_step_exact(float(tau[1]), math_utils.h)
+        first_pre = None
+        first_levels = []
+
+        for step_index in range(len(times), 0, -1):
+            obs_time = times[step_index - 1]
+
+            # EX-coupon recording: capture the per-memory continuation surfaces BEFORE
+            # this observation's coupon/KO jump, indexed by post-resolution memory k
+            # (= the value a path carries INTO the next period). A KO'd path is handled
+            # by the state machine (dead -> 0), so these surfaces value only survivors.
+            if record_grids:
+                self._backward_grids[float(obs_time)] = (
+                    spot_grid.copy(),
+                    [arr.copy() for arr in v_in_list],
+                    [arr.copy() for arr in v_out_list],
+                )
+
+            if step_index == 1 and first_exact:
+                # the exact first step (S3b): the pre-event states (the maturity seed when the first event is maturity)
+                first_pre = None if len(times) == 1 else (
+                    [arr.copy() for arr in v_in_list], [arr.copy() for arr in v_out_list],
+                    None if w_in is None else w_in.copy(), None if w_out is None else w_out.copy(),
+                )
+                first_ko_index = next(
+                    (idx for idx, rec in enumerate(ko_records) if same_instant(obs_time, rec.observation_time)), None
+                )
+                first_ko = None if first_ko_index is None else ko_records[first_ko_index]
+                first_ki = self._match_record(obs_time, ki_records) if ki_records else None
+                first_levels = [
+                    level for level in (
+                        first_ko.barrier if first_ko is not None else None,
+                        coupon_barriers[first_ko_index] if first_ko is not None else None,
+                        first_ki.barrier if first_ki is not None else None,
+                        product.barrier_config.ki_barrier if ki_continuous and log_ki_barrier is not None else None,
+                    ) if level is not None
+                ]
+            v_in_list, v_out_list, w_in, w_out = observe(
+                obs_time, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out
+            )
 
             # Diffusion Step
             tau_step = float(tau[step_index])
@@ -889,6 +930,15 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
                     )
 
+        first_values = None
+        if first_exact:
+            first_values, v_in_list, v_out_list, w_in, w_out = self._phoenix_first_step(
+                product, math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]),
+                first_levels, first_pre,
+                terminal_lists, terminal_w, expiry_coupons, observe, times[0], v_in_list, v_out_list, w_in, w_out,
+                touch=(log_ki_barrier, product.is_reverse) if ki_continuous and log_ki_barrier is not None else None,
+            )
+
         # t0 surfaces (memory 0, no observation at valuation): the exposure grid's
         # valuation-date slice. v_*_list has only the memory-0 state here.
         if record_grids:
@@ -914,19 +964,68 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             v_in_list[memory_state] if knocked_in_now else v_out_list[memory_state]
         )
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
-        value = math_utils.interpolate(value_surface, x=0.0)
+        if first_values is not None:
+            value = first_values["in" if knocked_in_now else "out"][memory_state]
+        else:
+            value = math_utils.interpolate(value_surface, x=0.0)
         if decision.coupon:
             if expiry_coupons:
                 # paid at termination: the regime's own termination-value surface discounts it
-                coupon_discount = math_utils.interpolate(
-                    w_in if knocked_in_now else w_out, x=0.0
-                )
+                if first_values is not None:
+                    coupon_discount = first_values["w_in" if knocked_in_now else "w_out"]
+                else:
+                    coupon_discount = math_utils.interpolate(
+                        w_in if knocked_in_now else w_out, x=0.0
+                    )
             else:
                 coupon_discount = event_delay_by_record[
                     id(ko_records[decision.coupon_index])
                 ]
             value += float(decision.coupon) * float(coupon_discount)
         return value
+
+    def _phoenix_first_step(self, product, math_utils, spot, tau1, alpha1, beta1, levels, pre, terminal_lists,
+                            terminal_w, expiry, observe, first_time, v_in_list, v_out_list, w_in, w_out, *, touch=None):
+        """The exact first step (S3b) on every memory state and the termination surfaces: the price's own
+        observation (``observe``) on the quadrature nodes, pointwise. Returns ``(values, v_in_list, v_out_list, w_in,
+        w_out)``: F at the spot per state (``values['out'][k]``, ``['in'][k]``, ``['w_out']``, ``['w_in']``) and the
+        t=0 surfaces with the band nodes replaced by F."""
+        fs = self._first_step_quadrature(math_utils, spot, tau1, alpha1, beta1, levels, touch=touch,
+                                         terminal=product if pre is None else None)
+        y = fs.y
+        if pre is None:
+            ins_y, outs_y = terminal_lists(spot * np.exp(y))
+            w_in_y = np.full(y.size, terminal_w, dtype=float) if expiry else None
+            w_out_y = np.full(y.size, terminal_w, dtype=float) if expiry else None
+        else:
+            ins_y = [fs.lift(arr) for arr in pre[0]]
+            outs_y = [fs.lift(arr) for arr in pre[1]]
+            w_in_y = None if pre[2] is None else fs.lift(pre[2])
+            w_out_y = None if pre[3] is None else fs.lift(pre[3])
+        with self._pointwise():
+            ins_y, outs_y, w_in_y, w_out_y = observe(
+                first_time, y, spot * np.exp(y), 0.0, ins_y, outs_y, w_in_y, w_out_y
+            )
+        if len(ins_y) != len(v_in_list):
+            raise PricingError("the exact first step's memory states do not match the lattice's")
+        values = {"out": [], "in": []}
+        v_in_list = [np.array(arr, dtype=float, copy=True) for arr in v_in_list]
+        v_out_list = [np.array(arr, dtype=float, copy=True) for arr in v_out_list]
+        for k, (in_y, out_y) in enumerate(zip(ins_y, outs_y)):
+            f_out, f_in = fs.expect_bridged(out_y, in_y), fs.expect(in_y)
+            v_out_list[k][fs.band] = f_out[1:]
+            v_in_list[k][fs.band] = f_in[1:]
+            values["out"].append(float(f_out[0]))
+            values["in"].append(float(f_in[0]))
+        if expiry:
+            f_w_out, f_w_in = fs.expect_bridged(w_out_y, w_in_y), fs.expect(w_in_y)
+            w_out = np.array(w_out, dtype=float, copy=True)
+            w_in = np.array(w_in, dtype=float, copy=True)
+            w_out[fs.band] = f_w_out[1:]
+            w_in[fs.band] = f_w_in[1:]
+            values["w_out"], values["w_in"] = float(f_w_out[0]), float(f_w_in[0])
+        self._last_first_step = fs
+        return values, v_in_list, v_out_list, w_in, w_out
 
     def _decided_at_valuation(
         self, product, pricing_env, spot: float, extra_cash: Optional[float] = None
@@ -1143,6 +1242,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 val_miss_in=miss_in, val_pay_in=pay_in,
                 ko_value_without_coupon=breach_miss, ko_value_with_coupon=breach_pay,
                 disable_ko_after_ki=product.barrier_config.disable_ko_after_ki,
+                pointwise=self._pointwise_events,
             )
             ki_record = None
         else:
@@ -1178,6 +1278,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         cash_rows = getattr(self, "_coupon_cash_rows", None)
         if cash_rows is not None:
             cash_rows.initialize(v_out, v_in)
+
+    def _first_event_extra_levels(self, product, observation_index) -> list:
+        return [] if observation_index is None else [self._coupon_barrier_for_obs(product, observation_index)]
 
     def _coupon_barrier_for_obs(self, product, obs_index: int) -> float:
         cb = product.coupon_config.coupon_barrier
@@ -1316,6 +1419,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         ko_value_without_coupon: float,
         ko_value_with_coupon: float,
         disable_ko_after_ki: bool,
+        pointwise: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """One-pass dual-cell projection of a Phoenix observation.
 
@@ -1407,7 +1511,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         def project(branches):
             if stacked:
                 branches = [np.moveaxis(np.asarray(branch), -1, 0) for branch in branches]
-            result = project_piecewise_event(grid, breaks, branches)
+            result = (pointwise_piecewise_event if pointwise else project_piecewise_event)(grid, breaks, branches)
             return np.moveaxis(result, 0, -1) if stacked else result
 
         return project(out_branches), project(in_branches)

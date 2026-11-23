@@ -7,6 +7,7 @@ Implements a direct two-state (knocked-in / not-knocked-in) quadrature recursion
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple
 
@@ -19,7 +20,12 @@ from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
-    project_event_values,
+    project_event_values as _project_event_values,
+)
+from quantark.asset.equity.engine.quad.first_step import (
+    GaussianFirstStep,
+    pointwise_breach,
+    pointwise_event_values,
 )
 from quantark.asset.equity.engine.quad.local_step import (
     UnderResolvedStepError,
@@ -87,6 +93,18 @@ _BGK_MAX_EDGE_GAP_RATIO = 3.0
 # Maximum relative deviation of the surface vol sampled along the schedule
 # (at the KI barrier) from the single pricing vol used for the shift.
 _BGK_MAX_VOL_DISPERSION = 0.25
+
+
+class _PointMasses:
+    """Point masses on the exact first step's quadrature nodes, in the shape the forward-density observation reads a
+    lattice (``grid``, ``spot``, the integration weights: one per point)."""
+
+    def __init__(self, nodes: np.ndarray, spot: float) -> None:
+        self.grid = np.asarray(nodes, dtype=float)
+        self.spot = float(spot)
+
+    def simpson_weight_vector(self) -> np.ndarray:
+        return np.ones(self.grid.size, dtype=float)
 
 
 class SnowballQuadEngine(BaseEngine):
@@ -485,30 +503,40 @@ class SnowballQuadEngine(BaseEngine):
             vol_vec**4
         ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
-        v_in_cash = np.array(
-            [
-                product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
-                for spot_value in spot_grid
-            ],
-            dtype=float,
-        )
-        v_out_cash = np.array(
-            [
-                product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
-                for spot_value in spot_grid
-            ],
-            dtype=float,
-        )
-        if fold is not None:
-            terminal = payment_timings.terminal
-            v_in_cash = v_in_cash + fold.bind_terminal(
-                "ki", terminal.determination_time, terminal.payment_time
+        def terminal_surfaces(spot_values):
+            """``(v_in, v_out)`` at maturity, settlement discount (and folded cash) included."""
+            v_in_cash = np.array(
+                [
+                    product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
+                    for spot_value in spot_values
+                ],
+                dtype=float,
             )
-            v_out_cash = v_out_cash + fold.bind_terminal(
-                "no_ki", terminal.determination_time, terminal.payment_time
+            v_out_cash = np.array(
+                [
+                    product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
+                    for spot_value in spot_values
+                ],
+                dtype=float,
             )
-        v_in = v_in_cash * payment_timings.terminal.delay_df
-        v_out = v_out_cash * payment_timings.terminal.delay_df
+            if fold is not None:
+                terminal = payment_timings.terminal
+                v_in_cash = v_in_cash + fold.bind_terminal(
+                    "ki", terminal.determination_time, terminal.payment_time
+                )
+                v_out_cash = v_out_cash + fold.bind_terminal(
+                    "no_ki", terminal.determination_time, terminal.payment_time
+                )
+            return (
+                v_in_cash * payment_timings.terminal.delay_df,
+                v_out_cash * payment_timings.terminal.delay_df,
+            )
+
+        v_in, v_out = terminal_surfaces(spot_grid)
+        # The first step from the valuation instant is priced exactly at the spot (S3b, ``first_step``) when the
+        # lattice cannot price it within the accuracy target; ``first_event`` evaluates the first event on any grid.
+        first_exact = self._first_step_exact(float(tau[1]), math_utils.h)
+        first_event = None
 
         log_ki_barrier = None
         if product.has_ki_barrier and ki_continuous:
@@ -556,6 +584,29 @@ class SnowballQuadEngine(BaseEngine):
                     else np.zeros_like(grid)
                 )
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            if step_index == 1 and first_exact:
+                first_ko = ko_record if ko_record is not None and ko_is_reachable else None
+                first_ko_value = ko_value if ko_record is not None else 0.0
+                # the pre-event surfaces: the maturity seed itself when the first event is maturity
+                first_pre = None if len(times) == 1 else (v_out.copy(), v_in.copy())
+                first_levels = [
+                    level for level in (
+                        first_ko.barrier if first_ko is not None else None,
+                        ki_record.barrier if ki_record is not None else None,
+                        ki_barrier_continuous if ki_continuous else None,
+                    ) if level is not None
+                ]
+
+                def first_event(y, out_y, in_y, _ko=first_ko, _value=first_ko_value, _ki=ki_record):
+                    weight = (
+                        self._event_weight(y, _ko.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
+                        if _ko is not None else None
+                    )
+                    return self._apply_observation(
+                        product, y, spot * np.exp(y), spot, 0.0, out_y, in_y,
+                        ko_record=_ko, ko_value=_value, ko_weight=weight, ki_record=_ki,
+                        ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                    )
             v_out, v_in = self._apply_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 ko_record=ko_record if ko_record is not None and ko_is_reachable else None,
@@ -580,7 +631,7 @@ class SnowballQuadEngine(BaseEngine):
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
-            if step_index == 1 and transition_readout:
+            if step_index == 1 and transition_readout and not first_exact:
                 # The last transition carries the surfaces to the valuation
                 # date; retain its INPUT so the readout can evaluate it at the
                 # spot instead of interpolating its output between nodes.
@@ -634,6 +685,17 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
+        first_value = None
+        if first_event is not None:
+            # F at the spot is the price; F at the nodes near the first event's barriers replaces the lattice's t=0
+            # values there, so the recorded surfaces and the spot-greeks grid agree with the price
+            v_out, v_in, first_out, first_in = self._first_step_two_state(
+                math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]), first_levels,
+                first_pre, terminal_surfaces, first_event, v_out, v_in,
+                touch=(log_ki_barrier, product.is_reverse) if ki_continuous else None, terminal_product=product,
+            )
+            first_value = first_in if knocked_in_at_valuation else first_out
+
         # After the full backward sweep, v_in/v_out are the valuation-date (t=0)
         # surfaces; record them so the exposure grid has a t0 slice for both states.
         if record_grids:
@@ -642,6 +704,8 @@ class SnowballQuadEngine(BaseEngine):
 
         value_surface = v_in if knocked_in_at_valuation else v_out
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
+        if first_value is not None:
+            return float(first_value)
         if final_transition is not None:
             pre_in, pre_out, prefactor, alpha, beta, tau_step = final_transition
             return float(
@@ -936,6 +1000,11 @@ class SnowballQuadEngine(BaseEngine):
     def _initialize_extra_quad_rows(self, v_out, v_in, n_ko: int) -> None:
         """Terminal values of the extra rows, in place (zero unless a subclass sets them)."""
 
+    def _first_event_extra_levels(self, product, observation_index) -> list:
+        """Levels the statistics' first event jumps at beyond its knock-out and knock-in (the exact first step's
+        breakpoints; Phoenix: the observation's coupon barrier)."""
+        return []
+
     def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn) -> Optional[dict]:
         """The coupon fields read from the extra rows at the spot (``None``: no coupons, Snowball)."""
         return None
@@ -960,7 +1029,7 @@ class SnowballQuadEngine(BaseEngine):
     ) -> Optional[EventStatistics]:
         from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
         from quantark.asset.equity.engine.quad import v1_statistics
-        from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, MarchLog
+        from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, FirstStepLog, MarchLog
 
         self._validate_product(product)
         want_ki = es.want_knock_in_path(streams)
@@ -1146,15 +1215,23 @@ class SnowballQuadEngine(BaseEngine):
         n_main = n_ko + self._n_extra_quad_rows(n_ko)
         m_unit, m_cash, kis_unit, kis_cash = n_main, n_main + 1, n_main + 2, n_main + 3
         n_rows = n_main + 4
-        v_in = np.zeros((n_rows, grid.size), dtype=float)
-        v_out = np.zeros((n_rows, grid.size), dtype=float)
-        self._initialize_extra_quad_rows(v_out, v_in, n_ko)
+
+        def terminal_stack(out_cash, in_cash):
+            """The columns at maturity on any points (``(v_out, v_in)``, rows x points)."""
+            v_in = np.zeros((n_rows, out_cash.size), dtype=float)
+            v_out = np.zeros((n_rows, out_cash.size), dtype=float)
+            self._initialize_extra_quad_rows(v_out, v_in, n_ko)
+            v_out[m_unit] = 1.0
+            v_out[m_cash] = out_cash
+            v_in[kis_unit] = 1.0
+            v_in[kis_cash] = in_cash
+            return v_out, v_in
+
         terminal_out_cash = v_out_cash * terminal.delay_df
         terminal_in_cash = v_in_cash * terminal.delay_df
-        v_out[m_unit] = 1.0
-        v_out[m_cash] = terminal_out_cash
-        v_in[kis_unit] = 1.0
-        v_in[kis_cash] = terminal_in_cash
+        v_out, v_in = terminal_stack(terminal_out_cash, terminal_in_cash)
+        first_exact = self._first_step_exact(float(tau[1]), math_utils.h)
+        first = None
 
         # The readout mode governs the event decomposition too, so its parts
         # keep reconciling with the price under either rule.
@@ -1196,6 +1273,55 @@ class SnowballQuadEngine(BaseEngine):
                     trigger_is_down=product.is_reverse,
                 ) if ko_is_reachable else np.zeros_like(grid)
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            if step_index == 1 and first_exact:
+                # the exact first step (S3b): the same event on the quadrature nodes, the columns read at the spot
+                fs = self._first_step_quadrature(
+                    math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]),
+                    [level for level in (
+                        ko_record.barrier if ko_is_reachable else None,
+                        ki_record.barrier if ki_record is not None else None,
+                        ki_barrier_continuous if ki_continuous else None,
+                    ) if level is not None] + self._first_event_extra_levels(product, ko_index),
+                    touch=(log_ki_barrier, product.is_reverse) if ki_continuous else None, band=False,
+                    terminal=product if len(times) == 1 else None,
+                )
+                y = fs.y
+                y_ko_weight = (
+                    self._event_weight(y, ko_record.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
+                    if ko_is_reachable else None
+                )
+                if len(times) == 1:
+                    y_in_cash, y_out_cash = self._terminal_cash_surfaces(product, pricing_env, spot * np.exp(y))
+                    pre_y = terminal_stack(y_out_cash * terminal.delay_df, y_in_cash * terminal.delay_df)
+                else:
+                    pre_y = (fs.lift(v_out), fs.lift(v_in))
+                with self._pointwise():
+                    post_y = self._apply_observation(
+                        product, y, spot * np.exp(y), spot, 0.0, pre_y[0], pre_y[1],
+                        ko_record=ko_record if ko_is_reachable else None,
+                        ko_value=self._node_constant_on(ko_breach, y.size), ko_weight=y_ko_weight,
+                        ki_record=ki_record,
+                        ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                        coupon_index=ko_index, n_ko=n_ko,
+                        coupon_record=ko_record, observation_index=ko_index,
+                    )
+                first = FirstStepLog(
+                    quadrature=fs,
+                    event=self._pointwise_event(self._statistics_event(
+                        product, y, spot * np.exp(y), spot, 0.0,
+                        ko_record=ko_record if ko_is_reachable else None, ko_weight=y_ko_weight,
+                        ki_record=ki_record,
+                        ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                        n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
+                        discount=float(discount_delay),
+                    )),
+                    terminal_out=None if len(times) > 1 else {
+                        "maturity_unit": np.ones(y.size), "maturity_cash": y_out_cash * terminal.delay_df},
+                    terminal_in=None if len(times) > 1 else {
+                        "ki_settlement_unit": np.ones(y.size), "ki_settlement_cash": y_in_cash * terminal.delay_df},
+                    values_out=fs.expect_bridged(post_y[0], post_y[1])[..., 0],
+                    values_in=fs.expect(post_y[1])[..., 0],
+                )
             v_out, v_in = self._apply_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 ko_record=ko_record if ko_is_reachable else None,
@@ -1235,7 +1361,7 @@ class SnowballQuadEngine(BaseEngine):
                 if ki_continuous else None,
             ))
 
-            if step_index == 1 and transition_readout:
+            if step_index == 1 and transition_readout and first is None:
                 # Inputs to the transition that reaches the valuation date, so
                 # the readout can evaluate it at the spot.
                 final_transition = {
@@ -1293,7 +1419,10 @@ class SnowballQuadEngine(BaseEngine):
                 )
 
         initial_surface = v_in if knocked_in_at_valuation else v_out
-        if final_transition is not None:
+        if first is not None:
+            log.first_step = first
+            values_at_spot = np.array(first.values_in if knocked_in_at_valuation else first.values_out, dtype=float)
+        elif final_transition is not None:
             prefactor, alpha, beta, tau_step = final_transition["kernel"]
             log.transition = (prefactor, alpha, beta, tau_step)
             pre = final_transition["in" if knocked_in_at_valuation else "out"]
@@ -2000,6 +2129,43 @@ class SnowballQuadEngine(BaseEngine):
         )
         return np.where(safe, np.exp(exponent), 1.0)
 
+    def _forward_first_step(self, math_utils, spot, tau1, alpha1, first_time, observe, *, product, ko_records,
+                            ki_records, ki_continuous, ki_barrier_continuous, log_ki, knocked_in_at_valuation):
+        """The forward seed of an exact first step (S3b): the first interval's Gaussian as point masses on the
+        quadrature nodes (undiscounted), split by the bridge touch under continuous knock-in, the first observation
+        applied to them pointwise, then carried onto the lattice as densities whose Simpson integral against any
+        lattice function is the quadrature's (``lift_transpose`` over the Simpson weights). Returns
+        ``(p_out, p_in)`` after the first observation."""
+        ko_record = self._match_record(first_time, ko_records)
+        ki_record = self._match_record(first_time, ki_records) if ki_records else None
+        touch = ki_continuous and product.has_ki_barrier and not knocked_in_at_valuation
+        ko_index = next((i for i, rec in enumerate(ko_records) if rec is ko_record), None)
+        levels = [
+            level for level in (
+                ko_record.barrier if ko_record is not None else None,
+                ki_record.barrier if ki_record is not None else None,
+                ki_barrier_continuous if touch else None,
+            ) if level is not None
+        ] + self._first_event_extra_levels(product, ko_index)
+        # beta = alpha^2: no discount (densities are discounted at the readout)
+        fs = self._first_step_quadrature(
+            math_utils, spot, tau1, alpha1, alpha1 * alpha1, levels,
+            touch=(log_ki, product.is_reverse) if touch else None, band=False,
+        )
+        mass = fs.W[0]
+        zero = np.zeros_like(mass)
+        if knocked_in_at_valuation:
+            p_out, p_in = zero, mass
+        elif touch:
+            p_out, p_in = mass * (1.0 - fs.P[0]), mass * fs.P[0]
+        else:
+            p_out, p_in = mass, zero
+        with self._pointwise():
+            p_out, p_in = observe(first_time, p_out, p_in, _PointMasses(fs.y, spot), 0.0)
+        cells = math_utils.simpson_weight_vector()
+        self._last_first_step = fs
+        return fs.lift_transpose(p_out) / cells, fs.lift_transpose(p_in) / cells
+
     # --- Extra forward-readout hooks (Phoenix overrides; Snowball no-ops) ---
 
     def _forward_extra_state(self, n_ko: int):
@@ -2036,8 +2202,86 @@ class SnowballQuadEngine(BaseEngine):
             safe_log(ki_barrier_continuous / spot) if ki_continuous else None
         )
 
+        def observe(obs_time, p_out, p_in, mu, width):
+            """The observation at ``obs_time`` on the densities over ``mu`` (the lattice, or the exact first step's
+            point masses)."""
+            ko_index, ko_record = None, None
+            for idx, rec in enumerate(ko_records):
+                if same_instant(obs_time, rec.observation_time):
+                    ko_index, ko_record = idx, rec
+                    break
+            if ko_record is not None:
+                if extra_state is not None:
+                    # Coupons read the alive density BEFORE KO absorption
+                    # (a coupon on a simultaneous KO is still paid).
+                    self._forward_extra_readouts_at_obs(
+                        extra_state, int(ko_index), ko_record, p_out + p_in,
+                        mu, width, product,
+                    )
+                if bool(reachable_ko[int(ko_index)]):
+                    if self._use_cell_average_events():
+                        zero = np.zeros((1, mu.grid.size), dtype=float)
+                        proj = self._project_quad_event(
+                            mu.grid, ko_record.barrier, spot,
+                            v_survive=p_out[None, :], v_breach=zero,
+                            breach_up=not product.is_reverse,
+                        )[0]
+                        absorbed_mass = self._density_integral(
+                            mu, p_out
+                        ) - self._density_integral(mu, proj)
+                        p_out = proj
+                        if not disable_ko_after_ki:
+                            proj_in = self._project_quad_event(
+                                mu.grid, ko_record.barrier, spot,
+                                v_survive=p_in[None, :], v_breach=zero,
+                                breach_up=not product.is_reverse,
+                            )[0]
+                            absorbed_mass += self._density_integral(
+                                mu, p_in
+                            ) - self._density_integral(mu, proj_in)
+                            p_in = proj_in
+                    else:
+                        ko_w = self._event_weight(
+                            mu.grid, ko_record.barrier, spot, width,
+                            trigger_is_down=product.is_reverse,
+                        )
+                        absorbed_mass = self._density_integral(
+                            mu, ko_w * p_out
+                        )
+                        p_out = p_out * (1.0 - ko_w)
+                        if not disable_ko_after_ki:
+                            absorbed_mass += self._density_integral(
+                                mu, ko_w * p_in
+                            )
+                            p_in = p_in * (1.0 - ko_w)
+                    absorbed[int(ko_index)] = absorbed_mass
+
+            if (
+                (not ki_continuous)
+                and ki_records
+                and not knocked_in_at_valuation
+            ):
+                ki_record = self._match_record(obs_time, ki_records)
+                if ki_record is not None:
+                    ki_w = self._event_weight(
+                        mu.grid, ki_record.barrier, spot, width,
+                        trigger_is_down=not product.is_reverse,
+                    )
+                    transfer = ki_w * p_out
+                    p_out = p_out - transfer
+                    p_in = p_in + transfer
+
+            return p_out, p_in
+
         # Analytic first step to times[0] (interval index 1).
         tau1, alpha1 = float(tau[1]), float(alpha_vec[1])
+        first_masses = None
+        if self._first_step_exact(tau1, math_utils.h):
+            first_masses = self._forward_first_step(
+                math_utils, spot, tau1, alpha1, times[0], observe, product=product, ko_records=ko_records,
+                ki_records=ki_records, ki_continuous=ki_continuous, ki_barrier_continuous=ki_barrier_continuous,
+                log_ki=log_ki, knocked_in_at_valuation=knocked_in_at_valuation,
+            )
         p_free = self._forward_seed(math_utils, tau1, alpha1)
         if knocked_in_at_valuation:
             p_in = p_free
@@ -2098,72 +2342,10 @@ class SnowballQuadEngine(BaseEngine):
                         p_out = transported[0]
                         p_in = transported[1]
 
-            obs_time = times[step_index - 1]
-            ko_index, ko_record = None, None
-            for idx, rec in enumerate(ko_records):
-                if same_instant(obs_time, rec.observation_time):
-                    ko_index, ko_record = idx, rec
-                    break
-            if ko_record is not None:
-                if extra_state is not None:
-                    # Coupons read the alive density BEFORE KO absorption
-                    # (a coupon on a simultaneous KO is still paid).
-                    self._forward_extra_readouts_at_obs(
-                        extra_state, int(ko_index), ko_record, p_out + p_in,
-                        math_utils, smoothing_width, product,
-                    )
-                if bool(reachable_ko[int(ko_index)]):
-                    if self._use_cell_average_events():
-                        zero = np.zeros((1, grid.size), dtype=float)
-                        proj = self._project_quad_event(
-                            grid, ko_record.barrier, spot,
-                            v_survive=p_out[None, :], v_breach=zero,
-                            breach_up=not product.is_reverse,
-                        )[0]
-                        absorbed_mass = self._density_integral(
-                            math_utils, p_out
-                        ) - self._density_integral(math_utils, proj)
-                        p_out = proj
-                        if not disable_ko_after_ki:
-                            proj_in = self._project_quad_event(
-                                grid, ko_record.barrier, spot,
-                                v_survive=p_in[None, :], v_breach=zero,
-                                breach_up=not product.is_reverse,
-                            )[0]
-                            absorbed_mass += self._density_integral(
-                                math_utils, p_in
-                            ) - self._density_integral(math_utils, proj_in)
-                            p_in = proj_in
-                    else:
-                        ko_w = self._event_weight(
-                            grid, ko_record.barrier, spot, smoothing_width,
-                            trigger_is_down=product.is_reverse,
-                        )
-                        absorbed_mass = self._density_integral(
-                            math_utils, ko_w * p_out
-                        )
-                        p_out = p_out * (1.0 - ko_w)
-                        if not disable_ko_after_ki:
-                            absorbed_mass += self._density_integral(
-                                math_utils, ko_w * p_in
-                            )
-                            p_in = p_in * (1.0 - ko_w)
-                    absorbed[int(ko_index)] = absorbed_mass
-
-            if (
-                (not ki_continuous)
-                and ki_records
-                and not knocked_in_at_valuation
-            ):
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    ki_w = self._event_weight(
-                        grid, ki_record.barrier, spot, smoothing_width,
-                        trigger_is_down=not product.is_reverse,
-                    )
-                    transfer = ki_w * p_out
-                    p_out = p_out - transfer
-                    p_in = p_in + transfer
+            if step_index == 1 and first_masses is not None:
+                p_out, p_in = first_masses
+                continue
+            p_out, p_in = observe(times[step_index - 1], p_out, p_in, math_utils, smoothing_width)
 
         # --- Readouts ---
         ko_prob = absorbed.copy()
@@ -2448,6 +2630,141 @@ class SnowballQuadEngine(BaseEngine):
         )
         return bound > float(getattr(self.params, "convergence_rel_tol", 1.0e-4))
 
+    # The first step from the valuation instant is priced exactly at the spot (``first_step``, S3b) when its kernel
+    # spans fewer than this many cells, resolved or not (owner decision 2026-11-23, "fix it"). Measured in S3b against
+    # F on the same lattice (the first step's own error: the lattice step plus the linear readout of a value surface
+    # curved on the step's scale), knock-out or discrete knock-in first, vol 5/20/60%, spot 0 .. 5 kernel widths from
+    # the barrier at four sub-cell offsets: worst 8.7e-5 at 8 cells, 6.3e-5 at 10, 5.4e-5 at 12, 4.0e-5 at 13 and above
+    # (the convergence_rel_tol / 2 = 5e-5 rule); the S1 distances alone would have allowed 9.
+    _FIRST_STEP_S_F = 13.0
+
+    #: the engine's event maps evaluate pointwise (each point on its own side of every barrier) instead of
+    #: projecting onto dual cells: the exact first step's quadrature nodes (``_pointwise``)
+    _pointwise_events = False
+
+    def _first_step_exact(self, tau1: float, h: float) -> bool:
+        """Whether the first step (valuation -> first event) is priced by the exact first step F: always when the
+        lattice cannot resolve it (``_local_step``; with local steps off ``_require_resolved_kernels`` has refused
+        it already), and when it spans fewer than ``_FIRST_STEP_S_F`` cells."""
+        if not tau1 > 0.0:
+            return False
+        if self._local_step(tau1, h):
+            return True
+        return math.sqrt(2.0 * float(tau1)) / float(h) < float(self._FIRST_STEP_S_F)
+
+    @contextmanager
+    def _pointwise(self):
+        """Evaluate the engine's event maps pointwise for the duration (the exact first step)."""
+        previous = self.__dict__.get("_pointwise_events")
+        self._pointwise_events = True
+        try:
+            yield
+        finally:
+            if previous is None:
+                del self._pointwise_events
+            else:
+                self._pointwise_events = previous
+
+    def _pointwise_event(self, event):
+        """``event`` (an adjoint event map on quadrature nodes) evaluated pointwise whenever it is called."""
+
+        def pointwise(*args, **kwargs):
+            with self._pointwise():
+                return event(*args, **kwargs)
+
+        return pointwise
+
+    @staticmethod
+    def _terminal_levels(product) -> list:
+        """Where a redemption kinks or jumps (strike, airbag barrier and strike): breakpoints of the exact first step
+        when the first event is where a state holds its maturity seed (evaluated exactly on the nodes)."""
+        airbag = getattr(product, "airbag_config", None)
+        levels = [getattr(product, "strike", None)]
+        if airbag is not None:
+            levels += [getattr(airbag, "airbag_barrier", None), getattr(airbag, "airbag_strike", None)]
+        return [float(level) for level in levels if level is not None and float(level) > 0.0]
+
+    def _first_step_quadrature(self, math_utils, spot: float, tau1: float, alpha1: float, beta1: float,
+                               levels: Sequence[float], *, touch=None, band: bool = True,
+                               terminal=None) -> GaussianFirstStep:
+        """The exact first step's quadrature: centre 0 (the spot) and, with ``band``, every lattice node within the
+        Gaussian's reach of a barrier observed at the first event (``levels``, spot units), where the lattice's t=0
+        values are replaced by F (``fs.band``: their node indices). ``touch``: ``(log barrier, is_reverse)`` of a
+        continuous knock-in. ``terminal``: the product, when a state holds its maturity seed at the first event (its
+        redemption's kinks become breakpoints too)."""
+        h = float(math_utils.h)
+        std = math.sqrt(2.0 * tau1)
+        mean = 2.0 * alpha1 * tau1
+        disc = math.exp(-(beta1 - alpha1 * alpha1) * tau1)
+        logs = sorted({safe_log(float(level) / float(spot)) for level in levels if float(level) > 0.0})
+        kinks = [] if terminal is None else sorted(
+            {safe_log(level / float(spot)) for level in self._terminal_levels(terminal)})
+        grid = math_utils.grid
+        band_index = np.zeros(0, dtype=np.int64)
+        if band and logs:
+            # six standard deviations from a barrier the lattice's own step sees the jump with mass < 1e-9
+            reach = 6.0 * std + abs(mean) + 4.0 * h
+            near = np.zeros(grid.size, dtype=bool)
+            for b in logs:
+                near |= np.abs(grid - b) <= reach
+            band_index = np.flatnonzero(near)
+        touch_arg = None
+        if touch is not None and touch[0] is not None:
+            touch_arg = (float(touch[0]), bool(touch[1]))
+        fs = GaussianFirstStep(
+            grid, h, mean=mean, std=std, disc=disc, centres=np.concatenate([[0.0], grid[band_index]]),
+            breakpoints=logs + kinks, touch=touch_arg,
+            # a continuous knock-in level is a kink of the not-knocked-in pre-event surface: never interpolated across
+            kinks=() if touch_arg is None else (touch_arg[0],),
+        )
+        fs.band = band_index
+        return fs
+
+    @staticmethod
+    def _node_constant_on(value, n_nodes: int):
+        """A knock-out source given on the lattice (scalar, or rows constant along the nodes) on ``n_nodes`` points.
+
+        Raises:
+            UnderResolvedStepError: the source varies along the lattice; the exact first step has no exact
+                value for it between nodes.
+        """
+        array = np.asarray(value, dtype=float)
+        if array.ndim == 0:
+            return value
+        if not np.array_equal(array, np.broadcast_to(array[..., :1], array.shape)):
+            raise UnderResolvedStepError(
+                "QUAD V1: the first event's knock-out value varies along the lattice; the exact first step has no "
+                "exact value for it between nodes."
+            )
+        return np.repeat(array[..., :1], n_nodes, axis=-1)
+
+    def _first_step_two_state(self, math_utils, spot, tau1, alpha1, beta1, levels, pre, terminal_fn, first_event,
+                              v_out0, v_in0, *, touch=None, terminal_product=None):
+        """F on the two note states: ``(v_out0, v_in0)`` with the band nodes replaced by F, and F at the spot.
+
+        ``pre``: the pre-event ``(out, in)`` lattice surfaces at the first event, or ``None`` for a state still
+        holding its maturity seed there (``terminal_fn(spot values) -> (in, out)`` evaluates it exactly at the
+        nodes; a kink of the redemption is never interpolated). ``first_event(y, out_y, in_y)`` is the engine's own
+        event map at the first event on the points ``y``.
+        """
+        pre_out, pre_in = (None, None) if pre is None else pre
+        fs = self._first_step_quadrature(math_utils, spot, tau1, alpha1, beta1, levels, touch=touch,
+                                         terminal=terminal_product if (pre_out is None or pre_in is None) else None)
+        terminal = None
+        if pre_out is None or pre_in is None:
+            terminal = terminal_fn(spot * np.exp(fs.y))
+        out_y = terminal[1] if pre_out is None else fs.lift(pre_out)
+        in_y = terminal[0] if pre_in is None else fs.lift(pre_in)
+        with self._pointwise():
+            out_y, in_y = first_event(fs.y, out_y, in_y)
+        f_out, f_in = fs.expect_bridged(out_y, in_y), fs.expect(in_y)
+        v_out0 = np.array(v_out0, dtype=float, copy=True)
+        v_in0 = np.array(v_in0, dtype=float, copy=True)
+        v_out0[fs.band] = f_out[1:]
+        v_in0[fs.band] = f_in[1:]
+        self._last_first_step = fs
+        return v_out0, v_in0, float(f_out[0]), float(f_in[0])
+
     def _require_resolved_kernels(self, times: Sequence[float], tau: np.ndarray, h: float) -> None:
         """Decide how every diffusion step is applied, refusing what cannot be priced to the accuracy target.
 
@@ -2458,16 +2775,20 @@ class SnowballQuadEngine(BaseEngine):
         whose bound exceeds ``params.convergence_rel_tol`` is applied by the local stencil instead (``local_step``,
         sub-resolution run C1), unless
 
-        * the step is the first one, from the valuation instant (S3b prices it exactly; refused until then);
         * local steps are switched off (the first ``auto_converge`` ladder);
         * the local steps chain: their accumulated variance exceeds ``_LOCAL_CHAIN_CELLS2`` squared cells, beyond
           which the stencil's fourth-moment error was measured to exceed the accuracy target (AC5d).
+
+        The first step, from the valuation instant, is priced by the exact first step (``_first_step_exact``, S3b):
+        the stencil only carries the lattice's t=0 surface away from the first event's barriers, so it does not
+        count towards the chain.
 
         Refusals raise ``UnderResolvedStepError``; MC and the PDE price such contracts.
         """
         times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
         step_tau = np.asarray(tau[1:], dtype=float)
         self._last_local_steps = ()
+        self._last_first_step = None
         if not np.any(step_tau > 0.0):
             return                            # no diffusion to resolve; zero-variance steps have their own checks
         s_over_h = np.full(step_tau.shape, np.inf)
@@ -2492,13 +2813,13 @@ class SnowballQuadEngine(BaseEngine):
         worst = int(indices[np.argmin(s_over_h[indices])])
         if not self._local_steps_allowed:
             refuse(worst, "local steps are off on this auto_converge rung.")
-        chain = float(np.sum(s_over_h[indices] ** 2))
+        chained = indices[indices > 0]
+        chain = float(np.sum(s_over_h[chained] ** 2))
         self._last_local_chain = chain
         if chain > self._LOCAL_CHAIN_CELLS2:
-            refuse(worst, f"{indices.size} local steps carry {chain:.3g} squared cells of variance, beyond the "
-                          f"{self._LOCAL_CHAIN_CELLS2:g} the local stencil prices within the accuracy target.")
-        if local[0]:
-            refuse(0, "it is the first step from the valuation instant, which the local stencil does not price.")
+            refuse(int(chained[np.argmin(s_over_h[chained])]),
+                   f"{chained.size} local steps carry {chain:.3g} squared cells of variance, beyond the "
+                   f"{self._LOCAL_CHAIN_CELLS2:g} the local stencil prices within the accuracy target.")
         self._last_local_steps = tuple(int(i) for i in indices)
 
     def _match_record(self, target_time: float, records: Sequence) -> Optional[object]:
@@ -2799,6 +3120,8 @@ class SnowballQuadEngine(BaseEngine):
         """
         barrier_log = safe_log(float(barrier) / float(spot))
         if self._use_cell_average_events():
+            if self._pointwise_events:
+                return pointwise_breach(grid, barrier_log, breach_up=not trigger_is_down)
             return breach_fractions(
                 grid, barrier_log, breach_up=not trigger_is_down
             )
@@ -2815,8 +3138,8 @@ class SnowballQuadEngine(BaseEngine):
             return (grid <= barrier_log).astype(float)
         return (grid >= barrier_log).astype(float)
 
-    @staticmethod
     def _project_quad_event(
+        self,
         grid: np.ndarray,
         barrier: float,
         spot: float,
@@ -2830,6 +3153,7 @@ class SnowballQuadEngine(BaseEngine):
         The shared projection core expects spot on axis zero. QUAD value
         vectors are one-dimensional while event-stat stacks store spot on the
         final axis, so stacked inputs are moved temporarily and restored.
+        Under ``_pointwise`` (the exact first step's quadrature nodes) the event is evaluated at each point.
         """
         survive = np.asarray(v_survive, dtype=float)
         breach = np.asarray(v_breach, dtype=float)
@@ -2837,6 +3161,9 @@ class SnowballQuadEngine(BaseEngine):
         if stacked:
             survive = np.moveaxis(survive, -1, 0)
             breach = np.moveaxis(breach, -1, 0)
+        project_event_values = (
+            pointwise_event_values if self._pointwise_events else _project_event_values
+        )
         projected = project_event_values(
             grid,
             safe_log(float(barrier) / float(spot)),

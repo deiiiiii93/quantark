@@ -82,9 +82,11 @@ def _price(
     kwargs = {"grid_points": grid_points, "align_priority": priority}
     if stretch is not None:
         kwargs["align_cell_stretch"] = stretch
-    return SnowballQuadEngine(params=QuadParams(**kwargs)).price(
-        _product(), _env(spot)
-    )
+    engine = SnowballQuadEngine(params=QuadParams(**kwargs))
+    # The lattice's own alignment is under test: the exact first step (S3b), which prices a first step narrower than
+    # _FIRST_STEP_S_F cells off the lattice and so removes most of the crossover kink itself, is switched off.
+    engine._FIRST_STEP_S_F = 0.0
+    return engine.price(_product(), _env(spot))
 
 
 def _math(stretch: float | None, barrier_logs, grid_x: int = GRID) -> QuadratureMath:

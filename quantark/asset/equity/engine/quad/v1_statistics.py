@@ -98,10 +98,12 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
             s0, s1 = float(starts_t[i]), float(t[i])
             tau, alpha = steps[i].diffusion[0], steps[i].diffusion[1]
             log_barrier, _, _, reverse = steps[i].bridge
-            weights = result.interval_start_dual[i]
+            start = result.interval_start_dual[i]
+            # an exact first step starts at the spot: its law is a point mass there (``(nodes, weights)``)
+            nodes, weights = start if isinstance(start, tuple) else (log.math_utils.grid, start)
             # the step's coefficients are constant: its variance accrues linearly in time
             fractions = np.clip((days[inside] - s0) / (s1 - s0), 0.0, 1.0)
-            law = ((log.math_utils.grid, weights), 2.0 * tau * alpha, 2.0 * tau, log_barrier, reverse)
+            law = ((nodes, weights), 2.0 * tau * alpha, 2.0 * tau, log_barrier, reverse)
             # the dual is signed at round-off level where the note is all but knocked out (its weights carry the
             # projection's ringing): the split is linear in it, so only a law with no mass at all is refused
             return crossed_by(law, np.r_[fractions, 1.0])

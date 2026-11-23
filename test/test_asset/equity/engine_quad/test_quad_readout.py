@@ -73,7 +73,12 @@ def _engine(readout: str | None = None, grid_points: int = 301):
     kwargs = {"grid_points": grid_points}
     if readout is not None:
         kwargs["readout"] = readout
-    return SnowballQuadEngine(params=QuadParams(**kwargs))
+    engine = SnowballQuadEngine(params=QuadParams(**kwargs))
+    # The readout modes read the lattice's last transition. A first step spanning fewer than _FIRST_STEP_S_F cells
+    # (this one: ~3 at 301 points) is priced by the exact first step instead, whatever the mode (sub-resolution run
+    # S3b, test_quad_v1_first_step.py); switched off here so the lattice's readouts are what is compared.
+    engine._FIRST_STEP_S_F = 0.0
+    return engine
 
 
 def _cell_width(engine, product, spot: float) -> float:
@@ -134,6 +139,7 @@ def test_at_a_node_the_transition_readout_reproduces_the_diffusion(
     )
     legacy = SnowballQuadEngine(QuadParams(readout="legacy_linear", **kwargs))
     transition = SnowballQuadEngine(QuadParams(readout="transition", **kwargs))
+    legacy._FIRST_STEP_S_F = transition._FIRST_STEP_S_F = 0.0      # the lattice's readouts (see _engine)
     product = _product()
 
     legacy.price(product, _env())

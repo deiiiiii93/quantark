@@ -156,11 +156,16 @@ class TestBackstops:
         with pytest.raises(UnderResolvedStepError, match="local steps"):
             SnowballQuadEngine(QuadParams()).price(p, env(0.05))
 
-    def test_unresolved_first_step_is_still_refused(self):
-        """S3a leaves the valuation -> first-event step to S3b's exact first step."""
+    def test_unresolved_first_step_is_priced_by_the_exact_first_step(self):
+        """S3b prices the valuation -> first-event step exactly at the spot (``first_step``) instead of refusing it;
+        the local stencil is never the first step's price."""
         p = snowball((5 * MINUTE,) + QUARTERS, QUARTERS)
-        with pytest.raises(UnderResolvedStepError, match="first step"):
-            SnowballQuadEngine(QuadParams()).price(p, env())
+        e = SnowballQuadEngine(QuadParams())
+        value = e.price(p, env(0.2, 103.0))
+        assert e._last_first_step is not None
+        ref = next(r for r in FIXTURE["rungs"]
+                   if r["case"] == "first_ko" and r["vol"] == 0.2 and r["rung"] == "5min" and r["dist"] == "on")
+        assert within(value, ref["ref_price"], ref["hw_price"], 1e-4, 1e-6), (value, ref["ref_price"])
 
     def test_auto_converge_keeps_today_ladder_and_prices_what_it_refused(self):
         """Coarse rungs still skip an unresolved step (contracts that converge today are bit-identical); a contract

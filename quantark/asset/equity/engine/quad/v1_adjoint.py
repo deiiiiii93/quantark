@@ -41,6 +41,7 @@ from quantark.util.exceptions import PricingError
 __all__ = [
     "AdjointUnavailable",
     "EventStep",
+    "FirstStepLog",
     "ForwardResult",
     "MarchLog",
     "forward_pass",
@@ -80,6 +81,23 @@ class EventStep:
 
 
 @dataclass(eq=False)
+class FirstStepLog:
+    """The exact first step of the march (``first_step``, S3b), when the engine priced it: the first event and the
+    step from the valuation instant are one linear functional of the PRE-event surfaces at the first event,
+    ``readout . event_y(lift(pre))`` on the quadrature nodes (bridged on the ``out`` state under continuous
+    knock-in). ``event`` is the engine's event map on the nodes (pointwise); ``terminal_out`` / ``terminal_in``:
+    a state's maturity seed on the nodes when the first event is where it is seeded (its masses read there);
+    ``values_out`` / ``values_in``: the columns at the spot (per row) for each readout state."""
+
+    quadrature: object
+    event: Callable
+    terminal_out: Optional[Dict[str, np.ndarray]] = None
+    terminal_in: Optional[Dict[str, np.ndarray]] = None
+    values_out: Optional[np.ndarray] = None
+    values_in: Optional[np.ndarray] = None
+
+
+@dataclass(eq=False)
 class MarchLog:
     """The operators of one statistics march, logged in backward order by the engine (``steps[0]`` is the last
     step); ``engine`` and ``math_utils`` give the diffusion and bridge kernels."""
@@ -93,6 +111,8 @@ class MarchLog:
     columns: Dict[str, float] = field(default_factory=dict)
     terminal_out: Dict[str, np.ndarray] = field(default_factory=dict)
     terminal_in: Dict[str, np.ndarray] = field(default_factory=dict)
+    #: the exact first step, replacing the readout, the first diffusion and the first event (``None``: the lattice's)
+    first_step: Optional[FirstStepLog] = None
 
 
 @dataclass(frozen=True)
@@ -271,6 +291,56 @@ def _source_vectors(event: Callable, n: int, key) -> Tuple[np.ndarray, np.ndarra
     return np.asarray(w_out, dtype=float)[0], np.asarray(w_in, dtype=float)[0]
 
 
+def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: int, k: int, first_ki, interval_ki,
+                        clean_ko, sources, starts, terminal):
+    """The transpose of the exact first step: the readout's quadrature weights on the nodes, the touch of a
+    continuous knock-in over the first interval, the event on the nodes (probed like any event map: pointwise, so
+    diagonal), then the nodes' duals back onto the lattice (``lift_transpose``) -- or, for a state seeded at the
+    first event, its terminal masses read on the nodes. Returns ``(beta_out, beta_in, done_out, done_in)``."""
+    fs = first.quadrature
+    n_y = fs.y.size
+    d = fs.readout_dual()
+    zero_y = np.zeros(n_y, dtype=float)
+    beta_out, beta_in = (zero_y, d) if log.readout_in else (d, zero_y)
+    alpha_out = beta_out if step.out_diffused else zero_y
+    alpha_in = beta_in
+    if step.bridge is not None and step.out_diffused:
+        # the interval starts at the spot: a point mass there is its first-passage law
+        starts[k] = (np.array([0.0]), np.array([float(np.sum(beta_out))]))
+        moved = beta_out * (fs.P[0] if fs.P is not None else 0.0)
+        alpha_out = alpha_out - moved
+        alpha_in = alpha_in + moved
+        interval_ki[k] = float(np.sum(moved))
+    if step.event is None:
+        y_out, y_in = alpha_out, alpha_in
+    else:
+        banded = _BandedEvent(first.event, n_y, step.time)
+        for key in step.sources:
+            s_out, s_in = _source_vectors(first.event, n_y, key)
+            out_mass = float(alpha_out @ s_out)
+            sources[key] = out_mass + float(alpha_in @ s_in)
+            clean_ko[k] += out_mass / step.source_units[key]
+        moved = banded.transpose("in", "out", alpha_out)
+        first_ki[k] = float(np.sum(moved))
+        y_out = banded.transpose("out", "out", alpha_out) + banded.transpose("out", "in", alpha_in)
+        y_in = moved + banded.transpose("in", "in", alpha_in)
+    done_out = done_in = False
+    zero = np.zeros(n, dtype=float)
+    if first.terminal_out is not None:
+        for name, value in first.terminal_out.items():
+            terminal[name] = float(y_out @ value)
+        beta_out, done_out = zero, True
+    else:
+        beta_out = fs.lift_transpose(y_out)
+    if first.terminal_in is not None:
+        for name, value in first.terminal_in.items():
+            terminal[name] = float(y_in @ value)
+        beta_in, done_in = zero, True
+    else:
+        beta_in = fs.lift_transpose(y_in)
+    return beta_out, beta_in, done_out, done_in
+
+
 # --- the pass -------------------------------------------------------------------------------------------------------
 
 
@@ -293,6 +363,8 @@ def forward_pass(log: MarchLog) -> ForwardResult:
     starts: List[Optional[np.ndarray]] = [None] * K
     terminal: Dict[str, float] = {}
 
+    first = log.first_step
+    done_out = done_in = False
     if log.transition is not None:
         prefactor, alpha, beta, tau = log.transition
         row = transition_readout_weights(mu, prefactor, alpha, beta, tau)
@@ -300,6 +372,10 @@ def forward_pass(log: MarchLog) -> ForwardResult:
         row = interpolation_weights(mu)
     beta_out, beta_in = (zero, row) if log.readout_in else (row, zero)
     for k, step in enumerate(steps):
+        if k == 0 and first is not None:
+            beta_out, beta_in, done_out, done_in = _first_step_forward(
+                first, step, log, n, k, first_ki, interval_ki, clean_ko, sources, starts, terminal)
+            continue
         if k == 0 and log.transition is not None:
             alpha_out, alpha_in = beta_out, beta_in         # the readout row is already the dual of the slice
         else:
@@ -336,11 +412,12 @@ def forward_pass(log: MarchLog) -> ForwardResult:
             for name, value in log.terminal_out.items():
                 terminal[name] = float(beta_out @ value)
             beta_out = zero
-    if not any(step.seed_out for step in steps):
+    if not done_out and not any(step.seed_out for step in steps):
         for name, value in log.terminal_out.items():
             terminal[name] = float(beta_out @ value)
-    for name, value in log.terminal_in.items():
-        terminal[name] = float(beta_in @ value)
+    if not done_in:
+        for name, value in log.terminal_in.items():
+            terminal[name] = float(beta_in @ value)
     times = np.array([float(step.time) for step in steps], dtype=float)
     if np.any(np.diff(times) <= 0.0):
         raise PricingError("the QUAD V1 march log is not in strictly increasing time")

@@ -293,18 +293,22 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         terminal = payment_timings.terminal
         pre_maturity = float(product.get_pre_maturity_time(pricing_env))
-        v_in_cash = np.array(
-            [
-                product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
-                for spot_value in spot_grid
-            ],
-            dtype=float,
-        )
-        if fold is not None:
-            v_in_cash = v_in_cash + fold.bind_terminal(
-                "ki", terminal.determination_time, terminal.payment_time
+
+        def terminal_in(spot_values):
+            v_in_cash = np.array(
+                [
+                    product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
+                    for spot_value in spot_values
+                ],
+                dtype=float,
             )
-        v_in = v_in_cash * terminal.delay_df
+            if fold is not None:
+                v_in_cash = v_in_cash + fold.bind_terminal(
+                    "ki", terminal.determination_time, terminal.payment_time
+                )
+            return v_in_cash * terminal.delay_df
+
+        v_in = terminal_in(spot_grid)
         # The not-yet-knocked-in contract matures on the PRE-KI schedule; only a
         # knocked-in one runs on to `maturity`. Seeding v_out at the end of the
         # grid would price it through a period it can never reach, so it is
@@ -314,26 +318,33 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         # The note that ends with schedule 1 is paid on the explicit settlement date when booked (spec D33),
         # else the terminal settlement lag after schedule 1's maturity (``first_schedule_settlement``).
         first_schedule = first_schedule_settlement(product, pricing_env, terminal)
-        v_out_terminal = np.array(
-            [
-                product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
-                for spot_value in spot_grid
-            ],
-            dtype=float,
-        ) * (first_schedule.delay_df if first_schedule.settlement_date_governs
-             else payment_timings.terminal.delay_df)
-        if fold is not None:
-            # Folded cash of the alive branch is paid with the note (the fold structure's slot),
-            # discounted from there to the pre-maturity by its own exact ratio; the product's own
-            # redemption keeps its discount.
-            no_ki_payment = (first_schedule.payment_time if first_schedule.settlement_date_governs
-                             else pre_maturity + (terminal.payment_time - terminal.determination_time))
-            no_ki_cash = fold.bind_terminal("no_ki", pre_maturity, no_ki_payment)
-            v_out_terminal = v_out_terminal + no_ki_cash * (
-                pricing_env.get_discount_factor(no_ki_payment)
-                / pricing_env.get_discount_factor(pre_maturity)
-            )
+
+        def terminal_out(spot_values):
+            v_out_terminal = np.array(
+                [
+                    product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
+                    for spot_value in spot_values
+                ],
+                dtype=float,
+            ) * (first_schedule.delay_df if first_schedule.settlement_date_governs
+                 else payment_timings.terminal.delay_df)
+            if fold is not None:
+                # Folded cash of the alive branch is paid with the note (the fold structure's slot),
+                # discounted from there to the pre-maturity by its own exact ratio; the product's own
+                # redemption keeps its discount.
+                no_ki_payment = (first_schedule.payment_time if first_schedule.settlement_date_governs
+                                 else pre_maturity + (terminal.payment_time - terminal.determination_time))
+                no_ki_cash = fold.bind_terminal("no_ki", pre_maturity, no_ki_payment)
+                v_out_terminal = v_out_terminal + no_ki_cash * (
+                    pricing_env.get_discount_factor(no_ki_payment)
+                    / pricing_env.get_discount_factor(pre_maturity)
+                )
+            return v_out_terminal
+
+        v_out_terminal = terminal_out(spot_grid)
         v_out = np.zeros_like(v_out_terminal)
+        first_exact = self._first_step_exact(float(tau[1]), math_utils.h)
+        first_event = None
         v_out_seeded = False
 
         log_ki_barrier = None
@@ -356,7 +367,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             obs_time = times[step_index - 1]
 
             out_live = obs_time < pre_maturity or same_instant(obs_time, pre_maturity)
-            if out_live and not v_out_seeded:
+            seed_now = out_live and not v_out_seeded
+            if seed_now:
                 v_out = v_out_terminal.copy()
                 v_out_seeded = True
 
@@ -368,6 +380,33 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     return 0.0
                 extra = 0.0 if fold_ko is None else fold_ko[id(record)]
                 return (record.payoff + extra) * event_delay_by_record[id(record)]
+
+            if step_index == 1 and first_exact:
+                # the pre-event states at the first event: a state seeded here holds its maturity seed exactly
+                first_pre = (
+                    None if (seed_now or not out_live) else v_out.copy(),
+                    None if len(times) == 1 else v_in.copy(),
+                )
+                first_out_live = out_live
+                first_ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+                first_levels = [
+                    level for level in (
+                        pre_record.barrier if pre_record is not None else None,
+                        post_record.barrier
+                        if post_record is not None and not disable_ko_after_ki else None,
+                        first_ki_record.barrier if first_ki_record is not None and out_live else None,
+                        product.barrier_config.ki_barrier
+                        if ki_continuous and log_ki_barrier is not None and out_live else None,
+                    ) if level is not None
+                ]
+
+                def first_event(y, out_y, in_y, _t=obs_time, _live=out_live,
+                                _pre=ko_cash(pre_record), _post=ko_cash(post_record)):
+                    return self._apply_reset_observation(
+                        product, y, spot * np.exp(y), spot, 0.0, out_y, in_y,
+                        _t, _live, pre_ko_records, post_ko_records, ki_records,
+                        ki_continuous, log_ki_barrier, _pre, _post,
+                    )
 
             v_out, v_in = self._apply_reset_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
@@ -443,6 +482,20 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     tau_step,
                 )
 
+        first_value = None
+        if first_event is not None:
+            # the exact first step (S3b): F at the spot is the price, F near the first event's barriers the t=0 values
+            v_out, v_in, first_out, first_in = self._first_step_two_state(
+                math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]), first_levels,
+                first_pre, lambda values: (terminal_in(values), terminal_out(values)), first_event, v_out, v_in,
+                touch=(log_ki_barrier, product.is_reverse)
+                if ki_continuous and log_ki_barrier is not None and first_out_live else None,
+                terminal_product=product,
+            )
+            if not first_out_live:
+                v_out = np.zeros_like(v_out)             # never seeded: the first schedule had ended
+            first_value = first_in if carried_knock_in else first_out
+
         if record_grids:
             self._backward_grids[0.0] = (spot_grid.copy(), v_in.copy(), v_out.copy())
 
@@ -467,6 +520,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         # its first schedule were still in force.
         value_surface = v_in if carried_knock_in else v_out
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
+        if first_value is not None:
+            return float(first_value)
         return math_utils.interpolate(value_surface, x=0.0)
 
     def _apply_reset_observation(
@@ -610,7 +665,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     ) -> Optional[EventStatistics]:
         from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
         from quantark.asset.equity.engine.quad import v1_statistics
-        from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, MarchLog
+        from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, FirstStepLog, MarchLog
 
         self._validate_product(product)
         want_ki = es.want_knock_in_path(streams)
@@ -768,6 +823,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         v_in[kis_unit] = 1.0
         v_in[kis_cash] = terminal_in_cash
         v_out_seeded = False
+        first_exact = self._first_step_exact(float(tau[1]), math_utils.h)
+        first = None
 
         log_ki_barrier = None
         if product.has_ki_barrier and ki_continuous:
@@ -820,6 +877,15 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 if not product.barrier_config.disable_ko_after_ki:
                     sources.append(("ko", post_offset + post_ko_records.index(post_record)))
                     units[sources[-1]] = float(post_unit)
+            if step_index == 1 and first_exact:
+                first = self._reset_first_step_statistics(
+                    product, pricing_env, math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]),
+                    obs_time, out_live, seed, len(times) == 1, v_out, v_in, pre_value, post_value,
+                    pre_record, post_record, pre_ko_records, post_ko_records, ki_records, ki_continuous,
+                    log_ki_barrier, rows=(n_rows, m_unit, m_cash, kis_unit, kis_cash),
+                    cash=(terminal.delay_df, first_schedule), pre_unit=float(pre_unit), post_unit=float(post_unit),
+                    pre_key=sources[0] if pre_record is not None else None, log_type=FirstStepLog,
+                )
             v_out, v_in = self._apply_reset_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
@@ -915,9 +981,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             )
 
         initial_surface = v_in if knocked_in_at_valuation else v_out
-        values_at_spot = np.array(
-            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_rows)], dtype=float
-        )
+        if first is not None:
+            log.first_step = first
+            values_at_spot = np.array(first.values_in if knocked_in_at_valuation else first.values_out, dtype=float)
+        else:
+            values_at_spot = np.array(
+                [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_rows)], dtype=float
+            )
         unit = values_at_spot[:m_unit]
         log.columns = {("ko", i): float(unit[i]) for i in range(m_unit)
                        if not (i >= post_offset and product.barrier_config.disable_ko_after_ki)}
@@ -946,6 +1016,73 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 ki_records=product_ki_records,
             ),
             unavailable={},
+        )
+
+    def _reset_first_step_statistics(self, product, pricing_env, math_utils, spot, tau1, alpha1, beta1, obs_time,
+                                     out_live, seeded, maturity_first, v_out, v_in, pre_value, post_value,
+                                     pre_record, post_record, pre_ko_records, post_ko_records, ki_records,
+                                     ki_continuous, log_ki_barrier, *, rows, cash, pre_unit, post_unit, pre_key,
+                                     log_type):
+        """The exact first step of the statistics columns (S3b): the first observation on the quadrature nodes,
+        pointwise, on the pre-event columns (a state seeded at the first event holds its maturity columns there,
+        evaluated on the nodes), read at the spot; and its log for the adjoint pass."""
+        n_rows, m_unit, m_cash, kis_unit, kis_cash = rows
+        delay_df, first_schedule = cash
+        ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+        bridged = bool(ki_continuous and log_ki_barrier is not None and out_live)
+        levels = [
+            level for level in (
+                pre_record.barrier if pre_record is not None else None,
+                post_record.barrier
+                if post_record is not None and not product.barrier_config.disable_ko_after_ki else None,
+                ki_record.barrier if ki_record is not None and out_live else None,
+                product.barrier_config.ki_barrier if bridged else None,
+            ) if level is not None
+        ]
+        fs = self._first_step_quadrature(
+            math_utils, spot, tau1, alpha1, beta1, levels,
+            touch=(log_ki_barrier, product.is_reverse) if bridged else None, band=False,
+            terminal=product if (seeded or maturity_first) else None,
+        )
+        y = fs.y
+        spots_y = spot * np.exp(y)
+        terminal_out = terminal_in = None
+        if seeded:
+            out_cash = np.array(
+                [product.get_maturity_payoff_v0(s, pricing_env=pricing_env) for s in spots_y], dtype=float
+            ) * (first_schedule.delay_df if first_schedule.settlement_date_governs else delay_df)
+            out_y = np.zeros((n_rows, y.size), dtype=float)
+            out_y[m_unit] = 1.0
+            out_y[m_cash] = out_cash
+            terminal_out = {"maturity_unit": np.ones(y.size), "maturity_cash": out_cash}
+        else:
+            out_y = fs.lift(v_out)
+        if maturity_first:
+            in_cash = np.array(
+                [product.get_maturity_payoff_v1(s, pricing_env=pricing_env) for s in spots_y], dtype=float
+            ) * delay_df
+            in_y = np.zeros((n_rows, y.size), dtype=float)
+            in_y[kis_unit] = 1.0
+            in_y[kis_cash] = in_cash
+            terminal_in = {"ki_settlement_unit": np.ones(y.size), "ki_settlement_cash": in_cash}
+        else:
+            in_y = fs.lift(v_in)
+        with self._pointwise():
+            out_y, in_y = self._apply_reset_observation(
+                product, y, spots_y, spot, 0.0, out_y, in_y, obs_time, out_live, pre_ko_records,
+                post_ko_records, ki_records, ki_continuous, log_ki_barrier,
+                self._node_constant_on(pre_value, y.size), self._node_constant_on(post_value, y.size),
+            )
+        return log_type(
+            quadrature=fs,
+            event=self._pointwise_event(self._reset_statistics_event(
+                product, y, spots_y, spot, 0.0, obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
+                ki_continuous, log_ki_barrier, pre_unit=pre_unit, post_unit=post_unit, pre_key=pre_key,
+            )),
+            terminal_out=terminal_out,
+            terminal_in=terminal_in,
+            values_out=(fs.expect_bridged(out_y, in_y) if out_live else fs.expect(out_y))[..., 0],
+            values_in=fs.expect(in_y)[..., 0],
         )
 
     def _reset_statistics_event(self, product, grid, spot_grid, spot, width, obs_time, out_live, pre_ko_records,
