@@ -85,13 +85,20 @@ def schedule_times(maturity: float, num_observations: int) -> List[float]:
 
 
 def _is_time(value: Any) -> bool:
-    # ``type is float`` first: the ABC check is the slow path and nearly every time is a plain float
-    return type(value) is float or (isinstance(value, Real) and not isinstance(value, bool))
+    # plain floats and ``None`` (an unset settlement) first: the ABC check is the slow path (AC12 profile)
+    kind = type(value)
+    if kind is float:
+        return True
+    if value is None or kind is bool:
+        return False
+    return isinstance(value, Real)
 
 
 def _time_list(value: Any) -> bool:
     """A non-empty list/tuple of numeric times (not dates, not ``(time, spot)`` fixings)."""
-    return isinstance(value, (list, tuple)) and bool(value) and all(_is_time(v) for v in value)
+    if not isinstance(value, (list, tuple)) or not value:
+        return False
+    return all(type(v) is float for v in value) or all(_is_time(v) for v in value)
 
 
 def _record_list(value: Any) -> bool:
@@ -150,14 +157,25 @@ def _numeric_maturity(product: Any) -> Optional[float]:
 def _gather(product: Any) -> Tuple[List[float], List[_Source], List[_Source], Optional[float]]:
     schedules, lists = _sources(product)
     values: List[float] = []
+    append = values.append
     for _, schedule in schedules:
-        for record in _numeric_records(schedule):
-            for name in ("observation_time", "settlement_time"):
-                t = getattr(record, name, None)
-                if _is_time(t):
-                    values.append(float(t))
+        records = schedule if isinstance(schedule, (list, tuple)) else schedule.records
+        for record in records:
+            if getattr(record, "observation_date", None) is not None:
+                continue                      # dated: resolves from its date
+            t = getattr(record, "observation_time", None)
+            if type(t) is float:
+                append(t)
+            elif _is_time(t):
+                append(float(t))
+            t = getattr(record, "settlement_time", None)
+            if t is not None:
+                if type(t) is float:
+                    append(t)
+                elif _is_time(t):
+                    append(float(t))
     for _, times in lists:
-        values.extend(float(t) for t in times)
+        values.extend(map(float, times))
     maturity = _numeric_maturity(product)
     if maturity is not None:
         values.append(maturity)
