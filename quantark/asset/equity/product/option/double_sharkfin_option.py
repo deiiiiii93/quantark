@@ -24,6 +24,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption, _refresh_observation_dates
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 
@@ -208,6 +209,8 @@ class DoubleSharkfinOption(BaseEquityOption):
         self._validate_strike_in_corridor()
         self._normalize_observation_schedule()
         refuse_accumulate(self.observation_schedule, "double sharkfin")
+        # one float per instant across the schedule, the legacy dates and the maturity (contract clock)
+        canonicalize_contract_clock(self)
 
     def _validate_strike_in_corridor(self) -> None:
         """Validate that the strike is inside the double sharkfin corridor."""
@@ -452,6 +455,7 @@ class DoubleSharkfinOption(BaseEquityOption):
 
         return safe_log(self.upper_barrier / self.lower_barrier)
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> None:

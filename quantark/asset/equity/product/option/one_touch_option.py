@@ -10,6 +10,7 @@ from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
 from .base_equity_option import _refresh_observation_dates, time_to_exercise
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.enum import (
@@ -199,6 +200,8 @@ class OneTouchOption(BaseEquityProduct):
             self.observation_dates = self.observation_schedule.times
         if self.touch_type == TouchType.NO_TOUCH:
             refuse_accumulate(self.observation_schedule, "no-touch")
+        # one float per instant across the schedule, the legacy dates and the maturity (contract clock)
+        canonicalize_contract_clock(self)
 
     def get_maturity(self, pricing_env=None) -> float:
         """
@@ -219,6 +222,7 @@ class OneTouchOption(BaseEquityProduct):
         else:
             return self.maturity
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> None:

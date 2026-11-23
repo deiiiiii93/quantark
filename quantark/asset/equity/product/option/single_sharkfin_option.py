@@ -25,6 +25,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption, _refresh_observation_dates
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 
@@ -193,6 +194,8 @@ class SingleSharkfinOption(BaseEquityOption):
         self._validate_barrier_orientation()
         self._normalize_observation_schedule()
         refuse_accumulate(self.observation_schedule, "single sharkfin")
+        # one float per instant across the schedule, the legacy dates and the maturity (contract clock)
+        canonicalize_contract_clock(self)
 
     def _validate_barrier_orientation(self) -> None:
         """Validate the barrier is on the sharkfin side of the strike."""
@@ -407,6 +410,7 @@ class SingleSharkfinOption(BaseEquityOption):
             return self.observation_schedule.times
         return self.observation_dates or []
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> None:

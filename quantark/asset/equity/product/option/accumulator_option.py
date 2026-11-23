@@ -38,6 +38,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close, is_zero
 
 from .base_equity_option import BaseEquityOption, _refresh_observation_dates
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .observation_schedule import ObservationSchedule
 
 
@@ -262,6 +263,8 @@ class AccumulatorOption(BaseEquityOption):
                 )
 
         self._normalize_observation_schedule()
+        # one float per instant across the schedule, the legacy dates and the maturity (contract clock)
+        canonicalize_contract_clock(self)
 
     def _normalize_observation_schedule(self) -> None:
         """Normalize discrete monitoring inputs into an ObservationSchedule."""
@@ -442,6 +445,7 @@ class AccumulatorOption(BaseEquityOption):
             return self.observation_schedule.times
         return self.observation_dates or []
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> None:

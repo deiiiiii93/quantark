@@ -49,6 +49,8 @@ __all__ = [
 
 #: product-level float lists that hold event times
 _PRODUCT_TIME_LISTS = ("observation_dates", "observation_times")
+#: product-level lists of observation records that are one schedule (a range accrual's)
+_PRODUCT_RECORD_LISTS = ("observation_records",)
 #: product-level scalar event times besides the maturity
 _PRODUCT_TIME_SCALARS = ("first_schedule_settlement_time",)
 
@@ -92,6 +94,11 @@ def _time_list(value: Any) -> bool:
     return isinstance(value, (list, tuple)) and bool(value) and all(_is_time(v) for v in value)
 
 
+def _record_list(value: Any) -> bool:
+    """A non-empty list of observation records (objects carrying an ``observation_time``)."""
+    return isinstance(value, list) and bool(value) and all(hasattr(r, "observation_time") for r in value)
+
+
 def _rebased_offsets(product: Any, config_name: str) -> bool:
     mode = getattr(product, "post_ko_mode", None)
     return config_name == "post_barrier_config" and getattr(mode, "name", None) == "REBASED"
@@ -110,6 +117,8 @@ def _sources(product: Any) -> Tuple[List[_Source], List[_Source]]:
             continue
         if isinstance(value, ObservationSchedule):
             schedules.append(((name,), value))
+        elif name in _PRODUCT_RECORD_LISTS and _record_list(value):
+            schedules.append(((name,), value))
         elif name in _PRODUCT_TIME_LISTS and _time_list(value):
             lists.append(((name,), value))
         elif dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -124,9 +133,11 @@ def _sources(product: Any) -> Tuple[List[_Source], List[_Source]]:
     return schedules, lists
 
 
-def _numeric_records(schedule: ObservationSchedule):
-    """The schedule's records on the numeric clock (a dated record resolves from its date)."""
-    return [r for r in schedule.records if getattr(r, "observation_date", None) is None]
+def _numeric_records(schedule: Any):
+    """The schedule's records (an ``ObservationSchedule``, or a product's list of records) on the numeric clock (a
+    dated record resolves from its date)."""
+    records = schedule if isinstance(schedule, list) else schedule.records
+    return [r for r in records if getattr(r, "observation_date", None) is None]
 
 
 def _numeric_maturity(product: Any) -> Optional[float]:
@@ -232,10 +243,10 @@ def _moved(t: Any, mapping: Dict[float, float]) -> Any:
     return mapping.get(float(t), t) if _is_time(t) else t
 
 
-def _canonical_schedule(schedule: ObservationSchedule, mapping: Dict[float, float]) -> ObservationSchedule:
+def _canonical_schedule(schedule: Any, mapping: Dict[float, float]) -> Any:
     records = []
     changed = False
-    for record in schedule.records:
+    for record in (schedule if isinstance(schedule, list) else schedule.records):
         if getattr(record, "observation_date", None) is None:
             changes = {
                 name: _moved(getattr(record, name), mapping)
@@ -246,7 +257,9 @@ def _canonical_schedule(schedule: ObservationSchedule, mapping: Dict[float, floa
                 record = dataclasses.replace(record, **changes)
                 changed = True
         records.append(record)
-    return dataclasses.replace(schedule, records=records) if changed else schedule
+    if not changed:
+        return schedule
+    return records if isinstance(schedule, list) else dataclasses.replace(schedule, records=records)
 
 
 def _canonical_list(times: Sequence[float], mapping: Dict[float, float]) -> Sequence[float]:

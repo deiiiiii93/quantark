@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
@@ -214,6 +215,15 @@ class DoubleBarrierOption(BaseEquityOption):
                 lower_barrier=self.lower_barrier,
             )
             self.observation_dates = self.observation_schedule.times
+        # one float per instant across the schedule, the legacy dates and the maturity (contract clock)
+        canonicalize_contract_clock(self)
+
+    @canonical_clock_after
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
+        """Age the product (``BaseEquityOption.time_shift``); the outermost call snaps the aged clock (contract clock)."""
+        super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
 
     def get_payoff(self, spot: float) -> float:
         """

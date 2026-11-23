@@ -20,6 +20,7 @@ from quantark.util.numerical import is_zero
 from quantark.asset.clock import enforce_clock
 
 from .base_equity_option import BaseEquityOption, maturity_reached
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
 
 if TYPE_CHECKING:
@@ -135,6 +136,8 @@ class RangeAccrualOption(BaseEquityOption):
         self._validate_contract_multiplier()
         self._validate_settlement_convention()
         self._validate_range_accrual_parameters()
+        # one float per instant across the records or times and the maturity (contract clock)
+        canonicalize_contract_clock(self)
 
     def _validate_range_accrual_parameters(self) -> None:
         """Validate range accrual specific parameters."""
@@ -403,6 +406,7 @@ class RangeAccrualOption(BaseEquityOption):
         """The time ``time_shift`` has aged a numeric contract by (see ``BaseEquityOption.get_tenor``)."""
         return self.accrued_offset
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> None:
