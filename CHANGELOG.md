@@ -7,17 +7,22 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
-## [0.12.0] - 2026-11-23
+## [0.12.0] - 2026-11-24
 
 One rule now decides when two numeric event times are the same instant, for every product and engine (contract
 clock, spec `docs/superpowers/specs/2026-11-23-contract-clock-design.md`). Before this, QUAD V1, QUAD V2, the PDE,
 Monte Carlo and the lifecycle each decided for itself, so one booking could be priced as different contracts.
 
+QUAD V1 and QUAD V2 also price steps shorter than their lattice resolves, including the step from the valuation
+instant to an observation minutes away (QUAD sub-resolution steps, spec
+`docs/superpowers/specs/2026-11-23-quad-subresolution-step-design.md`). Before, V1 silently mispriced them and V2
+refused them.
+
 ### Changed
 
 - **One schedule-time generator.** Every factory (`snowball_helpers`, `phoenix_helpers`,
-  `range_accrual_helpers`, 11 sites, and `RangeAccrualOption`'s `num_observations` schedule) computes evenly spaced times as `(i + 1) * maturity / n` through
-  `contract_clock.schedule_times`. The old `(i + 1) / n * maturity` rounded twice and left equal calendar instants
+  `range_accrual_helpers`, 11 sites, and `RangeAccrualOption`'s `num_observations` schedule) computes evenly spaced
+  times as `(i + 1) * maturity / n` through `contract_clock.schedule_times`. The old `(i + 1) / n * maturity` rounded twice and left equal calendar instants
   one ulp apart (the KO-reset factory's `11/12 * 1.0` vs `11/18 * 1.5`). Maturity-1.0 contracts are bitwise
   unchanged.
 - **Canonical contract clock.** At construction (`validate`), `time_shift` and the lifecycle day-snap
@@ -36,17 +41,40 @@ Monte Carlo and the lifecycle each decided for itself, so one booking could be p
   `merge_time_nodes` (new `anchors=` keyword; `None` is bitwise as before). `test/test_contract_clock_sites.py` pins
   77 time-identity sites plus 3 anchored merges. The cash-leg survival axis treats only an exact 0.0 as the
   valuation instant (was 1e-6 y).
-- **QUAD V1 refuses a step its lattice cannot resolve** (`NumericalError` subclass `UnderResolvedStepError`).
-  V1 sizes its lattice from the knock-in spacing only, so a knock-out minutes from a knock-in, a settlement node or
-  two instants seconds apart left a step narrower than its cells; the sampled kernel then lost mass by aliasing
-  (`2 exp(-2 pi^2 (s/h)^2)`, plus a half-frequency term under Simpson weights) and V1 silently mispriced (KO 0.5 /
-  KI 0.5+gap, true 98.92: gap 53 min -> 109.33, 5 min -> 226.05, 35 s -> 573.39). A step whose bound exceeds the
-  engine's own accuracy target `QuadParams.convergence_rel_tol` is now refused; with `auto_converge=True` the ladder
-  moves to a finer rung instead. This includes the first step from the valuation instant: a valuation minutes before
-  an observation (e.g. a 14:55 proxy-close revaluation) now refuses on V1 (measured 5 min ahead: 265.92 unguarded
-  against PDE 98.30). MC and the PDE price such contracts; QUAD V2 does with `max_nodes` raised (5 min gap: 150k
-  nodes; it refuses below tens of seconds). The new exceptions `UnderResolvedStepError` and V2's
-  `ResourceLimitError` (both `NumericalError`) are exported from `quantark.asset.equity.engine.quad`.
+- **QUAD V1 prices a step its lattice cannot resolve.** V1 sizes its lattice from the knock-in spacing only, so a
+  knock-out minutes from a knock-in, a settlement node or two instants seconds apart left a step narrower than its
+  cells. The sampled kernel then lost mass by aliasing (`2 exp(-2 pi^2 (s/h)^2)`, plus a half-frequency term under
+  Simpson weights), and V1 silently mispriced (KO 0.5 / KI 0.5+gap, true 98.92: gap 53 min -> 109.33, 5 min ->
+  226.05, 35 s -> 573.39). A step whose bound exceeds `QuadParams.convergence_rel_tol` is now applied by a local
+  three-point stencil that carries the step's mass, mean and variance (`quad/local_step.py`), on the price, the
+  stacked statistics, the Brownian-bridge correction, forward densities and the adjoint statistics pass. A lattice
+  too fine for `max_adaptive_grid_points` is sized from the other steps instead of refused. Isolated steps price
+  within 2.3e-8 of the same engine with the step resolved. Every contract V1 priced before prices bit for bit as
+  before, except through the first step (next item).
+- **QUAD V1 prices the first step exactly at the spot.** The step from the valuation instant to the first event is
+  applied as a Gaussian quadrature at the spot on the surfaces just before that event, with exact limits at its
+  barriers (`quad/first_step.py`), whenever it spans fewer than 13 cells or the lattice cannot resolve it. The
+  lattice readout was off there: near a barrier a one-day lead missed the accuracy target in 11 of 30 measured
+  configurations (worst 1.1e-3), up to 1.1% just above the old refusal threshold, and 265.92 against the PDE's 98.30
+  five minutes ahead (a 14:55 proxy-close revaluation). It covers snowball, Phoenix and KO-reset, every route that
+  reads the first step (price, statistics with `pv == price()`, the adjoint, `readout="transition"`,
+  `event_stats_mode="forward_density"`, the spot-greeks surface), and every engine's own event semantics. The 13-cell
+  switch is measured: beyond it the readout is within half the accuracy target in all 2,298 configurations.
+- **QUAD V2 prices intervals its `max_nodes` mesh cannot resolve.** When the mesh sized from every interval would
+  exceed `max_nodes`, the shortest intervals are left out of the sizing, the cell edges are aligned to the (at most
+  two) value jumps of the event ending each of them, and their kernel is integrated exactly (`Operator(...,
+  local_variance=)`). Gaps from 2e-10 y to the old ~7 min threshold price within 3.9e-8 of the resolved mesh at
+  default parameters, on under 800 nodes. Every contract V2 priced before is bit-identical. V2's first step was
+  already exact.
+- **What is still refused** (`UnderResolvedStepError` on V1, `ResourceLimitError` on V2, both `NumericalError`, each
+  with its reason; MC, the PDE and `auto_converge` price them):
+  - two observations of the same barrier (within three standard deviations of the step) separated only by
+    unresolved steps: the crossing mass between them lies in a layer narrower than a cell (measured up to 1.07e-3 in
+    a knock-out probability);
+  - on V1, unresolved steps whose accumulated variance exceeds 8 squared cells (a five-year daily knock-in at vol 5%);
+  - on V2, more than two value jumps at the event ending an unresolved interval, or a zero-variance interval beside
+    one.
+  `UnderResolvedStepError` and V2's `ResourceLimitError` are exported from `quantark.asset.equity.engine.quad`.
 - **QUAD V2's resource-limit refusal** names the event times bounding the shortest interval and
   `QuadV2Params.event_time_tolerance` (message only; semantics and defaults unchanged).
 
@@ -60,17 +88,34 @@ Monte Carlo and the lifecycle each decided for itself, so one booking could be p
 
 ### Moved values
 
-- No certificate anchor (six live studies, exact comparison on the banking architecture) and no golden or replay
-  golden moved. MC values moved only on W17a collision grids, by at most 1.6e-15 relative.
-- Contracts with event times 1e-10..1e-6 y apart are now two instants on QUAD V1 and the PDE (they were merged);
-  V1 refuses those it cannot resolve.
+- **QUAD V1, through the exact first step (owner-signed):**
+  - Certificates snowball-, phoenix- and ko-reset-flat-bsm amended and banked as 2026-11-24, every candidate
+    ADMITTED; the 2026-11-15 directories are retired in place. QUAD pv moved by at most 3.7e-5 relative, delta by
+    1.5e-2 and gamma by 2-12%. Against a 16x finer lattice the new values are closer in 30 of 36 checked cells
+    (snowball `ordinary` gamma: before -0.04429, now -0.04714, fine lattice -0.04715).
+  - Cash-leg baseline: QUAD V1 records move under the new D9 cause (s), checked by recomputing them with the exact
+    first step off (price at most 2e-4, legs at most 5e-3 relative).
+  - Cross-engine smoke allowances: QUAD V1 on `flat_ko_reset_absolute_dki` (pv 94.54254 -> 94.54341).
+  - Futures-carry identity pin: residual .5491942645 -> .5612113718, delta -91.5027056047 -> -91.5114910203.
+- No other certificate anchor (the PDE cells; adi2d, intraday and local-vol studies) and no replay golden moved. MC
+  values moved only on W17a collision grids, by at most 1.6e-15 relative.
+- Contracts with event times 1e-10..1e-6 y apart are now two instants on QUAD V1 and the PDE (they were merged).
+
+### Performance
+
+- A 60-trade book of monthly snowballs (price and spot bumps) runs 1.016x its 0.11.3 time on QUAD V1. The exact first
+  step's own arithmetic is ~1% of it; allocating and freeing its 0.2-8 MB matrices on every price made numpy's FFTs
+  ~13% slower afterwards (macOS heap layout), so those matrices come from a small bounded pool.
 
 ### Tests
 
 - `test_contract_clock*.py` (generator, canonical clock, products, barrier family, QUAD V1, PDE, MC, cross-engine
   twins / KO-wins-tie / distinct instants) and the site list `test/test_contract_clock_sites.py`.
-- QUAD V2's near-coincident refusal test now uses a 1e-9 y gap (beyond the contract tolerance) and a 1e-8 opt-in
-  knob; a 1e-14 pair is one instant at construction and prices.
+- QUAD V2's near-coincident test now prices a 1e-9 y pair locally (within 1e-8 of the coincident booking on under
+  20k nodes); a 1e-14 pair is one instant at construction.
+- `test_quad_v1_local_step.py`, `test_quad_v1_first_step.py` and `test_quad_v2_local_interval.py`: gap and lead
+  ladders (2e-10 y .. 88 h, vol 5/20/60%, spot on, near and away from the barrier) against pinned references,
+  continuity of price, delta and theta across every switch, the refusals, and bitwise priority.
 
 ## [0.11.3] - 2026-11-17
 
