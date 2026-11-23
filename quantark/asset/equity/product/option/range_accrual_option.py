@@ -20,9 +20,8 @@ from quantark.util.numerical import is_zero
 from quantark.asset.clock import enforce_clock
 
 from .base_equity_option import BaseEquityOption, maturity_reached
-from .contract_clock import canonical_clock_after, canonicalize_contract_clock
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock, schedule_times
 from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
-from .contract_clock import schedule_times
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
