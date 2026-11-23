@@ -943,6 +943,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 first_levels, first_pre,
                 terminal_lists, terminal_w, expiry_coupons, observe, times[0], v_in_list, v_out_list, w_in, w_out,
                 touch=(log_ki_barrier, product.is_reverse) if ki_continuous and log_ki_barrier is not None else None,
+                pricing_env=pricing_env,
             )
 
         # t0 surfaces (memory 0, no observation at valuation): the exposure grid's
@@ -991,13 +992,14 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         return value
 
     def _phoenix_first_step(self, product, math_utils, spot, tau1, alpha1, beta1, levels, pre, terminal_lists,
-                            terminal_w, expiry, observe, first_time, v_in_list, v_out_list, w_in, w_out, *, touch=None):
+                            terminal_w, expiry, observe, first_time, v_in_list, v_out_list, w_in, w_out, *, touch=None,
+                            pricing_env=None):
         """The exact first step (S3b) on every memory state and the termination surfaces: the price's own
         observation (``observe``) on the quadrature nodes, pointwise. Returns ``(values, v_in_list, v_out_list, w_in,
         w_out)``: F at the spot per state (``values['out'][k]``, ``['in'][k]``, ``['w_out']``, ``['w_in']``) and the
         t=0 surfaces with the band nodes replaced by F."""
         fs = self._first_step_quadrature(math_utils, spot, tau1, alpha1, beta1, levels, touch=touch,
-                                         terminal=product if pre is None else None)
+                                         terminal=product if pre is None else None, pricing_env=pricing_env)
         y = fs.y
         if pre is None:
             ins_y, outs_y = terminal_lists(spot * np.exp(y))

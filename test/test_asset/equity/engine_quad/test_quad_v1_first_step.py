@@ -392,20 +392,35 @@ class TestRoutes:
         assert forward.maturity.probability == pytest.approx(stacked.maturity.probability, abs=1e-4)
         assert forward.ki_settlement.probability == pytest.approx(stacked.ki_settlement.probability, abs=1e-4)
 
-    @pytest.mark.parametrize("name", ["phoenix_5min_ko", "ko_reset_5min_ko", "reverse_5min_ko", "week_ko_0.2_on"])
+    @pytest.mark.parametrize("name", ["phoenix_5min_ko", "ko_reset_5min_ko", "reverse_5min_ko", "week_ko_0.2_on",
+                                      "week_ki_0.05_5pct", "week_ko_0.05_5pct"])
     def test_the_t0_surfaces_agree_with_the_price(self, name):
-        """The spot-greeks grid and the recorded t=0 surfaces carry F near the first event's barriers: the node next to
-        the spot holds the price the engine gives at that node's spot."""
+        """The spot-greeks grid and the recorded t=0 surfaces carry F near the first event's barriers: the nodes around
+        the spot hold the price the engine gives at their spots."""
         engine, product, market = solve(name)
         engine.record_backward_grids = True
         engine.price(product, market)
         spots, values = engine._last_spot_greeks_grid
         recorded = engine._backward_grids[0.0]
         j = int(np.argmin(np.abs(np.log(spots / market.spot))))
-        at_node = solve(name, spot=float(spots[j]))
-        node_price = at_node[0].price(at_node[1], at_node[2])
-        assert values[j] == pytest.approx(node_price, rel=2e-6)
+        for k in (j - 1, j, j + 1):
+            at_node = solve(name, spot=float(spots[k]))
+            node_price = at_node[0].price(at_node[1], at_node[2])
+            assert values[k] == pytest.approx(node_price, rel=1e-12)
         assert np.array_equal(np.asarray(recorded[0]), spots)
+
+    @pytest.mark.parametrize("name", ["thr_guard_below", "thr_sizing_below"])
+    def test_the_t0_surface_around_a_spot_away_from_the_barriers_is_the_exact_first_step(self, name):
+        """The band also covers the spot's neighbourhood: here the spot is beyond the Gaussian's reach of every
+        first-event barrier, and the nodes around it still hold the price the engine gives at their spots."""
+        engine, product, market = threshold_point(name, "base")
+        engine.price(product, market)
+        spots, values = engine._last_spot_greeks_grid
+        j = int(np.argmin(np.abs(np.log(spots / market.spot))))
+        for k in (j - 1, j, j + 1):
+            node_engine, node_product, node_market = threshold_point(name, "base")
+            node_market.spot_quote.spot = float(spots[k])
+            assert values[k] == pytest.approx(node_engine.price(node_product, node_market), rel=1e-12)
 
 
 class TestThresholds:
@@ -484,6 +499,40 @@ class TestThresholds:
         value = SnowballQuadEngine(QuadParams(auto_converge=True)).price(
             _ladder_product(rung), env(rung["vol"], rung["spot"]))
         assert within(value, rung["ref_price"], rung["hw_price"], 1e-4, 1e-6), (value, rung["ref_price"])
+
+
+class TestTerminalKinks:
+    """A state holding its maturity seed at the first event is evaluated on the quadrature nodes: every kink of its
+    redemption is a breakpoint, so no Gauss-Legendre piece straddles one."""
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    @pytest.mark.parametrize("annualized_ki", [False, True])
+    def test_every_kink_of_both_redemptions_is_a_breakpoint(self, reverse, annualized_ki):
+        from quantark.asset.equity.product.option.snowball_config import AirbagConfig
+        from quantark.util.enum import ProtectionType
+
+        p = SnowballOption(
+            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=1.0, is_reverse=reverse,
+            barrier_config=BarrierConfig(ko_barrier=97.0 if reverse else 103.0, ko_rate=0.12,
+                                         ko_observation_dates=list(QUARTERS), ki_barrier=125.0 if reverse else 75.0,
+                                         ki_observation_type=ObservationType.DISCRETE,
+                                         ki_observation_dates=list(QUARTERS)),
+            payoff_config=PayoffConfig(call_rebate_enabled=True, call_strike=104.0, call_participation_rate=0.5,
+                                       participation_rate=0.8, protection_type=ProtectionType.PARTIAL,
+                                       protection_rate=0.12),
+            airbag_config=AirbagConfig(airbag_barrier=110.0 if reverse else 90.0, airbag_participation_rate=0.6,
+                                       airbag_strike=104.0 if reverse else 96.0),
+            accrual_config=AccrualConfig(is_annualized_ki=annualized_ki),
+        )
+        market = env(0.2, 100.0)
+        levels = np.array(SnowballQuadEngine._terminal_levels(p, market))
+        spots = np.linspace(40.0, 160.0, 240001)
+        for payoff in (p.get_maturity_payoff_v0, p.get_maturity_payoff_v1):
+            values = np.array([payoff(float(s), market) for s in spots])
+            second = np.abs(np.diff(values, 2))
+            kinks = spots[1:-1][second > 1e-9 * max(1.0, float(np.max(np.abs(values))))]
+            for k in kinks:
+                assert np.min(np.abs(levels - k)) <= 1e-3, (payoff.__name__, k, levels)
 
 
 class TestKinkAwareInterpolation:

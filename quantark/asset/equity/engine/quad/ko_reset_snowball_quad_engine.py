@@ -493,7 +493,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 first_pre, lambda values: (terminal_in(values), terminal_out(values)), first_event, v_out, v_in,
                 touch=(log_ki_barrier, product.is_reverse)
                 if ki_continuous and log_ki_barrier is not None and first_out_live else None,
-                terminal_product=product,
+                terminal_product=product, pricing_env=pricing_env,
             )
             if not first_out_live:
                 v_out = np.zeros_like(v_out)             # never seeded: the first schedule had ended
@@ -1048,7 +1048,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         fs = self._first_step_quadrature(
             math_utils, spot, tau1, alpha1, beta1, levels,
             touch=(log_ki_barrier, product.is_reverse) if bridged else None, band=False,
-            terminal=product if (seeded or maturity_first) else None,
+            terminal=product if (seeded or maturity_first) else None, pricing_env=pricing_env,
         )
         y = fs.y
         spots_y = spot * np.exp(y)

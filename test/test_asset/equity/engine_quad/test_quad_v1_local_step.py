@@ -118,20 +118,31 @@ class TestTwoEventLadder:
         assert within(value, rung["ref_price"], rung["hw_price"], 1e-4, 1e-8 * 100.0), (value, rung["ref_price"])
         assert tol  # fixture carries its own tolerance block
 
-    @pytest.mark.parametrize("rung", [r for r in two_event_rungs() if r["delta_gated"] and r["vol"] == 0.2],
-                             ids=lambda r: r["rung"])
+    @pytest.mark.parametrize("rung", [r for r in two_event_rungs() if r["delta_gated"]],
+                             ids=lambda r: f"{r['vol']}-{r['rung']}")
     def test_delta_matches_the_increment_reference(self, rung):
+        """Every vol the fixture gates (5%, 20%, 60%): central relative 1% spot bumps. The reference is the fixture's
+        delta increment over its 2e-10 y rung, anchored on the engine's own coincident-booking delta (gap 0, no local
+        step, bitwise today's operator): at vol 5% the fit's intercept over 1-8 d gaps (s/h 0.87 at 1 d, barely
+        resolved) is 6.9e-4 from that exact gap-0 value (1.3e-3 relative); at 20% and 60% within 4.1e-12."""
         e = SnowballQuadEngine(QuadParams())
-        p = two_event(rung["x_years"])
-        up, dn = e.price(p, env(0.2, 101.0)), e.price(p, env(0.2, 99.0))
-        delta = (up - dn) / 2.0
-        assert within(delta, rung["ref_delta"], rung["hw_delta"], 1e-3, 1e-6 * 100.0), (delta, rung["ref_delta"])
+        spot = rung["spot"]
+
+        def delta(product):
+            up = e.price(product, env(rung["vol"], spot * 1.01))
+            return (up - e.price(product, env(rung["vol"], spot * 0.99))) / (0.02 * spot)
+
+        base = next(r for r in two_event_rungs() if r["vol"] == rung["vol"] and r["rung"] == "2e-10y")
+        ref = delta(two_event(0.0)) + (rung["ref_delta"] - base["ref_delta"])
+        value = delta(two_event(rung["x_years"]))
+        assert within(value, ref, rung["hw_delta"] + base["hw_delta"], 1e-3, 1e-6 * 100.0), (value, ref)
 
     def test_resolved_gap_is_bitwise_unchanged(self):
-        """8.8 hours apart at vol 20% resolves (s/h ~1.05): today's operator, untouched."""
+        """8.8 hours apart at vol 20% resolves (s/h ~1.05): today's operator, untouched -- the value the engine gave
+        before the sub-resolution run (aa6d5a2f), bit for bit."""
         p = two_event(1e-3)
         e = SnowballQuadEngine(QuadParams())
-        assert e.price(p, env()) == e.price(p, env())
+        assert e.price(p, env()) == 98.91842991352458
         assert not getattr(e, "_last_local_steps", ())
 
     def test_event_statistics_pv_is_the_price(self):
@@ -199,10 +210,21 @@ class TestBackstops:
                    if r["case"] == "first_ko" and r["vol"] == 0.2 and r["rung"] == "5min" and r["dist"] == "on")
         assert within(value, ref["ref_price"], ref["hw_price"], 1e-4, 1e-6), (value, ref["ref_price"])
 
+    @pytest.mark.parametrize("gap, allowed", [(1e-3, False), (5 * MINUTE, False), (SECOND, True)])
+    def test_auto_converge_statistics_run_the_ladder_that_priced(self, gap, allowed):
+        """The statistics re-solve on the accepted grid with the accepted ladder's local-step switch: the first ladder
+        (no local steps) for a contract it converges, the second for one every first-ladder rung refused."""
+        p = two_event(gap)
+        e = SnowballQuadEngine(QuadParams(auto_converge=True))
+        stats = e.calculate_event_stats(p, env())
+        assert e._last_convergence_info["local_steps_allowed"] is allowed
+        assert stats.pv == e.price(p, env())
+        assert abs(stats.reconciliation_error) <= 1e-12 * stats.pv
+
     def test_auto_converge_keeps_today_ladder_and_prices_what_it_refused(self):
         """Coarse rungs still skip an unresolved step (contracts that converge today are bit-identical); a contract
         every rung refused is priced by a second ladder with local steps."""
         p = two_event(5 * MINUTE)
         value = SnowballQuadEngine(QuadParams(auto_converge=True)).price(p, env())
         ref = next(r for r in two_event_rungs() if r["vol"] == 0.2 and r["rung"] == "5min")
-        assert value == pytest.approx(ref["R1_price"], rel=2e-4)
+        assert within(value, ref["ref_price"], ref["hw_price"], 1e-4, 1e-6), (value, ref["ref_price"])

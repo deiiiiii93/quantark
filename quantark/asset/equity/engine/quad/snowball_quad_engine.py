@@ -43,9 +43,10 @@ from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.accrual import leg_annualized
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType
+from quantark.util.enum import ObservationType, ProtectionType
 from quantark.util.enum.engine_enums import (
     EngineType,
     EventProjectionMode,
@@ -695,6 +696,7 @@ class SnowballQuadEngine(BaseEngine):
                 math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]), first_levels,
                 first_pre, terminal_surfaces, first_event, v_out, v_in,
                 touch=(log_ki_barrier, product.is_reverse) if ki_continuous else None, terminal_product=product,
+                pricing_env=pricing_env,
             )
             first_value = first_in if knocked_in_at_valuation else first_out
 
@@ -791,6 +793,7 @@ class SnowballQuadEngine(BaseEngine):
                     self._last_convergence_info = {
                         "converged": True,
                         "grid_points": used,
+                        "local_steps_allowed": allow_local,
                         "error_estimate": error,
                         "tolerance": tolerance,
                         "estimates": tuple(estimates),
@@ -814,6 +817,7 @@ class SnowballQuadEngine(BaseEngine):
         self._last_convergence_info = {
             "converged": False,
             "grid_points": estimates[-1][0] if estimates else requested,
+            "local_steps_allowed": allow_local,
             "error_estimate": last_error,
             "tolerance": (
                 float(self.params.convergence_abs_tol)
@@ -880,6 +884,8 @@ class SnowballQuadEngine(BaseEngine):
         )
         candidate = self.__class__(params=params)
         candidate.record_backward_grids = self.record_backward_grids
+        # the accepted rung's ladder: rule (i) sizing and the local stencil follow the same switch as the price
+        candidate._local_steps_allowed = self._last_convergence_info.get("local_steps_allowed", True)
         stats = candidate._compute_event_stats(product, pricing_env, streams=streams, pv=pv)
         self._last_v1_march = getattr(candidate, "_last_v1_march", None)
         return stats
@@ -1287,13 +1293,14 @@ class SnowballQuadEngine(BaseEngine):
                         ki_barrier_continuous if ki_continuous else None,
                     ) if level is not None] + self._first_event_extra_levels(product, ko_index),
                     touch=(log_ki_barrier, product.is_reverse) if ki_continuous else None, band=False,
-                    terminal=product if len(times) == 1 else None,
+                    terminal=product if len(times) == 1 else None, pricing_env=pricing_env,
                 )
                 y = fs.y
-                y_ko_weight = (
-                    self._event_weight(y, ko_record.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
-                    if ko_is_reachable else None
-                )
+                with self._pointwise():
+                    y_ko_weight = (
+                        self._event_weight(y, ko_record.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
+                        if ko_is_reachable else None
+                    )
                 if len(times) == 1:
                     y_in_cash, y_out_cash = self._terminal_cash_surfaces(product, pricing_env, spot * np.exp(y))
                     pre_y = terminal_stack(y_out_cash * terminal.delay_df, y_in_cash * terminal.delay_df)
@@ -2134,12 +2141,14 @@ class SnowballQuadEngine(BaseEngine):
         return np.where(safe, np.exp(exponent), 1.0)
 
     def _forward_first_step(self, math_utils, spot, tau1, alpha1, first_time, observe, *, product, ko_records,
-                            ki_records, ki_continuous, ki_barrier_continuous, log_ki, knocked_in_at_valuation):
+                            ki_records, ki_continuous, ki_barrier_continuous, log_ki, knocked_in_at_valuation,
+                            maturity_first=False, pricing_env=None):
         """The forward seed of an exact first step (S3b): the first interval's Gaussian as point masses on the
         quadrature nodes (undiscounted), split by the bridge touch under continuous knock-in, the first observation
         applied to them pointwise, then carried onto the lattice as densities whose Simpson integral against any
         lattice function is the quadrature's (``lift_transpose`` over the Simpson weights). Returns
-        ``(p_out, p_in)`` after the first observation."""
+        ``(p_out, p_in)`` after the first observation. ``maturity_first``: the first event is maturity, whose
+        redemption kinks become breakpoints as on the stacked route (the same quadrature nodes)."""
         ko_record = self._match_record(first_time, ko_records)
         ki_record = self._match_record(first_time, ki_records) if ki_records else None
         touch = ki_continuous and product.has_ki_barrier and not knocked_in_at_valuation
@@ -2155,6 +2164,7 @@ class SnowballQuadEngine(BaseEngine):
         fs = self._first_step_quadrature(
             math_utils, spot, tau1, alpha1, alpha1 * alpha1, levels,
             touch=(log_ki, product.is_reverse) if touch else None, band=False,
+            terminal=product if maturity_first else None, pricing_env=pricing_env,
         )
         mass = fs.W[0]
         zero = np.zeros_like(mass)
@@ -2285,20 +2295,23 @@ class SnowballQuadEngine(BaseEngine):
                 math_utils, spot, tau1, alpha1, times[0], observe, product=product, ko_records=ko_records,
                 ki_records=ki_records, ki_continuous=ki_continuous, ki_barrier_continuous=ki_barrier_continuous,
                 log_ki=log_ki, knocked_in_at_valuation=knocked_in_at_valuation,
+                maturity_first=len(times) == 1, pricing_env=pricing_env,
             )
-        p_free = self._forward_seed(math_utils, tau1, alpha1)
-        if knocked_in_at_valuation:
-            p_in = p_free
-            p_out = np.zeros_like(p_free)
-        elif ki_continuous and product.has_ki_barrier:
-            touch0 = self._forward_seed_touch_probability(
-                math_utils, tau1, log_ki, product.is_reverse
-            )
-            p_out = p_free * (1.0 - touch0)
-            p_in = p_free * touch0
+            p_out = p_in = None               # the exact first step's masses replace the seed at step 1
         else:
-            p_out = p_free
-            p_in = np.zeros_like(p_free)
+            p_free = self._forward_seed(math_utils, tau1, alpha1)
+            if knocked_in_at_valuation:
+                p_in = p_free
+                p_out = np.zeros_like(p_free)
+            elif ki_continuous and product.has_ki_barrier:
+                touch0 = self._forward_seed_touch_probability(
+                    math_utils, tau1, log_ki, product.is_reverse
+                )
+                p_out = p_free * (1.0 - touch0)
+                p_in = p_free * touch0
+            else:
+                p_out = p_free
+                p_in = np.zeros_like(p_free)
 
         for step_index in range(1, len(times) + 1):
             if step_index > 1:
@@ -2682,18 +2695,38 @@ class SnowballQuadEngine(BaseEngine):
         return pointwise
 
     @staticmethod
-    def _terminal_levels(product) -> list:
-        """Where a redemption kinks or jumps (strike, airbag barrier and strike): breakpoints of the exact first step
-        when the first event is where a state holds its maturity seed (evaluated exactly on the nodes)."""
+    def _terminal_levels(product, pricing_env=None) -> list:
+        """Where a redemption kinks or jumps, breakpoints of the exact first step when the first event is where a
+        state holds its maturity seed (evaluated exactly on the nodes): the strike, the airbag barrier and strike, the
+        call rebate's strike (not knocked in) and where the knocked-in loss reaches the partial-protection floor, on
+        either participation (spot units). A level that is not a kink of this product only splits a piece."""
         airbag = getattr(product, "airbag_config", None)
-        levels = [getattr(product, "strike", None)]
+        payoff = getattr(product, "payoff_config", None)
+        strike = getattr(product, "strike", None)
+        levels = [strike]
+        legs = [(strike, getattr(payoff, "participation_rate", None))]
         if airbag is not None:
-            levels += [getattr(airbag, "airbag_barrier", None), getattr(airbag, "airbag_strike", None)]
+            airbag_strike = getattr(airbag, "airbag_strike", None)
+            levels += [getattr(airbag, "airbag_barrier", None), airbag_strike]
+            legs.append((strike if airbag_strike is None else airbag_strike,
+                         getattr(airbag, "airbag_participation_rate", None)))
+        if payoff is not None and getattr(payoff, "call_rebate_enabled", False):
+            levels.append(getattr(payoff, "call_strike", None))
+        if payoff is not None and getattr(payoff, "protection_type", None) == ProtectionType.PARTIAL:
+            multiplier = float(getattr(product, "contract_multiplier", 1.0))
+            floor = float(payoff.protection_rate) * float(product.initial_price) * multiplier
+            scale = multiplier * (float(product.get_contract_tenor(pricing_env))
+                                  if leg_annualized(product, "knock_in") else 1.0)
+            for leg_strike, rate in legs:
+                if leg_strike is None or not rate or scale <= 0.0:
+                    continue
+                reach = floor / (float(rate) * scale)
+                levels.append(float(leg_strike) + reach if product.is_reverse else float(leg_strike) - reach)
         return [float(level) for level in levels if level is not None and float(level) > 0.0]
 
     def _first_step_quadrature(self, math_utils, spot: float, tau1: float, alpha1: float, beta1: float,
                                levels: Sequence[float], *, touch=None, band: bool = True,
-                               terminal=None) -> GaussianFirstStep:
+                               terminal=None, pricing_env=None) -> GaussianFirstStep:
         """The exact first step's quadrature: centre 0 (the spot) and, with ``band``, every lattice node within the
         Gaussian's reach of a barrier observed at the first event (``levels``, spot units), where the lattice's t=0
         values are replaced by F (``fs.band``: their node indices). ``touch``: ``(log barrier, is_reverse)`` of a
@@ -2705,13 +2738,15 @@ class SnowballQuadEngine(BaseEngine):
         disc = math.exp(-(beta1 - alpha1 * alpha1) * tau1)
         logs = sorted({safe_log(float(level) / float(spot)) for level in levels if float(level) > 0.0})
         kinks = [] if terminal is None else sorted(
-            {safe_log(level / float(spot)) for level in self._terminal_levels(terminal)})
+            {safe_log(level / float(spot)) for level in self._terminal_levels(terminal, pricing_env)})
         grid = math_utils.grid
         band_index = np.zeros(0, dtype=np.int64)
-        if band and logs:
-            # six standard deviations from a barrier the lattice's own step sees the jump with mass < 1e-9
+        if band:
+            # six standard deviations from a barrier the lattice's own step sees the jump with mass < 1e-9; and the
+            # spot's own neighbourhood (four cells: the readout's and the grid greeks' stencils), so the surface the
+            # spot greeks read is the price's quadrature wherever the spot is
             reach = 6.0 * std + abs(mean) + 4.0 * h
-            near = np.zeros(grid.size, dtype=bool)
+            near = np.abs(grid) <= 4.0 * h
             for b in logs:
                 near |= np.abs(grid - b) <= reach
             band_index = np.flatnonzero(near)
@@ -2746,7 +2781,7 @@ class SnowballQuadEngine(BaseEngine):
         return np.repeat(array[..., :1], n_nodes, axis=-1)
 
     def _first_step_two_state(self, math_utils, spot, tau1, alpha1, beta1, levels, pre, terminal_fn, first_event,
-                              v_out0, v_in0, *, touch=None, terminal_product=None):
+                              v_out0, v_in0, *, touch=None, terminal_product=None, pricing_env=None):
         """F on the two note states: ``(v_out0, v_in0)`` with the band nodes replaced by F, and F at the spot.
 
         ``pre``: the pre-event ``(out, in)`` lattice surfaces at the first event, or ``None`` for a state still
@@ -2756,7 +2791,8 @@ class SnowballQuadEngine(BaseEngine):
         """
         pre_out, pre_in = (None, None) if pre is None else pre
         fs = self._first_step_quadrature(math_utils, spot, tau1, alpha1, beta1, levels, touch=touch,
-                                         terminal=terminal_product if (pre_out is None or pre_in is None) else None)
+                                         terminal=terminal_product if (pre_out is None or pre_in is None) else None,
+                                         pricing_env=pricing_env)
         terminal = None
         if pre_out is None or pre_in is None:
             terminal = terminal_fn(spot * np.exp(fs.y))
