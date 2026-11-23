@@ -190,6 +190,7 @@ class SnowballQuadEngine(BaseEngine):
         event maps are closures over the solve (a process pool ships engines between workers)."""
         state = dict(self.__dict__)
         state.pop("_last_v1_march", None)
+        state.pop("_last_first_step", None)       # the last exact first step's quadrature: a diagnostic, not state
         return state
 
     def price_folded(
@@ -2641,6 +2642,9 @@ class SnowballQuadEngine(BaseEngine):
     #: the engine's event maps evaluate pointwise (each point on its own side of every barrier) instead of
     #: projecting onto dual cells: the exact first step's quadrature nodes (``_pointwise``)
     _pointwise_events = False
+
+    #: the last solve's exact first step (its quadrature), ``None`` when the lattice priced the first step
+    _last_first_step = None
 
     def _first_step_exact(self, tau1: float, h: float) -> bool:
         """Whether the first step (valuation -> first event) is priced by the exact first step F: always when the
