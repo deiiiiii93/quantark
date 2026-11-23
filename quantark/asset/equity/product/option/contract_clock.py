@@ -321,7 +321,7 @@ def _canonicalize_rebased_offsets(product: Any) -> bool:
     records = _numeric_records(schedule)
     observations = [float(r.observation_time) for r in records if _is_time(r.observation_time)]
     if not observations:
-        return False                          # a dated REBASED schedule 2 carries calendar offsets, not floats
+        return False                          # no numeric offset to place
     values = observations + [float(r.settlement_time) for r in records if _is_time(r.settlement_time)]
     legacy = getattr(config, "ko_observation_dates", None)
     if _time_list(legacy):
