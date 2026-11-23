@@ -21,6 +21,13 @@ from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_event_values,
 )
+from quantark.asset.equity.engine.quad.local_step import (
+    UnderResolvedStepError,
+    local_bridge_hit,
+    local_step_apply,
+    local_step_transpose,
+    local_step_weights,
+)
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.quad_adapters import (
     resolve_structured_payment_timings,
@@ -55,11 +62,6 @@ from quantark.util.numerical import (
 
 if TYPE_CHECKING:
     from quantark.cashleg.folding import FoldOverlay
-
-class UnderResolvedStepError(NumericalError):
-    """QUAD V1 refuses a diffusion step its lattice does not resolve (``_require_resolved_kernels``). A finer
-    lattice may resolve it: ``auto_converge`` moves to its next rung instead of failing."""
-
 
 # Broadie-Glasserman-Kou (1997) discrete-monitoring barrier correction:
 # beta = -zeta(1/2) / sqrt(2*pi). A barrier monitored discretely at spacing
@@ -663,8 +665,13 @@ class SnowballQuadEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         *,
         fold=None,
+        allow_local: bool = False,
     ) -> float:
         """Refine nested odd grids until consecutive prices meet tolerance.
+
+        The first ladder runs without local steps, so a rung that cannot resolve a step is skipped exactly as before
+        the local stencil existed; only when every rung refused does a second ladder run with local steps
+        (sub-resolution run: contracts that converge today are bit-identical).
 
         The returned value is always the finest engine price, not a scalar
         extrapolation, so ``_last_spot_greeks_grid`` and optional backward
@@ -683,6 +690,7 @@ class SnowballQuadEngine(BaseEngine):
             )
             candidate = self.__class__(params=candidate_params)
             candidate.record_backward_grids = self.record_backward_grids
+            candidate._local_steps_allowed = allow_local
             try:
                 if fold is None:
                     value = float(candidate.price(product, pricing_env))
@@ -692,6 +700,8 @@ class SnowballQuadEngine(BaseEngine):
                 # this rung's lattice cannot resolve a step: not an estimate, the next (finer) rung may (CP2 #1)
                 next_requested = 2 * (requested - 1) + 1
                 if next_requested > cap:
+                    if not allow_local and not estimates:
+                        return self._price_with_convergence(product, pricing_env, fold=fold, allow_local=True)
                     raise
                 requested = next_requested
                 continue
@@ -1476,8 +1486,18 @@ class SnowballQuadEngine(BaseEngine):
         if required % 2 == 0:
             required += 1
         max_adaptive = int(getattr(self.params, "max_adaptive_grid_points", 5001))
+        if required > max_adaptive and requested < required and self._local_steps_allowed:
+            # rule (i): the shortest steps that would push the lattice past its cap are left to the local stencil
+            # (``_require_resolved_kernels`` decides whether they can be priced); size from the rest
+            for dt_min in np.unique(positive_dt):
+                fits = int(math.ceil(1.0 + 2.0 * log_half_width * min_cells / (vol * math.sqrt(float(dt_min)))))
+                if fits % 2 == 0:
+                    fits += 1
+                if fits <= max_adaptive:
+                    return max(requested, fits)
+            return requested
         if required > max_adaptive and requested < required:
-            raise NumericalError(
+            raise UnderResolvedStepError(
                 "Observation intervals require at least "
                 f"{required} quadrature grid points to resolve the shortest diffusion "
                 f"step, exceeding max_adaptive_grid_points={max_adaptive}. Increase "
@@ -1724,6 +1744,8 @@ class SnowballQuadEngine(BaseEngine):
         beta: float,
         tau_step: float,
     ) -> np.ndarray:
+        if self._local_step(tau_step, math_utils.h):
+            return local_step_apply(values, local_step_weights(float(math_utils.h), alpha, beta, tau_step))
         if values.ndim == 1:
             u_array = math_utils.simpson_weights(values, p_lr, p_ur, p0)
             conv = math_utils.convolution_fft(omega_array, u_array)
@@ -1802,6 +1824,10 @@ class SnowballQuadEngine(BaseEngine):
         )
 
         delta = v_in - v_out
+        if self._local_step(tau_step, math_utils.h):
+            weights = local_step_weights(float(math_utils.h), alpha, beta, tau_step)
+            hit = local_bridge_hit(grid, log_barrier, vol * vol * dt, is_reverse)
+            return base + local_step_apply(delta, weights, hit)
 
         # Indicator rows whose delta is identically zero contribute an exactly
         # zero correction (the kernel is finite and non-negative); reduce the
@@ -2031,34 +2057,46 @@ class SnowballQuadEngine(BaseEngine):
                 tau_step = float(tau[step_index])
                 alpha = float(alpha_vec[step_index])
                 vol_step = float(vol_vec[step_index])
-                omega_fwd, prefactor_fwd = self._forward_kernel(
-                    math_utils, tau_step, alpha
-                )
-                rows = [p_out, p_in]
-                transported = self._diffuse_density(
-                    np.vstack(rows), math_utils, omega_fwd, prefactor_fwd,
-                    full_p_lr, full_p_ur, full_p0,
-                )
-                if ki_continuous and not knocked_in_at_valuation:
-                    band = self._bridge_band(tau_step, math_utils.h, grid.size)
-                    denom = vol_step * vol_step * float(dt[step_index])
-                    kernels = self._bridge_kernels(
-                        math_utils, band, tau_step, -alpha, denom,
-                        log_ki, product.is_reverse,
-                    )
-                    touch_rows = np.vstack([p_out])
-                    touched = np.zeros(
-                        (touch_rows.shape[0], grid.size), dtype=float
-                    )
-                    for source, target, kernel in kernels:
-                        touched[:, target] += (
-                            prefactor_fwd * kernel * touch_rows[:, source]
-                        )
-                    p_out = transported[0] - touched[0]
-                    p_in = transported[1] + touched[0]
+                if self._local_step(tau_step, math_utils.h):
+                    # the forward step is the transpose of the backward local step, undiscounted
+                    weights = local_step_weights(float(math_utils.h), alpha, 0.0, tau_step, discounted=False)
+                    transported = local_step_transpose(np.vstack([p_out, p_in]), weights)
+                    if ki_continuous and not knocked_in_at_valuation:
+                        denom = vol_step * vol_step * float(dt[step_index])
+                        hit = local_bridge_hit(grid, log_ki, denom, product.is_reverse)
+                        touched = local_step_transpose(p_out, weights, hit)
+                        p_out, p_in = transported[0] - touched, transported[1] + touched
+                    else:
+                        p_out, p_in = transported[0], transported[1]
                 else:
-                    p_out = transported[0]
-                    p_in = transported[1]
+                    omega_fwd, prefactor_fwd = self._forward_kernel(
+                        math_utils, tau_step, alpha
+                    )
+                    rows = [p_out, p_in]
+                    transported = self._diffuse_density(
+                        np.vstack(rows), math_utils, omega_fwd, prefactor_fwd,
+                        full_p_lr, full_p_ur, full_p0,
+                    )
+                    if ki_continuous and not knocked_in_at_valuation:
+                        band = self._bridge_band(tau_step, math_utils.h, grid.size)
+                        denom = vol_step * vol_step * float(dt[step_index])
+                        kernels = self._bridge_kernels(
+                            math_utils, band, tau_step, -alpha, denom,
+                            log_ki, product.is_reverse,
+                        )
+                        touch_rows = np.vstack([p_out])
+                        touched = np.zeros(
+                            (touch_rows.shape[0], grid.size), dtype=float
+                        )
+                        for source, target, kernel in kernels:
+                            touched[:, target] += (
+                                prefactor_fwd * kernel * touch_rows[:, source]
+                            )
+                        p_out = transported[0] - touched[0]
+                        p_in = transported[1] + touched[0]
+                    else:
+                        p_out = transported[0]
+                        p_in = transported[1]
 
             obs_time = times[step_index - 1]
             ko_index, ko_record = None, None
@@ -2388,36 +2426,80 @@ class SnowballQuadEngine(BaseEngine):
             bound += (2.0 / 3.0) * math.exp(-0.5 * math.pi * math.pi * s_over_h * s_over_h)
         return bound
 
+    # Local steps whose accumulated variance exceeds this many squared cells are refused (AC5d). The stencil's error
+    # per step is (s^2 h^2 - 3 s^4) V_xxxx / 24, so a chain's error scales with sum s_i^2 / h^2. Measured (hourly and
+    # quarter-hourly knock-in windows, vol 5/20/60%, against grids where every step resolves): <= 4.8e-5 relative up
+    # to 8 cells^2 (vol 20%), 1.24e-4 at 128; S1's five-year daily chain (~250 cells^2) -5.9e-4.
+    _LOCAL_CHAIN_CELLS2 = 8.0
+
+    # ``auto_converge`` turns this off on its first ladder so rungs that cannot resolve a step are skipped as before
+    # (contracts that converge today are bit-identical); the second ladder, run only when every rung refused, turns
+    # it back on.
+    _local_steps_allowed = True
+
+    def _local_step(self, tau_step: float, h: float) -> bool:
+        """True when this diffusion step is priced by the local stencil (``local_step``): its sampled kernel's mass
+        error exceeds the accuracy target -- exactly the steps ``_require_resolved_kernels`` admits as local."""
+        if not tau_step > 0.0:
+            return False
+        bound = self._kernel_mass_error_bound(
+            math.sqrt(2.0 * float(tau_step)) / float(h),
+            str(getattr(self.params, "integration_rule", "trapezoid")).lower(),
+        )
+        return bound > float(getattr(self.params, "convergence_rel_tol", 1.0e-4))
+
     def _require_resolved_kernels(self, times: Sequence[float], tau: np.ndarray, h: float) -> None:
-        """Refuse a diffusion step whose kernel the lattice does not resolve (owner ruling 2026-11-23).
+        """Decide how every diffusion step is applied, refusing what cannot be priced to the accuracy target.
 
         The lattice is sized for the whole maturity and refined only for the knock-in spacing
         (``_resolve_grid_points``), so a step shorter than that -- a knock-out minutes from a knock-in, a settlement
-        node, two instants seconds apart -- can carry a kernel narrower than the cells. Its sampled mass then leaks
-        (``_kernel_mass_error_bound``): a knock-out and a knock-in 1e-4 years apart priced 109.3 against 98.9. Such a
-        step is refused, never priced, when its relative mass error exceeds the engine's own accuracy target,
-        ``params.convergence_rel_tol`` (default 1e-4: s/h below ~0.71). Monte Carlo and the PDE price such
-        contracts; QUAD V2 does with ``max_nodes`` raised (down to gaps of tens of seconds); a finer ``grid_points``
-        or ``auto_converge`` may resolve it here.
+        node, two instants seconds apart -- can carry a kernel narrower than the cells; sampling it aliases its mass
+        (``_kernel_mass_error_bound``: a knock-out and a knock-in 1e-4 years apart priced 109.3 against 98.9). A step
+        whose bound exceeds ``params.convergence_rel_tol`` is applied by the local stencil instead (``local_step``,
+        sub-resolution run C1), unless
+
+        * the step is the first one, from the valuation instant (S3b prices it exactly; refused until then);
+        * local steps are switched off (the first ``auto_converge`` ladder);
+        * the local steps chain: their accumulated variance exceeds ``_LOCAL_CHAIN_CELLS2`` squared cells, beyond
+          which the stencil's fourth-moment error was measured to exceed the accuracy target (AC5d).
+
+        Refusals raise ``UnderResolvedStepError``; MC and the PDE price such contracts.
         """
         times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
         step_tau = np.asarray(tau[1:], dtype=float)
+        self._last_local_steps = ()
         if not np.any(step_tau > 0.0):
             return                            # no diffusion to resolve; zero-variance steps have their own checks
         s_over_h = np.full(step_tau.shape, np.inf)
         s_over_h[step_tau > 0.0] = np.sqrt(2.0 * step_tau[step_tau > 0.0]) / float(h)
-        worst = int(np.argmin(s_over_h))
-        bound = self._kernel_mass_error_bound(
-            float(s_over_h[worst]), str(getattr(self.params, "integration_rule", "trapezoid")).lower()
-        )
+        local = np.array([self._local_step(float(t), h) for t in step_tau], dtype=bool)
+        if not local.any():
+            return
         accuracy = float(getattr(self.params, "convergence_rel_tol", 1.0e-4))
-        if bound > accuracy:
-            a, b = float(times_full[worst]), float(times_full[worst + 1])
+        rule = str(getattr(self.params, "integration_rule", "trapezoid")).lower()
+
+        def refuse(index: int, why: str):
+            a, b = float(times_full[index]), float(times_full[index + 1])
+            bound = self._kernel_mass_error_bound(float(s_over_h[index]), rule)
             raise UnderResolvedStepError(
                 f"QUAD V1: the diffusion step from {a!r} to {b!r} ({b - a:.3g} years) is under-resolved by the "
-                f"lattice: its kernel spans {s_over_h[worst]:.3g} cells (mass error bound {bound:.2g} > the engine's "
-                f"accuracy target convergence_rel_tol={accuracy:g}). Raise grid_points or use auto_converge, or price this contract on the MC or PDE engine (QUAD V2 with max_nodes raised)."
+                f"lattice: its kernel spans {s_over_h[index]:.3g} cells (mass error bound {bound:.2g} > the engine's "
+                f"accuracy target convergence_rel_tol={accuracy:g}); {why} Raise grid_points or use auto_converge, "
+                "or price this contract on the MC or PDE engine (QUAD V2 with max_nodes raised)."
             )
+
+        indices = np.flatnonzero(local)
+        worst = int(indices[np.argmin(s_over_h[indices])])
+        if not self._local_steps_allowed:
+            refuse(worst, "local steps are off on this auto_converge rung.")
+        chain = float(np.sum(s_over_h[indices] ** 2))
+        self._last_local_chain = chain
+        if chain > self._LOCAL_CHAIN_CELLS2:
+            refuse(worst, f"{indices.size} local steps carry {chain:.3g} squared cells of variance, beyond the "
+                          f"{self._LOCAL_CHAIN_CELLS2:g} the local stencil prices within the accuracy target.")
+        if local[0]:
+            refuse(0, "it is the first step from the valuation instant, which the local stencil does not price.")
+        self._last_local_steps = tuple(int(i) for i in indices)
 
     def _match_record(self, target_time: float, records: Sequence) -> Optional[object]:
         for rec in records:

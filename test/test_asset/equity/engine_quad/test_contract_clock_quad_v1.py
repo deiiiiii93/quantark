@@ -83,19 +83,28 @@ class TestKernelResolution:
         p = snowball(schedule_times(1.0, 12), schedule_times(1.0, 365))
         assert np.isfinite(engine().price(p, env()))
 
-    def test_a_tighter_accuracy_target_tightens_the_guard(self):
+    def test_a_tighter_accuracy_target_sends_more_steps_to_the_local_stencil(self):
+        """Sub-resolution run: a step beyond the accuracy target is priced by the local stencil, not refused; a tighter
+        target admits fewer steps to the sampled kernel."""
         from quantark.asset.equity.product.option.contract_clock import schedule_times
 
         p = snowball(schedule_times(1.0, 12), schedule_times(1.0, 365))
-        with pytest.raises(NumericalError, match="under-resolved"):
-            SnowballQuadEngine(QuadParams(convergence_rel_tol=1e-6)).price(p, env())
+        default, tight = engine(), SnowballQuadEngine(QuadParams(convergence_rel_tol=1e-6))
+        default.price(p, env())
+        tight.price(p, env())
+        assert len(tight._last_local_steps) > len(default._last_local_steps)
 
     @pytest.mark.parametrize("gap", [1e-8, SECOND, 1e-4])
-    def test_under_resolved_step_is_refused(self, gap):
+    def test_under_resolved_step_prices_by_the_local_stencil(self, gap):
+        """Refused under the contract clock; priced since the sub-resolution run (C1), next to the PDE."""
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.param import PDEParams
+
         times = (0.25, 0.5, 0.75, 1.0)
         split = snowball(times, (0.25, 0.5 + gap, 0.75, 1.0))
-        with pytest.raises(NumericalError, match=r"under-resolved"):
-            engine().price(split, env())
+        e = engine()
+        assert e.price(split, env()) == pytest.approx(SnowballPDESolver(PDEParams()).price(split, env()), abs=1e-3)
+        assert e._last_local_steps
 
     def test_resolved_short_step_prices_like_the_pde(self):
         """8.8 hours apart: s/h ~ 1.05, mass error ~ 8e-10 -- priced, and as the PDE prices it."""
@@ -132,9 +141,12 @@ class TestCheckpointTwoFixes:
 
         times = (0.25, 0.5, 0.75, 1.0)
         split = snowball(times, (0.25, 0.5 + 2e-4, 0.75, 1.0))
-        with pytest.raises(NumericalError, match="under-resolved"):
-            engine().price(split, env())
-        converged = SnowballQuadEngine(QuadParams(auto_converge=True)).price(split, env())
+        assert engine().price(split, env()) == pytest.approx(
+            SnowballPDESolver(PDEParams()).price(split, env()), abs=1e-3)       # local stencil at 1001 points
+        auto = SnowballQuadEngine(QuadParams(auto_converge=True))
+        converged = auto.price(split, env())
+        # the first ladder still skips the unresolved 1001 rung (no local steps on it): converged on a finer rung
+        assert auto._last_convergence_info["grid_points"] > 1001
         assert converged == pytest.approx(SnowballPDESolver(PDEParams()).price(split, env()), abs=1e-3)
 
     def test_simpson_bound_adds_the_half_frequency_alias(self):

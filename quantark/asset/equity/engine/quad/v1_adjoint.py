@@ -35,6 +35,7 @@ import numpy as np
 from scipy.special import erfc
 
 from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnavailable
+from quantark.asset.equity.engine.quad.local_step import local_bridge_hit, local_step_transpose, local_step_weights
 from quantark.util.exceptions import PricingError
 
 __all__ = [
@@ -129,13 +130,17 @@ def _tail_vectors(math_utils, alpha: float, beta: float, tau: float):
 
 
 def diffuse_transpose(values: np.ndarray, math_utils, omega: np.ndarray, prefactor: float, alpha: float,
-                      beta: float, tau: float) -> np.ndarray:
+                      beta: float, tau: float, *, engine=None) -> np.ndarray:
     """``D^T`` of ``SnowballQuadEngine._diffuse_fft`` on stacked duals (rows x nodes).
+
+    A step the engine applies by its local stencil (``engine._local_step``) transposes as the stencil.
 
     ``D v = prefactor * conv(omega, c v) + v_0 TL + v_last TR`` (``c`` the Simpson coefficients); the convolution's
     output ``i`` pairs input ``j`` through the kernel at ``n - 1 + i - j`` (spectrally filtered, circular), so its
     transpose is the same convolution with the kernel reversed (the filter is real and even)."""
     values = np.atleast_2d(np.asarray(values, dtype=float))
+    if engine is not None and engine._local_step(tau, math_utils.h):
+        return local_step_transpose(values, local_step_weights(float(math_utils.h), alpha, beta, tau))
     n = math_utils.grid.size
     padded = np.zeros((values.shape[0], 2 * n - 1), dtype=float)
     padded[:, :n] = values
@@ -148,9 +153,13 @@ def diffuse_transpose(values: np.ndarray, math_utils, omega: np.ndarray, prefact
 
 
 def bridge_transpose(dual_out: np.ndarray, engine, math_utils, prefactor: float, alpha: float, tau: float,
-                     log_barrier: float, vol: float, dt: float, is_reverse: bool) -> np.ndarray:
-    """``B^T`` of the bridge correction of ``_diffuse_with_bridge`` (``correction[target] += P k work[source]``)."""
+                     log_barrier: float, vol: float, dt: float, is_reverse: bool, *, beta: float = 0.0) -> np.ndarray:
+    """``B^T`` of the bridge correction of ``_diffuse_with_bridge`` (``correction[target] += P k work[source]``);
+    on a local step, the transpose of the local stencil's touch-weighted correction (``beta`` gives its discount)."""
     grid = math_utils.grid
+    if engine._local_step(tau, math_utils.h):
+        weights = local_step_weights(float(math_utils.h), alpha, beta, tau)
+        return local_step_transpose(dual_out, weights, local_bridge_hit(grid, log_barrier, vol * vol * dt, is_reverse))
     band = engine._bridge_band(tau, math_utils.h, grid.size)
     kernels = engine._bridge_kernels(math_utils, band, tau, alpha, vol * vol * dt, log_barrier, is_reverse)
     out = np.zeros_like(dual_out)
@@ -295,13 +304,15 @@ def forward_pass(log: MarchLog) -> ForwardResult:
             alpha_out, alpha_in = beta_out, beta_in         # the readout row is already the dual of the slice
         else:
             tau, alpha, beta, prefactor, omega = step.diffusion
-            stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau)
+            stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau,
+                                        engine=engine)
             alpha_out = stacked[0] if step.out_diffused else zero
             alpha_in = stacked[1]
             if step.bridge is not None and step.out_diffused:
                 log_barrier, vol, dt, reverse = step.bridge
                 starts[k] = beta_out.copy()
-                moved = bridge_transpose(beta_out, engine, mu, prefactor, alpha, tau, log_barrier, vol, dt, reverse)
+                moved = bridge_transpose(beta_out, engine, mu, prefactor, alpha, tau, log_barrier, vol, dt, reverse,
+                                         beta=beta)
                 alpha_out = alpha_out - moved
                 alpha_in = alpha_in + moved
                 interval_ki[k] = float(np.sum(moved))

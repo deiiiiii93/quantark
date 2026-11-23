@@ -424,11 +424,16 @@ def test_adaptive_grid_refinement_can_be_disabled():
 
 
 def test_adaptive_grid_refinement_respects_safety_cap():
+    """Past the cap the lattice is never grown: with local steps off (an auto_converge rung) the sizing refuses; with
+    them on (sub-resolution run, rule (i)) the steps too short for the cap are left to the local stencil and the
+    lattice stays within it (``_require_resolved_kernels`` then decides whether they can be priced)."""
     engine = SnowballQuadEngine(
         params=QuadParams(grid_points=301, max_adaptive_grid_points=501)
     )
     times = [(index + 1) / 244.0 for index in range(244)]
 
+    assert engine._resolve_grid_points(maturity=1.0, vol=0.20, times=times) <= 501
+    engine._local_steps_allowed = False
     with pytest.raises(NumericalError, match="max_adaptive_grid_points=501"):
         engine._resolve_grid_points(maturity=1.0, vol=0.20, times=times)
 

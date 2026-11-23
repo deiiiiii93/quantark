@@ -215,7 +215,12 @@ class TestDistinctInstantsStayDistinct:
         mc = mc_engine.price(p, env())
         assert abs(pde - mc) < 3.0 * mc_engine.get_last_result().std_error
 
-    @pytest.mark.parametrize("engine", ["quad_v1", "quad_v2"])
-    def test_lattice_engines_refuse_what_they_cannot_resolve(self, engine):
+    def test_quad_v2_refuses_what_it_cannot_resolve(self):
         with pytest.raises(NumericalError):
-            SNOWBALL_ENGINES[engine]().price(self._split(), env())
+            SNOWBALL_ENGINES["quad_v2"]().price(self._split(), env())
+
+    def test_quad_v1_prices_the_split_by_its_local_stencil(self):
+        """Sub-resolution run: V1 prices the 1 s split (local stencil) instead of refusing it, next to the PDE."""
+        p = self._split()
+        assert SNOWBALL_ENGINES["quad_v1"]().price(p, env()) == pytest.approx(
+            SNOWBALL_ENGINES["pde"]().price(p, env()), abs=1e-3)
