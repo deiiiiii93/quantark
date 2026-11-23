@@ -16,7 +16,7 @@ Monte Carlo and the lifecycle each decided for itself, so one booking could be p
 ### Changed
 
 - **One schedule-time generator.** Every factory (`snowball_helpers`, `phoenix_helpers`,
-  `range_accrual_helpers`, 11 sites) computes evenly spaced times as `(i + 1) * maturity / n` through
+  `range_accrual_helpers`, 11 sites, and `RangeAccrualOption`'s `num_observations` schedule) computes evenly spaced times as `(i + 1) * maturity / n` through
   `contract_clock.schedule_times`. The old `(i + 1) / n * maturity` rounded twice and left equal calendar instants
   one ulp apart (the KO-reset factory's `11/12 * 1.0` vs `11/18 * 1.5`). Maturity-1.0 contracts are bitwise
   unchanged.
@@ -34,14 +34,19 @@ Monte Carlo and the lifecycle each decided for itself, so one booking could be p
   instants are anchors that engine-added nodes cannot displace), cash legs, theta shift, SA-CVA exposure surfaces,
   the backtest life surface and settlement support all decide time identity with `same_instant` /
   `merge_time_nodes` (new `anchors=` keyword; `None` is bitwise as before). `test/test_contract_clock_sites.py` pins
-  94 sites. The cash-leg survival axis treats only an exact 0.0 as the valuation instant (was 1e-6 y).
+  77 time-identity sites plus 3 anchored merges. The cash-leg survival axis treats only an exact 0.0 as the
+  valuation instant (was 1e-6 y).
 - **QUAD V1 refuses a step its lattice cannot resolve** (`NumericalError` subclass `UnderResolvedStepError`).
   V1 sizes its lattice from the knock-in spacing only, so a knock-out minutes from a knock-in, a settlement node or
   two instants seconds apart left a step narrower than its cells; the sampled kernel then lost mass by aliasing
   (`2 exp(-2 pi^2 (s/h)^2)`, plus a half-frequency term under Simpson weights) and V1 silently mispriced (KO 0.5 /
   KI 0.5+gap, true 98.92: gap 53 min -> 109.33, 5 min -> 226.05, 35 s -> 573.39). A step whose bound exceeds the
   engine's own accuracy target `QuadParams.convergence_rel_tol` is now refused; with `auto_converge=True` the ladder
-  moves to a finer rung instead. MC, the PDE and QUAD V2 price such contracts.
+  moves to a finer rung instead. This includes the first step from the valuation instant: a valuation minutes before
+  an observation (e.g. a 14:55 proxy-close revaluation) now refuses on V1 (measured 5 min ahead: 265.92 unguarded
+  against PDE 98.30). MC and the PDE price such contracts; QUAD V2 does with `max_nodes` raised (5 min gap: 150k
+  nodes; it refuses below tens of seconds). The new exceptions `UnderResolvedStepError` and V2's
+  `ResourceLimitError` (both `NumericalError`) are exported from `quantark.asset.equity.engine.quad`.
 - **QUAD V2's resource-limit refusal** names the event times bounding the shortest interval and
   `QuadV2Params.event_time_tolerance` (message only; semantics and defaults unchanged).
 
@@ -63,7 +68,7 @@ Monte Carlo and the lifecycle each decided for itself, so one booking could be p
 ### Tests
 
 - `test_contract_clock*.py` (generator, canonical clock, products, barrier family, QUAD V1, PDE, MC, cross-engine
-  twins / KO-wins-tie / distinct instants) and the 94-site `test/test_contract_clock_sites.py`.
+  twins / KO-wins-tie / distinct instants) and the site list `test/test_contract_clock_sites.py`.
 - QUAD V2's near-coincident refusal test now uses a 1e-9 y gap (beyond the contract tolerance) and a 1e-8 opt-in
   knob; a 1e-14 pair is one instant at construction and prices.
 

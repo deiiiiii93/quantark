@@ -349,6 +349,13 @@ SITES = [
      ("is_close(resolved_times[-1], maturity)",)),
     ("quantark/asset/equity/engine/settlement_support.py", "first_schedule_settlement", V1_ABS),
     ("quantark/asset/equity/engine/settlement_support.py", "first_schedule_payment_time", V1_ABS),
+    # final-review findings: the KO-reset product's own time-identity checks (is_close keeps its default rel 1e-9)
+    ("quantark/asset/equity/product/option/ko_reset_snowball_option.py",
+     "KnockOutResetSnowballOption._validate_first_schedule_settlement_range",
+     ("abs_tol=Tolerance.PRECISION", "is_close(value, pre_end", "is_close(value, float(terminal.payment_time)")),
+    ("quantark/asset/equity/product/option/ko_reset_snowball_option.py",
+     "KnockOutResetSnowballOption._validate_schedule_two_ends_last", ("is_close(end, pre_end",)),
+    ("quantark/asset/equity/engine/quad/v2/context.py", "_shortest_interval", ()),
     # CP2 findings
     ("quantark/asset/equity/engine/mc/barrier_vol_mc_engines.py", "_settlement_scale",
      ("np.isclose(rec.settlement_time, rec.observation_time)",)),

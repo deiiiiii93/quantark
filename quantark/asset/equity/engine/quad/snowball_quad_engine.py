@@ -40,10 +40,6 @@ from quantark.util.enum.engine_enums import (
 )
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 
-
-class UnderResolvedStepError(NumericalError):
-    """QUAD V1 refuses a diffusion step its lattice does not resolve (``_require_resolved_kernels``). A finer
-    lattice may resolve it: ``auto_converge`` moves to its next rung instead of failing."""
 from quantark.util.numerical import (
     Tolerance,
     is_close,
@@ -59,6 +55,11 @@ from quantark.util.numerical import (
 
 if TYPE_CHECKING:
     from quantark.cashleg.folding import FoldOverlay
+
+class UnderResolvedStepError(NumericalError):
+    """QUAD V1 refuses a diffusion step its lattice does not resolve (``_require_resolved_kernels``). A finer
+    lattice may resolve it: ``auto_converge`` moves to its next rung instead of failing."""
+
 
 # Broadie-Glasserman-Kou (1997) discrete-monitoring barrier correction:
 # beta = -zeta(1/2) / sqrt(2*pi). A barrier monitored discretely at spacing
@@ -2395,11 +2396,16 @@ class SnowballQuadEngine(BaseEngine):
         node, two instants seconds apart -- can carry a kernel narrower than the cells. Its sampled mass then leaks
         (``_kernel_mass_error_bound``): a knock-out and a knock-in 1e-4 years apart priced 109.3 against 98.9. Such a
         step is refused, never priced, when its relative mass error exceeds the engine's own accuracy target,
-        ``params.convergence_rel_tol`` (default 1e-4: s/h below ~0.71). Monte Carlo, the PDE and QUAD V2 resolve it;
-        a finer ``grid_points`` may too.
+        ``params.convergence_rel_tol`` (default 1e-4: s/h below ~0.71). Monte Carlo and the PDE price such
+        contracts; QUAD V2 does with ``max_nodes`` raised (down to gaps of tens of seconds); a finer ``grid_points``
+        or ``auto_converge`` may resolve it here.
         """
         times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
-        s_over_h = np.sqrt(2.0 * np.asarray(tau[1:], dtype=float)) / float(h)
+        step_tau = np.asarray(tau[1:], dtype=float)
+        if not np.any(step_tau > 0.0):
+            return                            # no diffusion to resolve; zero-variance steps have their own checks
+        s_over_h = np.full(step_tau.shape, np.inf)
+        s_over_h[step_tau > 0.0] = np.sqrt(2.0 * step_tau[step_tau > 0.0]) / float(h)
         worst = int(np.argmin(s_over_h))
         bound = self._kernel_mass_error_bound(
             float(s_over_h[worst]), str(getattr(self.params, "integration_rule", "trapezoid")).lower()
@@ -2410,7 +2416,7 @@ class SnowballQuadEngine(BaseEngine):
             raise UnderResolvedStepError(
                 f"QUAD V1: the diffusion step from {a!r} to {b!r} ({b - a:.3g} years) is under-resolved by the "
                 f"lattice: its kernel spans {s_over_h[worst]:.3g} cells (mass error bound {bound:.2g} > the engine's "
-                f"accuracy target convergence_rel_tol={accuracy:g}). Raise grid_points, or price this contract on the MC, PDE or QUAD V2 engine."
+                f"accuracy target convergence_rel_tol={accuracy:g}). Raise grid_points or use auto_converge, or price this contract on the MC or PDE engine (QUAD V2 with max_nodes raised)."
             )
 
     def _match_record(self, target_time: float, records: Sequence) -> Optional[object]:

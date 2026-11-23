@@ -28,7 +28,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance, is_close, is_valid_number
+from quantark.util.numerical import is_close, is_valid_number, same_instant
 
 from .observation_schedule import (
     at_valuation_instant,
@@ -191,7 +191,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         if value is None or schedule is None or not schedule.records:
             return
         pre_end = max(float(r.observation_time) for r in schedule.records)
-        if value < pre_end and not is_close(value, pre_end, abs_tol=Tolerance.ZERO):
+        if value < pre_end and not same_instant(value, pre_end):
             raise ValidationError(
                 f"first_schedule_settlement_time {value!r} precedes schedule 1's maturity {pre_end!r}: the payment of a "
                 "note that ends with schedule 1 cannot come before it ends"
@@ -205,8 +205,8 @@ class KnockOutResetSnowballOption(SnowballOption):
                                  spot_quote=SpotQuote(float(self.initial_price) or 1.0),
                                  vol_surface=FlatVolSurface(0.2), div_yield=NoDividend())
         terminal = resolve_terminal_timing(self, env)
-        one_maturity = is_close(pre_end, float(terminal.determination_time), abs_tol=Tolerance.PRECISION)
-        if one_maturity and not is_close(value, float(terminal.payment_time), abs_tol=Tolerance.ZERO):
+        one_maturity = same_instant(pre_end, float(terminal.determination_time))
+        if one_maturity and not same_instant(value, float(terminal.payment_time)):
             raise ValidationError(
                 f"first_schedule_settlement_time {value!r}: schedule 1 runs to the product maturity, so the note has one "
                 f"maturity, paid at the product terminal's payment time {float(terminal.payment_time)!r}; another "
@@ -252,7 +252,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         def before(end, pre_end) -> bool:
             if dated:
                 return end < pre_end
-            return end < pre_end and not is_close(end, pre_end, abs_tol=Tolerance.ZERO)
+            return end < pre_end and not same_instant(end, pre_end)
 
         pre_end = last(pre.records)
         if self.post_ko_mode == PostKOScheduleMode.ABSOLUTE:

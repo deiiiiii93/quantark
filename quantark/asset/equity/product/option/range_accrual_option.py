@@ -22,6 +22,7 @@ from quantark.asset.clock import enforce_clock
 from .base_equity_option import BaseEquityOption, maturity_reached
 from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
+from .contract_clock import schedule_times
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
@@ -278,10 +279,7 @@ class RangeAccrualOption(BaseEquityOption):
 
         # Generate uniform schedule from num_observations
         if self.num_observations is not None and self.maturity is not None:
-            times = [
-                (i + 1) / self.num_observations * self.maturity
-                for i in range(self.num_observations)
-            ]
+            times = schedule_times(self.maturity, self.num_observations)
             return [
                 RangeAccrualObservationRecord(observation_time=t, weight=1.0)
                 for t in times

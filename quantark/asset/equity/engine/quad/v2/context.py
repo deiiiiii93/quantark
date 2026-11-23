@@ -157,7 +157,9 @@ def _shortest_interval(events, variances) -> str:
     """The event times bounding the interval of least positive variance, for a resource-limit refusal (message only:
     the contract clock already books one float per instant, so two times this close are two instants)."""
     variances = np.asarray(variances, dtype=float)
+    # the mesh is sized from the intervals after the first (``make_mesh`` reads ``variances[1:]``)
     positive = np.flatnonzero(variances > 0)
+    positive = positive[positive >= 1]
     if positive.size == 0:
         return ""
     i = int(positive[np.argmin(variances[positive])])

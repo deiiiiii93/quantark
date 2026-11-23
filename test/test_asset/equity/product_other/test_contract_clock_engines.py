@@ -88,12 +88,26 @@ POST = [(i + 1) / 18 * 1.5 for i in range(18)]
 KI = [(i + 1) / 12 * 1.0 for i in range(12)]
 
 
-def _ko_reset_twins():
-    noisy = ko_reset(PRE, POST, KI)
-    pre = [r.observation_time for r in noisy.barrier_config.ko_observation_schedule.records]
-    post = [r.observation_time for r in noisy.post_barrier_config.ko_observation_schedule.records]
-    ki = [r.observation_time for r in noisy.barrier_config.ki_observation_schedule.records]
-    return noisy, ko_reset(pre, post, ki)
+def _ko_reset_twins(direction):
+    """The schedule-1 / schedule-2 instant at 11/12 booked one ulp apart, and the booking written out at the run's
+    LAST float in both schedules -- by hand, not from the canonicalizer's output.
+
+    - ``factory``: the old double-rounded factory floats (schedule 2's 11/18 * 1.5 is the later spelling);
+    - ``post_after`` / ``post_before``: schedule 2 one ulp after / before schedule 1's single-rounded float.
+    """
+    x = 11 * 1.0 / 12
+    if direction == "factory":
+        pre, post, last = PRE, POST, max(PRE[10], POST[10])
+    else:
+        pre, post = list(PRE[:10]) + [x] + list(PRE[11:]), list(POST)
+        post[10] = UP(x) if direction == "post_after" else DOWN(x)
+        last = max(x, post[10])
+    eq_pre, eq_post = list(pre), list(post)
+    eq_pre[10] = eq_post[10] = last
+    return ko_reset(pre, post, KI), ko_reset(eq_pre, eq_post, KI)
+
+
+KO_RESET_DIRECTIONS = ("factory", "post_after", "post_before")
 
 
 def same(a, b) -> bool:
@@ -143,8 +157,9 @@ class TestTwinBookings:
         assert same(make().calculate_event_stats(noisy, env()), make().calculate_event_stats(equal, env()))
 
     @pytest.mark.parametrize("engine", sorted(KO_RESET_ENGINES))
-    def test_ko_reset_price_and_event_statistics_bitwise(self, engine):
-        noisy, equal = _ko_reset_twins()
+    @pytest.mark.parametrize("direction", KO_RESET_DIRECTIONS)
+    def test_ko_reset_price_and_event_statistics_bitwise(self, direction, engine):
+        noisy, equal = _ko_reset_twins(direction)
         make = KO_RESET_ENGINES[engine]
         assert same(make().price(noisy, env()), make().price(equal, env()))
         assert same(make().calculate_event_stats(noisy, env()), make().calculate_event_stats(equal, env()))
@@ -156,8 +171,9 @@ class TestTwinBookings:
         path = [(30, 99.0), (91, 99.0), (182, 70.0), (183, 72.0), (274, 110.0)]
         assert _ledger(AutocallableLifecycleTracker, noisy, path) == _ledger(AutocallableLifecycleTracker, equal, path)
 
-    def test_ko_reset_tracker_events_and_cash_ledger(self):
-        noisy, equal = _ko_reset_twins()
+    @pytest.mark.parametrize("direction", KO_RESET_DIRECTIONS)
+    def test_ko_reset_tracker_events_and_cash_ledger(self, direction):
+        noisy, equal = _ko_reset_twins(direction)
         path = [(30, 99.0), (61, 78.0), (92, 90.0), (335, 96.0), (365, 96.0)]
         assert _ledger(KOResetLifecycleTracker, noisy, path) == _ledger(KOResetLifecycleTracker, equal, path)
 
