@@ -222,7 +222,7 @@ class AutocallableCashLeg(CashLeg):
                 f"length {obs.shape}; align the leg to the parent's future grid."
             )
         if obs.shape != ev_times.shape or not all(
-            almost_equal(float(a), float(b), tol=Tolerance.PROBABILITY)
+            same_instant(float(a), float(b))
             for a, b in zip(obs, ev_times)
         ):
             raise ValidationError(

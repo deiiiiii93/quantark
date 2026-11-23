@@ -326,6 +326,8 @@ SITES = [
      ("is_close(sorted_obs[-1], maturity)", "np.searchsorted(all_times, obs_times)")),
     ("quantark/cashleg/autocallable_leg.py", "AutocallableCashLeg._per_event_contingent",
      ("<= Tolerance.PROBABILITY",)),
+    ("quantark/cashleg/autocallable_leg.py", "AutocallableCashLeg._scheduled_contingent",
+     ("tol=Tolerance.PROBABILITY",)),
     ("quantark/asset/equity/riskmeasures/greeks/theta_shift.py", "_carried_to_t1",
      ("is_close(payment_time, time_bump)",)),
     ("quantark/asset/equity/riskmeasures/greeks/theta_shift.py", "_ko_reset_schedule_1_end",
