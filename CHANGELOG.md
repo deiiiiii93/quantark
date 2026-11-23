@@ -7,6 +7,66 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-23
+
+One rule now decides when two numeric event times are the same instant, for every product and engine (contract
+clock, spec `docs/superpowers/specs/2026-11-23-contract-clock-design.md`). Before this, QUAD V1, QUAD V2, the PDE,
+Monte Carlo and the lifecycle each decided for itself, so one booking could be priced as different contracts.
+
+### Changed
+
+- **One schedule-time generator.** Every factory (`snowball_helpers`, `phoenix_helpers`,
+  `range_accrual_helpers`, 11 sites) computes evenly spaced times as `(i + 1) * maturity / n` through
+  `contract_clock.schedule_times`. The old `(i + 1) / n * maturity` rounded twice and left equal calendar instants
+  one ulp apart (the KO-reset factory's `11/12 * 1.0` vs `11/18 * 1.5`). Maturity-1.0 contracts are bitwise
+  unchanged.
+- **Canonical contract clock.** At construction (`validate`), `time_shift` and the lifecycle day-snap
+  (`snap_contract`), a product's numeric event times (every observation schedule, settlement times, maturity,
+  `first_schedule_settlement_time`, legacy time lists, a REBASED schedule 2's offsets) are snapped onto one float per
+  instant: times closer than `Tolerance.ZERO` (1e-10 y, ~3 ms) are one instant, the last of a run, a run holding an
+  exact 0.0 becomes 0.0 (a theta landing stays at the valuation instant), maturity is pinned. A lone positive time,
+  however small, stays ahead (review 2026-09-21 R1). Two distinct observations of one schedule on one instant, and a
+  run wider than the tolerance, are refused (`ValidationError`). Covers snowball, Phoenix, KO-reset, barrier, double
+  barrier, one-touch, double one-touch, single/double sharkfin, accumulator and range accrual; dated records are
+  untouched. KO-reset REBASED schedule-2 times (`t_ki + offset`) snap onto the contract's instants on every path
+  (MC rows, REBASED maturity, the knocked-in copy).
+- **Engines share the rule.** QUAD V1 (step merge was 1e-6 y, ~31 s), the PDE (relative 1e-9), MC grids (contract
+  instants are anchors that engine-added nodes cannot displace), cash legs, theta shift, SA-CVA exposure surfaces,
+  the backtest life surface and settlement support all decide time identity with `same_instant` /
+  `merge_time_nodes` (new `anchors=` keyword; `None` is bitwise as before). `test/test_contract_clock_sites.py` pins
+  94 sites. The cash-leg survival axis treats only an exact 0.0 as the valuation instant (was 1e-6 y).
+- **QUAD V1 refuses a step its lattice cannot resolve** (`NumericalError` subclass `UnderResolvedStepError`).
+  V1 sizes its lattice from the knock-in spacing only, so a knock-out minutes from a knock-in, a settlement node or
+  two instants seconds apart left a step narrower than its cells; the sampled kernel then lost mass by aliasing
+  (`2 exp(-2 pi^2 (s/h)^2)`, plus a half-frequency term under Simpson weights) and V1 silently mispriced (KO 0.5 /
+  KI 0.5+gap, true 98.92: gap 53 min -> 109.33, 5 min -> 226.05, 35 s -> 573.39). A step whose bound exceeds the
+  engine's own accuracy target `QuadParams.convergence_rel_tol` is now refused; with `auto_converge=True` the ladder
+  moves to a finer rung instead. MC, the PDE and QUAD V2 price such contracts.
+- **QUAD V2's resource-limit refusal** names the event times bounding the shortest interval and
+  `QuadV2Params.event_time_tolerance` (message only; semantics and defaults unchanged).
+
+### Fixed
+
+- QUAD V2 prices the factory KO-reset (`create_ko_reset_snowball(maturity_pre=1.0, maturity_post=1.5)`) at default
+  parameters (it refused with a 36-billion-node resource limit).
+- A booking whose KO and KI (or whose two KO-reset schedules) sit one ulp apart prices, reports event statistics,
+  raises tracker events and books cash exactly as the coincident booking, on every engine; the knock-out wins the
+  tie everywhere.
+
+### Moved values
+
+- No certificate anchor (six live studies, exact comparison on the banking architecture) and no golden or replay
+  golden moved. MC values moved only on W17a collision grids, by at most 1.6e-15 relative.
+- Contracts with event times 1e-10..1e-6 y apart are now two instants on QUAD V1 and the PDE (they were merged);
+  V1 refuses those it cannot resolve.
+
+### Tests
+
+- `test_contract_clock*.py` (generator, canonical clock, products, barrier family, QUAD V1, PDE, MC, cross-engine
+  twins / KO-wins-tie / distinct instants) and the 94-site `test/test_contract_clock_sites.py`.
+- QUAD V2's near-coincident refusal test now uses a 1e-9 y gap (beyond the contract tolerance) and a 1e-8 opt-in
+  knob; a 1e-14 pair is one instant at construction and prices.
+
 ## [0.11.3] - 2026-11-17
 
 ### Fixed
