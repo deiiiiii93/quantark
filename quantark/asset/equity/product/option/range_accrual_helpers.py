@@ -29,6 +29,7 @@ from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import CouponPayType, ObservationFrequency
 from quantark.util.exceptions import ValidationError
 
+from .contract_clock import schedule_times
 from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
 from .range_accrual_option import RangeAccrualOption
 
@@ -343,9 +344,7 @@ def create_standard_range_accrual(
     obs_records = observation_records
     if obs_records is None and use_calendar_day_weights:
         # Generate uniform schedule with Friday=3 weights
-        obs_times = [
-            (i + 1) / num_observations * maturity for i in range(num_observations)
-        ]
+        obs_times = schedule_times(maturity, num_observations)
         # Estimate weekday pattern based on observation index
         # Simplified: assume starting Monday, every 5th observation is Friday
         weights = []
@@ -440,9 +439,7 @@ def create_reverse_range_accrual(
     # Build observation records if using calendar day weights
     obs_records = observation_records
     if obs_records is None and use_calendar_day_weights:
-        obs_times = [
-            (i + 1) / num_observations * maturity for i in range(num_observations)
-        ]
+        obs_times = schedule_times(maturity, num_observations)
         weights = []
         for i in range(num_observations):
             day_of_week = i % 5
@@ -574,9 +571,7 @@ def create_stepdown_range_accrual(
     )
 
     # Build observation records
-    obs_times = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    obs_times = schedule_times(maturity, num_observations)
 
     if use_calendar_day_weights:
         weights = []

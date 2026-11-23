@@ -33,6 +33,7 @@ from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import ValidationError
 
+from .contract_clock import schedule_times
 from .phoenix_config import CouponBarrierConfig
 from .phoenix_option import PhoenixOption
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
@@ -201,9 +202,7 @@ def create_standard_phoenix(
         coupon_barrier = 0.85 * initial_price
 
     # Generate observation dates
-    ko_observation_dates = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_observations)
 
     # Extract config-specific kwargs
     (
@@ -360,9 +359,7 @@ def create_stepdown_phoenix(
     )
 
     # Generate observation dates
-    ko_observation_dates = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_observations)
 
     # Extract config-specific kwargs
     (

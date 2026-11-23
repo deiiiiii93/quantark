@@ -33,6 +33,7 @@ from typing import List, Optional
 from quantark.util.exceptions import ValidationError
 from quantark.util.enum import ObservationType, CouponPayType, PostKOScheduleMode
 
+from .contract_clock import schedule_times
 from .snowball_option import SnowballOption
 from .ko_reset_snowball_option import KnockOutResetSnowballOption
 from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig, AirbagConfig
@@ -108,7 +109,7 @@ def generate_ko_observation_dates(
         )
 
     # Generate dates evenly spaced up to maturity
-    all_dates = [(i + 1) / num_observations * maturity for i in range(num_observations)]
+    all_dates = schedule_times(maturity, num_observations)
 
     if skip_first >= len(all_dates):
         raise ValidationError(
@@ -294,9 +295,7 @@ def create_standard_snowball(
         ki_barrier = 0.75 * initial_price
 
     # Generate observation dates
-    ko_observation_dates = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_observations)
 
     # Extract config-specific kwargs
     barrier_kwargs, payoff_kwargs, accrual_kwargs, airbag_kwargs = _extract_config_kwargs(kwargs)
@@ -412,9 +411,7 @@ def create_stepdown_snowball(
     )
 
     # Generate observation dates
-    ko_observation_dates = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_observations)
 
     # Extract config-specific kwargs
     barrier_kwargs, payoff_kwargs, accrual_kwargs, airbag_kwargs = _extract_config_kwargs(kwargs)
@@ -524,9 +521,7 @@ def create_european_ki_snowball(
         ki_barrier = 0.75 * initial_price
 
     # Generate KO observation dates
-    ko_observation_dates = [
-        (i + 1) / num_ko_observations * maturity for i in range(num_ko_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_ko_observations)
 
     # KI only at maturity (European-style)
     ki_observation_dates = [maturity]
@@ -641,9 +636,7 @@ def create_parachute_snowball(
     ko_barriers = [ko_barrier] * (num_observations - 1) + [ki_barrier]
 
     # Generate observation dates
-    ko_observation_dates = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_observations)
 
     # Extract config-specific kwargs
     barrier_kwargs, payoff_kwargs, accrual_kwargs, airbag_kwargs = _extract_config_kwargs(kwargs)
@@ -791,9 +784,7 @@ def create_airbag_snowball(
             )
 
     # Generate observation dates
-    ko_observation_dates = [
-        (i + 1) / num_observations * maturity for i in range(num_observations)
-    ]
+    ko_observation_dates = schedule_times(maturity, num_observations)
 
     # Extract config-specific kwargs
     barrier_kwargs, payoff_kwargs, accrual_kwargs, airbag_kwargs = (
