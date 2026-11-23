@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -86,6 +87,11 @@ D9_CAUSES: Dict[str, str] = {
          "EXPIRY also a schedule-1 knock-out) is paid on the product's explicit settlement_date when booked, the "
          "settlement delay only without one, on PDE 1D / LV PDE / ADI, QUAD V1, QUAD V2 and the fold structure (no "
          "banked case is one: test_no_banked_case_is_in_the_d33_settlement_precedence_class)",
+    "s": "QUAD V1 exact first step (sub-resolution run, 0.12.0, owner-signed 2026-11-23): a valuation-to-first-event "
+         "step spanning fewer than 13 cells is priced at the spot on the pre-event surfaces instead of the lattice "
+         "readout. Checked by recomputing every QUAD V1 record with the exact first step off "
+         "(``_without_exact_first_step``): that must reproduce the bank under every other cause, so the first step is "
+         "the only new source of a move; ``test_quad_v1_first_step_moves_are_bounded`` measures the moves themselves",
     "r": "D34 intraday twin carries the D33 payment: a numeric KO-reset with first_schedule_settlement_time (the "
          "intraday twin of a dated D33-class note) is paid there; only intraday prices of D33-class notes move (no "
          "banked case carries it: test_no_banked_case_is_in_the_d34_intraday_twin_class)",
@@ -1395,6 +1401,24 @@ D29_ALSO = frozenset(rid for rid in _D29_MOVES if rid in EXPECTED_MOVES and EXPE
 
 # --- live recomputation (cached per worker: one event route / one drilldown per case) -------------
 
+@contextmanager
+def _without_exact_first_step(case_id: str):
+    """Cause (s): QUAD V1 records are recomputed with the exact first step off (``_FIRST_STEP_S_F = 0``: the lattice
+    readout every first step it resolves used before the sub-resolution run, bit for bit), so every other cause's
+    check keeps comparing like with like and the first step is the only new source of a QUAD V1 move."""
+    if not str(BANKED["cases"][case_id]["engine"]).startswith("quad_v1"):
+        yield
+        return
+    from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+
+    saved = SnowballQuadEngine._FIRST_STEP_S_F
+    SnowballQuadEngine._FIRST_STEP_S_F = 0.0
+    try:
+        yield
+    finally:
+        SnowballQuadEngine._FIRST_STEP_S_F = saved
+
+
 @lru_cache(maxsize=None)
 def _case(case_id: str):
     meta = BANKED["cases"][case_id]
@@ -1403,12 +1427,14 @@ def _case(case_id: str):
 
 @lru_cache(maxsize=None)
 def _event(case_id: str):
-    return cases.event_route(_case(case_id))
+    with _without_exact_first_step(case_id):
+        return cases.event_route(_case(case_id))
 
 
 @lru_cache(maxsize=None)
 def _drilldown(case_id: str):
-    return cases.fold_drilldown(_case(case_id), list(BANKED["cases"][case_id]["drilldown_set"]))
+    with _without_exact_first_step(case_id):
+        return cases.fold_drilldown(_case(case_id), list(BANKED["cases"][case_id]["drilldown_set"]))
 
 
 def live_outcome(record: dict) -> dict:
@@ -1421,7 +1447,8 @@ def live_outcome(record: dict) -> dict:
     if route == "event":
         return _event(case_id)["legs"][leg]
     if route == "fold_total":
-        return cases.fold_total(_case(case_id), leg)
+        with _without_exact_first_step(case_id):
+            return cases.fold_total(_case(case_id), leg)
     if route == "fold_drilldown_total":
         return _drilldown(case_id)["total"]
     if route == "fold_drilldown_npv":
@@ -1429,7 +1456,8 @@ def live_outcome(record: dict) -> dict:
     if route == "fold_drilldown":
         if leg in BANKED["cases"][case_id]["drilldown_set"]:
             return _drilldown(case_id)["per_leg"][leg]
-        return cases.fold_drilldown(_case(case_id), [leg])["per_leg"][leg]
+        with _without_exact_first_step(case_id):
+            return cases.fold_drilldown(_case(case_id), [leg])["per_leg"][leg]
     raise AssertionError(f"unknown route {route!r}")
 
 
@@ -1709,6 +1737,11 @@ def test_expected_moves_name_banked_records_and_d9_causes():
 @pytest.mark.parametrize("record_id", list(RECORDS) or ["<bank missing>"])
 def test_record_reproduces_or_moves_by_its_cause(record_id):
     assert BANKED is not None, f"{BANK} is not banked"
+    with _without_exact_first_step(RECORDS[record_id]["case"]):     # cause (s): checks compare like with like
+        _record_reproduces_or_moves_by_its_cause(record_id)
+
+
+def _record_reproduces_or_moves_by_its_cause(record_id):
     record = RECORDS[record_id]
     live = live_outcome(record)
     move = EXPECTED_MOVES.get(record_id)
@@ -1721,6 +1754,37 @@ def test_record_reproduces_or_moves_by_its_cause(record_id):
         move.check(live, record["outcome"], record)
         return
     assert_reproduced(live, record["outcome"], record)
+
+
+QUAD_V1_CASES = sorted(cid for cid in (BANKED or {}).get("cases", {})
+                       if str(BANKED["cases"][cid]["engine"]).startswith("quad_v1"))
+
+
+@pytest.mark.parametrize("case_id", QUAD_V1_CASES or ["<none>"])
+def test_quad_v1_first_step_moves_are_bounded(case_id):
+    """Cause (s), measured: with the exact first step on, a QUAD V1 case's price moves by at most 2e-4 relative and
+    every event-route leg by at most 5e-3 relative (owner-signed; S3b measured 7.8e-5 / 4.0e-3)."""
+    assert QUAD_V1_CASES, "no QUAD V1 case is banked"
+    off = _event(case_id)
+    on = cases.event_route(_case(case_id))
+    if "raises" in off["price"]:
+        assert "raises" in on["price"], (case_id, on["price"])
+        return
+    p_off, p_on = float(off["price"]["value"]), float(on["price"]["value"])
+    assert abs(p_on - p_off) <= 2e-4 * max(1.0, abs(p_off)), (case_id, p_off, p_on)
+    for leg, outcome in off["legs"].items():
+        if "raises" in outcome:
+            assert "raises" in on["legs"][leg], (case_id, leg)
+            continue
+        old, new = float(outcome["value"]), float(on["legs"][leg]["value"])
+        assert abs(new - old) <= 5e-3 * max(1.0, abs(old)), (case_id, leg, old, new)
+
+
+def test_the_exact_first_step_moves_some_quad_v1_price():
+    """Cause (s) is live: the check above is not comparing the readout with itself."""
+    moved = [cid for cid in QUAD_V1_CASES if "value" in _event(cid)["price"]
+             and cases.event_route(_case(cid))["price"]["value"] != _event(cid)["price"]["value"]]
+    assert moved, "no QUAD V1 price moved with the exact first step on"
 
 
 def test_rebanks_absorbed_no_move_without_a_cause_check():

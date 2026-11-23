@@ -82,5 +82,8 @@ def test_worst_historical_date_closes_local_identity_while_preserving_secant_gap
         # Re-pinned 2026-10-09: the rebate (flag unset) now follows is_annualized and pays coupon x the contract
         # tenor (1.00822 years) instead of the flat coupon: .5482832642 -> .5491942645, -91.4013448101 ->
         # -91.5027056047 (accrual follow-ups item 6).
-        assert result.finite_bump_identity_residual_hands == pytest.approx(.5491942645, abs=1e-7)
-        assert pricing_delta / 200 == pytest.approx(-91.5027056047, abs=1e-7)
+        # Re-pinned 2026-11-24 (owner-signed, QUAD sub-resolution run): the first step from the valuation is priced
+        # exactly at the spot (first_step) instead of the lattice readout: .5491942645 -> .5612113718,
+        # -91.5027056047 -> -91.5114910203.
+        assert result.finite_bump_identity_residual_hands == pytest.approx(.5612113718, abs=1e-7)
+        assert pricing_delta / 200 == pytest.approx(-91.5114910203, abs=1e-7)
