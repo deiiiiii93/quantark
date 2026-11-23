@@ -67,7 +67,7 @@ from .validation import (
     check_numerical_stability,
 )
 from .pnl import pnl_pct_of_abs_baseline
-from .time_nodes import merge_time_nodes, node_index
+from .time_nodes import merge_time_nodes, node_index, same_instant, snap_to_anchors
 
 __all__ = [
     # Constants
@@ -126,4 +126,6 @@ __all__ = [
     'pnl_pct_of_abs_baseline',
     'merge_time_nodes',
     'node_index',
+    'same_instant',
+    'snap_to_anchors',
 ]
