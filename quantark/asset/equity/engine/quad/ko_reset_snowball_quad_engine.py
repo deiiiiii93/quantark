@@ -280,7 +280,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         df_local = make_df_fn(pricing_env)
         tau = 0.5 * vol_vec * vol_vec * dt
-        self._require_resolved_kernels(times, tau, math_utils.h)
+        self._require_resolved_kernels(
+            times, tau, math_utils.h,
+            levels=self._observed_levels(times, pre_ko_records, post_ko_records, ki_records),
+        )
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -782,7 +785,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         df_local = make_df_fn(pricing_env)
         tau = 0.5 * vol_vec * vol_vec * dt
-        self._require_resolved_kernels(times, tau, math_utils.h)
+        self._require_resolved_kernels(
+            times, tau, math_utils.h,
+            levels=self._observed_levels(times, pre_ko_records, post_ko_records, ki_records),
+        )
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 

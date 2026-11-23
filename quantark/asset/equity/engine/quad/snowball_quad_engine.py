@@ -493,7 +493,8 @@ class SnowballQuadEngine(BaseEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         tau = 0.5 * vol_vec * vol_vec * dt
-        self._require_resolved_kernels(times, tau, math_utils.h)
+        self._require_resolved_kernels(
+            times, tau, math_utils.h, levels=self._observed_levels(times, ko_records, ki_records))
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -1162,7 +1163,9 @@ class SnowballQuadEngine(BaseEngine):
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
         tau = 0.5 * vol_vec * vol_vec * dt
-        self._require_resolved_kernels(times, tau, math_utils.h)
+        self._require_resolved_kernels(
+            times, tau, math_utils.h,
+            levels=self._observed_levels(times, self._observation_levels(product, ko_records, ki_records)))
         alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
             vol_vec * vol_vec
         )
@@ -2769,7 +2772,28 @@ class SnowballQuadEngine(BaseEngine):
         self._last_first_step = fs
         return v_out0, v_in0, float(f_out[0]), float(f_in[0])
 
-    def _require_resolved_kernels(self, times: Sequence[float], tau: np.ndarray, h: float) -> None:
+    @staticmethod
+    def _observed_levels(times: Sequence[float], *groups) -> list:
+        """Per step time, the barrier levels observed there: ``groups`` of records (anything with
+        ``observation_time`` and ``barrier``) or of ``(time, level)`` pairs."""
+        times_arr = np.asarray(times, dtype=float)
+        out = [set() for _ in range(times_arr.size)]
+        for group in groups:
+            for item in group:
+                t, level = ((item.observation_time, item.barrier) if hasattr(item, "observation_time") else item)
+                if t is None or level is None:
+                    continue
+                k = int(np.searchsorted(times_arr, float(t) - Tolerance.ZERO))
+                if k < times_arr.size and same_instant(float(t), float(times_arr[k])):
+                    out[k].add(float(level))
+        return out
+
+    def _observation_levels(self, product, ko_records, ki_records) -> list:
+        """``(time, level)`` of every barrier the statistics recursion observes (Phoenix adds its coupon barriers)."""
+        return [(r.observation_time, r.barrier) for r in list(ko_records) + list(ki_records)]
+
+    def _require_resolved_kernels(self, times: Sequence[float], tau: np.ndarray, h: float, *,
+                                  levels: Optional[Sequence] = None) -> None:
         """Decide how every diffusion step is applied, refusing what cannot be priced to the accuracy target.
 
         The lattice is sized for the whole maturity and refined only for the knock-in spacing
@@ -2780,6 +2804,10 @@ class SnowballQuadEngine(BaseEngine):
         sub-resolution run C1), unless
 
         * local steps are switched off (the first ``auto_converge`` ladder);
+        * the step separates two observations of the same barrier (``levels``: the levels observed at each step
+          time): the mass crossing between them lies in a layer of width s at the barrier, which the stencil cannot
+          carry (CP1, measured against grids resolving the step: a knock-out pair's probability increment off by up
+          to 1.07e-3 at vol 5%, its price by 1.5e-4 at vol 60%; a knock-in pair's probability by 3.0e-4);
         * the local steps chain: their accumulated variance exceeds ``_LOCAL_CHAIN_CELLS2`` squared cells, beyond
           which the stencil's fourth-moment error was measured to exceed the accuracy target (AC5d).
 
@@ -2792,6 +2820,7 @@ class SnowballQuadEngine(BaseEngine):
         times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
         step_tau = np.asarray(tau[1:], dtype=float)
         self._last_local_steps = ()
+        self._last_local_chain = 0.0
         self._last_first_step = None
         if not np.any(step_tau > 0.0):
             return                            # no diffusion to resolve; zero-variance steps have their own checks
@@ -2824,6 +2853,13 @@ class SnowballQuadEngine(BaseEngine):
             refuse(int(chained[np.argmin(s_over_h[chained])]),
                    f"{chained.size} local steps carry {chain:.3g} squared cells of variance, beyond the "
                    f"{self._LOCAL_CHAIN_CELLS2:g} the local stencil prices within the accuracy target.")
+        if levels is not None:
+            for j in indices[indices > 0]:
+                shared = [a for a in levels[j - 1] for b in levels[j] if is_close(a, b, rel_tol=1e-12, abs_tol=0.0)]
+                if shared:
+                    refuse(int(j), f"it separates two observations of the same barrier ({shared[0]:g}): the mass "
+                                   "crossing it between them lies in a layer narrower than a cell, which the local "
+                                   "stencil does not carry.")
         self._last_local_steps = tuple(int(i) for i in indices)
 
     def _match_record(self, target_time: float, records: Sequence) -> Optional[object]:

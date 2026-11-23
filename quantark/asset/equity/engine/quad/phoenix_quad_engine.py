@@ -452,7 +452,13 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         tau = 0.5 * vol_vec * vol_vec * dt
-        self._require_resolved_kernels(times, tau, math_utils.h)
+        self._require_resolved_kernels(
+            times, tau, math_utils.h,
+            levels=self._observed_levels(
+                times, ko_records, ki_records,
+                [(r.observation_time, coupon_barriers[i]) for i, r in enumerate(ko_records)],
+            ),
+        )
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -1278,6 +1284,11 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         cash_rows = getattr(self, "_coupon_cash_rows", None)
         if cash_rows is not None:
             cash_rows.initialize(v_out, v_in)
+
+    def _observation_levels(self, product, ko_records, ki_records) -> list:
+        return super()._observation_levels(product, ko_records, ki_records) + [
+            (r.observation_time, self._coupon_barrier_for_obs(product, i)) for i, r in enumerate(ko_records)
+        ]
 
     def _first_event_extra_levels(self, product, observation_index) -> list:
         return [] if observation_index is None else [self._coupon_barrier_for_obs(product, observation_index)]

@@ -142,11 +142,43 @@ class TestTwoEventLadder:
 
     def test_two_knock_in_dates_seconds_apart_price_within_the_sizing_cap(self):
         """Rule (i): sizing for a 1 s knock-in spacing would exceed ``max_adaptive_grid_points``; the short step is
-        priced locally on a grid sized from the other steps instead of refused."""
-        p = snowball(QUARTERS, (0.25, 0.5, 0.5 + SECOND, 0.75, 1.0))
-        coincident = snowball(QUARTERS, (0.25, 0.5, 0.75, 1.0))
+        priced locally on a grid sized from the other steps instead of refused. The two dates observe different levels
+        (74 then 75): the same level twice is refused (``TestSameBarrier``)."""
+        dates = (0.25, 0.5, 0.5 + SECOND, 0.75, 1.0)
+        p = SnowballOption(
+            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=1.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=103.0, ko_rate=0.12, ko_observation_dates=list(QUARTERS),
+                ki_barrier=[75.0, 74.0, 75.0, 75.0, 75.0], ki_observation_type=ObservationType.DISCRETE,
+                ki_observation_dates=list(dates)),
+        )
         e = SnowballQuadEngine(QuadParams())
-        assert e.price(p, env()) == pytest.approx(e.price(coincident, env()), rel=1e-4)
+        value = e.price(p, env())
+        assert e._last_local_steps
+        assert value == pytest.approx(e.price(snowball(QUARTERS, (0.25, 0.5, 0.75, 1.0)), env()), rel=1e-4)
+
+
+class TestSameBarrier:
+    """CP1: two observations of the SAME barrier a local step apart. The crossing mass between them lives in a layer
+    of width s at the barrier, which the stencil cannot carry (measured against grids that resolve the step: knock-out
+    pair, vol 5%, 5 min: knock-out probability increment off by 1.07e-3; vol 60%: price 1.5e-4; knock-in pair, vol 60%:
+    knock-in probability 3.0e-4). Refused, never mispriced; MC, the PDE or ``auto_converge`` price them."""
+
+    @pytest.mark.parametrize("pair", ["ko", "ki"])
+    def test_a_local_step_between_two_observations_of_one_barrier_is_refused(self, pair):
+        dates = (0.25, 0.5, 0.5 + 5 * MINUTE, 0.75, 1.0)
+        p = snowball(dates, QUARTERS) if pair == "ko" else snowball(QUARTERS, dates)
+        engine = SnowballQuadEngine(QuadParams())
+        with pytest.raises(UnderResolvedStepError, match="same barrier"):
+            engine.price(p, env())
+        with pytest.raises(UnderResolvedStepError, match="same barrier"):
+            engine.calculate_event_stats(p, env())
+
+    def test_auto_converge_prices_it_on_a_rung_that_resolves_the_step(self):
+        p = snowball((0.25, 0.5, 0.5 + 5 * MINUTE, 0.75, 1.0), QUARTERS)
+        value = SnowballQuadEngine(QuadParams(auto_converge=True)).price(p, env())
+        ref = SnowballQuadEngine(QuadParams(grid_points=16001)).price(p, env())
+        assert within(value, ref, 0.0, 1e-4, 1e-6), (value, ref)
 
 
 class TestBackstops:
