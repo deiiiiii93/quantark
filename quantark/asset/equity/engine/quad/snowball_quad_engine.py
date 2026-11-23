@@ -2891,7 +2891,11 @@ class SnowballQuadEngine(BaseEngine):
                    f"{self._LOCAL_CHAIN_CELLS2:g} the local stencil prices within the accuracy target.")
         if levels is not None:
             for j in indices[indices > 0]:
-                shared = [a for a in levels[j - 1] for b in levels[j] if is_close(a, b, rel_tol=1e-12, abs_tol=0.0)]
+                # levels within ~3 standard deviations of the step cut the same crossing layer (CP2: 103 / 103.001,
+                # vol 60%, 5 min); exactly equal levels are the limit
+                width = max(Tolerance.ZERO, 3.0 * float(s_over_h[j]) * float(h))
+                shared = [a for a in levels[j - 1] for b in levels[j]
+                          if a > 0.0 and b > 0.0 and abs(math.log(float(a) / float(b))) < width]
                 if shared:
                     refuse(int(j), f"it separates two observations of the same barrier ({shared[0]:g}): the mass "
                                    "crossing it between them lies in a layer narrower than a cell, which the local "

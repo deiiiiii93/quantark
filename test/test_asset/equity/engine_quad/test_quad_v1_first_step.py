@@ -216,6 +216,25 @@ def within(value, ref, hw, rel, floor):
     return abs(value - ref) <= rel * abs(ref) + hw + floor
 
 
+def test_the_matrix_pool_never_leases_a_much_larger_buffer():
+    """CP2: a small matrix must not pin a recycled buffer far larger than itself on a long-lived engine."""
+    import gc
+    from quantark.asset.equity.engine.quad import first_step as fs_mod
+
+    pool = fs_mod._MatrixPool()
+
+    class Owner:
+        pass
+
+    big_owner = Owner()
+    pool._take(big_owner, 1_000_000)
+    del big_owner
+    gc.collect()
+    small_owner = Owner()
+    leased = pool._take(small_owner, 10_000)
+    assert leased.base is None or leased.base.size <= 2 * 10_000
+
+
 class TestQuadrature:
     """S1's unit check of the F quadrature: mass, mean and a closed-form barrier split to round-off for every step
     width, with and without lattice nodes inside the Gaussian's support."""

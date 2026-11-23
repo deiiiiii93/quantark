@@ -197,6 +197,17 @@ def _same_level(a, b):
     return is_close(a, b, rel_tol=0.0, abs_tol=Tolerance.ZERO)
 
 
+#: two levels within this many standard deviations of the local intervals between them cut the same crossing layer
+_LAYER_WIDTHS = 3.0
+
+
+def _same_layer(a, b, variance):
+    """Two log levels cut one crossing layer when they lie within ``_LAYER_WIDTHS`` standard deviations of the
+    locally priced variance between their observations (CP2: 103 / 103.001 at vol 60%, 5 min, left the second
+    observation's probability 1.6e-4 off; exactly equal levels are the limit)."""
+    return abs(a - b) < max(Tolerance.ZERO, _LAYER_WIDTHS * float(np.sqrt(max(variance, 0.0))))
+
+
 def _local_breaks(contract, variances, threshold, jumps):
     """The jump breaks a mesh must carry on cell edges when every interval of variance below ``threshold`` (after the
     first) is priced locally; refuses, with the reason, what the local treatment cannot price exactly. ``jumps``: a
@@ -232,8 +243,9 @@ def _local_breaks(contract, variances, threshold, jumps):
         own = jump_levels(i)
         breaks |= own
         k = i - 1
+        between = float(variances[i])                 # the locally priced variance between observations k and i
         while own:
-            shared = sorted(b for b in own if any(_same_level(b, c) for c in jump_levels(k)))
+            shared = sorted(b for b in own if any(_same_layer(b, c, between) for c in jump_levels(k)))
             if shared:
                 raise ResourceLimitError(
                     f"the locally priced interval ending at event time {float(events[i].time)!r} and the observation "
@@ -243,6 +255,7 @@ def _local_breaks(contract, variances, threshold, jumps):
                 )
             if k == 0 or not 0.0 < variances[k] < threshold:
                 break
+            between += float(variances[k])
             k -= 1
     return breaks
 

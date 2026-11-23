@@ -185,6 +185,22 @@ class TestSameBarrier:
         with pytest.raises(UnderResolvedStepError, match="same barrier"):
             engine.calculate_event_stats(p, env())
 
+    def test_two_knock_out_levels_within_the_crossing_layer_are_one_barrier(self):
+        """CP2: levels a hair apart (103 / 103.001 at vol 60%, 5 min) cut the same layer of width ~ s."""
+        from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+
+        g = 5 * MINUTE
+        sched = ObservationSchedule(records=[ObservationRecord(observation_time=t, barrier=b) for t, b in
+                                             ((0.25, 103.0), (0.5, 103.0), (0.5 + g, 103.001), (0.75, 103.0),
+                                              (1.0, 103.0))])
+        p = SnowballOption(
+            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=1.0,
+            barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.12, ko_observation_schedule=sched,
+                                         ki_barrier=75.0, ki_observation_type=ObservationType.DISCRETE,
+                                         ki_observation_dates=list(QUARTERS)))
+        with pytest.raises(UnderResolvedStepError, match="same barrier"):
+            SnowballQuadEngine(QuadParams()).price(p, env(0.6))
+
     def test_auto_converge_prices_it_on_a_rung_that_resolves_the_step(self):
         p = snowball((0.25, 0.5, 0.5 + 5 * MINUTE, 0.75, 1.0), QUARTERS)
         value = SnowballQuadEngine(QuadParams(auto_converge=True)).price(p, env())

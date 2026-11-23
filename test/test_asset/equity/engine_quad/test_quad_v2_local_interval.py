@@ -346,6 +346,16 @@ class TestRefusals:
         product = snowball(QUARTERS, (0.25, 0.5, 0.5 + 5 * MINUTE, 0.75, 1.0))
         self._refused(SnowballQuadEngineV2, product, "same barrier")
 
+    @pytest.mark.parametrize("vol, second", [(0.6, 103.001), (0.05, 103.0001)])
+    def test_two_knock_out_levels_within_the_crossing_layer(self, vol, second):
+        """CP2: levels a hair apart cut the same layer (width ~ s of the local intervals between them): measured, the
+        second observation's knock-out probability is 1.6e-4 (vol 60%, 103.001) / 2.1e-4 (vol 5%, 103.0001) off."""
+        g = 5 * MINUTE
+        product = snowball((), ko_schedule=schedule([(0.25, 103.0), (0.5, 103.0), (0.5 + g, second), (0.75, 103.0),
+                                                     (1.0, 103.0)]), ki_times=QUARTERS, maturity=1.0)
+        with pytest.raises(ResourceLimitError, match="same barrier"):
+            SnowballQuadEngineV2().price(product, env(vol))
+
     def test_same_barrier_across_a_chain_of_local_intervals(self):
         """KI 75 at 0.5, KO 103 at +5 min, KI 75 at +10 min: the second KI's layer crosses the KO event unresolved."""
         g = 5 * MINUTE

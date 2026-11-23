@@ -137,7 +137,8 @@ class _MatrixPool:
         with self._lock:
             best = None
             for i, buf in enumerate(self._free):
-                if buf.size >= size and (best is None or buf.size < self._free[best].size):
+                # at most twice the request: a small matrix never pins a large recycled buffer (CP2)
+                if size <= buf.size <= 2 * max(size, 1) and (best is None or buf.size < self._free[best].size):
                     best = i
             buf = self._free.pop(best) if best is not None else np.empty(max(size, 1), dtype=float)
         weakref.finalize(owner, self._give_back, buf).atexit = False
