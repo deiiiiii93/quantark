@@ -5,6 +5,10 @@ import numpy as np
 from quantark.util.exceptions import NumericalError
 
 
+class ResourceLimitError(NumericalError):
+    """The mesh the shortest event interval needs exceeds ``max_nodes`` (the caller names the interval)."""
+
+
 @lru_cache(maxsize=32)
 def gauss(order):
     x, w = np.polynomial.legendre.leggauss(order)
@@ -108,7 +112,7 @@ def make_mesh(query_logs, means, variances, params, align=None):
         hi = lo + np.ceil((hi - lo) / h) * h
     required = max(8, int(np.ceil((hi - lo) / h)))
     if required * params.order > params.max_nodes:
-        raise NumericalError(
+        raise ResourceLimitError(
             f"QUAD V2 resource limit: required {required * params.order} nodes "
             f"for minimum interior variance {positive.min():.6g}; max_nodes={params.max_nodes}"
         )

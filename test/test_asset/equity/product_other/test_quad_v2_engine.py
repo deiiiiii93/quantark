@@ -251,6 +251,18 @@ def test_near_coincident_dates_fail_before_large_allocation():
     )
 
 
+def test_resource_limit_refusal_names_the_pair_and_the_knob():
+    """AC10: the refusal keeps "resource limit" and names the two event times of the shortest interval and the
+    ``event_time_tolerance`` knob (message only; semantics unchanged)."""
+    p = snowball(times=(0.5, 1.0), ki_times=(0.5 + 1e-9, 1.0))
+    with pytest.raises(NumericalError) as refused:
+        SnowballQuadEngineV2(QuadV2Params(max_nodes=20_000)).price(p, environment())
+    message = str(refused.value)
+    assert "resource limit" in message
+    assert repr(0.5) in message and repr(0.5 + 1e-9) in message
+    assert "event_time_tolerance" in message
+
+
 def test_float_noise_pair_is_one_instant_by_contract():
     """A 1e-14 pair is one instant: the contract clock books it as one float at construction, so V2 at default
     params prices it (exactly as the pair booked equal at its LAST member) instead of refusing it."""

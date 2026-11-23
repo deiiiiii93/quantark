@@ -5,7 +5,7 @@ from types import MappingProxyType
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
-from .basis import make_mesh
+from .basis import ResourceLimitError, make_mesh
 from .contract import affine, grid_function
 from .gaussian import readout
 from .operator import Operator
@@ -153,6 +153,22 @@ def interval_moments(env, strike, times):
     return means, variances, discounts
 
 
+def _shortest_interval(events, variances) -> str:
+    """The event times bounding the interval of least positive variance, for a resource-limit refusal (message only:
+    the contract clock already books one float per instant, so two times this close are two instants)."""
+    variances = np.asarray(variances, dtype=float)
+    positive = np.flatnonzero(variances > 0)
+    if positive.size == 0:
+        return ""
+    i = int(positive[np.argmin(variances[positive])])
+    end = float(events[i].time)
+    start = float(events[i - 1].time) if i > 0 else 0.0
+    return (
+        f" (the shortest interval runs from event time {start!r} to {end!r}, {end - start:.3g} years; "
+        "QuadV2Params.event_time_tolerance declares near-coincident event times one instant)"
+    )
+
+
 def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
     spots = np.asarray(spots, dtype=float).reshape(-1)
     if not len(spots) or np.any(~np.isfinite(spots)) or np.any(spots <= 0):
@@ -162,9 +178,12 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
     means, variances, discounts = interval_moments(
         env, strike, [e.time for e in events]
     )
-    mesh = make_mesh(
-        np.log(spots), means, variances, params, align=contract.continuous_barrier
-    )
+    try:
+        mesh = make_mesh(
+            np.log(spots), means, variances, params, align=contract.continuous_barrier
+        )
+    except ResourceLimitError as refusal:
+        raise ResourceLimitError(f"{refusal}{_shortest_interval(events, variances)}") from refusal
     n_states, n_channels = len(contract.state_names), len(contract.channels)
     workspace_columns = n_states * n_channels
     if (
