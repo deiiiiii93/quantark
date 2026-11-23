@@ -25,6 +25,7 @@ from quantark.asset.equity.engine.quad import (
     PhoenixQuadEngine,
     SnowballQuadEngine,
 )
+from quantark.asset.equity.engine.quad import first_step as first_step_module
 from quantark.asset.equity.engine.quad.first_step import GaussianFirstStep
 from quantark.asset.equity.engine.quad.v1_adjoint import forward_pass
 from quantark.asset.equity.param import QuadParams
@@ -281,6 +282,42 @@ class TestQuadrature:
         # reflection principle: P(min <= b) = 2 P(X <= b) for a driftless path
         zero, one = np.zeros(fs.y.size), np.ones(fs.y.size)
         assert fs.expect_bridged(zero, one)[0] == pytest.approx(2.0 * ndtr(-0.5), abs=1e-13)
+
+    @pytest.mark.parametrize("std", [3e-4, 2e-2])
+    def test_leased_matrices_are_private_to_a_live_quadrature(self, std):
+        """``W`` / ``P`` live in storage reused across quadratures (S3c, ``_MatrixPool``): a live quadrature keeps its
+        own, and one built on recycled storage equals one built on fresh storage, bit for bit."""
+        grid = np.linspace(-1.0, 1.0, 1001)
+        h = float(grid[1] - grid[0])
+        rng = np.random.default_rng(5)
+
+        def build(shift=0.0):
+            return GaussianFirstStep(grid, h, mean=1e-4 + shift, std=std, disc=0.98, centres=[0.0, *grid[480:540]],
+                                     breakpoints=[0.01], touch=(-0.02, False))
+
+        first = build()
+        w, p = first.W.copy(), first.P.copy()
+        v_out, v_in = rng.normal(size=first.y.size), rng.normal(size=first.y.size)
+        bridged = first.expect_bridged(v_out, v_in)
+        for k in range(6):                     # others are built and collected meanwhile
+            other = build(1e-3 * (k + 1))
+            other.expect_bridged(rng.normal(size=other.y.size), rng.normal(size=other.y.size))
+            del other
+        assert np.array_equal(first.W, w) and np.array_equal(first.P, p)
+        assert np.array_equal(first.expect_bridged(v_out, v_in), bridged)
+        del first
+        again = build()                        # on storage the collected quadratures gave back
+        assert np.array_equal(again.W, w) and np.array_equal(again.P, p)
+        assert np.array_equal(again.expect_bridged(v_out, v_in), bridged)
+        pool = first_step_module._POOL
+        original = pool._MAX_BYTES
+        pool._MAX_BYTES = 0                    # every matrix above the cap: fresh arrays, as before the pool
+        try:
+            fresh = build()
+        finally:
+            pool._MAX_BYTES = original
+        assert fresh.W.base is None and np.array_equal(fresh.W, w) and np.array_equal(fresh.P, p)
+        assert np.array_equal(fresh.expect_bridged(v_out, v_in), bridged)
 
 
 # --- the engine ----------------------------------------------------------------------------------------------------

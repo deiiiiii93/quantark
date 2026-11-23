@@ -30,6 +30,8 @@ The event map is pointwise, so the nodes of all centres are evaluated together.
 from __future__ import annotations
 
 import math
+import threading
+import weakref
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
@@ -90,6 +92,77 @@ def _phi(z: np.ndarray) -> np.ndarray:
     return np.exp(-0.5 * z * z) / _SQ2PI
 
 
+class _MatrixPool:
+    """Storage for the quadrature's dense centres x nodes matrices (``W``, ``P``, ``W * P``), leased per quadrature
+    and taken back when the quadrature is collected (sub-resolution run S3c).
+
+    Why: F's own arithmetic is about 1% of a monthly snowball's price, but allocating and freeing centres x nodes
+    arrays on every solve (0.2 .. 8 MB: the allocator's medium range on macOS) left numpy's FFT temporaries on a heap
+    layout where every transform of the following solves ran about 13% slower -- +5.4 s on the 42 s book benchmark
+    (60 monthly snowballs x 3 spots), the same transforms on the same inputs. Plain numpy reproduces it: one 1 MB
+    allocate/free between batches of transforms slows them 6%; 0.12 MB blocks, 10 MB blocks, or 2 MB blocks kept
+    alive and reused do not. So the long-lived matrices come from here, and the transient ones are built on blocks of
+    centres small enough for the small range (``_row_blocks``); either half alone left the book at 1.11x.
+
+    Matrices above ``_MAX_BYTES`` (sub-cell steps with a band: each centre has its own nodes) are the allocator's
+    large range, unaffected, and allocated fresh as before rather than retained.
+
+    The values are unchanged: a leased matrix is a C-contiguous view of the same shape, filled by the same elementwise
+    operations as the fresh array it replaces, and read by the same products.
+    """
+
+    #: free buffers kept for reuse (a solve leases at most three at once; the last solve's quadrature holds its own)
+    _KEEP = 4
+    #: largest matrix leased (bytes); above it the allocator's large range (mapped per allocation) is used directly
+    _MAX_BYTES = 8 << 20
+
+    def __init__(self) -> None:
+        self._free: list = []
+        self._lock = threading.RLock()       # re-entrant: a collection inside ``lease`` may give a buffer back
+
+    def lease(self, owner, shape: Tuple[int, int], fill: Optional[float] = None) -> np.ndarray:
+        """A ``shape`` matrix (filled with ``fill``, else uninitialised) whose storage returns to the pool when
+        ``owner`` is collected."""
+        size = int(shape[0]) * int(shape[1])
+        if size * 8 > self._MAX_BYTES:
+            if fill is None:
+                return np.empty(shape)
+            return np.zeros(shape) if fill == 0.0 else np.full(shape, float(fill))
+        matrix = self._take(owner, size).reshape(shape)
+        if fill is not None:
+            matrix.fill(float(fill))
+        return matrix
+
+    def _take(self, owner, size: int) -> np.ndarray:
+        with self._lock:
+            best = None
+            for i, buf in enumerate(self._free):
+                if buf.size >= size and (best is None or buf.size < self._free[best].size):
+                    best = i
+            buf = self._free.pop(best) if best is not None else np.empty(max(size, 1), dtype=float)
+        weakref.finalize(owner, self._give_back, buf).atexit = False
+        return buf[:size]
+
+    def _give_back(self, buf: np.ndarray) -> None:
+        with self._lock:
+            self._free.append(buf)
+            if len(self._free) > self._KEEP:
+                smallest = min(range(len(self._free)), key=lambda i: self._free[i].size)
+                del self._free[smallest]
+
+
+_POOL = _MatrixPool()
+
+#: entries of a centres x nodes temporary: 96 kB of float64, inside the allocator's small range (``_MatrixPool``)
+_BLOCK_ENTRIES = 12_000
+
+
+def _row_blocks(n_rows: int, n_cols: int):
+    """Slices of at most ``_BLOCK_ENTRIES // n_cols`` rows (at least one) covering ``range(n_rows)``."""
+    step = max(1, _BLOCK_ENTRIES // max(int(n_cols), 1))
+    return [slice(lo, min(lo + step, n_rows)) for lo in range(0, int(n_rows), step)]
+
+
 class GaussianFirstStep:
     """Quadrature of ``disc * E[f(c + X)]``, ``X ~ N(mean, std^2)``, for each centre ``c`` (log-spot offsets from the
     spot; the price is the centre 0), with ``f`` the engine's pointwise event map on interpolated pre-event surfaces.
@@ -119,6 +192,7 @@ class GaussianFirstStep:
         self.disc = float(disc)
         self.centres = np.asarray(centres, dtype=float)
         self._breaks = np.asarray(sorted(float(b) for b in breakpoints), dtype=float)
+        self._WP = None                   # ``W * P`` (``expect_bridged``), built on first use
         if self.std < self.h:
             self._own_nodes(touch)
         else:
@@ -169,8 +243,8 @@ class GaussianFirstStep:
             blocks.append(w)
         self.y = np.concatenate(nodes) if nodes else np.zeros(0)
         n_c = self.centres.size
-        self.W = np.zeros((n_c, self.y.size))
-        self.P = None if touch is None else np.ones((n_c, self.y.size))
+        self.W = _POOL.lease(self, (n_c, self.y.size), fill=0.0)
+        self.P = None if touch is None else _POOL.lease(self, (n_c, self.y.size), fill=1.0)
         start = 0
         for k, (y, w) in enumerate(zip(nodes, blocks)):
             stop = start + y.size
@@ -216,9 +290,11 @@ class GaussianFirstStep:
         n_whole = y_whole.size
         node_cell = np.repeat(cell[whole], gx.size)
         node_point = np.tile(np.arange(gx.size), int(whole.sum()))
-        self.W = np.zeros((self.centres.size, self.y.size))
+        self.W = _POOL.lease(self, (self.centres.size, self.y.size), fill=0.0)
         on_node = np.flatnonzero(np.isin(self.centres, self.grid))
         off_node = np.setdiff1d(np.arange(self.centres.size), on_node)
+        # centres x nodes work runs on blocks of centres (``_row_blocks``: the allocator's small range, see
+        # ``_MatrixPool``); every entry is the same elementwise expression as on the whole matrix
         if on_node.size:
             index = np.searchsorted(self.grid, self.centres[on_node])
             reach_cells = int(math.ceil((_SUPPORT * self.std + abs(self.mean)) / self.h)) + 2
@@ -226,15 +302,23 @@ class GaussianFirstStep:
             xi = 0.5 * self.h * (1.0 + gx)
             z = (offsets[:, None] * self.h + xi[None, :] - self.mean) / self.std
             table = np.where(np.abs(z) <= _SUPPORT, _phi(z) / self.std, 0.0)
-            k = node_cell[None, :] - index[:, None]
-            inside = np.abs(k) <= reach_cells
-            rows = np.where(inside, table[np.clip(k + reach_cells, 0, offsets.size - 1), node_point[None, :]], 0.0)
-            self.W[on_node, :n_whole] = self.disc * w[None, :n_whole] * rows
-            self.W[on_node, n_whole:] = self.disc * w[None, n_whole:] * self._density(
-                self.y[None, n_whole:], self.centres[on_node, None])
-        if off_node.size:
-            self.W[off_node] = self.disc * w[None, :] * self._density(self.y[None, :], self.centres[off_node, None])
-        self.P = None if touch is None else self._touch(self.y[None, :], self.centres[:, None], touch)
+            for block in _row_blocks(on_node.size, self.y.size):
+                rows_at = on_node[block]
+                k = node_cell[None, :] - index[block, None]
+                inside = np.abs(k) <= reach_cells
+                rows = np.where(inside, table[np.clip(k + reach_cells, 0, offsets.size - 1), node_point[None, :]],
+                                0.0)
+                self.W[rows_at, :n_whole] = self.disc * w[None, :n_whole] * rows
+                self.W[rows_at, n_whole:] = self.disc * w[None, n_whole:] * self._density(
+                    self.y[None, n_whole:], self.centres[rows_at, None])
+        for block in _row_blocks(off_node.size, self.y.size):
+            rows_at = off_node[block]
+            self.W[rows_at] = self.disc * w[None, :] * self._density(self.y[None, :], self.centres[rows_at, None])
+        self.P = None
+        if touch is not None:
+            self.P = _POOL.lease(self, (self.centres.size, self.y.size))
+            for block in _row_blocks(self.centres.size, self.y.size):
+                self.P[block] = self._touch(self.y[None, :], self.centres[block, None], touch)
 
     def _touch(self, y: np.ndarray, centre, touch: Tuple[float, bool]) -> np.ndarray:
         """Brownian-bridge probability that the path from ``centre`` to ``y`` over the step touches the barrier
@@ -313,8 +397,14 @@ class GaussianFirstStep:
         if self.P is None:
             return self.expect(v_out)
         v_out = np.asarray(v_out, dtype=float)
-        return v_out @ self.W.T + (np.asarray(v_in, dtype=float) - v_out) @ (self.W * self.P).T
+        if self._WP is None:
+            # ``W * P``, leased and filled by blocks of centres (``_MatrixPool``)
+            self._WP = _POOL.lease(self, self.W.shape)
+            for block in _row_blocks(self.W.shape[0], self.W.shape[1]):
+                np.multiply(self.W[block], self.P[block], out=self._WP[block])
+        return v_out @ self.W.T + (np.asarray(v_in, dtype=float) - v_out) @ self._WP.T
 
     def readout_dual(self) -> np.ndarray:
-        """The spot's (centre 0) quadrature weights: the dual F puts on the nodes (``v1_adjoint``)."""
-        return self.W[0]
+        """The spot's (centre 0) quadrature weights: the dual F puts on the nodes (``v1_adjoint``). A copy: ``W``'s
+        storage is leased (``_MatrixPool``) and goes back to the pool with this quadrature."""
+        return self.W[0].copy()
