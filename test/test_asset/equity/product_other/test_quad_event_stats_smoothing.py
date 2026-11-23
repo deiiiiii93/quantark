@@ -195,15 +195,20 @@ def test_cells_zero_reproduces_hard_mask_baseline():
     # sum error 0.00158 -> 0.00023. This degraded config (cells=0 + NODAL) sits
     # at RMS ~0.021, an order of magnitude above the shift, so it is not
     # evidence either way.
+    # Re-baselined 2026-11-24 (owner-signed QUAD sub-resolution run): the first observation is now priced exactly at
+    # the spot (first_step) instead of the hard-mask NODAL projection, which put the first knock-out probability at
+    # 0.35447 against 0.32356 on 4001 nodes (now 0.32354). The later rows still carry the hard mask's own error (this
+    # degraded config exists only to show smoothing is additive). With the exact first step off the old baseline
+    # reproduces to the last digit.
     ko_baseline = np.array([
-        0.354468887677, 0.140439806223, 0.077572281329, 0.050650821005,
-        0.036339860516, 0.027689214398, 0.021996606161, 0.018017655092,
-        0.015108290509, 0.012905303710, 0.011189958953, 0.009823491326,
+        0.323540917491, 0.157269042397, 0.081359743062, 0.052503430359,
+        0.037479187312, 0.028476609150, 0.022581090232, 0.018473024982,
+        0.015475684425, 0.013209653980, 0.011447349476, 0.010044813359,
     ])
     coupon_baseline = np.array([
-        0.993817761713, 0.607749348541, 0.435040182387, 0.333648557060,
-        0.266761879525, 0.219645023918, 0.184928740459, 0.158469343047,
-        0.137756038844, 0.121182902483, 0.107678604857, 0.096503578694,
+        0.994865245888, 0.638944272866, 0.448910162856, 0.343054189864,
+        0.273778783460, 0.225149491443, 0.189395634585, 0.162186752120,
+        0.140911216262, 0.123903701098, 0.110055704057, 0.098603298629,
     ])
     np.testing.assert_allclose(
         np.asarray(stats.observations.probability), ko_baseline, rtol=0, atol=1e-9
@@ -269,15 +274,20 @@ def test_discrete_ki_cells_zero_reduces_to_hard_mask():
             integration_rule="simpson",
         )
     ).calculate_event_stats(ph, env)
+    # Re-baselined 2026-11-24 (owner-signed QUAD sub-resolution run): the first observation is now priced exactly at
+    # the spot (first_step) instead of the hard-mask NODAL projection, which put the first knock-out probability at
+    # 0.35447 against 0.32356 on 4001 nodes (now 0.32354). The later rows still carry the hard mask's own error (this
+    # degraded config exists only to show smoothing is additive). With the exact first step off the old baseline
+    # reproduces to the last digit.
     ko_baseline = np.array([
-        0.354468887677, 0.140439806223, 0.077572281329, 0.050650821005,
-        0.036339860516, 0.027689214398, 0.021996606161, 0.018017655092,
-        0.015108290509, 0.01290530371, 0.011189958953, 0.009823491326,
+        0.323540917491, 0.157269042397, 0.081359743062, 0.052503430359,
+        0.037479187312, 0.028476609150, 0.022581090232, 0.018473024982,
+        0.015475684425, 0.013209653980, 0.011447349476, 0.010044813359,
     ])
     coupon_baseline = np.array([
-        0.993817761713, 0.607749348541, 0.435040182387, 0.33364855706,
-        0.266761879525, 0.219645023918, 0.184928740459, 0.158469343047,
-        0.137756038844, 0.121182902483, 0.107678604857, 0.096503578694,
+        0.994865245888, 0.638944272866, 0.448910162856, 0.343054189864,
+        0.273778783460, 0.225149491443, 0.189395634585, 0.162186752120,
+        0.140911216262, 0.123903701098, 0.110055704057, 0.098603298629,
     ])
     np.testing.assert_allclose(np.asarray(s.observations.probability), ko_baseline, rtol=0, atol=1e-9)
     np.testing.assert_allclose(np.asarray(s.coupons.probability), coupon_baseline, rtol=0, atol=1e-9)

@@ -201,6 +201,14 @@ class TestSameBarrier:
         with pytest.raises(UnderResolvedStepError, match="same barrier"):
             SnowballQuadEngine(QuadParams()).price(p, env(0.6))
 
+    def test_another_event_between_the_two_observations_does_not_resolve_the_layer(self):
+        """Final review: KO at 0.5 and 0.5 + 5 min with a KI at 0.5 + 2.5 min between them (two local steps) priced
+        1.41e-4 off at vol 60% (second KO probability 3.85e-3 off at vol 5%); QUAD V2 refuses it."""
+        p = snowball((0.25, 0.5, 0.5 + 5 * MINUTE, 0.75, 1.0), (0.25, 0.5 + 2.5 * MINUTE, 0.75, 1.0))
+        for vol in (0.6, 0.05):
+            with pytest.raises(UnderResolvedStepError, match="same barrier"):
+                SnowballQuadEngine(QuadParams()).price(p, env(vol))
+
     def test_auto_converge_prices_it_on_a_rung_that_resolves_the_step(self):
         p = snowball((0.25, 0.5, 0.5 + 5 * MINUTE, 0.75, 1.0), QUARTERS)
         value = SnowballQuadEngine(QuadParams(auto_converge=True)).price(p, env())

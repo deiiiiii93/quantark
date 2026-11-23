@@ -1,9 +1,9 @@
 # QUAD sub-resolution steps: price short gaps locally instead of refining everything
 
-Status: DRAFT brief, owner direction 2026-11-23 ("treat a sub-resolution step locally ... we should do this").
-Destination: docs/superpowers/specs/2026-11-23-quad-subresolution-step-design.md (parked in the contract-clock run
-dir because that session was worktree-isolated). Follows the contract-clock run, which makes V1 REFUSE
-under-resolved steps. Nothing is built.
+Status: BUILT in 0.12.0 (landed with the contract clock). The first half is the brief as written on 2026-11-23
+(owner direction: "treat a sub-resolution step locally ... we should do this"); the second half is the run
+specification as built, with every owner decision and acceptance criterion. Where they differ, the second half and the
+0.12.0 CHANGELOG entry describe the code.
 
 ## 1. Problem
 
@@ -22,7 +22,7 @@ s/h 1.047 -> 8.0e-10, 0.722 -> 6.7e-5, 0.574 -> 3.0e-3, 0.331 -> 0.23).
 - **PDE** and **MC** price every gap correctly (PDE within 5e-4 of the coincident value at gaps 0.3 s .. 88 h; MC
   within 3 sigma).
 
-Probes (copied next to this brief): `engines_gap_probe.py`, `v1_mass_probe.py`, `v2_nodes_probe.py`.
+(The probes behind these numbers were run-local scripts and are not in the repository.)
 
 ## 2. Goal
 

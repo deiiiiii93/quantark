@@ -64,12 +64,12 @@ refused them.
   exceed `max_nodes`, the shortest intervals are left out of the sizing, the cell edges are aligned to the (at most
   two) value jumps of the event ending each of them, and their kernel is integrated exactly (`Operator(...,
   local_variance=)`). Gaps from 2e-10 y to the old ~7 min threshold price within 3.9e-8 of the resolved mesh at
-  default parameters, on under 800 nodes. Every contract V2 priced before is bit-identical. V2's first step was
+  default parameters, on at most 784 nodes. Every contract V2 priced before is bit-identical. V2's first step was
   already exact.
 - **What is still refused** (`UnderResolvedStepError` on V1, `ResourceLimitError` on V2, both `NumericalError`, each
   with its reason; MC, the PDE and `auto_converge` price them):
-  - two observations of the same barrier (within three standard deviations of the step) separated only by
-    unresolved steps: the crossing mass between them lies in a layer narrower than a cell (measured up to 1.07e-3 in
+  - two observations of the same barrier (within three standard deviations of the variance between them) separated
+    only by unresolved steps, whatever other events lie between them: the crossing mass between them lies in a layer narrower than a cell (measured up to 1.07e-3 in
     a knock-out probability);
   - on V1, unresolved steps whose accumulated variance exceeds 8 squared cells (a five-year daily knock-in at vol 5%);
   - on V2, more than two value jumps at the event ending an unresolved interval, or a zero-variance interval beside
@@ -90,13 +90,18 @@ refused them.
 
 - **QUAD V1, through the exact first step (owner-signed):**
   - Certificates snowball-, phoenix- and ko-reset-flat-bsm amended and banked as 2026-11-24, every candidate
-    ADMITTED; the 2026-11-15 directories are retired in place. QUAD pv moved by at most 3.7e-5 relative, delta by
-    1.5e-2 and gamma by 2-12%. Against a 16x finer lattice the new values are closer in 30 of 36 checked cells
+    ADMITTED; the 2026-11-15 directories are retired in place. Snowball and KO-reset QUAD pv moved by at most 3.7e-5
+    relative, delta by 1.5e-2; Phoenix pv (near zero) by at most 2e-3 absolute (~1.6e-5 of notional), delta by
+    2.3e-4 absolute; gamma by 2-12%. Against a 16x finer lattice the new values are closer in 30 of 36 checked cells
     (snowball `ordinary` gamma: before -0.04429, now -0.04714, fine lattice -0.04715).
   - Cash-leg baseline: QUAD V1 records move under the new D9 cause (s), checked by recomputing them with the exact
     first step off (price at most 2e-4, legs at most 5e-3 relative).
   - Cross-engine smoke allowances: QUAD V1 on `flat_ko_reset_absolute_dki` (pv 94.54254 -> 94.54341).
   - Futures-carry identity pin: residual .5491942645 -> .5612113718, delta -91.5027056047 -> -91.5114910203.
+  - Book backtest single-product P&L -1414.52 -> -1357.60 (trades and days unchanged); the hard-mask NODAL event
+    statistics baseline (first knock-out probability 0.35447 -> 0.32354, against 0.32356 on 4001 nodes); the
+    empty-side test measures the lattice's own gap on the readout the aged contract uses.
+  - Each of these reproduces its old value with the exact first step switched off.
 - No other certificate anchor (the PDE cells; adi2d, intraday and local-vol studies) and no replay golden moved. MC
   values moved only on W17a collision grids, by at most 1.6e-15 relative.
 - Contracts with event times 1e-10..1e-6 y apart are now two instants on QUAD V1 and the PDE (they were merged).

@@ -1778,6 +1778,18 @@ def test_quad_v1_first_step_moves_are_bounded(case_id):
             continue
         old, new = float(outcome["value"]), float(on["legs"][leg]["value"])
         assert abs(new - old) <= 5e-3 * max(1.0, abs(old)), (case_id, leg, old, new)
+    # the fold routes too (final review: S3b's largest move, 4.0e-3, is a KO-reset fold_drilldown leg)
+    drill_set = list(BANKED["cases"][case_id]["drilldown_set"])
+    if drill_set:
+        d_off, d_on = _drilldown(case_id), cases.fold_drilldown(_case(case_id), drill_set)
+        for key in ("total", "npv"):
+            if "value" in d_off[key]:
+                old, new = float(d_off[key]["value"]), float(d_on[key]["value"])
+                assert abs(new - old) <= 5e-3 * max(1.0, abs(old)), (case_id, key, old, new)
+        for leg, outcome in d_off["per_leg"].items():
+            if "value" in outcome:
+                old, new = float(outcome["value"]), float(d_on["per_leg"][leg]["value"])
+                assert abs(new - old) <= 5e-3 * max(1.0, abs(old)), (case_id, "drilldown", leg, old, new)
 
 
 def test_the_exact_first_step_moves_some_quad_v1_price():

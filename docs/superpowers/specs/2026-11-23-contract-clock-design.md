@@ -1,7 +1,8 @@
 # Contract clock: one rule for "the same instant" across products and engines
 
-Status: owner decisions D1-D4 recorded 2026-11-23 ("A, b, confirmed"); awaiting
-approval of this document. Nothing is built.
+Status: BUILT in 0.12.0 (owner decisions D1-D4 recorded 2026-11-23, "A, b, confirmed"). This is the design as
+approved; the 0.12.0 CHANGELOG entry describes what was built, including the QUAD V1 changes that superseded the
+refusal of under-resolved steps (2026-11-23-quad-subresolution-step-design.md).
 
 ## 1. Intent
 

@@ -104,7 +104,10 @@ def test_single_product_summary_is_stable(single_summary):
     assert single_summary["num_days"] == 86
     assert single_summary["num_trades"] == 4
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
-    assert single_summary["total_pnl"] == pytest.approx(-1414.522255399701, rel=1e-9)
+    # Re-pinned 2026-11-24 (owner-signed QUAD sub-resolution run): QUAD V1 prices the first step from each daily
+    # valuation exactly at the spot when it spans fewer than 13 cells; the daily PVs near observations move, trades
+    # and days do not: -1414.52 -> -1357.60. With the exact first step off the old anchor reproduces.
+    assert single_summary["total_pnl"] == pytest.approx(-1357.5985612515506, rel=1e-9)
 
 
 def test_book_config_rejects_empty_products():

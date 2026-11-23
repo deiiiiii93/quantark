@@ -59,7 +59,15 @@ def test_legacy_quad_prices_an_ended_side_as_the_pde_does(family, times, knocked
         product = make(family, *times)
         return carrying_a_knock_in(product) if knocked_in else product
 
-    gap = abs(price(family, "pde", build(), SPOT) - price(family, "quad_v1", build(), SPOT))
+    # the lattice's own gap, measured on the readout the aged contract takes: its first step is long, so the exact
+    # first step (which brings the unaged price closer to the PDE) does not apply to it
+    from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+
+    saved, SnowballQuadEngine._FIRST_STEP_S_F = SnowballQuadEngine._FIRST_STEP_S_F, 0.0
+    try:
+        gap = abs(price(family, "pde", build(), SPOT) - price(family, "quad_v1", build(), SPOT))
+    finally:
+        SnowballQuadEngine._FIRST_STEP_S_F = saved
     aged = build()
     aged.time_shift(AGE, None, env(SPOT), keep_landing=True)
     side = aged.barrier_config.ki_observation_schedule if times is NO_KI else aged.barrier_config.ko_observation_schedule
