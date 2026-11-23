@@ -96,7 +96,7 @@ def _time_list(value: Any) -> bool:
 
 def _record_list(value: Any) -> bool:
     """A non-empty list of observation records (objects carrying an ``observation_time``)."""
-    return isinstance(value, list) and bool(value) and all(hasattr(r, "observation_time") for r in value)
+    return isinstance(value, (list, tuple)) and bool(value) and all(hasattr(r, "observation_time") for r in value)
 
 
 def _rebased_offsets(product: Any, config_name: str) -> bool:
@@ -136,7 +136,7 @@ def _sources(product: Any) -> Tuple[List[_Source], List[_Source]]:
 def _numeric_records(schedule: Any):
     """The schedule's records (an ``ObservationSchedule``, or a product's list of records) on the numeric clock (a
     dated record resolves from its date)."""
-    records = schedule if isinstance(schedule, list) else schedule.records
+    records = schedule if isinstance(schedule, (list, tuple)) else schedule.records
     return [r for r in records if getattr(r, "observation_date", None) is None]
 
 
@@ -246,7 +246,7 @@ def _moved(t: Any, mapping: Dict[float, float]) -> Any:
 def _canonical_schedule(schedule: Any, mapping: Dict[float, float]) -> Any:
     records = []
     changed = False
-    for record in (schedule if isinstance(schedule, list) else schedule.records):
+    for record in (schedule if isinstance(schedule, (list, tuple)) else schedule.records):
         if getattr(record, "observation_date", None) is None:
             changes = {
                 name: _moved(getattr(record, name), mapping)
@@ -259,7 +259,9 @@ def _canonical_schedule(schedule: Any, mapping: Dict[float, float]) -> Any:
         records.append(record)
     if not changed:
         return schedule
-    return records if isinstance(schedule, list) else dataclasses.replace(schedule, records=records)
+    if isinstance(schedule, (list, tuple)):
+        return type(schedule)(records)
+    return dataclasses.replace(schedule, records=records)
 
 
 def _canonical_list(times: Sequence[float], mapping: Dict[float, float]) -> Sequence[float]:

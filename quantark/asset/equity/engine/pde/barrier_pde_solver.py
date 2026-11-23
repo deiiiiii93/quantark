@@ -145,7 +145,7 @@ class BarrierPDESolver(BasePDESolver):
     def _next_observation(self, current_time):
         """(level, cash, settlement time) of the first observation at or after ``current_time``, else None."""
         for t, level, cash, settle in getattr(self, "_far_field_timeline", ()):
-            if is_greater_than_or_close(t, current_time):
+            if t > current_time or same_instant(t, current_time):
                 return level, cash, settle
         return None
 

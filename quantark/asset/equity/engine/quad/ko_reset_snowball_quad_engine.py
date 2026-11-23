@@ -987,7 +987,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         delay = float(terminal.payment_time) - float(terminal.determination_time)
         last_pre = pre_ko_records[-1] if pre_ko_records else None
         pre_date = (last_pre.observation_date if last_pre is not None
-                    and is_close(float(last_pre.observation_time), pre_maturity) else None)
+                    and same_instant(float(last_pre.observation_time), pre_maturity) else None)
         df_pre = float(pricing_env.get_discount_factor(pre_maturity)) if pre_maturity > 0.0 else 1.0
         # paid on the explicit settlement date when booked (spec D33), else the terminal delay after its maturity
         settlement = first_schedule_settlement(product, pricing_env, terminal)

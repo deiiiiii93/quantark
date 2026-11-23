@@ -37,6 +37,7 @@ from quantark.execution.errors import CapabilityError
 from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType, ObservationType
+from quantark.util.numerical import same_instant
 from quantark.util.enum.engine_enums import EngineType, HestonMCScheme
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.curves import forward_carry_on_grid, forward_rates_on_grid
@@ -134,7 +135,7 @@ def _settlement_scale(engine, product, env, lifecycle_state):
             product=product,
         )
         delayed_hit = delayed_hit or any(
-            not np.isclose(rec.settlement_time, rec.observation_time)
+            not same_instant(rec.settlement_time, rec.observation_time)
             for rec in resolved
         )
 

@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Protocol, Tuple
 import numpy as np
 
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import same_instant
 
 
 class ValueSurface(Protocol):
@@ -37,7 +38,7 @@ class GridValueSurface:
         if self.times.size > 1 and np.any(np.diff(self.times) <= 0):
             raise ValidationError("times must be strictly increasing")
         for key in grids:  # every grid slice must correspond to a declared time
-            if not np.any(np.abs(self.times - key) <= 1e-9):
+            if not any(same_instant(float(t), float(key)) for t in self.times):
                 raise ValidationError(f"grid time {key} not present in times")
         self.grids = grids
         self.currency = currency
@@ -46,7 +47,7 @@ class GridValueSurface:
         per_t = self.grids.get(t)
         if per_t is None:  # tolerance lookup (exact float keys are brittle)
             for key in self.grids:
-                if abs(key - t) <= 1e-9:
+                if same_instant(key, t):
                     per_t = self.grids[key]
                     break
         if per_t is None:

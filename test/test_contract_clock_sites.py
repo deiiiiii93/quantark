@@ -349,6 +349,18 @@ SITES = [
      ("is_close(resolved_times[-1], maturity)",)),
     ("quantark/asset/equity/engine/settlement_support.py", "first_schedule_settlement", V1_ABS),
     ("quantark/asset/equity/engine/settlement_support.py", "first_schedule_payment_time", V1_ABS),
+    # CP2 findings
+    ("quantark/asset/equity/engine/mc/barrier_vol_mc_engines.py", "_settlement_scale",
+     ("np.isclose(rec.settlement_time, rec.observation_time)",)),
+    ("quantark/cashleg/event_distribution.py", "EventDistribution._survival_axis", ("tol=Tolerance.PROBABILITY",)),
+    ("quantark/cashleg/event_distribution.py", "EventDistribution.survival_at", ("tol=Tolerance.PROBABILITY",)),
+    ("quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py", "KOResetSnowballQuadEngine._reset_rows",
+     ("is_close(float(last_pre.observation_time), pre_maturity)",)),
+    ("quantark/cashleg/folding.py", "_ko_reset_structure", ("- Tolerance.PROBABILITY",)),
+    ("quantark/sacva/exposure/value_surface.py", "GridValueSurface.__init__", ("<= 1e-9",)),
+    ("quantark/sacva/exposure/value_surface.py", "GridValueSurface.value_at", ("<= 1e-9",)),
+    ("quantark/asset/equity/engine/pde/barrier_pde_solver.py", "BarrierPDESolver._next_observation",
+     ("is_greater_than_or_close(t, current_time)",)),
 ]
 
 #: D2: the MC grids that union contract instants with engine-added nodes merge against the contract instants

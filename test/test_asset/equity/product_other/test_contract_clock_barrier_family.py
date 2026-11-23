@@ -148,3 +148,11 @@ class TestRangeAccrualRecords:
                                observation_records=records)
         assert p.observation_records[-1].observation_time == 1.0
         assert held.observation_time == OBS_ULP[-1]
+
+
+def test_range_accrual_tuple_of_records_is_canonicalized():
+    """CP2 #9: a tuple of observation records is one schedule too, rebuilt as a tuple."""
+    records = tuple(RangeAccrualObservationRecord(observation_time=t) for t in OBS_ULP)
+    p = RangeAccrualOption(initial_price=100.0, range_config=range_config(), maturity=1.0, observation_records=records)
+    assert isinstance(p.observation_records, tuple)
+    assert p.observation_records[-1].observation_time == 1.0

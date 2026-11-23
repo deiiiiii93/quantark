@@ -39,6 +39,11 @@ from quantark.util.enum.engine_enums import (
     KnockInMonitoringMode,
 )
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
+
+
+class UnderResolvedStepError(NumericalError):
+    """QUAD V1 refuses a diffusion step its lattice does not resolve (``_require_resolved_kernels``). A finer
+    lattice may resolve it: ``auto_converge`` moves to its next rung instead of failing."""
 from quantark.util.numerical import (
     Tolerance,
     is_close,
@@ -677,10 +682,18 @@ class SnowballQuadEngine(BaseEngine):
             )
             candidate = self.__class__(params=candidate_params)
             candidate.record_backward_grids = self.record_backward_grids
-            if fold is None:
-                value = float(candidate.price(product, pricing_env))
-            else:
-                value = float(candidate._price_once(product, pricing_env, fold=fold))
+            try:
+                if fold is None:
+                    value = float(candidate.price(product, pricing_env))
+                else:
+                    value = float(candidate._price_once(product, pricing_env, fold=fold))
+            except UnderResolvedStepError:
+                # this rung's lattice cannot resolve a step: not an estimate, the next (finer) rung may (CP2 #1)
+                next_requested = 2 * (requested - 1) + 1
+                if next_requested > cap:
+                    raise
+                requested = next_requested
+                continue
             grid_artifact = getattr(candidate, "_last_spot_greeks_grid", None)
             used = (
                 int(grid_artifact[0].size)
@@ -2361,11 +2374,18 @@ class SnowballQuadEngine(BaseEngine):
         return np.concatenate(([0.0], dt))
 
     @staticmethod
-    def _kernel_mass_error_bound(s_over_h: float) -> float:
-        """Relative mass the sampled Gaussian kernel of one step loses to aliasing: ``2 exp(-2 pi^2 (s/h)^2)`` for a
-        kernel of standard deviation ``s`` (log-spot) sampled on cells of width ``h`` (measured on this engine's
-        operator: s/h 1.047 -> 8.0e-10, 0.722 -> 6.7e-5, 0.574 -> 3.0e-3, 0.331 -> 0.23)."""
-        return 2.0 * math.exp(-2.0 * math.pi * math.pi * s_over_h * s_over_h)
+    def _kernel_mass_error_bound(s_over_h: float, integration_rule: str = "trapezoid") -> float:
+        """Relative mass the sampled Gaussian kernel of one step loses to aliasing, for a kernel of standard
+        deviation ``s`` (log-spot) sampled on cells of width ``h``.
+
+        Trapezoid weights alias at the grid frequency: ``2 exp(-2 pi^2 (s/h)^2)`` (measured on this engine's operator:
+        s/h 1.047 -> 8.0e-10, 0.722 -> 6.7e-5, 0.574 -> 3.0e-3, 0.331 -> 0.23). Simpson's alternating 4/2 weights also
+        alias at half that frequency: ``+ (2/3) exp(-pi^2 (s/h)^2 / 2)`` (s/h 0.85 -> 1.9e-2, CP2 measurement).
+        """
+        bound = 2.0 * math.exp(-2.0 * math.pi * math.pi * s_over_h * s_over_h)
+        if integration_rule == "simpson":
+            bound += (2.0 / 3.0) * math.exp(-0.5 * math.pi * math.pi * s_over_h * s_over_h)
+        return bound
 
     def _require_resolved_kernels(self, times: Sequence[float], tau: np.ndarray, h: float) -> None:
         """Refuse a diffusion step whose kernel the lattice does not resolve (owner ruling 2026-11-23).
@@ -2381,11 +2401,13 @@ class SnowballQuadEngine(BaseEngine):
         times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
         s_over_h = np.sqrt(2.0 * np.asarray(tau[1:], dtype=float)) / float(h)
         worst = int(np.argmin(s_over_h))
-        bound = self._kernel_mass_error_bound(float(s_over_h[worst]))
+        bound = self._kernel_mass_error_bound(
+            float(s_over_h[worst]), str(getattr(self.params, "integration_rule", "trapezoid")).lower()
+        )
         accuracy = float(getattr(self.params, "convergence_rel_tol", 1.0e-4))
         if bound > accuracy:
             a, b = float(times_full[worst]), float(times_full[worst + 1])
-            raise NumericalError(
+            raise UnderResolvedStepError(
                 f"QUAD V1: the diffusion step from {a!r} to {b!r} ({b - a:.3g} years) is under-resolved by the "
                 f"lattice: its kernel spans {s_over_h[worst]:.3g} cells (mass error bound {bound:.2g} > the engine's "
                 f"accuracy target convergence_rel_tol={accuracy:g}). Raise grid_points, or price this contract on the MC, PDE or QUAD V2 engine."

@@ -18,6 +18,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.event_stats import StatisticsProvenance
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.asset.equity.product.option.observation_schedule import at_valuation_instant
 from quantark.util.numerical import Tolerance, almost_equal, is_zero
 
 
@@ -483,10 +484,10 @@ class EventDistribution:
             times, survival = times[keep], survival[keep]
         if times.size == 0:
             end = max(float(terminal_time), 0.0)
-            if almost_equal(end, 0.0, tol=Tolerance.PROBABILITY):
+            if at_valuation_instant(end):
                 return np.array([0.0]), np.array([1.0])
             return np.array([0.0, end]), np.array([1.0, 1.0])
-        if almost_equal(float(times[0]), 0.0, tol=Tolerance.PROBABILITY):
+        if at_valuation_instant(float(times[0])):
             return times, survival
         return np.r_[0.0, times], np.r_[1.0, survival]
 
@@ -557,7 +558,7 @@ class EventDistribution:
         t = float(t)
         time_grid, survival_grid = self.survival_times, self.survival_probability
         if is_zero(t):
-            if almost_equal(float(time_grid[0]), 0.0, tol=Tolerance.PROBABILITY):
+            if at_valuation_instant(float(time_grid[0])):
                 return float(survival_grid[0])
             return 1.0
         if t < 0.0:
@@ -759,7 +760,7 @@ class EventDistribution:
             raise NumericalError("EventDistribution survival axis contains non-finite values")
         if np.any(np.diff(times) < -Tolerance.PROBABILITY):
             raise NumericalError("EventDistribution.survival_times must be sorted")
-        if not almost_equal(float(times[0]), 0.0, tol=Tolerance.PROBABILITY):
+        if not at_valuation_instant(float(times[0])):
             raise NumericalError(
                 f"EventDistribution.survival_times starts at {times[0]}, expected the valuation (0)"
             )

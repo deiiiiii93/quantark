@@ -121,3 +121,23 @@ class TestKernelResolution:
         times = (0.25, 0.5, 0.75, 1.0)
         mc = SnowballMCEngine(params=MCParams(seed=11, num_paths=50_000))
         assert np.isfinite(mc.price(snowball(times, (0.25, 0.5 + SECOND, 0.75, 1.0)), env()))
+
+
+class TestCheckpointTwoFixes:
+    def test_auto_converge_refines_past_an_unresolved_rung(self):
+        """CP2 #1: a KI 2e-4 y after a KO is refused at 1001 points but resolved at 2001/4001; the auto_converge
+        ladder moves on instead of failing at its first rung, and lands next to the PDE."""
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.param import PDEParams
+
+        times = (0.25, 0.5, 0.75, 1.0)
+        split = snowball(times, (0.25, 0.5 + 2e-4, 0.75, 1.0))
+        with pytest.raises(NumericalError, match="under-resolved"):
+            engine().price(split, env())
+        converged = SnowballQuadEngine(QuadParams(auto_converge=True)).price(split, env())
+        assert converged == pytest.approx(SnowballPDESolver(PDEParams()).price(split, env()), abs=1e-3)
+
+    def test_simpson_bound_adds_the_half_frequency_alias(self):
+        """CP2 #4: measured 1.9e-2 at s/h 0.85 with Simpson weights against 1.3e-6 with trapezoid."""
+        assert SnowballQuadEngine._kernel_mass_error_bound(0.85, "simpson") == pytest.approx(1.9e-2, rel=0.05)
+        assert SnowballQuadEngine._kernel_mass_error_bound(0.85, "trapezoid") == pytest.approx(1.3e-6, rel=0.1)

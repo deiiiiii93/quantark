@@ -35,7 +35,7 @@ from quantark.cashleg.deterministic_leg import DeterministicLeg
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance, almost_equal, is_close, is_non_positive
+from quantark.util.numerical import Tolerance, almost_equal, is_close, is_non_positive, same_instant
 
 __all__ = [
     "FoldMode",
@@ -411,7 +411,8 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
     merged_times, merged_pays = times[order], pays[order]
     schedule_tags = tuple("pre" if tag[i] == 0 else "post" for i in order)
     # F5: the pre-maturity mass leaves the survival at its own determination when that precedes the last record
-    drops_pre_maturity = pre_maturity < float(merged_times[-1]) - Tolerance.PROBABILITY
+    last = float(merged_times[-1])
+    drops_pre_maturity = pre_maturity < last and not same_instant(pre_maturity, last)
     after_pre_maturity = merged_times >= pre_maturity
 
     def distribution(p_ko, p_no_ki, p_ki):
