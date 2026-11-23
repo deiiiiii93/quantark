@@ -425,5 +425,140 @@
    "hw_pki": 6.782158398221938e-07,
    "method": "F forced, grid 8001; hw = |8001 - 4001|"
   }
- }
+ },
+ "thresholds": {
+  "thr_guard_below": {
+   "base": {
+    "ref_price": 98.07139980527111,
+    "coarse_price": 98.07137040358427
+   },
+   "spot_up": {
+    "ref_price": 98.49962937133971,
+    "coarse_price": 98.49960093327125
+   },
+   "spot_dn": {
+    "ref_price": 97.6084111560976,
+    "coarse_price": 97.608380792697
+   },
+   "theta": {
+    "ref_price": 98.07139980527144,
+    "coarse_price": 98.07137040358445
+   },
+   "vega": {
+    "ref_price": 97.63908303132791,
+    "coarse_price": 97.63905295792497
+   }
+  },
+  "thr_guard_above": {
+   "base": {
+    "ref_price": 98.07139980527108,
+    "coarse_price": 98.07137040358421
+   },
+   "spot_up": {
+    "ref_price": 98.49962937133967,
+    "coarse_price": 98.49960093327121
+   },
+   "spot_dn": {
+    "ref_price": 97.60841115609755,
+    "coarse_price": 97.60838079269695
+   },
+   "theta": {
+    "ref_price": 98.07139980527134,
+    "coarse_price": 98.07137040358438
+   },
+   "vega": {
+    "ref_price": 97.63908303132789,
+    "coarse_price": 97.63905295792496
+   }
+  },
+  "thr_sf_below": {
+   "base": {
+    "ref_price": 98.64259241424116,
+    "coarse_price": 98.64259878293231
+   },
+   "spot_up": {
+    "ref_price": 98.75969521855522,
+    "coarse_price": 98.75970477094569
+   },
+   "spot_dn": {
+    "ref_price": 98.57528111329017,
+    "coarse_price": 98.57528494771388
+   },
+   "theta": {
+    "ref_price": 98.64259370425647,
+    "coarse_price": 98.64260007254047
+   },
+   "vega": {
+    "ref_price": 98.78805415967628,
+    "coarse_price": 98.78806252535318
+   }
+  },
+  "thr_sf_above": {
+   "base": {
+    "ref_price": 98.64259076890897,
+    "coarse_price": 98.64259713870679
+   },
+   "spot_up": {
+    "ref_price": 98.759695257848,
+    "coarse_price": 98.75970481463742
+   },
+   "spot_dn": {
+    "ref_price": 98.57528055659768,
+    "coarse_price": 98.5752843912442
+   },
+   "theta": {
+    "ref_price": 98.64259128240664,
+    "coarse_price": 98.64259765166682
+   },
+   "vega": {
+    "ref_price": 98.7880634072547,
+    "coarse_price": 98.78807177827741
+   }
+  },
+  "thr_sizing_below": {
+   "base": {
+    "ref_price": 81.78750355316657,
+    "coarse_price": 81.78747984543895
+   },
+   "spot_up": {
+    "ref_price": 82.75036456465665,
+    "coarse_price": 82.75033785305061
+   },
+   "spot_dn": {
+    "ref_price": 80.80876226711236,
+    "coarse_price": 80.80874184760332
+   },
+   "theta": {
+    "ref_price": 81.78750355316849,
+    "coarse_price": 81.78747984544106
+   },
+   "vega": {
+    "ref_price": 81.45754723449849,
+    "coarse_price": 81.45752742560484
+   }
+  },
+  "thr_sizing_above": {
+   "base": {
+    "ref_price": 81.78750355316645,
+    "coarse_price": 81.78747613707937
+   },
+   "spot_up": {
+    "ref_price": 82.75036456465655,
+    "coarse_price": 82.7503348242995
+   },
+   "spot_dn": {
+    "ref_price": 80.80876226711223,
+    "coarse_price": 80.80873734607975
+   },
+   "theta": {
+    "ref_price": 81.78750355316797,
+    "coarse_price": 81.78747984544044
+   },
+   "vega": {
+    "ref_price": 81.4575472344985,
+    "coarse_price": 81.45753424347109
+   }
+  }
+ },
+ "method_thresholds": "CP1: THRESHOLDS x BUMPS, F forced on 8001 nodes, also 4001 nodes (coarse_price): half-widths of prices and of bump differences are their refinement differences"
 }

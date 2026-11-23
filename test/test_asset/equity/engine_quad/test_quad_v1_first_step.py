@@ -168,6 +168,40 @@ CASES = {
 }
 
 
+#: AC5c with greeks: just below / above each switch threshold, spot away from the barriers so the bump delta is gated.
+#: name -> (engine class, product factory of the lead, lead, vol, spot, theta step). Kernel guard (s/h 0.708, F on both
+#: sides); S_F (F below, the lattice above; vol 5% on a half-year note, so 13 cells fit before the next date); the
+#: rule-(i) sizing cap (a first knock-in date whose spacing needs more than max_adaptive_grid_points: priced locally
+#: on 1001 nodes below, the grid grown above; F on both sides).
+_SIZING_LEAD = (2.0 * (10.0 * 0.2 + 1.02) * 2.5 / (0.2 * 5000.0)) ** 2
+THRESHOLDS = {
+    **{f"thr_guard_{side}": (SnowballQuadEngine, first_ko, (r * default_h(0.2) / 0.2) ** 2, 0.2,
+                             103.0 * math.exp(-0.05), 1.0 / (365.0 * 24.0))
+       for side, r in (("below", 0.70), ("above", 0.72))},
+    **{f"thr_sf_{side}": (SnowballQuadEngine,
+                          lambda lead: snowball((lead, 0.25, 0.375, 0.5), (0.25, 0.375, 0.5)),
+                          (r * default_h(0.05, 0.5) / 0.05) ** 2, 0.05, 95.0, DAY)
+       for side, r in (("below", 12.9), ("above", 13.1))},
+    **{f"thr_sizing_{side}": (SnowballQuadEngine, first_ki, _SIZING_LEAD * f, 0.2, 75.0 * math.exp(0.05),
+                              1.0 / (365.0 * 24.0))
+       for side, f in (("below", 0.96), ("above", 1.04))},
+}
+#: each threshold case is priced at its point and bumped: spot +-1% (delta), the lead shortened by the theta step
+#: (theta: the first step's length moves), vol + 1% (vega: s/h moves with the grid's vol^2 half-width term)
+BUMPS = ("base", "spot_up", "spot_dn", "theta", "vega")
+
+
+def threshold_point(name, bump, *, grid_points=None, force=False):
+    cls, make, lead, vol, spot, dt = THRESHOLDS[name]
+    params = QuadParams() if grid_points is None else QuadParams(grid_points=grid_points)
+    engine = cls(params)
+    if force:
+        engine._FIRST_STEP_S_F = float("inf")
+    product = make(lead - dt if bump == "theta" else lead)
+    s = spot * {"spot_up": 1.01, "spot_dn": 0.99}.get(bump, 1.0)
+    return engine, product, env(vol + (0.01 if bump == "vega" else 0.0), s)
+
+
 def solve(name, *, grid_points=None, force=False, spot=None, engine_cls=None):
     cls, make, vol, s = CASES[name]
     params = QuadParams() if grid_points is None else QuadParams(grid_points=grid_points)
@@ -394,6 +428,55 @@ class TestThresholds:
         today._FIRST_STEP_S_F = 0.0
         assert engine.price(product, market) == today.price(product, market)
         assert np.array_equal(engine._last_spot_greeks_grid[1], today._last_spot_greeks_grid[1])
+
+    # CP1: price, bump delta and theta just below / above each switch, with the bumps that move a contract across it.
+    # Measured (default engine, 2026-11-23): theta's one-hour shortening of the lead crosses the guard
+    # (thr_guard_above -> a local first step) and the sizing cap (thr_sizing_above: 4905 -> 1001 nodes); vega's +1%
+    # crosses the guard (below -> above) and S_F (thr_sf_below -> the lattice).
+
+    @pytest.mark.parametrize("name, exact", [("thr_guard_below", True), ("thr_guard_above", True),
+                                             ("thr_sf_below", True), ("thr_sf_above", False),
+                                             ("thr_sizing_below", True), ("thr_sizing_above", True)])
+    @pytest.mark.parametrize("bump", BUMPS)
+    def test_price_on_both_sides_matches_the_reference(self, name, exact, bump):
+        ref = REFS["thresholds"][name][bump]
+        engine, product, market = threshold_point(name, bump)
+        value = engine.price(product, market)
+        if bump in ("base", "spot_up", "spot_dn"):
+            assert (engine._last_first_step is not None) == exact
+        hw = abs(ref["ref_price"] - ref["coarse_price"])
+        assert within(value, ref["ref_price"], hw, 1e-4, 1e-6), (value, ref["ref_price"])
+
+    @pytest.mark.parametrize("name", list(THRESHOLDS))
+    def test_bump_delta_on_both_sides_matches_the_reference(self, name):
+        """Central 1% spot bumps (``calculate_greeks``), the spot several step widths from every barrier."""
+        refs = REFS["thresholds"][name]
+        spot = THRESHOLDS[name][4]
+
+        def diff(key):
+            return (refs["spot_up"][key] - refs["spot_dn"][key]) / (0.02 * spot)
+
+        engine, product, market = threshold_point(name, "base")
+        delta = engine.calculate_greeks(product, market)["delta"]
+        ref, hw = diff("ref_price"), abs(diff("ref_price") - diff("coarse_price"))
+        assert within(delta, ref, hw, 1e-3, 1e-4), (delta, ref)
+
+    @pytest.mark.parametrize("name", list(THRESHOLDS))
+    def test_theta_on_both_sides_matches_the_reference(self, name):
+        """Theta as the first step shortens by the case's step (one hour, or a day). Where that crosses a switch each
+        end is the AC price tolerance from its own reference, so theta is bounded by their sum over the step; the
+        largest crossing (sizing cap, 4905 -> 1001 nodes) moves the price 9.1e-4 in the hour (1.1e-5 relative)."""
+        refs = REFS["thresholds"][name]
+        dt = THRESHOLDS[name][5]
+        values = {}
+        for bump in ("base", "theta"):
+            engine, product, market = threshold_point(name, bump)
+            values[bump] = engine.price(product, market)
+        theta = (values["theta"] - values["base"]) / dt
+        ref = (refs["theta"]["ref_price"] - refs["base"]["ref_price"]) / dt
+        hw = abs(ref - (refs["theta"]["coarse_price"] - refs["base"]["coarse_price"]) / dt)
+        tol = sum(1e-4 * abs(refs[b]["ref_price"]) + 1e-6 for b in ("base", "theta")) / dt
+        assert abs(theta - ref) <= 1e-3 * abs(ref) + hw + tol, (theta, ref)
 
     def test_auto_converge_prices_a_one_day_first_step(self):
         rung = next(r for r in first_step_rungs()
