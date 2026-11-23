@@ -28,7 +28,7 @@ from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import Tolerance, is_close, safe_log
+from quantark.util.numerical import Tolerance, is_close, safe_log, same_instant
 
 
 @dataclass(frozen=True)
@@ -377,8 +377,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            contract_times = times
             times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
-            times = self._merge_times(times, (), maturity)
+            # the knots are engine-added nodes: a contract instant is never displaced by one (contract clock D2)
+            times = self._merge_times(times, (), maturity, anchors=contract_times)
         if not times:
             raise PricingError("Observation time grid is empty for PhoenixQuadEngine.")
 
@@ -449,6 +451,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         tau = 0.5 * vol_vec * vol_vec * dt
+        self._require_resolved_kernels(times, tau, math_utils.h)
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -616,7 +619,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             ko_index = None
             ko_record = None
             for idx, rec in enumerate(ko_records):
-                if is_close(obs_time, rec.observation_time, abs_tol=Tolerance.PRECISION):
+                if same_instant(obs_time, rec.observation_time):
                     ko_index = idx
                     ko_record = rec
                     break

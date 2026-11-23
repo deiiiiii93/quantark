@@ -42,6 +42,8 @@ from quantark.util.exceptions import NumericalError, PricingError, ValidationErr
 from quantark.util.numerical import (
     Tolerance,
     is_close,
+    merge_time_nodes,
+    same_instant,
     is_greater_than,
     is_less_than,
     is_zero,
@@ -220,8 +222,8 @@ class SnowballQuadEngine(BaseEngine):
             for rec in records
             if rec.observation_time is not None
             and not is_less_than(float(rec.observation_time), 0.0, rel_tol=0.0, abs_tol=0.0)
-            and not is_greater_than(
-                float(rec.observation_time), maturity, rel_tol=0.0, abs_tol=Tolerance.PRECISION
+            and not (
+                float(rec.observation_time) > maturity and not same_instant(float(rec.observation_time), maturity)
             )
         ]
 
@@ -386,8 +388,10 @@ class SnowballQuadEngine(BaseEngine):
         )
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            contract_times = times
             times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
-            times = self._merge_times(times, (), maturity)
+            # the knots are engine-added nodes: a contract instant is never displaced by one (contract clock D2)
+            times = self._merge_times(times, (), maturity, anchors=contract_times)
         if not times:
             raise PricingError("Observation time grid is empty for SnowballQuadEngine.")
 
@@ -462,6 +466,7 @@ class SnowballQuadEngine(BaseEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         tau = 0.5 * vol_vec * vol_vec * dt
+        self._require_resolved_kernels(times, tau, math_utils.h)
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -1003,8 +1008,10 @@ class SnowballQuadEngine(BaseEngine):
         )
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            contract_times = times
             times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
-            times = self._merge_times(times, (), maturity)
+            # the knots are engine-added nodes: a contract instant is never displaced by one (contract clock D2)
+            times = self._merge_times(times, (), maturity, anchors=contract_times)
         dt = self._build_dt(times)
 
         rate_vec, div_vec, vol_vec = self._term_step_params(
@@ -1061,6 +1068,7 @@ class SnowballQuadEngine(BaseEngine):
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
         tau = 0.5 * vol_vec * vol_vec * dt
+        self._require_resolved_kernels(times, tau, math_utils.h)
         alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
             vol_vec * vol_vec
         )
@@ -1146,7 +1154,7 @@ class SnowballQuadEngine(BaseEngine):
             ko_index = None
             ko_record = None
             for idx, rec in enumerate(ko_records):
-                if is_close(obs_time, rec.observation_time, abs_tol=Tolerance.PRECISION):
+                if same_instant(obs_time, rec.observation_time):
                     ko_index = idx
                     ko_record = rec
                     break
@@ -1516,14 +1524,7 @@ class SnowballQuadEngine(BaseEngine):
                 active.append(True)
                 continue
 
-            matches = np.flatnonzero(
-                np.isclose(
-                    time_arr,
-                    float(rec.observation_time),
-                    rtol=0.0,
-                    atol=Tolerance.PRECISION,
-                )
-            )
+            matches = np.flatnonzero(np.abs(time_arr - float(rec.observation_time)) < Tolerance.ZERO)
             if matches.size == 0:
                 raise ValidationError(
                     "KO observation time is missing from the QUAD recursion grid: "
@@ -2048,8 +2049,7 @@ class SnowballQuadEngine(BaseEngine):
             obs_time = times[step_index - 1]
             ko_index, ko_record = None, None
             for idx, rec in enumerate(ko_records):
-                if is_close(obs_time, rec.observation_time,
-                            abs_tol=Tolerance.PRECISION):
+                if same_instant(obs_time, rec.observation_time):
                     ko_index, ko_record = idx, rec
                     break
             if ko_record is not None:
@@ -2277,12 +2277,13 @@ class SnowballQuadEngine(BaseEngine):
             if st is None:
                 continue
             st = float(st)
-            if st <= float(rec.observation_time) + Tolerance.PRECISION:
+            obs = float(rec.observation_time)
+            if st <= obs or same_instant(st, obs):
                 continue  # immediate settlement: already an observation node
-            if is_greater_than(st, maturity, abs_tol=Tolerance.PRECISION):
+            if st > maturity and not same_instant(st, maturity):
                 continue  # post-maturity tail: handled (rejected) by the exposure layer
             st = min(st, float(maturity))
-            if not any(is_close(st, t, abs_tol=Tolerance.PRECISION) for t in merged):
+            if not any(same_instant(st, t) for t in merged):
                 merged.append(st)
         return sorted(merged)
 
@@ -2301,23 +2302,31 @@ class SnowballQuadEngine(BaseEngine):
             )
 
     def _merge_times(
-        self, ko_times: Sequence[float], ki_times: Sequence[float], maturity: float
+        self,
+        ko_times: Sequence[float],
+        ki_times: Sequence[float],
+        maturity: float,
+        *,
+        anchors: Optional[Sequence[float]] = None,
     ) -> list[float]:
-        merged = []
-        for t in sorted(list(ko_times) + list(ki_times)):
+        """The recursion's step times in (0, maturity], one per instant, maturity last and exact.
+
+        One instant is the contract clock's rule (``merge_time_nodes``: closer than ``Tolerance.ZERO``, the LAST of a
+        run, maturity pinned). Contract times arrive canonical, so for them this is a no-op; ``anchors`` (the contract
+        times) pins them against nodes the engine adds itself (continuous-KI knots).
+        """
+        maturity = float(maturity)
+        kept = []
+        for t in list(ko_times) + list(ki_times):
             t = float(t)
             self._require_resolvable_time(t)
-            if t <= 0.0:
+            if t <= 0.0 or (t > maturity and not same_instant(t, maturity)):
                 continue
-            if is_greater_than(t, maturity, abs_tol=Tolerance.PRECISION):
-                continue
-            if is_close(t, maturity, abs_tol=Tolerance.PRECISION):
-                t = float(maturity)
-            if not merged or not is_close(t, merged[-1], abs_tol=Tolerance.PRECISION):
-                merged.append(t)
-        if not merged or not is_close(merged[-1], maturity, abs_tol=Tolerance.PRECISION):
-            merged.append(maturity)
-        return merged
+            kept.append(t)
+        if anchors is not None:
+            anchors = [float(a) for a in anchors]
+        nodes = merge_time_nodes(kept + [maturity], pin=maturity, anchors=anchors)
+        return [float(t) for t in nodes]
 
     def _term_step_params(
         self, pricing_env, ref_strike, times, rate, div, vol
@@ -2351,9 +2360,40 @@ class SnowballQuadEngine(BaseEngine):
             raise ValidationError("observation_times must be strictly increasing.")
         return np.concatenate(([0.0], dt))
 
+    @staticmethod
+    def _kernel_mass_error_bound(s_over_h: float) -> float:
+        """Relative mass the sampled Gaussian kernel of one step loses to aliasing: ``2 exp(-2 pi^2 (s/h)^2)`` for a
+        kernel of standard deviation ``s`` (log-spot) sampled on cells of width ``h`` (measured on this engine's
+        operator: s/h 1.047 -> 8.0e-10, 0.722 -> 6.7e-5, 0.574 -> 3.0e-3, 0.331 -> 0.23)."""
+        return 2.0 * math.exp(-2.0 * math.pi * math.pi * s_over_h * s_over_h)
+
+    def _require_resolved_kernels(self, times: Sequence[float], tau: np.ndarray, h: float) -> None:
+        """Refuse a diffusion step whose kernel the lattice does not resolve (owner ruling 2026-11-23).
+
+        The lattice is sized for the whole maturity and refined only for the knock-in spacing
+        (``_resolve_grid_points``), so a step shorter than that -- a knock-out minutes from a knock-in, a settlement
+        node, two instants seconds apart -- can carry a kernel narrower than the cells. Its sampled mass then leaks
+        (``_kernel_mass_error_bound``): a knock-out and a knock-in 1e-4 years apart priced 109.3 against 98.9. Such a
+        step is refused, never priced, when its relative mass error exceeds the engine's own accuracy target,
+        ``params.convergence_rel_tol`` (default 1e-4: s/h below ~0.71). Monte Carlo, the PDE and QUAD V2 resolve it;
+        a finer ``grid_points`` may too.
+        """
+        times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
+        s_over_h = np.sqrt(2.0 * np.asarray(tau[1:], dtype=float)) / float(h)
+        worst = int(np.argmin(s_over_h))
+        bound = self._kernel_mass_error_bound(float(s_over_h[worst]))
+        accuracy = float(getattr(self.params, "convergence_rel_tol", 1.0e-4))
+        if bound > accuracy:
+            a, b = float(times_full[worst]), float(times_full[worst + 1])
+            raise NumericalError(
+                f"QUAD V1: the diffusion step from {a!r} to {b!r} ({b - a:.3g} years) is under-resolved by the "
+                f"lattice: its kernel spans {s_over_h[worst]:.3g} cells (mass error bound {bound:.2g} > the engine's "
+                f"accuracy target convergence_rel_tol={accuracy:g}). Raise grid_points, or price this contract on the MC, PDE or QUAD V2 engine."
+            )
+
     def _match_record(self, target_time: float, records: Sequence) -> Optional[object]:
         for rec in records:
-            if is_close(target_time, rec.observation_time, abs_tol=Tolerance.PRECISION):
+            if same_instant(target_time, rec.observation_time):
                 return rec
         return None
 

@@ -123,7 +123,7 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
         times = np.array([float(r.observation_time) for r in records], dtype=float)
         columns = []
         for x in times:
-            hit = np.flatnonzero(np.abs(t - x) <= Tolerance.PRECISION)
+            hit = np.flatnonzero(np.abs(t - x) < Tolerance.ZERO)
             columns.append(int(hit[0]) if hit.size else None)
         on_schedule = np.zeros(t.size, dtype=bool)
         on_schedule[[c for c in columns if c is not None]] = True

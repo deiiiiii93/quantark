@@ -39,6 +39,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
     is_close,
+    same_instant,
     safe_log,
     validate_non_negative,
     validate_positive,
@@ -178,7 +179,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             rec
             for rec in pre_ko_records
             if rec.observation_time <= maturity
-            or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
+            or same_instant(rec.observation_time, maturity)
         ]
         if not pre_ko_records and not carried_knock_in:
             raise PricingError("Pre-KO observation schedule is empty for KOResetSnowballQuadEngine.")
@@ -190,7 +191,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             rec
             for rec in post_ko_records
             if rec.observation_time <= maturity
-            or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
+            or same_instant(rec.observation_time, maturity)
         ]
         # An empty schedule 2 (aged past its last date, spec 2026-10-07) is legal: a knock-in
         # then leaves no knock-out before maturity. An empty knock-in side folds away too.
@@ -231,8 +232,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            contract_times = times
             times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
-            times = self._merge_times(times, (), maturity)
+            # the knots are engine-added nodes: a contract instant is never displaced by one (contract clock D2)
+            times = self._merge_times(times, (), maturity, anchors=contract_times)
         if not times:
             raise PricingError("Observation time grid is empty for KOResetSnowballQuadEngine.")
 
@@ -277,6 +280,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         df_local = make_df_fn(pricing_env)
         tau = 0.5 * vol_vec * vol_vec * dt
+        self._require_resolved_kernels(times, tau, math_utils.h)
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -351,9 +355,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
-            out_live = obs_time < pre_maturity or is_close(
-                obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
-            )
+            out_live = obs_time < pre_maturity or same_instant(obs_time, pre_maturity)
             if out_live and not v_out_seeded:
                 v_out = v_out_terminal.copy()
                 v_out_seeded = True
@@ -637,7 +639,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             rec
             for rec in pre_ko_records
             if rec.observation_time <= maturity
-            or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
+            or same_instant(rec.observation_time, maturity)
         ]
         post_ko_records = self._resolve_ko_records(
             product, pricing_env, product.post_barrier_config
@@ -646,7 +648,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             rec
             for rec in post_ko_records
             if rec.observation_time <= maturity
-            or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
+            or same_instant(rec.observation_time, maturity)
         ]
         # A knock-out at the valuation instant is decided on the known spot, as in ``price``.
         decision = product.decide_observations_at_valuation(
@@ -683,8 +685,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
+            contract_times = times
             times, self._continuous_ki_model = continuous_time_grid(pricing_env, times, self.params)
-            times = self._merge_times(times, (), maturity)
+            # the knots are engine-added nodes: a contract instant is never displaced by one (contract clock D2)
+            times = self._merge_times(times, (), maturity, anchors=contract_times)
         if not times:
             return None
 
@@ -723,6 +727,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         df_local = make_df_fn(pricing_env)
         tau = 0.5 * vol_vec * vol_vec * dt
+        self._require_resolved_kernels(times, tau, math_utils.h)
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
@@ -790,9 +795,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
-            out_live = obs_time < pre_maturity or is_close(
-                obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
-            )
+            out_live = obs_time < pre_maturity or same_instant(obs_time, pre_maturity)
             seed = out_live and not v_out_seeded
             if seed:
                 v_out[m_unit] = 1.0
