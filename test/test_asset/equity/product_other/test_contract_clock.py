@@ -105,6 +105,15 @@ def _ki(product):
 
 
 class TestCanonicalize:
+    """The function on RAW bookings: construction's own canonicalization (T3) is switched off here, so each test
+    hands the function exactly the floats it booked."""
+
+    @pytest.fixture(autouse=True)
+    def raw_construction(self, monkeypatch):
+        from quantark.asset.equity.product.option import snowball_option
+
+        monkeypatch.setattr(snowball_option, "canonicalize_contract_clock", lambda product: False)
+
     def test_cross_schedule_ulp_pair_becomes_the_last_member(self):
         """AC2(a): both spellings become the run's LAST float, in the schedules and in the legacy lists."""
         p = _snowball(ki_times=(0.25, UP(0.5), 0.75, 1.0))
@@ -162,16 +171,18 @@ class TestCanonicalize:
         assert canonicalize_contract_clock(p) is True
         assert p.barrier_config.ko_observation_schedule.records[0].settlement_time == 0.5
 
-    def test_time_within_tol_of_zero_becomes_exact_zero(self):
-        """AC2(i): zero is pinned (a theta landing stays at the valuation instant)."""
+    def test_lone_tiny_positive_time_stays_ahead(self):
+        """Review 2026-09-21 R1: only an exact zero is the valuation instant; a time 1e-11 ahead is still ahead."""
         p = _snowball(ki_times=(5e-11, 0.5, 0.75, 1.0))
-        assert canonicalize_contract_clock(p) is True
-        assert _ki(p)[0] == 0.0
+        assert canonicalize_contract_clock(p) is False
+        assert _ki(p)[0] == 5e-11
 
     def test_zero_beats_maturity_and_chains_are_refused(self):
-        """AC2(i) for a maturity residue, AC2(j) for a run wider than the tolerance (core map)."""
-        mapping = contract_clock._canonical_map([5e-11, -3e-17, 0.4], maturity=5e-11)
+        """AC2(i): a run holding an exact 0.0 (a theta landing) becomes 0.0, maturity residue included; AC2(j): a run
+        wider than the tolerance is refused (core map)."""
+        mapping = contract_clock._canonical_map([0.0, 5e-11, -3e-17, 0.4], maturity=5e-11)
         assert mapping[5e-11] == 0.0 and mapping[-3e-17] == 0.0 and mapping[0.4] == 0.4
+        assert contract_clock._canonical_map([3.17e-11, 0.4], maturity=3.17e-11) is None
         step = 0.6 * Tolerance.ZERO
         with pytest.raises(ValidationError, match="wider than"):
             contract_clock._canonical_map([0.5, 0.5 + step, 0.5 + 2 * step], maturity=1.0)

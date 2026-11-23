@@ -33,6 +33,7 @@ from quantark.asset.clock import enforce_clock
 
 from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor, leg_annualized
 from .accrual_build import build_contract_accrual
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock
 from .observation_schedule import (
     active_record_indices,
     at_valuation_instant,
@@ -256,6 +257,8 @@ class PhoenixOption(BaseEquityOption):
         self._validate_payoff_parameters()
         self._validate_accrual_parameters()
         self._build_observation_schedules()
+        # one float per instant across every schedule, before the accrual periods are derived from the times
+        canonicalize_contract_clock(self)
         build_contract_accrual(self)
 
     def _validate_core_parameters(self) -> None:
@@ -501,10 +504,12 @@ class PhoenixOption(BaseEquityOption):
             ki_observation_schedule=ki_schedule,
         )
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> None:
-        """Age the product: maturity and both barrier schedules (spec 2026-10-07 theta boundary)."""
+        """Age the product: maturity and both barrier schedules (spec 2026-10-07 theta boundary). The outermost
+        call snaps the aged clock back onto one float per instant (contract clock)."""
         super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
 
         before = self._ko_observation_count()

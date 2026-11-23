@@ -237,16 +237,27 @@ def test_deterministic_ko_and_ki_equality(reverse):
 
 
 def test_near_coincident_dates_fail_before_large_allocation():
-    p = snowball(times=(0.5, 1.0), ki_times=(0.5 + 1e-14, 1.0))
+    # 1e-9 y apart: two instants under the contract clock (Tolerance.ZERO = 1e-10), so V2 is handed both and keeps its
+    # exact semantics (contract clock spec 2026-11-23: V2 is no longer HANDED a 1e-14 pair, see the test below).
+    p = snowball(times=(0.5, 1.0), ki_times=(0.5 + 1e-9, 1.0))
     with pytest.raises(NumericalError, match="resource limit"):
         SnowballQuadEngineV2(QuadV2Params(max_nodes=20_000)).price(p, environment())
     # User-declared clock equivalence is explicit and preserves both payloads.
-    result = SnowballQuadEngineV2(QuadV2Params(event_time_tolerance=1e-12)).price(
+    result = SnowballQuadEngineV2(QuadV2Params(event_time_tolerance=1e-8)).price(
         p, environment()
     )
     assert result == pytest.approx(
         SnowballQuadEngineV2().price(snowball(), environment()), abs=1e-10
     )
+
+
+def test_float_noise_pair_is_one_instant_by_contract():
+    """A 1e-14 pair is one instant: the contract clock books it as one float at construction, so V2 at default
+    params prices it (exactly as the pair booked equal at its LAST member) instead of refusing it."""
+    p = snowball(times=(0.5, 1.0), ki_times=(0.5 + 1e-14, 1.0))
+    assert p.barrier_config.ko_observation_schedule.records[0].observation_time == 0.5 + 1e-14
+    twin = snowball(times=(0.5 + 1e-14, 1.0), ki_times=(0.5 + 1e-14, 1.0))
+    assert SnowballQuadEngineV2().price(p, environment()) == SnowballQuadEngineV2().price(twin, environment())
 
 
 def test_lifecycle_knocked_in_and_unknown_subclass():

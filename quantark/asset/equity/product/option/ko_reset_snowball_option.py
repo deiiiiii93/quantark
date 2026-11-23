@@ -43,6 +43,7 @@ from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffC
 from .accrual import (AccrualKind, AccrualPeriod, KnockInAnchor, contract_tenor as _contract_tenor, ko_accrual_factor,
                       leg_annualized)
 from .accrual_build import snapshot_terms
+from .contract_clock import canonical_clock_after, canonicalize_contract_clock, contract_instants, snap_to_instants
 from .snowball_option import SnowballOption
 
 
@@ -376,7 +377,9 @@ class KnockOutResetSnowballOption(SnowballOption):
         indices in the knock-in schedule), in years from the valuation date: ``t_ki + offsets`` on the numeric
         clock, the resolved generated dates (``rebased_extended_schedule``) on the date clock."""
         if not self._dated_rebased():
-            return [t_ki + offsets for t_ki in ki_times]
+            # a knock-in time plus an offset is a second spelling of any contract instant it lands on: snap it
+            instants = contract_instants(self)
+            return [snap_to_instants(t_ki + np.asarray(offsets, dtype=float), instants) for t_ki in ki_times]
         extended = self.rebased_extended_schedule
         return [
             np.array([ObservationRecord(observation_date=d).resolve_time(pricing_env) for d in extended[index]],
@@ -506,6 +509,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             self.post_barrier_config, ko_observation_schedule=post_schedule
         )
 
+    @canonical_clock_after
     def time_shift(
         self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
     ) -> bool:
@@ -610,13 +614,17 @@ class KnockOutResetSnowballOption(SnowballOption):
             return self._with_converted_terminals(product, embedded)
 
         shift = float(knock_in_time)
+        instants = contract_instants(self)
+
+        def placed(offset: float) -> float:
+            # the knock-in time plus an offset, on the contract's instant when it is one (as MC places it)
+            return float(snap_to_instants([shift + float(offset)], instants)[0])
+
         records = [
             replace(
                 record,
-                observation_time=shift + float(record.observation_time),
-                settlement_time=(
-                    None if record.settlement_time is None else shift + float(record.settlement_time)
-                ),
+                observation_time=placed(record.observation_time),
+                settlement_time=None if record.settlement_time is None else placed(record.settlement_time),
                 accrual=embedded(record.accrual),
             )
             for record in schedule.records
@@ -628,7 +636,8 @@ class KnockOutResetSnowballOption(SnowballOption):
             ko_observation_dates=None,
         )
         product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
-        product.maturity = shift + max(float(record.observation_time) for record in schedule.records)
+        product.maturity = placed(max(float(record.observation_time) for record in schedule.records))
+        canonicalize_contract_clock(product)
         return self._with_converted_terminals(product, embedded)
 
     def _with_converted_terminals(self, product: "KnockOutResetSnowballOption", embedded) -> \
@@ -777,7 +786,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             return max(times)
         if ki_time is None:
             raise ValidationError("ki_time is required for rebased post-KO maturity.")
-        return float(ki_time + max(times))
+        return float(snap_to_instants([float(ki_time) + max(times)], contract_instants(self))[0])
 
     def get_max_maturity_time(self, pricing_env: PricingEnv) -> float:
         base_maturity = super().get_maturity(pricing_env)

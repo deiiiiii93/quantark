@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import List, Optional
 
+from quantark.asset.equity.product.option.contract_clock import canonicalize_contract_clock
 from quantark.util.numerical import Tolerance
 
 DAYS_PER_YEAR = 365.0
@@ -167,5 +168,10 @@ def snap_contract(product):
         # Snapping moves observation timing only: the terminal tenors (V0, V1) stay the contract's. A numeric terminal
         # is derived from the last fixing or the maturity, so a later validate() (QUAD V2 validates every product)
         # would otherwise re-derive it from the snapped times (0.5 -> 182/365). Records already keep their periods.
+        contract._terminal_accrual_explicit = True
+    # The day-snap rounds PER schedule: a kept whole-day float one ulp off k/365 in one schedule and a neighbour
+    # rounded onto k/365 in another are one instant in two spellings. The contract clock takes them to one float,
+    # last, after the maturity snap so the snapped maturity is the pin.
+    if canonicalize_contract_clock(contract) and getattr(contract, "_terminal_accrual", None):
         contract._terminal_accrual_explicit = True
     return contract

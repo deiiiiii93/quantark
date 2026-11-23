@@ -13,8 +13,10 @@ decides equality for contract times itself. The rule (owner decisions D1-D3, 202
 - two times closer than ``Tolerance.ZERO`` (1e-10 y, ~3 ms) are one instant: above float noise, far below the
   intraday clock's one second;
 - a run of such times becomes its LAST member (``merge_time_nodes``' rule, the MC grid's since W17a), except that a
-  run within the tolerance of zero becomes exactly ``0.0`` (a theta landing stays AT the valuation instant) and,
-  next, a run within the tolerance of the maturity becomes the maturity exactly;
+  run holding an exact ``0.0`` becomes ``0.0`` (a theta landing, which ``time_shift`` books at exactly zero, keeps its
+  settlement and maturity residues AT the valuation instant) and, next, a run within the tolerance of the maturity
+  becomes the maturity exactly. A lone positive time, however small, stays ahead: only an exact zero is the valuation
+  instant (``at_valuation_instant``, review 2026-09-21 R1);
 - a run wider than the tolerance is ambiguous and refused, and so are two distinct observation floats of ONE schedule
   landing on one instant (no engine may pick one record's terms silently). Settlement times merge but never refuse.
 
@@ -171,7 +173,8 @@ def _canonical_map(
     if u.size == 0:
         return None
     close = np.diff(u) < tol
-    near_zero = (np.abs(u) < tol) & (u != 0.0)
+    has_zero = bool(np.any(u == 0.0))
+    near_zero = (np.abs(u) < tol) & (u != 0.0) & has_zero
     near_maturity = (
         (np.abs(u - maturity) < tol) & (u != maturity) if maturity is not None else np.zeros(u.size, dtype=bool)
     )
@@ -188,7 +191,7 @@ def _canonical_map(
                 f"contract clock: the times {[float(t) for t in run]} chain into a run wider than the "
                 f"{tol:g}-year tolerance; which instant they are is ambiguous -- book them as one time or apart"
             )
-        if np.any(np.abs(run) < tol):
+        if np.any(run == 0.0):
             rep = 0.0
         elif maturity is not None and np.any(np.abs(run - maturity) < tol):
             rep = float(maturity)
