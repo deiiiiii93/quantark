@@ -236,31 +236,42 @@ def test_deterministic_ko_and_ki_equality(reverse):
     assert np.isnan(result["delta"])
 
 
-def test_near_coincident_dates_fail_before_large_allocation():
+def test_near_coincident_dates_price_locally_without_large_allocation():
     # 1e-9 y apart: two instants under the contract clock (Tolerance.ZERO = 1e-10), so V2 is handed both and keeps its
     # exact semantics (contract clock spec 2026-11-23: V2 is no longer HANDED a 1e-14 pair, see the test below).
+    # Sub-resolution run S4: the mesh the 1e-9 y interval needs exceeds max_nodes, so that interval is priced by the
+    # exact local kernel on the mesh the other intervals size (within max_nodes) instead of being refused.
     p = snowball(times=(0.5, 1.0), ki_times=(0.5 + 1e-9, 1.0))
-    with pytest.raises(NumericalError, match="resource limit"):
-        SnowballQuadEngineV2(QuadV2Params(max_nodes=20_000)).price(p, environment())
+    engine = SnowballQuadEngineV2(QuadV2Params(max_nodes=20_000))
+    local = engine.price(p, environment())
+    assert engine._prepared.diagnostics["local_intervals"] == 1
+    assert engine._prepared.diagnostics["nodes"] <= 20_000
+    coincident = SnowballQuadEngineV2().price(snowball(), environment())
+    assert local == pytest.approx(coincident, rel=1e-8)
     # User-declared clock equivalence is explicit and preserves both payloads.
     result = SnowballQuadEngineV2(QuadV2Params(event_time_tolerance=1e-8)).price(
         p, environment()
     )
-    assert result == pytest.approx(
-        SnowballQuadEngineV2().price(snowball(), environment()), abs=1e-10
-    )
+    assert result == pytest.approx(coincident, abs=1e-10)
+    # what the local treatment cannot price (two observations of one barrier a local step apart) is still refused
+    # before the large allocation
+    pair = snowball(times=(0.5, 0.5 + 1e-9, 1.0), ki_times=(0.5, 1.0))
+    with pytest.raises(NumericalError, match="resource limit"):
+        SnowballQuadEngineV2(QuadV2Params(max_nodes=20_000)).price(pair, environment())
 
 
 def test_resource_limit_refusal_names_the_pair_and_the_knob():
     """AC10: the refusal keeps "resource limit" and names the two event times of the shortest interval and the
-    ``event_time_tolerance`` knob (message only; semantics unchanged)."""
-    p = snowball(times=(0.5, 1.0), ki_times=(0.5 + 1e-9, 1.0))
+    ``event_time_tolerance`` knob (message only; semantics unchanged); since S4 it is raised only where the local
+    treatment cannot price the short interval either, and says why."""
+    p = snowball(times=(0.5, 0.5 + 1e-9, 1.0), ki_times=(0.5, 1.0))
     with pytest.raises(NumericalError) as refused:
         SnowballQuadEngineV2(QuadV2Params(max_nodes=20_000)).price(p, environment())
     message = str(refused.value)
     assert "resource limit" in message
     assert repr(0.5) in message and repr(0.5 + 1e-9) in message
     assert "event_time_tolerance" in message
+    assert "same barrier" in message
 
 
 def test_float_noise_pair_is_one_instant_by_contract():

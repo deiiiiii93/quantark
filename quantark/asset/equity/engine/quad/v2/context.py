@@ -5,7 +5,8 @@ from types import MappingProxyType
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
-from .basis import ResourceLimitError, make_mesh
+from quantark.util.numerical import Tolerance, is_close
+from .basis import ResourceLimitError, local_mesh, make_mesh
 from .contract import affine, grid_function
 from .gaussian import readout
 from .operator import Operator
@@ -171,7 +172,111 @@ def _shortest_interval(events, variances) -> str:
     )
 
 
-def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
+def _jump_breaks(event):
+    """The breaks of ``event`` where some incoming state's map jumps in value: the two regions' actions continue into
+    different states, or their affine cash differs at the break. A kink (same continuations, equal value at the break)
+    is not a jump: its projection error is O(h^2) smaller and needs no cell edge."""
+    jumps = set()
+    for j, b in enumerate(event.breaks):
+        for row in event.rows:
+            left, right = row[j], row[j + 1]
+            if sorted(left.terms) != sorted(right.terms) or sorted(left.channel_terms) != sorted(right.channel_terms):
+                jumps.add(float(b))
+                break
+            cash_l, cash_r = np.asarray(left.cash, dtype=float), np.asarray(right.cash, dtype=float)
+            asset_l, asset_r = np.asarray(left.asset, dtype=float), np.asarray(right.asset, dtype=float)
+            value_l, value_r = cash_l + asset_l * np.exp(b), cash_r + asset_r * np.exp(b)
+            scale = np.maximum(1.0, np.maximum(np.abs(value_l), np.abs(value_r)))
+            if np.any(np.abs(value_l - value_r) > Tolerance.RELATIVE * scale):
+                jumps.add(float(b))
+                break
+    return jumps
+
+
+def _same_level(a, b):
+    return is_close(a, b, rel_tol=0.0, abs_tol=Tolerance.ZERO)
+
+
+def _local_breaks(contract, variances, threshold, jumps):
+    """The jump breaks a mesh must carry on cell edges when every interval of variance below ``threshold`` (after the
+    first) is priced locally; refuses, with the reason, what the local treatment cannot price exactly. ``jumps``: a
+    cache of each event's jump levels, shared across thresholds.
+
+    A local step leaves its end event's jumps smeared over a width s far below a cell: the mesh carries them sharp on
+    cell edges (``local_mesh``), which differs from the true function by a layer of mass ~ J s / sqrt(2 pi) on each
+    side. A later operator that integrates across the break cancels the two sides (O(s^2)); one that CUTS at the same
+    level -- a later observation of the same barrier, reached through local steps only -- keeps one side and loses the
+    crossing mass between the two observations (S2: second observation's probability 2.68e-4 against 3.97e-4 at 5 min;
+    QUAD V1 refuses the same pairs, CP1). The continuous knock-in barrier is cut by the reflection kernel, which
+    vanishes at the barrier, so its layer costs O(s^2) (measured: 1.2e-6 rel at vol 60%, 5 min) and it only needs its
+    cell edge.
+    """
+    events = contract.events
+    barrier = contract.continuous_barrier
+    local = [i for i in range(1, len(events)) if 0.0 < variances[i] < threshold]
+    breaks = set() if barrier is None else {float(barrier)}
+
+    def jump_levels(k):
+        if k not in jumps:
+            jumps[k] = {b for b in _jump_breaks(events[k]) if barrier is None or not _same_level(b, barrier)}
+        return jumps[k]
+
+    deterministic = [i for i in range(1, len(events)) if variances[i] == 0.0]
+    if deterministic:
+        i = deterministic[0]
+        raise ResourceLimitError(
+            f"the interval to event time {float(events[i].time)!r} has zero variance: its deterministic shift moves "
+            "the locally priced intervals' jump breaks off the mesh's cell edges"
+        )
+    for i in local:
+        own = jump_levels(i)
+        breaks |= own
+        k = i - 1
+        while own:
+            shared = sorted(b for b in own if any(_same_level(b, c) for c in jump_levels(k)))
+            if shared:
+                raise ResourceLimitError(
+                    f"the locally priced interval ending at event time {float(events[i].time)!r} and the observation "
+                    f"at {float(events[k].time)!r} observe the same barrier (log spot {shared[0]:.6g}) with only "
+                    "locally priced intervals between them: the mass crossing it in between lies in a layer narrower "
+                    "than a cell, which the mesh does not carry"
+                )
+            if k == 0 or not 0.0 < variances[k] < threshold:
+                break
+            k -= 1
+    return breaks
+
+
+def _local_mesh(contract, query_logs, means, variances, params):
+    """The mesh when ``make_mesh`` refuses (bitwise priority: only there): the smallest interval variances are excluded
+    from the sizing in turn (equal ones together) until the mesh fits ``max_nodes``; ``(mesh, threshold)``, every
+    interval after the first of variance below ``threshold`` being priced locally.
+
+    Raises:
+        ResourceLimitError: the reason the local treatment cannot price the excluded intervals, or no mesh fits.
+    """
+    variances = np.asarray(variances, dtype=float)
+    candidates = np.unique(variances[1:][variances[1:] > 0.0])
+    jumps = {}
+    for threshold in candidates[1:]:
+        # alignment adds at most one cell (one break) or narrows the cells (two), so a threshold whose unaligned mesh
+        # exceeds max_nodes is skipped before its breaks are read
+        if local_mesh(query_logs, means, variances, params, float(threshold), ()) is None:
+            continue
+        breaks = _local_breaks(contract, variances, float(threshold), jumps)
+        mesh = local_mesh(query_logs, means, variances, params, float(threshold), breaks)
+        if mesh is not None:
+            return mesh, float(threshold)
+    raise ResourceLimitError("no interval's variance sizes a mesh within max_nodes")
+
+
+def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0, local_intervals=True):
+    """Solve ``contract`` backward onto a mesh over ``spots``.
+
+    ``local_intervals``: where the mesh the shortest interval needs exceeds ``max_nodes``, price the shortest
+    intervals locally (``_local_mesh``) instead of refusing; ``False`` keeps the refusal (a ``spot_batch`` session's
+    wide prepare, whose fallback to the scalar contexts is bitwise ``price()``).
+    """
     spots = np.asarray(spots, dtype=float).reshape(-1)
     if not len(spots) or np.any(~np.isfinite(spots)) or np.any(spots <= 0):
         raise ValidationError("prepare needs positive finite spots")
@@ -180,12 +285,21 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
     means, variances, discounts = interval_moments(
         env, strike, [e.time for e in events]
     )
+    local_variance = 0.0
     try:
         mesh = make_mesh(
             np.log(spots), means, variances, params, align=contract.continuous_barrier
         )
     except ResourceLimitError as refusal:
-        raise ResourceLimitError(f"{refusal}{_shortest_interval(events, variances)}") from refusal
+        named = f"{refusal}{_shortest_interval(events, variances)}"
+        if not local_intervals:
+            raise ResourceLimitError(named) from refusal
+        try:
+            mesh, local_variance = _local_mesh(contract, np.log(spots), means, variances, params)
+        except ResourceLimitError as why:
+            raise ResourceLimitError(
+                f"{named}; the intervals below the mesh's resolution cannot be priced locally: {why}"
+            ) from refusal
     n_states, n_channels = len(contract.state_names), len(contract.channels)
     workspace_columns = n_states * n_channels
     if (
@@ -194,7 +308,7 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
         > params.max_work_bytes
     ):
         raise NumericalError("QUAD V2 state arrays exceed workspace budget")
-    op = Operator(mesh, params) if mesh else None
+    op = Operator(mesh, params, local_variance) if mesh else None
     states = tuple(affine(np.zeros(n_channels)) for _ in range(n_states))
     continuous_pair = None
     for i in range(len(events) - 1, -1, -1):
@@ -254,6 +368,11 @@ def prepare_compiled(contract, env, strike, params, spots, *, pending_pv=0.0):
             "states": n_states,
             "kernel_cache_bytes": 0 if op is None else op.cache.bytes,
             "backends": () if op is None else tuple(sorted(op.backends_used)),
+            # sub-resolution run S4: present only where the local treatment engaged (bitwise priority)
+            **({} if not local_variance else {
+                "local_variance": local_variance,
+                "local_intervals": int(np.sum((variances[1:] > 0) & (variances[1:] < local_variance))),
+            }),
             "model": "deterministic Gaussian log increments",
             "qualification": "requires independent accuracy/refinement evidence",
             **contract.metadata,

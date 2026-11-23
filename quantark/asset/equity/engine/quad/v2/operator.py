@@ -33,9 +33,19 @@ class ByteCache:
         self.bytes += value.nbytes
 
 
+#: Gauss-Legendre points per standard-normal panel of the local kernel, and the panel width (sd): a cell polynomial
+#: times the density over 2 sd is integrated to round-off (S2's "Eq" form, robust at every s/h; the tests check it
+#: against adaptive quadrature to 1e-12 for s/h from 1e-4 to 1.9)
+_LOCAL_POINTS = 16
+_LOCAL_PANEL_SD = 2.0
+
+
 class Operator:
-    def __init__(self, mesh, params):
+    def __init__(self, mesh, params, local_variance=0.0):
+        """``local_variance``: intervals of smaller variance are integrated by the exact local kernel (``kernel``);
+        0 (every context the mesh sizing fits) keeps today's kernels for every interval."""
         self.mesh, self.params = mesh, params
+        self.local_variance = float(local_variance)
         self.cache = ByteCache(params.max_cache_bytes)
         self.backends_used = set()
 
@@ -45,6 +55,10 @@ class Operator:
         cached = self.cache.get(key)
         if cached is not None:
             return cached, key
+        if variance < self.local_variance:
+            kernel = self._local_kernel(float(mean), float(variance), float(lo), float(hi))
+            self.cache.put(key, kernel)
+            return kernel, key
         mesh = self.mesh
         band = max(
             1,
@@ -66,6 +80,44 @@ class Operator:
         )
         self.cache.put(key, kernel)
         return kernel, key
+
+    def _local_kernel(self, mean, variance, lo, hi):
+        """The cell kernel of an interval the cells do not resolve (sub-resolution run S4).
+
+        ``kernel[band + d, q, r]`` is the integral of source cell ``j``'s Lagrange polynomial ``L_q`` over its local
+        coordinates ``[lo, hi]`` against the Gaussian density of the move from target node ``r`` of cell ``j - d``:
+        in standard normal coordinates ``z``, ``t = theta_r - d + (mean + sd z) / h`` (offset ``d = j - i``), so the
+        integral is ``int L_q(t(z)) phi(z) dz`` between the exact limits of ``[lo, hi]``, truncated at ``tail_sd`` as
+        today's band. The limits cut fixed 2-sd panels, each integrated by 16-point Gauss-Legendre: exact to
+        round-off for the degree-``order`` polynomial times the density at any s/h, where today's kernel samples the
+        density on a cell grid that a step narrower than a cell aliases. The closed-form truncated moments (S2's
+        "EaA") drift (4.6e-8 at s/h = 2) from the monomial expansion; this form does not.
+        """
+        mesh, params = self.mesh, self.params
+        sd, h, theta = np.sqrt(variance), mesh.h, mesh.theta
+        tail = float(params.tail_sd)
+        band = max(1, int(np.ceil((abs(mean) + tail * sd) / h)) + 1)
+        edges = np.r_[np.arange(-tail, tail, _LOCAL_PANEL_SD), tail]
+        d = np.arange(-band, band + 1)[:, None]
+        za = np.clip(((d + lo - theta) * h - mean) / sd, -tail, tail)              # (D, R)
+        zb = np.clip(((d + hi - theta) * h - mean) / sd, -tail, tail)
+        a = np.maximum(za[..., None], edges[:-1])                                   # (D, R, P)
+        b = np.maximum(a, np.minimum(zb[..., None], edges[1:]))
+        live = np.flatnonzero((b > a).any(axis=(1, 2)))
+        kernel = np.zeros((2 * band + 1, mesh.order, mesh.order))
+        if not len(live):
+            return kernel
+        a, b = a[live], b[live]
+        required = a.size * _LOCAL_POINTS * (mesh.order + 3) * 8
+        if required > params.max_work_bytes:
+            raise NumericalError(f"QUAD V2 local kernel workspace requires {required} bytes")
+        gx, gw = gauss(_LOCAL_POINTS)
+        half, mid = (b - a) / 2, (b + a) / 2
+        z = mid[..., None] + half[..., None] * gx                                  # (L, R, P, G)
+        weights = half[..., None] * gw * np.exp(-0.5 * z * z) / np.sqrt(2 * np.pi)
+        t = theta[None, :, None, None] - d[live][..., None, None] + (mean + sd * z) / h
+        kernel[live] = np.einsum("qlrpg,lrpg->lqr", lagrange(mesh.theta, t), weights, optimize=True)
+        return kernel
 
     def integrate(self, function, mean, variance, discount):
         mesh = self.mesh

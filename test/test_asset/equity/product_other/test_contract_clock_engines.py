@@ -215,9 +215,19 @@ class TestDistinctInstantsStayDistinct:
         mc = mc_engine.price(p, env())
         assert abs(pde - mc) < 3.0 * mc_engine.get_last_result().std_error
 
+    def test_quad_v2_prices_the_split_by_its_local_kernel(self):
+        """Sub-resolution run S4: V2 prices the 1 s split on its max_nodes mesh (exact local kernel, cell edges on the
+        knock-in barrier) instead of refusing it, next to the PDE."""
+        p = self._split()
+        assert SNOWBALL_ENGINES["quad_v2"]().price(p, env()) == pytest.approx(
+            SNOWBALL_ENGINES["pde"]().price(p, env()), abs=1e-3)
+
     def test_quad_v2_refuses_what_it_cannot_resolve(self):
-        with pytest.raises(NumericalError):
-            SNOWBALL_ENGINES["quad_v2"]().price(self._split(), env())
+        """Two observations of one barrier a second apart: the crossing mass between them lies in a layer narrower
+        than a cell of the max_nodes mesh -- still refused."""
+        pair = snowball((0.25, 0.5, 0.5 + SECOND, 0.75, 1.0), (0.25, 0.5, 0.75, 1.0))
+        with pytest.raises(NumericalError, match="same barrier"):
+            SNOWBALL_ENGINES["quad_v2"]().price(pair, env())
 
     def test_quad_v1_prices_the_split_by_its_local_stencil(self):
         """Sub-resolution run: V1 prices the 1 s split (local stencil) instead of refusing it, next to the PDE."""

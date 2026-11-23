@@ -150,9 +150,11 @@ class AutocallableQuadEngineV2(BaseEngine):
             return context
         if batch.widens(key):
             try:
+                # the wide prepare keeps today's resource-limit refusal (no local intervals): its fallback, the
+                # scalar context, is ``price()`` bitwise (sub-resolution run S4, S2 concern 1)
                 context = prepare_compiled(
                     contract, pricing_env, product.strike, self.params, [batch.lo, batch.hi],
-                    pending_pv=pending,
+                    pending_pv=pending, local_intervals=False,
                 )
             except NumericalError:
                 batch.failed.append(key)
