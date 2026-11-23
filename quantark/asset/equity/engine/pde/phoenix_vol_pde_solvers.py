@@ -36,7 +36,7 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     event_damped_step_keys,
     price_folded_2d,
 )
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import is_close, is_zero, same_instant
 from quantark.volmodels.adi_core import HestonSLVADICore
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
@@ -470,7 +470,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             return
         # tau vs T, not current_time vs 0: tau accumulates FP step
         # increments, so a relative is_close against zero can never fire.
-        if not is_close(float(tau), float(T)):
+        if not same_instant(float(tau), float(T)):
             return
         k = self._hook_tau_key(tau, event_maps["dt"])
         if k is None:
@@ -655,7 +655,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         # the exact inclusive trigger [2026-07-23 review, finding 2].
         # tau vs T, not current_time vs 0: tau accumulates FP step
         # increments, so a relative is_close against zero can never fire.
-        at_valuation = is_close(float(tau), float(T))
+        at_valuation = same_instant(float(tau), float(T))
         if self._use_cell_average_events() and not at_valuation:
             return self._project_event_values(
                 core.S_grid,
@@ -721,7 +721,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         # A KO observed at the valuation date is deterministic — apply the
         # exact inclusive trigger [2026-07-23 review, finding 2].
         # tau vs T, not current_time vs 0: see _apply_coupon.
-        at_valuation = is_close(float(tau), float(T))
+        at_valuation = same_instant(float(tau), float(T))
         if self._use_cell_average_events() and not at_valuation:
             if self._joint_coupon_ko_active_2d(ko_record, obs_idx):
                 # Coincident coupon + KO: ONE piecewise cell average of the
@@ -873,7 +873,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             return False
         if not self._use_cell_average_events():
             return False
-        if is_close(float(tau), float(T)):
+        if same_instant(float(tau), float(T)):
             return False
         recs = event_maps["ko"].get(k, [])
         if len(recs) != 1:
@@ -915,7 +915,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                         raise PricingError("missing V1 snapshot for Heston/SLV Phoenix KI jump")
                     U = self._apply_ki(
                         U, core, product, barrier, v1,
-                        at_valuation=is_close(float(tau), float(T)),
+                        at_valuation=same_instant(float(tau), float(T)),
                         tau=float(tau),
                     )
             if k is not None:

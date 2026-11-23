@@ -30,7 +30,7 @@ from quantark.priceenv.term_sampling import TermCoefficients
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import is_close, is_zero, same_instant
 from quantark.volmodels.adi_core import HestonSLVADICore
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
@@ -988,7 +988,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             return
         # tau vs T, not current_time vs 0: tau accumulates FP step
         # increments, so a relative is_close against zero can never fire.
-        if not is_close(float(tau), float(T)):
+        if not same_instant(float(tau), float(T)):
             return
         k = self._hook_tau_key(tau, event_maps["dt"])
         if k is None:
@@ -1112,7 +1112,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             # (two O(1) numbers): tau accumulates FP step increments, so
             # current_time lands at ~1e-16 rather than 0.0, and a relative
             # is_close against zero can never fire.
-            at_valuation = is_close(float(tau), float(T))
+            at_valuation = same_instant(float(tau), float(T))
             if self._use_cell_average_events() and not at_valuation:
                 U = self._project_event_values(
                     core.S_grid, float(rec.barrier), product.is_reverse, True,
@@ -1163,7 +1163,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
                     # is applied with the exact inclusive trigger.
                     ki_discrete = not self._ki_continuous
                     # tau vs T, not current_time vs 0: see _apply_ko.
-                    at_valuation = is_close(float(tau), float(T))
+                    at_valuation = same_instant(float(tau), float(T))
                     if (
                         self._use_cell_average_events()
                         and ki_discrete

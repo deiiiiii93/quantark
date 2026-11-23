@@ -90,7 +90,7 @@ class KOResetStatistics(SnowballStatistics):
         v1[:, L.maturity_unit[1]] = 1.0
         pre_maturity = float(product.get_pre_maturity_time(env))
         staged = bool(solver._pre_ko_observation_indices and pre_maturity < self.tau
-                      and not is_close(pre_maturity, self.tau, abs_tol=Tolerance.PRECISION))
+                      and not same_instant(pre_maturity, self.tau))
         self.seed_idx = max(solver._pre_ko_observation_indices) if staged else None
         if not self.prepared.request.price:
             # the value terminal sets the seed index the stages read; a statistics-only march has none
@@ -186,7 +186,7 @@ class KOResetStatistics(SnowballStatistics):
         lo0, up0, lo1, up1 = edges
         det_post = solver._df_between_times(self.env, current, solver._total_tau)
         pre_maturity = self._pre_maturity_time()
-        alive = current <= pre_maturity or is_close(current, pre_maturity, abs_tol=Tolerance.PRECISION)
+        alive = current <= pre_maturity or same_instant(current, pre_maturity)
         det_pre = solver._df_between_times(self.env, current, pre_maturity) if alive else 0.0
         ko1, ki1 = (r_lo1, r_up1) if product.is_reverse else (r_up1, r_lo1)
         ko0, ki0 = (r_lo0, r_up0) if product.is_reverse else (r_up0, r_lo0)
@@ -219,7 +219,7 @@ class KOResetStatistics(SnowballStatistics):
         pre_maturity = float(product.get_pre_maturity_time(env))
         last_pre = self.ko_records[-1] if self.ko_records else None
         pre_det_date = (last_pre.observation_date
-                        if last_pre is not None and is_close(float(last_pre.observation_time), pre_maturity)
+                        if last_pre is not None and same_instant(float(last_pre.observation_time), pre_maturity)
                         else None)
         # paid on the explicit settlement date when booked (spec D33), else the terminal delay after its maturity
         settlement = first_schedule_settlement(product, env, terminal)

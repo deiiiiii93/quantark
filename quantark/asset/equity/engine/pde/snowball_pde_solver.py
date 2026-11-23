@@ -1715,7 +1715,7 @@ class SnowballPDESolver(BasePDESolver):
             return lower, upper
         now = self._total_tau - tau
         times = self._get_cached_ki_profile(pricing_env, product)["observation_times"]
-        if not any(t is not None and is_greater_than_or_close(float(t), now) for t in times):
+        if not any(t is not None and (float(t) > now or same_instant(float(t), now)) for t in times):
             return lower, upper
         barrier = product.barrier_config.ki_barrier
         levels = [float(b) for b in barrier] if isinstance(barrier, (list, tuple)) else [float(barrier)]
@@ -2201,7 +2201,7 @@ class SnowballPDESolver(BasePDESolver):
         next_rec: Optional[ResolvedObservationRecord] = None
         if future_records:
             for rec in future_records:
-                if is_greater_than_or_close(rec.observation_time, current_time):
+                if (rec.observation_time > current_time or same_instant(rec.observation_time, current_time)):
                     next_rec = rec
                     break
             if next_rec is None:

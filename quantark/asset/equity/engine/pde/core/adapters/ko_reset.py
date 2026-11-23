@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from quantark.util.numerical import Tolerance, is_close
+from quantark.util.numerical import same_instant
 
 from .snowball import SnowballAdapter
 
@@ -62,7 +62,7 @@ class KOResetAdapter(SnowballAdapter):
         staged_v0 = (
             solver._pre_ko_observation_indices
             and pre_maturity < tau
-            and not is_close(pre_maturity, tau, abs_tol=Tolerance.PRECISION)
+            and not same_instant(pre_maturity, tau)
         )
         if staged_v0:
             seed = np.zeros((num_x, 1))

@@ -15,7 +15,7 @@ from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
-from quantark.util.numerical import is_close, is_greater_than_or_close
+from quantark.util.numerical import is_close, is_greater_than_or_close, same_instant
 
 from .base_pde_solver import BasePDESolver
 from .core.adapters.barrier import BarrierAdapter
@@ -136,7 +136,7 @@ class BarrierPDESolver(BasePDESolver):
                 out.append((float(rec.observation_time), float(level), float(rec.payoff), float(settle)))
             return tuple(sorted(out))
         for t in sorted(float(x) for x in (getattr(product, "observation_dates", None) or ())):
-            if is_close(t, 0.0) or t < 0.0 or (t > self._total_tau and not is_close(t, self._total_tau)):
+            if is_close(t, 0.0) or t < 0.0 or (t > self._total_tau and not same_instant(t, self._total_tau)):
                 continue
             settle = self._event_payment_time(product, pricing_env, t) if product.pay_at_hit else terminal_pay
             out.append((t, float(product.barrier), float(product.rebate), float(settle)))
