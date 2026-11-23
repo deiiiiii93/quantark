@@ -38,7 +38,8 @@ def test_event_times_must_be_interior():
 
 def test_event_times_deduplicated_and_sorted():
     r = make_request(event_times=(0.5, 0.25, 0.5 + 1e-14))
-    assert r.event_times == (0.25, 0.5)
+    # one instant (closer than Tolerance.ZERO): the LAST of its run (contract clock D2, merge_time_nodes)
+    assert r.event_times == (0.25, 0.5 + 1e-14)
 
 
 def test_hard_bounds_ordering():

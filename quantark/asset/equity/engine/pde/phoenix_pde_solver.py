@@ -22,7 +22,7 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import is_close, is_zero, same_instant
 
 
 class PhoenixPDESolver(SnowballPDESolver):
@@ -249,7 +249,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         for obs_idx, obs_time in enumerate(ko_times):
             if is_close(obs_time, 0.0):
                 self._coupon_observation_indices[0] = obs_idx
-            elif is_close(obs_time, tau):
+            elif same_instant(obs_time, tau):
                 self._coupon_observation_indices[len(t_vec) - 1] = obs_idx
             elif 0.0 < obs_time < tau:
                 if step_of is not None:

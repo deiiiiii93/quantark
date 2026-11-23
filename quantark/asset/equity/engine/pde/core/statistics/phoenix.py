@@ -33,7 +33,7 @@ from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.enum import CouponPayType
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import same_instant
 
 from . import adjoint
 from . import event_statistics as es
@@ -83,7 +83,7 @@ class PhoenixStatistics(SnowballStatistics):
         self._k_of_obs, self._obs_of_k = {}, {}
         for obs_idx, rec in enumerate(solver._get_cached_ko_records(self.env, self.product)):
             for k, own in enumerate(self.ko_records):
-                if is_close(float(own.observation_time), float(rec.observation_time)):
+                if same_instant(own.observation_time, rec.observation_time):
                     self._k_of_obs[obs_idx], self._obs_of_k[k] = k, obs_idx
                     break
         self._S = [np.r_[L.cash[:, m], L.bucket[:, m], L.cash_u[:, m]].astype(int) for m in range(self.n_states)]

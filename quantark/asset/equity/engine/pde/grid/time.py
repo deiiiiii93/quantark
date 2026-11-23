@@ -29,6 +29,7 @@ import numpy as np
 from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, TimeRefinement
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import same_instant
 
 
 @dataclass(frozen=True, eq=False)
@@ -45,18 +46,17 @@ class TimeLayout:
         """Node index for an event-bearing time.
 
         Exact float hit first (the common case: the verbatim request float).
-        Falls back to an ``is_close`` scan for times that came from a
-        DIFFERENT schedule resolution of the same date (e.g. KO 1/12 vs KI
-        4/48 rounded) — well-defined because construction deduplicates
-        event nodes within the same tolerance, so at most one key matches.
+        Falls back to a ``same_instant`` scan (the contract clock's rule,
+        ``Tolerance.ZERO`` absolute) for another spelling of the same instant
+        (e.g. KO 1/12 vs KI 4/48 rounded, or the first member of a merged run)
+        — well-defined because the request merges event nodes closer than the
+        same tolerance, so at most one key matches.
         """
         hit = self.step_of.get(obs_time)
         if hit is not None:
             return hit
-        from quantark.util.numerical import is_close
-
         for key, idx in self.step_of.items():
-            if is_close(key, obs_time):
+            if same_instant(key, obs_time):
                 return idx
         raise KeyError(obs_time)
 

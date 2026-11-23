@@ -39,6 +39,7 @@ from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.util.enum import OptionType, ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import same_instant
 from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.heston.deterministic_limit import DeterministicVarianceLocalVol
@@ -104,7 +105,7 @@ def _settlement_scale(engine, product, env) -> float:
             product=product,
         )
         delayed_hit = any(
-            not np.isclose(rec.settlement_time, rec.observation_time)
+            not same_instant(rec.settlement_time, rec.observation_time)
             for rec in resolved
         )
     convention = getattr(product, "settlement_convention", None)

@@ -13,7 +13,7 @@ from quantark.asset.equity.engine.settlement_support import first_schedule_settl
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.util.enum import CouponPayType
-from quantark.util.numerical import is_close
+from quantark.util.numerical import same_instant
 
 from . import event_statistics as es
 
@@ -23,7 +23,7 @@ __all__ = ["knocked_out_event_statistics"]
 def _position(records, record):
     """The decision's record in a resolved schedule (the one observed at the valuation instant)."""
     t = float(record.observation_time)
-    return next(k for k, rec in enumerate(records) if is_close(float(rec.observation_time), t))
+    return next(k for k, rec in enumerate(records) if same_instant(rec.observation_time, t))
 
 
 # --- EventStatistics (unified event statistics T12) ------------------------------------------------------

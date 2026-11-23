@@ -69,6 +69,7 @@ from quantark.util.numerical import (
     is_close,
     is_greater_than_or_close,
     is_less_than_or_close,
+    same_instant,
 )
 
 if TYPE_CHECKING:
@@ -1024,9 +1025,9 @@ class SnowballPDESolver(BasePDESolver):
     def _find_record_at_time(
         records: List[ResolvedObservationRecord], target_time: float
     ) -> Optional[ResolvedObservationRecord]:
-        """Find an observation record at a specific time (within tolerance)."""
+        """Find the observation record at a specific instant (``same_instant``, the contract clock's rule)."""
         for rec in records:
-            if is_close(rec.observation_time, target_time):
+            if same_instant(rec.observation_time, target_time):
                 return rec
         return None
 
@@ -1193,7 +1194,7 @@ class SnowballPDESolver(BasePDESolver):
         self, t_vec: np.ndarray, obs_time: float, label: str
     ) -> int:
         for idx, t_val in enumerate(t_vec):
-            if is_close(float(t_val), float(obs_time), abs_tol=Tolerance.PRECISION):
+            if same_instant(t_val, obs_time):
                 return int(idx)
         nearest = int(np.argmin(np.abs(t_vec - obs_time)))
         nearest_time = float(t_vec[nearest])
@@ -1435,7 +1436,7 @@ class SnowballPDESolver(BasePDESolver):
                 continue
             if is_close(obs_time, 0.0):
                 self._ko_observation_indices[0] = rec
-            elif is_close(obs_time, tau):
+            elif same_instant(obs_time, tau):
                 self._ko_terminal_record = rec
                 self._has_terminal_ko = True
             elif 0.0 < obs_time < tau:
@@ -1460,7 +1461,7 @@ class SnowballPDESolver(BasePDESolver):
                 if is_close(obs_time, 0.0):
                     self._ki_observation_indices.add(0)
                     self._ki_barrier_by_tidx[0] = float(barrier)
-                elif is_close(obs_time, tau):
+                elif same_instant(obs_time, tau):
                     idx = layout.time.actual_steps
                     self._ki_observation_indices.add(idx)
                     self._ki_barrier_by_tidx[idx] = float(barrier)

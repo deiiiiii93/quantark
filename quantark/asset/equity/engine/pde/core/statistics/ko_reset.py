@@ -19,7 +19,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance, is_close
+from quantark.util.numerical import Tolerance, is_close, same_instant
 
 from . import adjoint
 from . import event_statistics as es
@@ -73,7 +73,7 @@ class KOResetStatistics(SnowballStatistics):
         records, cols = ((self.ko_records, self.layout.ko) if surface == "alive"
                          else (self.post_records, self.layout.post_ko))
         for k, rec in enumerate(records):
-            if is_close(float(rec.observation_time), t):
+            if same_instant(rec.observation_time, t):
                 return int(cols[k])
         raise ValidationError(f"no {surface} statistics column for the knock-out record at t={t}")
 

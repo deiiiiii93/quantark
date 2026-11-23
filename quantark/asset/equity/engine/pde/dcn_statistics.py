@@ -48,7 +48,7 @@ from quantark.asset.equity.engine.dcn_statistics import (
 )
 from quantark.asset.equity.engine.event_stats import EventStatistics, ReceivablesTable, StatisticsProvenance
 from quantark.util.exceptions import PricingError
-from quantark.util.numerical import Tolerance, is_close
+from quantark.util.numerical import Tolerance, is_close, same_instant
 
 from .core.statistics.adjoint import AdjointUnavailable, banded_step_transpose
 from .vol_model_adjoint import StepTranspose, _transposed_tridiagonal
@@ -150,7 +150,7 @@ class DCNForwardResult:
     def ki_row_at(self, t: float) -> int:
         """The knock-in row of the daily date ``t``."""
         k = int(np.searchsorted(self.rows.ki_times, t - Tolerance.ZERO, side="left"))
-        if k >= self.rows.ki_times.size or not is_close(float(self.rows.ki_times[k]), t):
+        if k >= self.rows.ki_times.size or not same_instant(self.rows.ki_times[k], t):
             raise PricingError(f"the forward pass found a knock-in at t = {t!r}, not a daily KI date")
         return k
 

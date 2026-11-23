@@ -13,7 +13,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.pde.grid import EventSchedule, project_between
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, same_instant
 
 from ..components import validate_readout
 from ..groups import VALUE, Backend, ColumnGroup
@@ -193,7 +193,7 @@ class SnowballAdapter(FamilyAdapter):
             if (
                 t_obs is None
                 or is_close(t_obs, 0.0)
-                or is_close(t_obs, tau)
+                or same_instant(t_obs, tau)
                 or not (0.0 < t_obs < tau)
             ):
                 continue
@@ -265,7 +265,7 @@ class SnowballAdapter(FamilyAdapter):
             for obs_idx, t_obs in enumerate(ki_times):
                 if t_obs is None or not (0.0 < t_obs < tau):
                     continue
-                if is_close(t_obs, 0.0) or is_close(t_obs, tau):
+                if is_close(t_obs, 0.0) or same_instant(t_obs, tau):
                     continue
                 barrier = None
                 if obs_idx < len(ki_barriers):

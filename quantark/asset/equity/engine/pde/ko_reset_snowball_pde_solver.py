@@ -26,7 +26,7 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, same_instant
 
 
 class KOResetSnowballPDESolver(SnowballPDESolver):
@@ -306,7 +306,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             obs_time = rec.observation_time
             if is_close(obs_time, 0.0):
                 self._post_ko_observation_indices[0] = rec
-            elif is_close(obs_time, tau):
+            elif same_instant(obs_time, tau):
                 self._post_ko_terminal_record = rec
                 self._has_post_terminal_ko = True
             elif 0.0 < obs_time < tau:

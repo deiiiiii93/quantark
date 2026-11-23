@@ -61,7 +61,7 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, NumericalError
-from quantark.util.numerical import is_close, safe_divide
+from quantark.util.numerical import is_close, safe_divide, same_instant
 from quantark.util.enum.option_enums import ExerciseType, ObservationType
 from quantark.util.enum import ObservationAggregation
 from quantark.util.enum.engine_enums import EngineType, EventProjectionMode
@@ -399,7 +399,7 @@ class BasePDESolver(BaseEngine):
                 if is_close(rec.observation_time, 0.0):
                     self._observation_indices.add(0)
                     self._schedule_records.setdefault(0, []).append(rec)
-                elif is_close(rec.observation_time, tau):
+                elif same_instant(rec.observation_time, tau):
                     self._terminal_schedule_records.append(rec)
                     self._has_terminal_observation = True
                 elif 0.0 < rec.observation_time < tau:
@@ -413,7 +413,7 @@ class BasePDESolver(BaseEngine):
             for obs_time in product.observation_dates:
                 if is_close(obs_time, 0.0):
                     self._observation_indices.add(0)
-                elif is_close(obs_time, tau):
+                elif same_instant(obs_time, tau):
                     self._has_terminal_observation = True
                 elif 0.0 < obs_time < tau:
                     self._observation_indices.add(self._interior_observation_index(t_vec, obs_time))

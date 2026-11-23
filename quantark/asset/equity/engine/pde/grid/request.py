@@ -12,26 +12,28 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import merge_time_nodes, same_instant
 
 
 def _dedup_sorted_interior(times, tau: float) -> Tuple[float, ...]:
-    """Sorted, is_close-deduplicated event times, strictly inside (0, tau).
+    """Sorted event times strictly inside (0, tau), one per instant (contract clock, D1/D2).
 
     Endpoint events are structurally excluded: t=0 semantics belong to the
     ``valuation_readout`` stage and t=tau to the ``terminal`` stage (spec §4.2).
+    The 0 side is EXACT: only t == 0.0 is the valuation instant, so a lone event
+    a millisecond ahead is a positive event (review 2026-09-21 R1). The tau side
+    is the shared rule: a time ``same_instant`` as tau IS tau. Interior times
+    closer than ``Tolerance.ZERO`` are one instant, the LAST of their run
+    (``merge_time_nodes``).
     """
-    out: list[float] = []
-    for t in sorted(float(t) for t in times):
-        if t <= 0.0 or t >= tau or is_close(t, 0.0) or is_close(t, tau):
+    values = [float(t) for t in times]
+    for t in values:
+        if t <= 0.0 or t >= tau or same_instant(t, tau):
             raise ValidationError(
                 f"event_times must lie strictly inside (0, {tau}); got {t} "
                 "(endpoint events belong to the terminal/valuation_readout stages)"
             )
-        if out and is_close(out[-1], t):
-            continue
-        out.append(t)
-    return tuple(out)
+    return tuple(float(t) for t in merge_time_nodes(values))
 
 
 def _require_positive_int(name: str, value) -> None:
@@ -96,7 +98,7 @@ class GridRequest:
             — each becomes an exact grid node, indexed and damped.
         extra_times: Additional interior times that must be exact grid
             nodes but carry NO event and NO damping (a life-surface readout
-            along a path).  One within ``is_close`` of an event time is
+            along a path).  One ``same_instant`` as an event time is
             dropped: the event's node serves it.
         refinement: the intervals the stepper's damping form splits in two
             (spec 3A §5.3). Part of the request so every cache and artefact
@@ -151,5 +153,5 @@ class GridRequest:
         extras = _dedup_sorted_interior(self.extra_times, self.tau)
         object.__setattr__(
             self, "extra_times",
-            tuple(t for t in extras if not any(is_close(t, e) for e in events)),
+            tuple(t for t in extras if not any(same_instant(t, e) for e in events)),
         )

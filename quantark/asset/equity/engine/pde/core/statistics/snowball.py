@@ -19,7 +19,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import same_instant
 
 from quantark.asset.equity.engine.pde.grid import project_between
 
@@ -106,7 +106,7 @@ class SnowballStatistics(RollingStatistics):
         if col is not None:
             return col
         for k, rec in enumerate(self.ko_records):
-            if is_close(float(rec.observation_time), t):
+            if same_instant(rec.observation_time, t):
                 return int(self.layout.ko[k])
         raise ValidationError(f"no statistics column for the knock-out record at t={t}")
 

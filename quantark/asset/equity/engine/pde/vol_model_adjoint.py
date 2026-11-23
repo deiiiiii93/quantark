@@ -34,7 +34,7 @@ from typing import Callable, List, Optional
 import numpy as np
 
 from quantark.util.exceptions import PricingError
-from quantark.util.numerical import Tolerance, is_close
+from quantark.util.numerical import Tolerance, is_close, same_instant
 from quantark.util.numerical.tridiag import solve_tridiag_batch
 
 from .adi_columns import RHO_OFF
@@ -504,7 +504,7 @@ def adi_forward_pass(*, owner, family, prepared, core, statistics, log, fp_2d, c
     def column_of(x: float) -> int:
         if is_close(x, 0.0):
             return 0
-        if is_close(x, tau):
+        if same_instant(x, tau):
             return node_of(int(layout.time.actual_steps))
         return int(layout.time.step_at(x))
 

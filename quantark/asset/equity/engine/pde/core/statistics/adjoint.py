@@ -50,7 +50,7 @@ from quantark.asset.equity.engine.knock_in_days import (
     step_overlap,
 )
 from quantark.util.exceptions import NumericalError, PricingError
-from quantark.util.numerical import Tolerance, is_close, is_zero
+from quantark.util.numerical import Tolerance, is_close, is_zero, same_instant
 
 from ..backends import factor
 from ..components import CrankNicolson
@@ -505,7 +505,7 @@ def _column_of(layout, t: float, tau: float) -> int:
     """The march's time index of an observation (``_populate_observation_maps``' rule)."""
     if is_close(t, 0.0):
         return 0
-    if is_close(t, tau):
+    if same_instant(t, tau):
         return int(layout.time.actual_steps)
     return int(layout.time.step_at(t))
 
