@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 from quantark.execution.errors import CapabilityError
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import is_close, is_zero, same_instant
 
 __all__ = ["ThetaShift", "shift_for_theta", "bumped_value", "bumped_trade_value", "carried_ended_value",
            "shift_cash_legs", "bumped_trade_value_folded"]
@@ -55,7 +55,7 @@ def _carried_to_t1(cash_pv_at_t0: float, payment_time: float, env_t0, env_t1, ti
     at time 0), whatever float residue the two times carry."""
     if payment_time is None:
         return 0.0
-    if is_close(payment_time, time_bump):
+    if same_instant(payment_time, time_bump):
         payment_time = time_bump
     elif payment_time < time_bump:
         return 0.0
@@ -160,7 +160,7 @@ def _ko_reset_schedule_1_end(product, env, time_bump):
     if not isinstance(product, KnockOutResetSnowballOption):
         return None
     times = [float(t) for t in product.get_pre_ko_observation_profile(env)["observation_times"]]
-    if not times or any(t >= time_bump or is_close(t, time_bump) for t in times):
+    if not times or any(t >= time_bump or same_instant(t, time_bump) for t in times):
         return None
     terminal = resolve_terminal_timing(product, env)
     settlement = first_schedule_settlement(product, env, terminal)

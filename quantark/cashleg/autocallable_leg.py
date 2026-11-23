@@ -22,6 +22,7 @@ from quantark.util.numerical import (
     almost_equal,
     is_zero,
     is_valid_number,
+    same_instant,
     validate_positive,
 )
 
@@ -246,7 +247,7 @@ class AutocallableCashLeg(CashLeg):
         for t, p in zip(times, prob):
             if almost_equal(float(p), 0.0, tol=0.0):
                 continue
-            match = np.flatnonzero(np.abs(obs - float(t)) <= Tolerance.PROBABILITY)
+            match = np.flatnonzero([same_instant(o, t) for o in obs])
             if match.size != 1:
                 raise ValidationError(
                     f"AutocallableCashLeg has {'no' if match.size == 0 else 'an ambiguous'} schedule entry for "

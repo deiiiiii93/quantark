@@ -44,7 +44,8 @@ from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
 from quantark.util.numerical import (
     is_zero,
-    is_close,
+    merge_time_nodes,
+    node_index,
     validate_positive,
     validate_non_negative,
     safe_log,
@@ -434,13 +435,13 @@ class BarrierOptionMCEngine(BaseEngine):
         if np.any(np.diff(sorted_obs) <= 0.0):
             raise ValidationError("Observation times must be strictly increasing.")
 
-        if sorted_obs.size and is_close(sorted_obs[-1], T):
-            all_times = sorted_obs
-        else:
-            all_times = np.concatenate([sorted_obs, [T]])
+        # One node per instant, maturity exactly last (contract clock): a last observation spelled within
+        # Tolerance.ZERO of maturity is the maturity node; a grid without such a pair is the sorted observations and
+        # maturity bit for bit, each observation on its own node.
+        all_times = merge_time_nodes(list(sorted_obs) + [T], pin=T)
 
         dt_array = np.diff(np.concatenate([[0.0], all_times]))
-        obs_indices = np.searchsorted(all_times, obs_times)
+        obs_indices = node_index(all_times, obs_times)
         barriers = np.array([rec.barrier for rec in resolved], dtype=float)
         payoffs = np.array([rec.payoff for rec in resolved], dtype=float)
         settlement_times = np.array(

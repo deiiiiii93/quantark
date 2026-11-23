@@ -24,7 +24,7 @@ from quantark.backtest.replay.market import SignedDividendYield
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import same_instant
 
 from ..config import CacheConfig, GateConfig
 from .base import (DayStates, GateReport, GateScale, StressCase, bucket_centre, bucket_key,
@@ -83,7 +83,7 @@ class LifeSurface:
         return int(sum(a.nbytes for a in arrays))
 
     def node(self, elapsed: float) -> int:
-        """The column for an elapsed time: exact float first, then ``is_close``.
+        """The column for an elapsed time: exact float first, then ``same_instant`` (the contract clock's rule).
 
         The maturity itself is the terminal column (the payoff after the
         terminal transforms); a time past it has no value on this surface.
@@ -92,10 +92,10 @@ class LifeSurface:
         if hit is not None:
             return hit
         for key, k in self.step_of.items():
-            if is_close(key, elapsed):
+            if same_instant(key, elapsed):
                 return k
         tau = float(self.t[-1])
-        if is_close(elapsed, tau):
+        if same_instant(elapsed, tau):
             return int(self.t.size - 1)
         raise ValidationError(f"no surface node at elapsed time {elapsed!r} (maturity {tau!r})")
 
@@ -305,7 +305,7 @@ class LifeSurfacePricer:
             elapsed = self.elapsed(d)
             if elapsed == 0.0:
                 continue                    # column 0 (day 0 of a run that starts on the contract's origin)
-            if elapsed > tau and not is_close(elapsed, tau):
+            if elapsed > tau and not same_instant(elapsed, tau):
                 break
             columns.add(surface.node(elapsed))
         return sorted(columns)
@@ -473,7 +473,7 @@ class LifeSurfacePricer:
         times = self._ki_observation_times()
         days = [d for d in range(len(self.dates))
                 if 0.0 < self.elapsed(d) < self._maturity
-                and any(is_close(self.elapsed(d), t) for t in times)]
+                and any(same_instant(self.elapsed(d), t) for t in times)]
         if len(days) <= wanted:
             return days
         # Evenly spaced through the observation schedule, endpoints kept:
@@ -488,7 +488,7 @@ class LifeSurfacePricer:
         elapsed = self.elapsed(day)
         times = [float(t) for t in (config.ki_observation_dates or ())]
         for idx, t in enumerate(times):
-            if is_close(elapsed, t):
+            if same_instant(elapsed, t):
                 level = self.product.get_ki_barrier_at(idx)
                 if level is not None:
                     return float(level)

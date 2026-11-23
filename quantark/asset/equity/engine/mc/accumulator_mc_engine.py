@@ -55,7 +55,8 @@ from quantark.util.enum import AccumulatorKnockOutType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
-    is_close,
+    merge_time_nodes,
+    node_index,
     is_zero,
     validate_non_negative,
     validate_positive,
@@ -305,6 +306,21 @@ class AccumulatorMCEngine(BaseEngine):
     # Monte Carlo core
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _observation_grid(
+        obs_times: np.ndarray, maturity: float
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The simulation grid: every observation time and the contract maturity, one node per instant.
+
+        A last observation spelled within Tolerance.ZERO of maturity is the maturity node (maturity exactly last,
+        contract clock); a grid without such a pair is the observations and maturity bit for bit, each observation on
+        its own node. Returns ``(all_times, dt_array, obs_indices)``.
+        """
+        all_times = merge_time_nodes(list(obs_times) + [maturity], pin=maturity)
+        dt_array = np.diff(np.concatenate([[0.0], all_times]))
+        obs_indices = node_index(all_times, obs_times)
+        return all_times, dt_array, obs_indices
+
     def _price_mc(
         self,
         product: AccumulatorOption,
@@ -320,13 +336,7 @@ class AccumulatorMCEngine(BaseEngine):
         terminal_payment_df: float,
     ) -> Tuple[float, float]:
         obs_times = np.asarray(times, dtype=float)
-        # Grid hits every observation date and the contract maturity.
-        if is_close(float(obs_times[-1]), maturity):
-            all_times = obs_times.copy()
-        else:
-            all_times = np.concatenate([obs_times, [maturity]])
-        dt_array = np.diff(np.concatenate([[0.0], all_times]))
-        obs_indices = np.searchsorted(all_times, obs_times)
+        all_times, dt_array, obs_indices = self._observation_grid(obs_times, maturity)
 
         generator = self._create_path_generator(
             spot, rate, div, vol, maturity, dt_array

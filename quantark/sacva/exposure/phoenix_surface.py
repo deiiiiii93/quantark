@@ -27,9 +27,7 @@ from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.sacva.exposure.value_surface import GridValueSurface
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance
-
-_TOL = 1e-9
+from quantark.util.numerical import Tolerance, same_instant
 
 
 class PhoenixTerminatedAtValuation(Exception):
@@ -55,7 +53,7 @@ class PhoenixExposureSurface:
 
 
 def _grid_index(times: np.ndarray, t_obs: float) -> int:
-    hits = np.where(np.abs(times - t_obs) <= _TOL)[0]
+    hits = np.flatnonzero(np.abs(times - t_obs) < Tolerance.ZERO)   # same_instant, vectorized
     if hits.size != 1:
         raise ValidationError(
             f"observation time {t_obs} is not a unique node of the exposure grid")
@@ -87,7 +85,7 @@ def build_phoenix_surface(trade) -> PhoenixExposureSurface:
     for rec in ko_records:
         obs_t = float(rec.observation_time)
         settle = obs_t if rec.settlement_time is None else float(rec.settlement_time)
-        if abs(settle - obs_t) > Tolerance.PRECISION:
+        if not same_instant(settle, obs_t):
             raise ValidationError(
                 f"{trade.trade_id}: Phoenix exposure v1 requires immediate KO settlement "
                 f"(obs={obs_t}, settle={settle}); delayed settlement is deferred "

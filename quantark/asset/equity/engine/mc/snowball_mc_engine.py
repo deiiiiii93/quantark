@@ -77,7 +77,7 @@ from quantark.util.enum import (
 )
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import Tolerance, is_close, merge_time_nodes, node_index, safe_log
+from quantark.util.numerical import Tolerance, merge_time_nodes, node_index, safe_log, same_instant
 
 # Optional Dask import
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
@@ -1021,13 +1021,17 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
         # continuous-KI node can be one instant spelled an ulp apart (a dated record's (d - a) / 365, an aged
         # numeric one's d / 365 - a / 365, a linspace node); kept as two nodes, the empty step between them re-dealt
         # every random draw after it. A grid without such a pair is the sorted set of its times, bit for bit.
-        all_times = merge_time_nodes(grid_times + [T], pin=T)
+        # The continuous-KI linspace and the curve knots are nodes the engine adds itself: a contract instant (a KO
+        # record, maturity) is never displaced by one a hair after it (contract clock D2). A discrete grid holds only
+        # contract times, which arrive canonical: nothing to anchor.
+        anchors = [t for t in ko_times if not at_valuation(t)] + [T] if ki_continuous else None
+        all_times = merge_time_nodes(grid_times + [T], pin=T, anchors=anchors)
 
         # Build dt_array
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
             all_times, self._continuous_ki_model = continuous_time_grid(pricing_env, all_times, self.params)
-            all_times = merge_time_nodes(all_times, pin=T)
+            all_times = merge_time_nodes(all_times, pin=T, anchors=anchors)
 
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
@@ -1098,7 +1102,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             in_horizon = [
                 index
                 for index, time in enumerate(ki_profile["observation_times"])
-                if time <= pre_maturity or is_close(time, pre_maturity)
+                if time <= pre_maturity or same_instant(time, pre_maturity)
             ]
             ki_times = [ki_profile["observation_times"][index] for index in in_horizon]
             ki_barriers = [ki_profile["barriers"][index] for index in in_horizon]
@@ -1109,6 +1113,9 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             ki_records = [ki_schedule_records[index] for index in ki_record_indices]
 
         all_times_set = set(pre_times) | set(ki_times) | {T}
+        # the contract's own instants (contract clock D2): every time below except the continuous-KI linspace and
+        # the business-day grid, which the engine adds itself
+        contract_set = set(pre_times) | (set() if ki_continuous else set(ki_times)) | {T}
 
         daily_times = np.array([], dtype=float)
         use_daily_grid = getattr(self.params, "use_business_day_grid", False)
@@ -1153,6 +1160,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
         post_times_by_ki: Optional[List[np.ndarray]] = None
         if post_mode == PostKOScheduleMode.ABSOLUTE:
             all_times_set |= set(post_times)
+            contract_set |= set(post_times)
         else:
             # REBASED: treat post_times as offsets from KI time
             if carried_knock_in:
@@ -1170,6 +1178,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             )
             for actual_times in post_times_by_ki:
                 all_times_set.update(actual_times)
+                contract_set.update(actual_times)
 
         # An observation exactly at valuation is decided on the known spot, as in _build_time_grid: it
         # is no simulation node (a zero step is rejected) and maps to index -1, i.e. path column 0 under
@@ -1180,13 +1189,20 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
 
         # One node per instant, as in _build_time_grid (W17a): two spellings of one instant (a record against a
         # continuous-KI node, a REBASED t_ki + offset against another node) are merged into one node.
+        # A node the engine adds itself (the continuous-KI linspace, the business-day grid, the curve knots) never
+        # displaces a contract instant a hair before it (contract clock D2); without such nodes nothing is anchored.
+        anchors = (
+            sorted(t for t in contract_set if not at_valuation(t))
+            if ki_continuous or daily_times.size
+            else None
+        )
         all_times = merge_time_nodes(
-            [t for t in all_times_set if not at_valuation(t)], pin=T
+            [t for t in all_times_set if not at_valuation(t)], pin=T, anchors=anchors
         )
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
             all_times, self._continuous_ki_model = continuous_time_grid(pricing_env, all_times, self.params)
-            all_times = merge_time_nodes(all_times, pin=T)
+            all_times = merge_time_nodes(all_times, pin=T, anchors=anchors)
 
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)

@@ -43,7 +43,8 @@ from quantark.util.enum import ObservationAggregation, ObservationType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
-    is_close,
+    merge_time_nodes,
+    node_index,
     is_zero,
     validate_non_negative,
     validate_positive,
@@ -392,13 +393,13 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         if np.any(np.diff(sorted_obs) <= 0.0):
             raise ValidationError("Observation times must be strictly increasing.")
 
-        if sorted_obs.size and is_close(sorted_obs[-1], maturity):
-            all_times = sorted_obs
-        else:
-            all_times = np.concatenate([sorted_obs, [maturity]])
+        # One node per instant, maturity exactly last (contract clock): a last observation spelled within
+        # Tolerance.ZERO of maturity is the maturity node; a grid without such a pair is the sorted observations and
+        # maturity bit for bit, each observation on its own node.
+        all_times = merge_time_nodes(list(sorted_obs) + [maturity], pin=maturity)
 
         dt_array = np.diff(np.concatenate([[0.0], all_times]))
-        obs_indices = np.searchsorted(all_times, obs_times)
+        obs_indices = node_index(all_times, obs_times)
         lower_barriers = np.array([rec.lower_barrier for rec in resolved], dtype=float)
         upper_barriers = np.array([rec.upper_barrier for rec in resolved], dtype=float)
         payoffs = np.array([rec.payoff for rec in resolved], dtype=float)

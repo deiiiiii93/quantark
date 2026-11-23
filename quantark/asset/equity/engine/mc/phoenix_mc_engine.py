@@ -512,12 +512,16 @@ class PhoenixMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine):
 
         # One node per instant (W17a): a knock-out record and a continuous-KI node that are one instant spelled an
         # ulp apart become one node; a grid without such a pair is the sorted set of its times, bit for bit.
-        all_times = merge_time_nodes(ko_grid_times + ki_grid_times + [T], pin=T)
+        # The continuous-KI linspace and the curve knots are nodes the engine adds itself: a contract instant (a KO
+        # record, maturity) is never displaced by one a hair after it (contract clock D2). A discrete grid holds only
+        # contract times, which arrive canonical: nothing to anchor.
+        anchors = ko_grid_times + [T] if ki_continuous else None
+        all_times = merge_time_nodes(ko_grid_times + ki_grid_times + [T], pin=T, anchors=anchors)
 
         if ki_continuous:
             from quantark.asset.equity.engine.continuous_ki_support import continuous_time_grid
             all_times, self._continuous_ki_model = continuous_time_grid(pricing_env, all_times, self.params)
-            all_times = merge_time_nodes(all_times, pin=T)
+            all_times = merge_time_nodes(all_times, pin=T, anchors=anchors)
 
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)

@@ -30,14 +30,12 @@ from quantark.sacva.exposure.value_surface import GridValueSurface
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance
+from quantark.util.numerical import Tolerance, same_instant
 
-_TOL = 1e-9
 # Settlement classification (immediate vs delayed vs post-maturity) MUST use the same
-# tolerance the QUAD engine uses when it decides whether to insert a settlement
-# recording node (SnowballQuadEngine._insert_settlement_times), otherwise a sub-
-# tolerance delay could be a node on one side and not the other.
-_SETTLE_TOL = Tolerance.PRECISION
+# rule the QUAD engine uses when it decides whether to insert a settlement recording
+# node (SnowballQuadEngine._insert_settlement_times: the contract clock's same_instant),
+# otherwise a sub-tolerance delay could be a node on one side and not the other.
 
 
 class SnowballTerminatedAtValuation(Exception):
@@ -73,7 +71,7 @@ class SnowballExposureSurface:
 
 
 def _grid_index(times: np.ndarray, t_obs: float) -> int:
-    hits = np.where(np.abs(times - t_obs) <= _TOL)[0]
+    hits = np.flatnonzero(np.abs(times - t_obs) < Tolerance.ZERO)   # same_instant, vectorized
     if hits.size != 1:
         raise ValidationError(
             f"observation time {t_obs} is not a unique node of the exposure grid")
@@ -100,11 +98,11 @@ def _validate_ko_leg(records, trade_id, maturity, leg="") -> float:
         settle = obs_t if rec.settlement_time is None else float(rec.settlement_time)
         if not np.isfinite(settle):
             raise ValidationError(f"{trade_id}: non-finite {leg}KO settlement time")
-        if settle < obs_t - _SETTLE_TOL:
+        if settle < obs_t and not same_instant(settle, obs_t):
             raise ValidationError(
                 f"{trade_id}: {leg}KO settlement precedes observation "
                 f"(obs={obs_t}, settle={settle})")
-        if settle > maturity + _SETTLE_TOL:
+        if settle > maturity and not same_instant(settle, maturity):
             raise ValidationError(
                 f"{trade_id}: post-maturity {leg}KO settlement (obs={obs_t}, "
                 f"settle={settle}, maturity={maturity}) is deferred — it needs the "
@@ -134,7 +132,8 @@ def _index_ko_leg(records, times: np.ndarray, maturity: float):
             settle_idx.append(obs_i)
             continue
         settle = min(float(rec.settlement_time), maturity)
-        if settle <= float(rec.observation_time) + _SETTLE_TOL:
+        obs_t = float(rec.observation_time)
+        if settle <= obs_t or same_instant(settle, obs_t):
             settle_idx.append(obs_i)
         else:
             settle_idx.append(_grid_index(times, settle))
@@ -185,7 +184,7 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
         # matches the recorded grid nodes exactly — not a silent fallback.
         post_ko_records = [
             r for r in engine._resolve_ko_records(product, env, product.post_barrier_config)
-            if float(r.observation_time) <= maturity + _SETTLE_TOL]
+            if float(r.observation_time) <= maturity or same_instant(r.observation_time, maturity)]
         post_ko_barrier = _validate_ko_leg(
             post_ko_records, trade.trade_id, maturity, leg="post-")
 

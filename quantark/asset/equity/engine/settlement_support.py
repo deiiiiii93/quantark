@@ -23,7 +23,7 @@ from quantark.util.calendar import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance, is_close, is_zero
+from quantark.util.numerical import is_close, is_zero, same_instant
 
 from .capabilities import SettlementSupport
 
@@ -180,7 +180,7 @@ def build_american_exercise_date_grid(
         )
 
     maturity = float(product.get_maturity(pricing_env))
-    if not is_close(resolved_times[-1], maturity):
+    if not same_instant(resolved_times[-1], maturity):
         raise ValidationError(
             "American exercise date grid is inconsistent with product maturity"
         )
@@ -498,7 +498,7 @@ def first_schedule_settlement(
     terminal = resolve_terminal_timing(product, pricing_env) if terminal is None else terminal
     pre_maturity = float(product.get_pre_maturity_time(pricing_env))
     determination = float(terminal.determination_time)
-    one_maturity = is_close(pre_maturity, determination, abs_tol=Tolerance.PRECISION)
+    one_maturity = same_instant(pre_maturity, determination)
     explicit = (getattr(product, "settlement_date", None) is not None
                 or getattr(product, "first_schedule_settlement_time", None) is not None)
     if explicit and not one_maturity:
@@ -533,7 +533,7 @@ def first_schedule_payment_time(
     """
     terminal = resolve_terminal_timing(product, pricing_env) if terminal is None else terminal
     pre_maturity = float(product.get_pre_maturity_time(pricing_env))
-    if is_close(pre_maturity, float(terminal.determination_time), abs_tol=Tolerance.PRECISION):
+    if same_instant(pre_maturity, float(terminal.determination_time)):
         return float(terminal.payment_time)
     return first_schedule_settlement(product, pricing_env, terminal).payment_time
 
