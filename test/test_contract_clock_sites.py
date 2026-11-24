@@ -266,7 +266,6 @@ SITES = [
     (QUAD + "snowball_quad_engine.py", "SnowballQuadEngine._insert_settlement_times", ("Tolerance.PRECISION",)),
     (QUAD + "snowball_quad_engine.py", "SnowballQuadEngine._match_record", V1_ABS),
     (QUAD + "snowball_quad_engine.py", "SnowballQuadEngine._compute_event_stats", V1_ABS),
-    (QUAD + "snowball_quad_engine.py", "SnowballQuadEngine._forward_event_quantities", V1_ABS),
     (QUAD + "snowball_quad_engine.py", "SnowballQuadEngine._fold_in_life", V1_ABS),
     (QUAD + "snowball_quad_engine.py", "SnowballQuadEngine._reachable_ko_observations", ("atol=Tolerance.PRECISION",)),
     (QUAD + "ko_reset_snowball_quad_engine.py", "KOResetSnowballQuadEngine._compute_event_stats", V1_ABS),

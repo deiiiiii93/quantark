@@ -19,7 +19,8 @@ interpolant is a cubic between them) and at standardized points ``m + s z`` -- n
 S1 found plain Gauss-Legendre across the step 0.48% low when ``s << h``. Mass beyond ``14 s`` (< 1e-44) is dropped.
 
 Under continuous knock-in the not-knocked-in state rolls with the Brownian-bridge touch probability from the spot to
-each node (``_forward_seed_touch_probability``'s formula), so the first interval's touch is exact too.
+each node (``exp(-2 d0 d1 / s^2)``, ``d0``/``d1`` the endpoints' distances to the barrier), so the first interval's
+touch is exact too.
 
 Everything here is linear in the pre-event surfaces, so it transposes: :meth:`GaussianFirstStep.lift_transpose`
 gives the adjoint statistics pass its row (``v1_adjoint``) and the forward-density seed.
@@ -323,7 +324,8 @@ class GaussianFirstStep:
 
     def _touch(self, y: np.ndarray, centre, touch: Tuple[float, bool]) -> np.ndarray:
         """Brownian-bridge probability that the path from ``centre`` to ``y`` over the step touches the barrier
-        (``SnowballQuadEngine._forward_seed_touch_probability``; 1 on the knocked side)."""
+        (``exp(-2 d0 d1 / s^2)`` with ``d0``, ``d1`` the endpoints' distances to the barrier; 1 on the knocked
+        side)."""
         log_barrier, is_reverse = touch
         denom = self.std * self.std
         if is_reverse:

@@ -648,8 +648,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         Columns: per knock-out record of both schedules its discounted unit, the maturity unit and cash (the first
         schedule's end, never knocked in), the knocked-in settlement unit and cash. The knock-in path statistics come
-        from the forward adjoint pass, run only when ``streams`` asks for the knock-in stream (spec D17);
-        ``event_stats_mode='forward_density'`` is ignored (this recursion has no forward-density mode).
+        from the forward adjoint pass, run only when ``streams`` asks for the knock-in stream (spec D17).
         """
         if not isinstance(product, KnockOutResetSnowballOption):
             return None

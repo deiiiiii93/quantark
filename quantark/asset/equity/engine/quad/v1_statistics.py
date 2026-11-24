@@ -42,7 +42,6 @@ from .v1_adjoint import MarchLog, forward_pass
 __all__ = [
     "BGK_REASON",
     "FIRST_PASSAGE",
-    "FORWARD_DENSITY_KI_REASON",
     "coupon_table",
     "knock_in_table",
     "statistics",
@@ -56,14 +55,7 @@ BGK_REASON = (
     "undefined: KnockInMonitoringMode.BGK_APPROXIMATION prices a shifted continuously monitored barrier; its "
     "knock-in mass falls between the product's observation dates and has no per-observation row"
 )
-#: the opt-in forward-density statistics mode reports no knock-in path statistics (its KI-ever counted knock-ins
-#: after a knock-out, which the contract forbids; spec AC9)
-FORWARD_DENSITY_KI_REASON = (
-    "undefined: event_stats_mode='forward_density' tracks no first knock-in before a knock-out; use "
-    "event_stats_mode='stacked' for P(knock in), its expected time and the knock-in table"
-)
 PROVENANCE = StatisticsProvenance("quad_v1", "quad_v1")
-FORWARD_DENSITY_PROVENANCE = StatisticsProvenance("quad_v1_forward_density", "quad_v1")
 
 
 def _df(env, t: float) -> float:
@@ -194,7 +186,7 @@ def coupon_table(env, terminal, observations: ObservationTable, *, probability, 
 
 def statistics(product, env, *, family: str, pv: float, observations: ObservationTable,
                coupons: Optional[CouponTable], maturity, ki_settlement, rule: str, want_knock_in: bool,
-               forward, unavailable: Dict[str, str], provenance: StatisticsProvenance = PROVENANCE,
+               forward, unavailable: Dict[str, str],
                path_dependent_cash: Optional[CashLedger] = None,
                knock_in_refusal: Optional[str] = None) -> EventStatistics:
     """The result: knock-in fields by ``rule`` (``forward`` the bound pass), ledger from the tables."""
@@ -210,4 +202,4 @@ def statistics(product, env, *, family: str, pv: float, observations: Observatio
                 + ki_settlement.probability * ki_settlement.time)
     return es.assemble(family=family, pv=pv, observations=observations, coupons=coupons, maturity=maturity,
                        ki_settlement=ki_settlement, knock_in=knock_in, ki_table=ki_table, expected_lifetime=lifetime,
-                       provenance=provenance, unavailable=unavailable, path_dependent_cash=path_dependent_cash)
+                       provenance=PROVENANCE, unavailable=unavailable, path_dependent_cash=path_dependent_cash)

@@ -33,9 +33,8 @@ class UnderResolvedStepError(NumericalError):
     next rung instead of failing."""
 
 
-def local_step_weights(h: float, alpha: float, beta: float, tau: float, *, discounted: bool = True
-                       ) -> Tuple[float, float, float]:
-    """``(w_-, w_0, w_+)`` of the step, discount included unless ``discounted=False`` (forward densities).
+def local_step_weights(h: float, alpha: float, beta: float, tau: float) -> Tuple[float, float, float]:
+    """``(w_-, w_0, w_+)`` of the step, discount included.
 
     Raises:
         UnderResolvedStepError: a weight is negative -- the step is not shorter than a cell, or its drift dominates
@@ -43,7 +42,7 @@ def local_step_weights(h: float, alpha: float, beta: float, tau: float, *, disco
     """
     a = 2.0 * tau / (h * h)
     b = 2.0 * alpha * tau / h
-    disc = math.exp(-(beta - alpha * alpha) * tau) if discounted else 1.0
+    disc = math.exp(-(beta - alpha * alpha) * tau)
     weights = (disc * (0.5 * a - 0.5 * b), disc * (1.0 - a), disc * (0.5 * a + 0.5 * b))
     if min(weights) < 0.0:
         raise UnderResolvedStepError(

@@ -153,15 +153,6 @@ def test_v1_carried_ki_and_valuation_ko_has_zero_ki_survival(family):
     assert stats.maturity.probability == 0.
 
 
-def test_forward_density_declares_different_statistics_model():
-    factory, spec, cls, _ = CASES['snowball']
-    product = factory(spec)
-    product._otc_lifecycle_knocked_in = True
-    stats = cls(QuadParams(grid_points=301, event_stats_mode='forward_density')).calculate_event_stats(product, env())
-    assert stats.provenance.surrogate
-    assert stats.ki_settlement.probability == pytest.approx(1. - stats.observations.probability.sum(), abs=1e-8)
-
-
 @pytest.mark.parametrize('family', CASES)
 def test_v1_converged_statistics_use_the_accepted_price_grid(family):
     from dataclasses import replace

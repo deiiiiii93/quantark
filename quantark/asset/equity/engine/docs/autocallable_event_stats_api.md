@@ -312,9 +312,9 @@ for speed.
 and copied to `EventDistribution.provenance`. It names the implementation, not an accuracy. On
 every native route the two names are equal (`provenance.surrogate` is False): the MC and QUAD V2
 engine class names, `"quad_v1"`, `"flat_vol_1d"` / `"local_vol_1d"` (PDE 1D), `"heston_adi_2d"` /
-`"slv_adi_2d"` (ADI). They differ only on an explicit approximation:
-`("quad_v1_forward_density", "quad_v1")` and the ADI `statistics="flat_vol_surrogate"` route
-(`"flat_vol_1d"` beside the 2D price model). The path analyzer reports
+`"slv_adi_2d"` (ADI). They differ only on an explicit approximation: the ADI
+`statistics="flat_vol_surrogate"` route (`"flat_vol_1d"` beside the 2D price model). (QUAD V1's
+opt-in `("quad_v1_forward_density", "quad_v1")` route was removed in 0.13.0.) The path analyzer reports
 `("path_analyzer_mc", "SnowballMCEngine")`; fold structures `("fold_structure", "fold_structure")`.
 
 ## `EventDistribution` and cash legs
@@ -432,11 +432,9 @@ decision time on the DCN axis and the payment time `price()` discounted the flow
   4001). The price knocks out the termination surface with nodal weights while the statistics use
   the joint projection; this is a pre-existing price-side difference, not hidden.
 - Memory Phoenix with more than 50 observations is refused, as for pricing.
-- Opt-in `event_stats_mode="forward_density"` keeps its own finite-grid numbers, provenance
-  `("quad_v1_forward_density", "quad_v1")`: diagnostic approximations that need not equal folded-price
-  increments. It reports no KI path statistics (the fields are unavailable with a reason) and
-  raises `StatisticsRefused` for memory or EXPIRY Phoenix, whose coupon cash it cannot compute.
-  See [`autocallable-ki-consistency`](../../../../../docs/plans/2026-11-10-autocallable-ki-consistency.md).
+- One statistics model. The opt-in `event_stats_mode="forward_density"` diagnostic (its own
+  finite-grid numbers, provenance `("quad_v1_forward_density", "quad_v1")`) and the
+  `QuadParams.event_stats_mode` field were removed in 0.13.0; passing the field raises `TypeError`.
 
 ### Path analyzer (`AutocallablePathAnalyzer.analyze_snowball_risk_neutral`)
 

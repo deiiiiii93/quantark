@@ -233,19 +233,6 @@ def test_statistics_and_the_forward_pass_close_on_corrected_steps(name, switch):
         assert got == pytest.approx(backward, abs=1e-10), key
 
 
-def test_forward_density_carries_the_same_mass(switch):
-    """AC6: the forward-density route (its kernel is the transpose of the backward step) lost the same alias mass in
-    0.12.0 (residual -2.25e-3) and now partitions to rounding, as the stacked route does. (Its per-observation
-    probabilities differ from the stacked route's at the second observation by 2.6e-3 with or without the fix, also
-    on resolved contracts: a pre-existing route difference, not mass.)"""
-    product, fd = _daily_ko(2.0), QuadParams(event_stats_mode="forward_density")
-    switch(False)
-    assert abs(SnowballQuadEngine(fd).calculate_event_stats(product, _env(0.10)).probability_residual) > 1e-3
-    switch(True)
-    forward = SnowballQuadEngine(fd).calculate_event_stats(product, _env(0.10))
-    assert abs(forward.probability_residual) <= 1e-11
-
-
 def test_routing_and_refusals_are_unchanged(switch):
     """AC7: a contract 0.12.0 refused (daily same-barrier steps narrower than a cell) is refused with the same
     message."""

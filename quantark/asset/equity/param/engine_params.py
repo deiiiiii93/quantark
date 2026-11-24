@@ -737,11 +737,6 @@ class QuadParams(EngineParams):
             BGK_APPROXIMATION; sparser schedules are rejected because the
             shift's first-order residual grows with observation spacing and
             the performance motivation only exists for dense schedules.
-        event_stats_mode: Event-distribution algorithm: "stacked"
-            (per-observation indicator rows, default) or "forward_density"
-            (diagnostic forward transition-density march; outcome probabilities
-            need not match price at finite grid, and provenance identifies a
-            different statistics model; see spec 2026-08-24).
         readout: How the scalar price is recovered from the nodal surface,
             one of QUAD_READOUT_MODES. "legacy_linear" (default) interpolates
             linearly between the straddling nodes; "transition" evaluates the
@@ -779,7 +774,6 @@ class QuadParams(EngineParams):
         KnockInMonitoringMode.EXACT_DISCRETE
     )
     bgk_min_ki_observations: int = 100
-    event_stats_mode: str = "stacked"
     readout: str = "legacy_linear"
 
     def __post_init__(self):
@@ -965,11 +959,6 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 "bgk_min_ki_observations must be at least 2, "
                 f"got {self.bgk_min_ki_observations}"
-            )
-        if self.event_stats_mode not in ("stacked", "forward_density"):
-            raise ValidationError(
-                "event_stats_mode must be one of stacked, forward_density, "
-                f"got {self.event_stats_mode}"
             )
 
     @classmethod

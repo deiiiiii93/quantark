@@ -682,19 +682,17 @@ def test_expiry_coupon_cash_to_pay_is_the_coupon_earned_at_the_row(memory):
     assert float(np.sum(ledger.discounted_cash)) == pytest.approx(stats.total_discounted_cash, rel=1e-12)
 
 
-# --- forward_density mode (opt-in; provenance and its own numbers kept) ---------------------------------------------
+# --- one statistics model (0.13.0) -----------------------------------------------------------------------------------
 
 
-def test_forward_density_keeps_its_provenance_and_reports_no_knock_in_path():
-    product = snowball("cki")
-    stacked = sb()().calculate_event_stats(product, env())
-    forward = sb(event_stats_mode="forward_density")().calculate_event_stats(product, env())
-    assert forward.provenance.statistics_model == "quad_v1_forward_density"
-    assert forward.pv == stacked.pv
-    for path in ("knock_in.probability", "knock_in.expected_time", "ki_table"):
-        assert forward.unavailable[path] == v1_statistics.FORWARD_DENSITY_KI_REASON
-    np.testing.assert_allclose(forward.observations.probability, stacked.observations.probability, atol=6e-4)
-    assert forward.ki_settlement.probability == pytest.approx(stacked.ki_settlement.probability, abs=1e-2)
+@pytest.mark.parametrize("value", ["stacked", "forward_density"])
+def test_event_stats_mode_was_removed(value):
+    """0.13.0 removed the opt-in forward-density statistics and with it the ``event_stats_mode`` switch: every V1
+    statistic rides the price's own operator. Passing the switch at all is refused, never silently ignored (KO-reset
+    used to ignore it)."""
+    assert not hasattr(QuadParams(), "event_stats_mode")
+    with pytest.raises(TypeError, match="event_stats_mode"):
+        QuadParams(event_stats_mode=value)
 
 
 # --- reentrancy ------------------------------------------------------------------------------------------------------

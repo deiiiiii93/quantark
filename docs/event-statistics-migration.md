@@ -301,6 +301,14 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     knock-out at its settlement time. Missing termination payment times raise `ValidationError`;
     `PAYMENT` on a `PAY_FULL_SCHEDULE` leg is refused.
 
+29. **0.13.0: QUAD V1 `event_stats_mode` removed (breaking).** The opt-in
+    `event_stats_mode="forward_density"` diagnostic (provenance `("quad_v1_forward_density",
+    "quad_v1")`, item 13) is gone, and with it the `QuadParams.event_stats_mode` field: QUAD V1
+    event statistics have one model, riding the price's own operator. Passing the field at all
+    (`"stacked"` included) raises `TypeError`; drop the argument. KO-reset used to ignore the flag
+    silently; it now fails the same way at `QuadParams` construction. Prices and the default
+    statistics are unchanged, bit for bit.
+
 ## 10. Known limitations in 0.11.0
 
 - DCN statistics stay on the DCN's own ACT/365F axis, like DCN `price()`. Under `BUSINESS_DAYS` or

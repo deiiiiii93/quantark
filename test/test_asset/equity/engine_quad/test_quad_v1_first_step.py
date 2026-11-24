@@ -437,17 +437,6 @@ class TestRoutes:
         b = engine.calculate_event_stats(product, market)
         assert np.array_equal(a.observations.probability, b.observations.probability)
 
-    @pytest.mark.parametrize("name", ["phoenix_5min_ko", "phoenix_5min_coupon", "reverse_5min_ko",
-                                      "disable_ko_after_ki_5min", "continuous_5min_near_ki", "week_ki_0.2_on"])
-    def test_forward_density_probabilities_match_the_stacked_columns(self, name):
-        """``event_stats_mode='forward_density'`` seeds its first observation from the same quadrature."""
-        engine, product, market = solve(name)
-        stacked = engine.calculate_event_stats(product, market)
-        forward = CASES[name][0](QuadParams(event_stats_mode="forward_density")).calculate_event_stats(product, market)
-        np.testing.assert_allclose(forward.observations.probability, stacked.observations.probability, atol=1e-4)
-        assert forward.maturity.probability == pytest.approx(stacked.maturity.probability, abs=1e-4)
-        assert forward.ki_settlement.probability == pytest.approx(stacked.ki_settlement.probability, abs=1e-4)
-
     @pytest.mark.parametrize("name", ["phoenix_5min_ko", "ko_reset_5min_ko", "reverse_5min_ko", "week_ko_0.2_on",
                                       "week_ki_0.05_5pct", "week_ko_0.05_5pct"])
     def test_the_t0_surfaces_agree_with_the_price(self, name):

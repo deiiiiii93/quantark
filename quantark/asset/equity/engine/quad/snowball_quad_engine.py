@@ -31,7 +31,6 @@ from quantark.asset.equity.engine.quad.local_step import (
     UnderResolvedStepError,
     local_bridge_hit,
     local_step_apply,
-    local_step_transpose,
     local_step_weights,
 )
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath, lattice_mass_factor
@@ -94,18 +93,6 @@ _BGK_MAX_EDGE_GAP_RATIO = 3.0
 # Maximum relative deviation of the surface vol sampled along the schedule
 # (at the KI barrier) from the single pricing vol used for the shift.
 _BGK_MAX_VOL_DISPERSION = 0.25
-
-
-class _PointMasses:
-    """Point masses on the exact first step's quadrature nodes, in the shape the forward-density observation reads a
-    lattice (``grid``, ``spot``, the integration weights: one per point)."""
-
-    def __init__(self, nodes: np.ndarray, spot: float) -> None:
-        self.grid = np.asarray(nodes, dtype=float)
-        self.spot = float(spot)
-
-    def simpson_weight_vector(self) -> np.ndarray:
-        return np.ones(self.grid.size, dtype=float)
 
 
 class SnowballQuadEngine(BaseEngine):
@@ -175,9 +162,6 @@ class SnowballQuadEngine(BaseEngine):
         # needs only a handful of entries; a term-structure env may produce one
         # per step, where eviction degrades gracefully to the uncached cost.
         self._bridge_kernel_cache: dict = {}
-        # Mass-conservation diagnostic of the last forward-density event-stats
-        # run (terminal density mass + absorbed KO mass); observational only.
-        self._last_forward_mass_diagnostic: Optional[float] = None
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -642,7 +626,7 @@ class SnowballQuadEngine(BaseEngine):
                 # (The readout samples the kernel at the spot's own phase, but it runs only when the first step is
                 # not exact -- s/h >= _FIRST_STEP_S_F = 13 -- where the lattice mass factor is exactly 1.0 at every
                 # phase, so the lattice prefactor is the readout's too. A test that lowers _FIRST_STEP_S_F below
-                # ~1.38 cells would read a phase-mismatched factor here and an uncorrected ``_forward_seed``.)
+                # ~1.38 cells would read a phase-mismatched factor here.)
                 final_transition = (v_in, v_out, prefactor, alpha, beta, tau_step)
 
             # The bridge correction below samples BOTH surfaces at this step's
@@ -1195,35 +1179,6 @@ class SnowballQuadEngine(BaseEngine):
         if pv is None:
             pv = float(self.price(product, pricing_env))
 
-        if str(self.params.event_stats_mode) == "forward_density":
-            q = self._forward_event_quantities(
-                product=product, pricing_env=pricing_env,
-                math_utils=math_utils, times=times, tau=tau,
-                alpha_vec=alpha_vec, vol_vec=vol_vec, dt=dt,
-                ko_records=ko_records, ki_records=ki_records,
-                ki_continuous=ki_continuous,
-                ki_barrier_continuous=ki_barrier_continuous,
-                reachable_ko=reachable_ko, spot=spot, spot_grid=spot_grid,
-                smoothing_width=smoothing_width,
-                disable_ko_after_ki=disable_ko_after_ki,
-                knocked_in_at_valuation=knocked_in_at_valuation,
-                want_ki=True, want_coupon=True,
-                df_local=df_local, rate=rate,
-            )
-            # Diagnostic only (spec section 8): terminal mass + absorbed KO
-            # mass; drifts from 1.0 by edge leakage. Never used numerically.
-            self._last_forward_mass_diagnostic = float(q["mass_diagnostic"])
-            return self._forward_density_statistics(
-                product, pricing_env, q, ko_records=ko_records, terminal=terminal, pv=pv,
-                knocked_in_at_valuation=knocked_in_at_valuation, streams=streams,
-                terminal_cash=(
-                    float(df_local(maturity)) * float(terminal.delay_df)
-                    * self._density_integral(math_utils, q["terminal_out"] * v_out_cash),
-                    float(df_local(maturity)) * float(terminal.delay_df)
-                    * self._density_integral(math_utils, q["terminal_in"] * v_in_cash),
-                ),
-            )
-
         # --- The statistics recursion: one column per outcome, stacked ---
         # Rows [0..n_ko-1] are knock-out units (one paid at the record's settlement); subclasses append extra rows
         # (Phoenix coupon columns) that ride the same diffusion/jumps; then the maturity unit and cash (never
@@ -1556,52 +1511,6 @@ class SnowballQuadEngine(BaseEngine):
             want_knock_in=es.want_knock_in_path(streams), forward=None,
             unavailable={} if unavailable is None else unavailable,
         )
-
-    def _forward_density_statistics(self, product, pricing_env, q, *, ko_records, terminal, pv,
-                                    knocked_in_at_valuation, streams, terminal_cash):
-        """``EventStatistics`` of the opt-in forward-density mode (provenance ``quad_v1_forward_density``).
-
-        Its own numbers: knock-out probabilities from the absorbed mass, the maturity and knocked-in settlement from
-        the terminal densities (their cash integrated against the redemptions), the Phoenix coupon fields where the
-        density alone determines them. It tracks no first knock-in before a knock-out, so the knock-in path
-        statistics are unavailable with a reason (its KI-ever counted knock-ins after a knock-out, spec AC9)."""
-        from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
-        from quantark.asset.equity.engine.quad import v1_statistics
-
-        unit = np.array([
-            float(p) * float(pricing_env.get_discount_factor(
-                float(r.settlement_time if r.settlement_time is not None else r.observation_time)))
-            for p, r in zip(q["ko_prob"], ko_records)
-        ], dtype=float)
-        coupon_fields = self._forward_density_coupon_fields(q, ko_records, product, pricing_env)
-        observations = es.observation_table(
-            pricing_env, ko_records, unit,
-            is_coupon_obs=None if coupon_fields is None else np.ones(len(ko_records), dtype=bool),
-        )
-        timing = dict(time=float(terminal.determination_time), payment_time=float(terminal.payment_time),
-                      date=terminal.determination_date, payment_date=terminal.payment_date)
-        maturity_row = es.outcome_row(pricing_env, probability=float(q["terminal_out_mass"]),
-                                      discounted=float(terminal_cash[0]), **timing)
-        ki_settlement = es.outcome_row(pricing_env, probability=float(q["terminal_in_mass"]),
-                                       discounted=float(terminal_cash[1]), **timing)
-        unavailable: dict = {}
-        coupons, path_dependent_cash = None, None
-        if coupon_fields is not None:
-            coupons, path_dependent_cash = v1_statistics.coupon_table(
-                pricing_env, terminal, observations, streams=streams, unavailable=unavailable, **coupon_fields
-            )
-        rule = es.knock_in_rule(product, knocked_out_now=False, knocked_in_now=bool(knocked_in_at_valuation))
-        return v1_statistics.statistics(
-            product, pricing_env, family=self._statistics_family, pv=pv, observations=observations,
-            coupons=coupons, maturity=maturity_row, ki_settlement=ki_settlement, rule=rule,
-            want_knock_in=es.want_knock_in_path(streams), forward=None, unavailable=unavailable,
-            provenance=v1_statistics.FORWARD_DENSITY_PROVENANCE, path_dependent_cash=path_dependent_cash,
-            knock_in_refusal=v1_statistics.FORWARD_DENSITY_KI_REASON,
-        )
-
-    def _forward_density_coupon_fields(self, q, ko_records, product, pricing_env) -> Optional[dict]:
-        """The forward-density coupon fields (``None``: no coupons, Snowball)."""
-        return None
 
     def _validate_product(self, product: SnowballOption) -> None:
         if product.barrier_config.ko_observation_type != ObservationType.DISCRETE:
@@ -2082,333 +1991,6 @@ class SnowballQuadEngine(BaseEngine):
             self._bridge_kernel_cache.clear()
         self._bridge_kernel_cache[key] = kernels
         return kernels
-
-    # --- Forward-density primitives (event_stats_mode="forward_density") ---
-
-    def _forward_kernel(self, math_utils, tau_step: float, alpha: float):
-        """Forward transition kernel: the backward omega with the alpha sign
-        flipped (correlation -> convolution) and the discount term dropped
-        from beta (densities are undiscounted; discounting happens at
-        readout)."""
-        omega_fwd = np.exp(
-            -(math_utils.z_grid ** 2) / (4.0 * tau_step)
-            + alpha * math_utils.z_grid
-        )
-        prefactor_fwd = (
-            math.exp(-(alpha * alpha) * tau_step)
-            / math.sqrt(math.pi * tau_step) / 2.0
-        )
-        # the transpose of the backward step: the same lattice sum (Theta is even in the centre's phase)
-        prefactor_fwd = self._step_prefactor(prefactor_fwd, tau_step, alpha, math_utils.h)
-        return omega_fwd, prefactor_fwd
-
-    def _diffuse_density(
-        self, values, math_utils, omega_fwd, prefactor_fwd, p_lr, p_ur, p0
-    ):
-        """One forward transport step. No tail correction: a density is ~0 at
-        the grid edges by construction (num_std_devs-wide grid); mass
-        bookkeeping is the caller's diagnostic."""
-        if values.ndim == 1:
-            u = math_utils.simpson_weights(values, p_lr, p_ur, p0)
-            return prefactor_fwd * math_utils.convolution_fft(omega_fwd, u)
-        u = math_utils.simpson_weights_many(values, p_lr, p_ur, p0)
-        return prefactor_fwd * math_utils.convolution_fft_many(omega_fwd, u)
-
-    @staticmethod
-    def _density_integral(math_utils, values) -> float:
-        """Simpson integral of a grid function (weights are h-scaled)."""
-        return float(np.dot(math_utils.simpson_weight_vector(), values))
-
-    def _forward_seed(self, math_utils, tau1: float, alpha1: float):
-        """Exact density after the first interval (analytic first step —
-        no discrete delta on the grid; spec section 4.3). var = sigma^2*dt1 =
-        2*tau1; mean = m*dt1 = alpha1 * 2*tau1."""
-        var = 2.0 * tau1
-        mean = var * alpha1
-        grid = math_utils.grid
-        return np.exp(-((grid - mean) ** 2) / (2.0 * var)) / math.sqrt(
-            2.0 * math.pi * var
-        )
-
-    def _forward_seed_touch_probability(
-        self, math_utils, tau1: float, log_barrier: float, is_reverse: bool
-    ):
-        """Point-source Brownian-bridge touch probability over the first
-        interval (source pinned at x=0 = spot), same formula family as the
-        step kernel's p_hit."""
-        grid = math_utils.grid
-        denom = 2.0 * tau1
-        if is_reverse:
-            d0 = log_barrier - grid
-            d1 = log_barrier - 0.0
-        else:
-            d0 = grid - log_barrier
-            d1 = 0.0 - log_barrier
-        safe = (d0 > 0.0) & (d1 > 0.0)
-        exponent = np.clip(
-            np.where(safe, -2.0 * d0 * d1 / denom, 0.0), -745.0, 0.0
-        )
-        return np.where(safe, np.exp(exponent), 1.0)
-
-    def _forward_first_step(self, math_utils, spot, tau1, alpha1, first_time, observe, *, product, ko_records,
-                            ki_records, ki_continuous, ki_barrier_continuous, log_ki, knocked_in_at_valuation,
-                            maturity_first=False, pricing_env=None):
-        """The forward seed of an exact first step (S3b): the first interval's Gaussian as point masses on the
-        quadrature nodes (undiscounted), split by the bridge touch under continuous knock-in, the first observation
-        applied to them pointwise, then carried onto the lattice as densities whose Simpson integral against any
-        lattice function is the quadrature's (``lift_transpose`` over the Simpson weights). Returns
-        ``(p_out, p_in)`` after the first observation. ``maturity_first``: the first event is maturity, whose
-        redemption kinks become breakpoints as on the stacked route (the same quadrature nodes)."""
-        ko_record = self._match_record(first_time, ko_records)
-        ki_record = self._match_record(first_time, ki_records) if ki_records else None
-        touch = ki_continuous and product.has_ki_barrier and not knocked_in_at_valuation
-        ko_index = next((i for i, rec in enumerate(ko_records) if rec is ko_record), None)
-        levels = [
-            level for level in (
-                ko_record.barrier if ko_record is not None else None,
-                ki_record.barrier if ki_record is not None else None,
-                ki_barrier_continuous if touch else None,
-            ) if level is not None
-        ] + self._first_event_extra_levels(product, ko_index)
-        # beta = alpha^2: no discount (densities are discounted at the readout)
-        fs = self._first_step_quadrature(
-            math_utils, spot, tau1, alpha1, alpha1 * alpha1, levels,
-            touch=(log_ki, product.is_reverse) if touch else None, band=False,
-            terminal=product if maturity_first else None, pricing_env=pricing_env,
-        )
-        mass = fs.W[0]
-        zero = np.zeros_like(mass)
-        if knocked_in_at_valuation:
-            p_out, p_in = zero, mass
-        elif touch:
-            p_out, p_in = mass * (1.0 - fs.P[0]), mass * fs.P[0]
-        else:
-            p_out, p_in = mass, zero
-        with self._pointwise():
-            p_out, p_in = observe(first_time, p_out, p_in, _PointMasses(fs.y, spot), 0.0)
-        cells = math_utils.simpson_weight_vector()
-        self._last_first_step = fs
-        return fs.lift_transpose(p_out) / cells, fs.lift_transpose(p_in) / cells
-
-    # --- Extra forward-readout hooks (Phoenix overrides; Snowball no-ops) ---
-
-    def _forward_extra_state(self, n_ko: int):
-        return None
-
-    def _forward_extra_readouts_at_obs(
-        self, state, ko_index, ko_record, p_alive, math_utils,
-        smoothing_width, product,
-    ) -> None:
-        return None
-
-    def _forward_extra_fields(
-        self, state, ko_records, product, pricing_env, rate, df_local
-    ) -> dict:
-        return {}
-
-    def _forward_event_quantities(
-        self, *, product, pricing_env, math_utils, times, tau, alpha_vec,
-        vol_vec, dt, ko_records, ki_records, ki_continuous,
-        ki_barrier_continuous, reachable_ko, spot, spot_grid,
-        smoothing_width, disable_ko_after_ki, knocked_in_at_valuation,
-        want_ki, want_coupon, df_local, rate,
-    ) -> dict:
-        """Forward transition-density march producing the event-distribution
-        quantities (spec section 4): two surfaces p_out / p_in (KO-absorbing,
-        KI-splitting). No knock-in is tracked after a knock-out (unified event
-        statistics T17: the KO-independent "ever" surface is removed)."""
-        grid = math_utils.grid
-        n_ko = len(ko_records)
-        full_p_lr, full_p_ur, full_p0 = 0, grid.size - 1, (grid.size - 1) % 2
-        absorbed = np.zeros(n_ko, dtype=float)
-        extra_state = self._forward_extra_state(n_ko) if want_coupon else None
-        log_ki = (
-            safe_log(ki_barrier_continuous / spot) if ki_continuous else None
-        )
-
-        def observe(obs_time, p_out, p_in, mu, width):
-            """The observation at ``obs_time`` on the densities over ``mu`` (the lattice, or the exact first step's
-            point masses)."""
-            ko_index, ko_record = None, None
-            for idx, rec in enumerate(ko_records):
-                if same_instant(obs_time, rec.observation_time):
-                    ko_index, ko_record = idx, rec
-                    break
-            if ko_record is not None:
-                if extra_state is not None:
-                    # Coupons read the alive density BEFORE KO absorption
-                    # (a coupon on a simultaneous KO is still paid).
-                    self._forward_extra_readouts_at_obs(
-                        extra_state, int(ko_index), ko_record, p_out + p_in,
-                        mu, width, product,
-                    )
-                if bool(reachable_ko[int(ko_index)]):
-                    if self._use_cell_average_events():
-                        zero = np.zeros((1, mu.grid.size), dtype=float)
-                        proj = self._project_quad_event(
-                            mu.grid, ko_record.barrier, spot,
-                            v_survive=p_out[None, :], v_breach=zero,
-                            breach_up=not product.is_reverse,
-                        )[0]
-                        absorbed_mass = self._density_integral(
-                            mu, p_out
-                        ) - self._density_integral(mu, proj)
-                        p_out = proj
-                        if not disable_ko_after_ki:
-                            proj_in = self._project_quad_event(
-                                mu.grid, ko_record.barrier, spot,
-                                v_survive=p_in[None, :], v_breach=zero,
-                                breach_up=not product.is_reverse,
-                            )[0]
-                            absorbed_mass += self._density_integral(
-                                mu, p_in
-                            ) - self._density_integral(mu, proj_in)
-                            p_in = proj_in
-                    else:
-                        ko_w = self._event_weight(
-                            mu.grid, ko_record.barrier, spot, width,
-                            trigger_is_down=product.is_reverse,
-                        )
-                        absorbed_mass = self._density_integral(
-                            mu, ko_w * p_out
-                        )
-                        p_out = p_out * (1.0 - ko_w)
-                        if not disable_ko_after_ki:
-                            absorbed_mass += self._density_integral(
-                                mu, ko_w * p_in
-                            )
-                            p_in = p_in * (1.0 - ko_w)
-                    absorbed[int(ko_index)] = absorbed_mass
-
-            if (
-                (not ki_continuous)
-                and ki_records
-                and not knocked_in_at_valuation
-            ):
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    ki_w = self._event_weight(
-                        mu.grid, ki_record.barrier, spot, width,
-                        trigger_is_down=not product.is_reverse,
-                    )
-                    transfer = ki_w * p_out
-                    p_out = p_out - transfer
-                    p_in = p_in + transfer
-
-            return p_out, p_in
-
-        # Analytic first step to times[0] (interval index 1).
-        tau1, alpha1 = float(tau[1]), float(alpha_vec[1])
-        first_masses = None
-        if self._first_step_exact(tau1, math_utils.h):
-            first_masses = self._forward_first_step(
-                math_utils, spot, tau1, alpha1, times[0], observe, product=product, ko_records=ko_records,
-                ki_records=ki_records, ki_continuous=ki_continuous, ki_barrier_continuous=ki_barrier_continuous,
-                log_ki=log_ki, knocked_in_at_valuation=knocked_in_at_valuation,
-                maturity_first=len(times) == 1, pricing_env=pricing_env,
-            )
-            p_out = p_in = None               # the exact first step's masses replace the seed at step 1
-        else:
-            p_free = self._forward_seed(math_utils, tau1, alpha1)
-            if knocked_in_at_valuation:
-                p_in = p_free
-                p_out = np.zeros_like(p_free)
-            elif ki_continuous and product.has_ki_barrier:
-                touch0 = self._forward_seed_touch_probability(
-                    math_utils, tau1, log_ki, product.is_reverse
-                )
-                p_out = p_free * (1.0 - touch0)
-                p_in = p_free * touch0
-            else:
-                p_out = p_free
-                p_in = np.zeros_like(p_free)
-
-        for step_index in range(1, len(times) + 1):
-            if step_index > 1:
-                tau_step = float(tau[step_index])
-                alpha = float(alpha_vec[step_index])
-                vol_step = float(vol_vec[step_index])
-                if self._local_step(tau_step, math_utils.h):
-                    # the forward step is the transpose of the backward local step, undiscounted
-                    weights = local_step_weights(float(math_utils.h), alpha, 0.0, tau_step, discounted=False)
-                    transported = local_step_transpose(np.vstack([p_out, p_in]), weights)
-                    if ki_continuous and not knocked_in_at_valuation:
-                        denom = vol_step * vol_step * float(dt[step_index])
-                        hit = local_bridge_hit(grid, log_ki, denom, product.is_reverse)
-                        touched = local_step_transpose(p_out, weights, hit)
-                        p_out, p_in = transported[0] - touched, transported[1] + touched
-                    else:
-                        p_out, p_in = transported[0], transported[1]
-                else:
-                    omega_fwd, prefactor_fwd = self._forward_kernel(
-                        math_utils, tau_step, alpha
-                    )
-                    rows = [p_out, p_in]
-                    transported = self._diffuse_density(
-                        np.vstack(rows), math_utils, omega_fwd, prefactor_fwd,
-                        full_p_lr, full_p_ur, full_p0,
-                    )
-                    if ki_continuous and not knocked_in_at_valuation:
-                        band = self._bridge_band(tau_step, math_utils.h, grid.size)
-                        denom = vol_step * vol_step * float(dt[step_index])
-                        kernels = self._bridge_kernels(
-                            math_utils, band, tau_step, -alpha, denom,
-                            log_ki, product.is_reverse,
-                        )
-                        touch_rows = np.vstack([p_out])
-                        touched = np.zeros(
-                            (touch_rows.shape[0], grid.size), dtype=float
-                        )
-                        for source, target, kernel in kernels:
-                            touched[:, target] += (
-                                prefactor_fwd * kernel * touch_rows[:, source]
-                            )
-                        p_out = transported[0] - touched[0]
-                        p_in = transported[1] + touched[0]
-                    else:
-                        p_out = transported[0]
-                        p_in = transported[1]
-
-            if step_index == 1 and first_masses is not None:
-                p_out, p_in = first_masses
-                continue
-            p_out, p_in = observe(times[step_index - 1], p_out, p_in, math_utils, smoothing_width)
-
-        # --- Readouts ---
-        ko_prob = absorbed.copy()
-        ed_ko_cf = np.zeros(n_ko, dtype=float)
-        survival_prob = np.ones(n_ko, dtype=float)
-        cumulative = 0.0
-        for i, rec in enumerate(ko_records):
-            obs = float(rec.observation_time)
-            df_total = float(df_local(obs)) * float(
-                self._ko_discount(rate, obs, rec.settlement_time,
-                                  df_fn=df_local)
-            )
-            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            ed_ko_cf[i] = ko_prob[i] * df_total * payoff
-            cumulative += ko_prob[i]
-            survival_prob[i] = max(0.0, 1.0 - cumulative)
-
-        extra_fields = (
-            self._forward_extra_fields(
-                extra_state, ko_records, product, pricing_env, rate, df_local
-            )
-            if extra_state is not None
-            else {}
-        )
-        terminal_mass = self._density_integral(math_utils, p_out + p_in)
-        return {
-            "terminal_out": p_out,
-            "terminal_in": p_in,
-            "terminal_out_mass": self._density_integral(math_utils, p_out),
-            "terminal_in_mass": self._density_integral(math_utils, p_in),
-            "ko_prob": ko_prob,
-            "ed_ko_cf": ed_ko_cf,
-            "survival_prob": survival_prob,
-            "extra_fields": extra_fields,
-            "mass_diagnostic": float(terminal_mass + np.sum(absorbed)),
-        }
 
     def _readout_at_spot(
         self,
