@@ -39,7 +39,7 @@ cos(2 pi n phi)`. That alias mass multiplied the value on every step, so on sche
 - Unpinned book benchmark (60 synthetic snowballs whose monthly knock-out dates fall 2-6 h off the daily knock-in
   instants): 120 of 180 prices moved (every discrete-KI trade, up to 2.3e-4 relative). Against 32001-node references,
   36 of 40 trades moved toward the reference; median error 6.5e-3 -> 7.7e-4, max 1.75e-2 -> 3.9e-3. The 4 that moved
-  away had an alias error that happened to cancel the lattice's ordinary error. Cost: 1.001x (interleaved, idle).
+  away (trades 19, 37, 38, 56; owner-accepted) had an alias error that happened to cancel the lattice's ordinary error. Cost: 1.001x (interleaved, idle).
 
 ### Known issues
 
