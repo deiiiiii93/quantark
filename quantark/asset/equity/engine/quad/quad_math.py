@@ -94,6 +94,51 @@ def _distinct_separations(
     return sorted(gap for gap in gaps if gap > floor)
 
 
+#: Theta's series stops once a term cannot change ``1 + 2 * sum`` in double precision.
+_THETA_TERM_FLOOR = 0.25 * float(np.finfo(float).eps)
+
+#: Below this many cells per kernel standard deviation the sampled kernel is not a quadrature of the transition at all
+#: (its lattice sum depends on where the centre falls between nodes and tends to zero off-node); V1 prices such steps
+#: with the local stencil and never builds their sampled kernel.
+_THETA_MIN_CELLS = 0.25
+
+
+def lattice_mass_factor(tau: float, h: float, centre_cells: float) -> float:
+    """Ratio of the sampled Gaussian kernel's trapezoid lattice sum to its exact integral.
+
+    A diffusion step's kernel ``exp(-z^2 / (4 tau) - alpha z)`` is a Gaussian of standard deviation
+    ``s = sqrt(2 tau)`` centred at ``mu``. Sampled at offsets ``z_0 + k h`` and summed with weights ``h``, Poisson
+    summation gives the exact integral times
+
+        Theta(r, phi) = 1 + 2 sum_{n >= 1} exp(-2 pi^2 n^2 r^2) cos(2 pi n phi),   r = s / h,
+
+    with ``phi = (mu - z_0) / h`` the centre's offset from the lattice in cells (``centre_cells``; only its fractional
+    part matters). The alias terms are the mass the sampled kernel gains or loses; because that error multiplies the
+    value on every step, it compounds over a schedule. Dividing the step by Theta makes its mass exact.
+
+    Exactly ``1.0`` when the alias is below double-precision rounding (r >~ 1.38): callers skip the division then, so
+    every resolved step is bit-identical to the uncorrected operator.
+
+    Raises:
+        NumericalError: ``r`` below ``_THETA_MIN_CELLS``, where the sampled kernel is not a quadrature of the step.
+    """
+    r = math.sqrt(2.0 * float(tau)) / float(h)
+    if not r >= _THETA_MIN_CELLS:
+        raise NumericalError(
+            f"lattice_mass_factor: the kernel spans {r:.3g} cells (< {_THETA_MIN_CELLS}); a step this narrow is not "
+            "sampled by the lattice kernel (V1 prices it with the local stencil)."
+        )
+    phase = 2.0 * math.pi * (float(centre_cells) - math.floor(float(centre_cells)))
+    total, n = 0.0, 1
+    while True:
+        term = math.exp(-2.0 * math.pi * math.pi * n * n * r * r)
+        if term < _THETA_TERM_FLOOR:
+            break
+        total += term * math.cos(n * phase)
+        n += 1
+    return 1.0 + 2.0 * total
+
+
 class QuadratureMath:
     """Reusable quadrature math utilities for log-price grids."""
 
