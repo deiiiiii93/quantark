@@ -207,18 +207,23 @@ def test_resolved_contracts_are_bit_identical(switch):
         assert SnowballQuadEngine(params).price(product, _env(0.2)) == on
 
 
-@pytest.mark.parametrize("continuous", [False, True])
-def test_statistics_and_the_forward_pass_close_on_corrected_steps(continuous, switch):
-    """AC6: on a contract whose every lattice step is corrected, the outcome probabilities partition 1 (0.12.0 lost
-    the alias mass there: -2.2e-3), cash reconciles with the price, and the transposed march reproduces every backward
-    column (continuous KI: the bridge transpose)."""
-    product = _daily_ko(2.0, continuous)
+AC6_CASES = {**{name: (case[0], case[1], case[2]) for name, case in CASES.items()},
+             "daily_ko_2y_vol10_continuous_ki": (lambda: _daily_ko(2.0, True), 0.10, None)}
+
+
+@pytest.mark.parametrize("name", list(AC6_CASES))
+def test_statistics_and_the_forward_pass_close_on_corrected_steps(name, switch):
+    """AC6: on every AC3 contract (its lattice steps corrected) and a continuous-KI one (the bridge transpose), the
+    outcome probabilities partition 1 (0.12.0 lost the alias mass: -2.2e-3 at 2y vol 10%), cash reconciles with the
+    price, and the transposed march reproduces every backward column."""
+    build, vol, params = AC6_CASES[name]
+    product = build()
     switch(False)
-    old = SnowballQuadEngine(QuadParams()).calculate_event_stats(product, _env(0.10))
-    assert abs(old.probability_residual) > 1e-3
+    old = SnowballQuadEngine(params or QuadParams()).calculate_event_stats(product, _env(vol))
+    assert abs(old.probability_residual) > 1e-5
     switch(True)
-    engine = SnowballQuadEngine(QuadParams())
-    stats = engine.calculate_event_stats(product, _env(0.10))
+    engine = SnowballQuadEngine(params or QuadParams())
+    stats = engine.calculate_event_stats(product, _env(vol))
     assert abs(stats.probability_residual) <= 1e-11                     # ~500 steps of rounding
     assert abs(stats.reconciliation_error) <= 1e-12 * max(1.0, abs(stats.pv))
     log = engine._last_v1_march
@@ -253,12 +258,24 @@ def test_routing_and_refusals_are_unchanged(switch):
     assert messages[0] == messages[1]
 
 
-def test_the_switch_reaches_auto_converge_rungs(switch):
-    """A switch flipped on an instance reaches every rung it builds (single-cause proofs flip the class)."""
-    product = _daily_ko(1.0)
-    switch(False)
-    old = SnowballQuadEngine(QuadParams(auto_converge=True)).price(product, _env(0.05))
+def test_the_switch_reaches_auto_converge_rungs(switch, monkeypatch):
+    """A switch flipped on an instance reaches every engine its auto_converge ladder builds, on the price path and on
+    the statistics path (the accepted rung's candidate): every step prefactor is computed under the instance's value.
+    Observed directly, because the accepted rung may resolve every step (Theta == 1.0) and hide a missed copy."""
+    seen = []
+    original = SnowballQuadEngine._step_prefactor
+
+    def spy(self, prefactor, tau_step, alpha, h):
+        seen.append(self._exact_lattice_mass)
+        return original(self, prefactor, tau_step, alpha, h)
+
+    monkeypatch.setattr(SnowballQuadEngine, "_step_prefactor", spy)
     switch(True)
+    product = _daily_ko(1.0)
     engine = SnowballQuadEngine(QuadParams(auto_converge=True))
     engine._exact_lattice_mass = False
-    assert engine.price(product, _env(0.05)) == old
+    engine.price(product, _env(0.05))
+    assert seen and not any(seen)
+    seen.clear()
+    engine.calculate_event_stats(product, _env(0.05))
+    assert seen and not any(seen)

@@ -26,7 +26,8 @@ cos(2 pi n phi)`. That alias mass multiplied the value on every step, so on sche
     -1.1e-4 (the remainder is the 1001-node lattice's ordinary O(h^2) error), 3y vol 20% +5.2e-4 -> +4.6e-6, 1y vol 5%
     +6.2e-5 -> -8.4e-6; an explicit 8001-node grid with 64 quarter-hour knock-in steps +3.7e-3 -> -1.2e-7.
   - Event statistics on those contracts lost the same mass: the outcome probabilities summed to 1 - 2.2e-3 (2y vol
-    10%; the forward-density route likewise). They now partition to 5e-12.
+    10%; the forward-density route likewise). They now partition to rounding (measured 5e-12 over ~500 steps;
+    tested at <= 1e-11 on every contract above).
 
 ### Changed (moved values, owner-signed)
 

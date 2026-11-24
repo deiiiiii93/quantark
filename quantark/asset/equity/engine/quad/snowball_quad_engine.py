@@ -639,6 +639,10 @@ class SnowballQuadEngine(BaseEngine):
                 # The last transition carries the surfaces to the valuation
                 # date; retain its INPUT so the readout can evaluate it at the
                 # spot instead of interpolating its output between nodes.
+                # (The readout samples the kernel at the spot's own phase, but it runs only when the first step is
+                # not exact -- s/h >= _FIRST_STEP_S_F = 13 -- where the lattice mass factor is exactly 1.0 at every
+                # phase, so the lattice prefactor is the readout's too. A test that lowers _FIRST_STEP_S_F below
+                # ~1.38 cells would read a phase-mismatched factor here and an uncorrected ``_forward_seed``.)
                 final_transition = (v_in, v_out, prefactor, alpha, beta, tau_step)
 
             # The bridge correction below samples BOTH surfaces at this step's

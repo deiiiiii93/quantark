@@ -137,7 +137,7 @@ class TestTwoEventLadder:
         value = delta(two_event(rung["x_years"]))
         assert within(value, ref, rung["hw_delta"] + base["hw_delta"], 1e-3, 1e-6 * 100.0), (value, ref)
 
-    def test_resolved_gap_is_bitwise_unchanged(self):
+    def test_resolved_gap_is_lattice_priced(self):
         """8.8 hours apart at vol 20% resolves (s/h ~1.05): no local step. Re-pinned 0.12.1 (owner-signed exact-mass
         run): the step's sampled kernel carried alias mass ~7e-10, now divided out (``lattice_mass_factor``) --
         98.91842991352458 -> 98.91842987745284 (-3.6e-10 relative). The 0.12.0 value reproduces bit for bit with the
