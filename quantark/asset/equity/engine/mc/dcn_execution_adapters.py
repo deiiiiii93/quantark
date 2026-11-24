@@ -250,7 +250,7 @@ def _final_observation_state(request):
         request.product, request.pricing_env, request.lifecycle_state
     )
     terminal = state is not None and state.terminal
-    if not terminal and not at_final_observation(request.product):
+    if not terminal and not at_final_observation(request.product, request.pricing_env):
         return None
     return PreparedState(
         payload=_DCNFinalObservation(), descriptors=(), fingerprint=None,
@@ -348,7 +348,7 @@ class _DCNBatchMixin:
         # execution (fail closed on mid-run replacement).
         captured = (env.vol_surface, env.spot_quote, env.rate_curve,
                     env.div_yield)
-        ctx = build_dcn_grid_context(product)
+        ctx = build_dcn_grid_context(product, env)
         dt_array = np.diff(ctx.times)
         if dt_array.size == 0:
             raise ValidationError(

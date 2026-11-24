@@ -538,7 +538,7 @@ class DCNMCEngine(BaseEngine):
             )
             self._last_result = result
             return result
-        ctx = build_dcn_grid_context(product)
+        ctx = build_dcn_grid_context(product, pricing_env)
         # folded cash legs (price_folded only), bound to this grid's rows
         fold = None if self._fold is None else bind_dcn_fold(self._fold, ctx)
         if ctx.times.size == 1:

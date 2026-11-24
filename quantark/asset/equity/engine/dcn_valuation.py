@@ -74,16 +74,17 @@ class DCNValuationRow:
         return float(sign * self.coupon_pv) + float(sign * self.ko_pv) + float(sign * self.loss_pv)
 
 
-def at_final_observation(product) -> bool:
-    """Whether the DCN is valued on its final observation date (``get_maturity`` 0.0)."""
-    return at_exercise_instant(product.get_maturity())
+def at_final_observation(product, pricing_env) -> bool:
+    """Whether the DCN is valued at its final observation instant on ``pricing_env``'s clock (``get_maturity`` 0.0:
+    the final observation date, or a later date the env places at the valuation instant)."""
+    return at_exercise_instant(product.get_maturity(pricing_env))
 
 
 def observe_valuation_row(
     product, pricing_env, ctx: Optional[DCNGridContext] = None, df=None,
 ) -> Optional[DCNValuationRow]:
     """The monthly row observed at the valuation instant, or ``None`` when the valuation date is not one."""
-    ctx = build_dcn_grid_context(product) if ctx is None else ctx
+    ctx = build_dcn_grid_context(product, pricing_env) if ctx is None else ctx
     if ctx.obs_cols.size == 0 or int(ctx.obs_cols[0]) != 0:
         return None
     df = make_df_fn(pricing_env) if df is None else df
@@ -114,7 +115,7 @@ def observe_valuation_row(
 
 def settle_final_observation(product, pricing_env, ctx: Optional[DCNGridContext] = None) -> DCNValuationRow:
     """The DCN on its final observation date (T = 0): the settled final row."""
-    ctx = build_dcn_grid_context(product) if ctx is None else ctx
+    ctx = build_dcn_grid_context(product, pricing_env) if ctx is None else ctx
     if ctx.times.size != 1:
         raise ValidationError("settle_final_observation needs a DCN valued on its final observation date")
     return observe_valuation_row(product, pricing_env, ctx)

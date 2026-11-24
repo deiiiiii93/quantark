@@ -54,7 +54,7 @@ def test_schedule_builds_on_a_non_trading_day(d):
 @pytest.mark.parametrize("d", [SAT, HOLIDAY])
 def test_grid_starts_at_an_unmonitored_instant(d):
     p = make_dcn(DCN_A, valuation_date=d)
-    ctx = build_dcn_grid_context(p)
+    ctx = build_dcn_grid_context(p, env_on(d))
     assert not ctx.valuation_monitored
     assert ctx.times[0] == 0.0 and ctx.times[1] == (TUE - d).days / 365.0
     assert int(ctx.obs_cols[0]) >= 1
@@ -63,7 +63,7 @@ def test_grid_starts_at_an_unmonitored_instant(d):
 
 
 def test_trading_day_grid_is_monitored():
-    assert build_dcn_grid_context(make_dcn(DCN_A, valuation_date=FRI)).valuation_monitored
+    assert build_dcn_grid_context(make_dcn(DCN_A, valuation_date=FRI), env_on(FRI)).valuation_monitored
 
 
 @pytest.mark.parametrize("d", [SAT, HOLIDAY])

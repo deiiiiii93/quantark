@@ -193,6 +193,23 @@ def synthetic_quote_book(sigma=0.20, spot=6000.0, r=0.0356, f_target=5800.0):
     return quotes, valuation_date, spot, rate_curve, carry_curve
 
 
+def calendar_env(product, spot=6000.0):
+    """A CALENDAR_DAYS environment dated at ``product``'s schedule valuation date: the pre-0.14 DCN axis
+    (``num_days / 365.0``), for grid-context tests that only need the contract's own times."""
+    from quantark.param import (
+        ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote,
+    )
+    from quantark.priceenv import PricingEnvironment
+
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=spot),
+        vol_surface=FlatVolSurface(volatility=FLAT["sigma"]),
+        rate_curve=FlatRateCurve(rate=FLAT["r"]),
+        div_yield=ContinuousDividendYield(div_yield=FLAT["q"]),
+        valuation_date=product.schedule.valuation_date,
+    )
+
+
 def flat_env(r, q, sigma, spot=6000.0):
     from datetime import datetime as _dt
 

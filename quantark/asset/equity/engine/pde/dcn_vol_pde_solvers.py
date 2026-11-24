@@ -332,7 +332,7 @@ class HestonDCNPDESolver(BaseEngine):
         """The contingent claim's price. ``log`` (a dict, the statistics' forward pass only, never with ``overlay``)
         records the march as it runs -- the core, each (half) step's ``(dt, tau, t_mid, theta, douglas, node)``, each
         date's event cash, the terminal block and the read surface -- without changing any arithmetic."""
-        ctx = build_dcn_grid_context(product)
+        ctx = build_dcn_grid_context(product, pricing_env)
         df = make_df_fn(pricing_env)
         # folded cash legs (price_folded only), bound to this grid's rows, buyer-view
         fold = None if overlay is None else bind_dcn_fold(overlay, ctx)

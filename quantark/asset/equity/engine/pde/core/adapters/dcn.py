@@ -22,7 +22,7 @@ class DCNEvents:
 
     def __init__(self, solver, product, env, layout, fold=None):
         self.solver, self.product, self.env, self.layout = solver, product, env, layout
-        self.ctx = ctx = build_dcn_grid_context(product)
+        self.ctx = ctx = build_dcn_grid_context(product, env)
         self.df = make_df_fn(env)
         # folded cash legs (a PRICE request's ``fold``, price_folded only): bound to this solve's rows, buyer-view
         self.fold = None if fold is None else _bind(fold, ctx)
@@ -191,7 +191,7 @@ class DCNAdapter(FamilyAdapter):
         price = row.pv
         if request.fold is not None:      # the decided event's folded cash, discounted as the row's own (D13)
             from quantark.asset.equity.engine.dcn_valuation import folded_row_cash
-            ctx = build_dcn_grid_context(product)
+            ctx = build_dcn_grid_context(product, env)
             price = price + float(product.direction_sign) * folded_row_cash(
                 row, _bind(request.fold, ctx), ctx, make_df_fn(env))
         if state is not None:

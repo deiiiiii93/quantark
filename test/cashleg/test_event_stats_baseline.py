@@ -951,7 +951,7 @@ def _dcn_pde_knock_in_by_backward_claims(live: dict, banked: dict, record: dict)
     assert "value" in live, live
     dist, env = _live_distribution(record)
     _, product, _ = _case(record["case"]).fresh()
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     first = 0 if ctx.valuation_monitored else 1
     times = np.asarray(dist.stream_times[EventType.KI], dtype=float)
     probability = np.asarray(dist.probabilities[EventType.KI], dtype=float)

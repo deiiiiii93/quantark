@@ -67,7 +67,7 @@ def dcn_exact(product, env, spots=None, *, width=0.006, order=12, nsig=8.0, kcut
     whose support lies inside the domain (a quadrature check, not a tolerance).
     """
     vol, r, q = _flat_market(env)
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     times = np.asarray(ctx.times, dtype=float)
     assert times[0] == 0.0 and np.all(np.diff(times) > 0), "the daily grid starts at the valuation date"
     spots = np.atleast_1d(np.asarray([float(env.spot)] if spots is None else spots, dtype=float))
@@ -170,7 +170,7 @@ def dcn_exact_term(product, env, spots=None, *, width=0.006, order=12, nsig=8.0,
     whose support lies inside the domain (a quadrature check, not a tolerance).
     """
     vol, df, growth = _market(env)
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     times = np.asarray(ctx.times, dtype=float)
     assert times[0] == 0.0 and np.all(np.diff(times) > 0), "the daily grid starts at the valuation date"
     spots = np.atleast_1d(np.asarray([float(env.spot)] if spots is None else spots, dtype=float))

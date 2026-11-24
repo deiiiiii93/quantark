@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from dcn_fixtures import DCN_A, DCN_B, FLAT, SSE, flat_env, make_dcn
+from dcn_fixtures import DCN_A, DCN_B, FLAT, SSE, flat_env, make_dcn, calendar_env
 
 from quantark.asset.equity.engine.mc import DCNMCEngine
 from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import HestonDCNMCEngine, LocalVolDCNMCEngine
@@ -201,7 +201,7 @@ def test_year_fraction_convention_is_refused():
 @pytest.mark.parametrize("name", sorted(CONVENTIONS))
 def test_grid_context_pay_times_are_the_c4_dates(name):
     p = with_convention(DCN_A, CONVENTIONS[name])
-    ctx, dates, v = build_dcn_grid_context(p), p.payment_dates(), p.schedule.valuation_date
+    ctx, dates, v = build_dcn_grid_context(p, calendar_env(p)), p.payment_dates(), p.schedule.valuation_date
     np.testing.assert_array_equal(ctx.coupon_pay_times, [yf(v, d) for d in dates.coupon_payment_dates])
     np.testing.assert_array_equal(ctx.ko_pay_times, [yf(v, d) for d in dates.ko_payment_dates])
     assert ctx.loss_pay_time == yf(v, dates.loss_payment_date)

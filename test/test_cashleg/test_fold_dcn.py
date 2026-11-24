@@ -40,7 +40,7 @@ from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 
-from dcn_fixtures import DCN_A, DCN_B, make_dcn
+from dcn_fixtures import DCN_A, DCN_B, make_dcn, calendar_env
 from test_cashleg.test_folding import _leg_set
 from test_asset.equity.engine_pde.test_dcn_lifecycle_state import CASH, ROW, ROW_PAY, STRADDLE, env_on, flow, state_on
 
@@ -95,7 +95,7 @@ def _overlay(product, env, ko=0.0, no_ki=0.0, ki=0.0, only_ko_eligible=True):
     s = _event_structure(product, env)
     amounts = np.broadcast_to(np.asarray(ko, dtype=float), (len(s.ko),)).copy()
     if only_ko_eligible:
-        amounts[~build_dcn_grid_context(product).obs_is_ko] = 0.0
+        amounts[~build_dcn_grid_context(product, env).obs_is_ko] = 0.0
     return FoldOverlay(
         ko=tuple(FoldedEventCash(sl.schedule, sl.determination_time, sl.payment_time, float(a))
                  for sl, a in zip(s.ko, amounts)),
@@ -119,7 +119,7 @@ def _identity_overlay(product, env, cash=C):
 
 def _twin_overlay(product, delta):
     """Cash of a knock-out coupon rate moved by ``delta``, per knock-out record, paid at its KO payment."""
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, calendar_env(product))
     env = env_on(product.schedule.valuation_date)
     return _overlay(product, env, ko=product.participation * delta * ctx.ko_accruals * product.notional)
 
@@ -172,7 +172,7 @@ def test_a_maturity_branch_at_another_settlement_is_refused(name):
 def test_cash_on_an_observation_that_cannot_knock_out_adds_nothing(name):
     # DCN_B's first three rows are coupon-only (ko_lock_months=6): knock-out probability zero on every route
     make, product, env = _case(name, contract=DCN_B)
-    ko_eligible = build_dcn_grid_context(product).obs_is_ko
+    ko_eligible = build_dcn_grid_context(product, env).obs_is_ko
     assert not ko_eligible.all()
     plain = _overlay(product, env, ko=C, ki=C)
     junk = _overlay(product, env, ko=np.where(ko_eligible, C, 7.0 * C), ki=C, only_ko_eligible=False)

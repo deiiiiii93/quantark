@@ -86,15 +86,28 @@ class DCNPDEEngine(BasePDESolver):
                 f"was removed in 0.6.0: {REMOVED_DCN_NAMES['num_space_nodes']}"
             )
         super().__init__(params)
+        # the environment ``grid_request`` (which takes none) builds the DCN grid on: stashed by the solve-state
+        # preamble every solve and bump clone runs first (the snowball solver's pattern)
+        self._grid_request_env = None
 
     def _uses_grid_layer(self) -> bool:
         return True
+
+    def _prepare_solve_state(self, product, pricing_env):
+        self._grid_request_env = pricing_env
+        return super()._prepare_solve_state(product, pricing_env)
 
     def grid_request(self, product, market, tau) -> GridRequest:
         # The DCN PDE horizon is the final observation date from the grid
         # context, not the product's nominal maturity; the passed tau is
         # superseded so external validation compares on equal footing.
-        ctx = build_dcn_grid_context(product)
+        env = self._grid_request_env
+        if env is None:
+            raise ValidationError(
+                "the DCN grid is built on a pricing environment's clock, but the grid was requested without one: "
+                "run the solve-state preamble (_prepare_solve_state) before grid_request"
+            )
+        ctx = build_dcn_grid_context(product, env)
         tau = float(ctx.times[-1])
         interior = tuple(
             float(t) for t in ctx.times[1:-1] if 0.0 < float(t) < tau

@@ -376,7 +376,7 @@ def test_a_sparse_or_semi_lagrangian_core_is_refused():
 def test_knock_in_table_on_the_daily_dates(name):
     engine, product, env = _fresh(name)
     stats = _stats(name)
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     first = 0 if ctx.valuation_monitored else 1
     table = stats.ki_table
     np.testing.assert_array_equal(table.times, ctx.times[first:])

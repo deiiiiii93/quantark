@@ -126,11 +126,19 @@ class DCNOption(BaseEquityProduct):
 
     # -- BaseEquityProduct contract -----------------------------------------
     def get_maturity(self, pricing_env=None) -> float:
-        """ACT/365F years from the valuation date to the final observation."""
+        """Years from the schedule's valuation date to the final observation, on ``pricing_env``'s axis.
+
+        ``pricing_env=None`` (env-less callers outside the library): the legacy ACT/365F value. Every library route
+        passes its environment, so the maturity and the grid are on one clock.
+        """
         s = self.schedule
-        return (
-            s.monthly[-1].observation_date - s.valuation_date
-        ).days / _DAYS_PER_YEAR
+        if pricing_env is None:
+            return (
+                s.monthly[-1].observation_date - s.valuation_date
+            ).days / _DAYS_PER_YEAR
+        from quantark.priceenv.date_axis import env_time
+
+        return env_time(pricing_env, s.monthly[-1].observation_date, anchor=s.valuation_date)
 
     def get_payoff(self, spot: float, knocked_in: bool = False) -> float:
         """Final-observation-date cashflow EXCLUDING coupons (signed).

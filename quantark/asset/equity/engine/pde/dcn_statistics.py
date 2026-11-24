@@ -323,7 +323,7 @@ def dcn_1d_statistics(solver, product, pricing_env, *, lifecycle_state=None):
         if state is not None and state.terminal:
             return pv, terminated_dcn_statistics(product, state, pv=pv, provenance=provenance)
         from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
-        ctx = build_dcn_grid_context(product)
+        ctx = build_dcn_grid_context(product, pricing_env)
         row = observe_valuation_row(product, pricing_env, ctx)
         return pv, decided_row_statistics(product, pricing_env, ctx, row, pv=pv,
                                           receivables=_receivables(product, state), provenance=provenance)
@@ -454,7 +454,7 @@ def dcn_adi_statistics(solver, product, pricing_env, *, lifecycle_state=None):
     log: dict = {}
     contingent = solver._price_contingent(product, pricing_env, None, log=log)
     pv = contingent.pv if state is None else contingent.pv + state.pending_pv
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, pricing_env)
     receivables = _receivables(product, state)
     row = observe_valuation_row(product, pricing_env, ctx)
     if row is not None and row.ends_contract:
@@ -651,7 +651,7 @@ def backward_claims_adi(solver, product, pricing_env, names: Optional[Sequence[s
     log: dict = {}
     solver._price_contingent(product, pricing_env, None, log=log)
     core = log["core"]
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, pricing_env)
     rows = DCNRows(product, pricing_env, ctx)
     df = log["df"]
     n_x, n_v = core.N_S, core.N_V

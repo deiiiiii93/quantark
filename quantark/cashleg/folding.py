@@ -443,7 +443,7 @@ def _dcn_structure(product, pricing_env) -> _Structure:
     from quantark.asset.equity.engine.dcn_valuation import dcn_fold_slots
     from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, pricing_env)
     if np.asarray(ctx.obs_cols).size == 0:
         return _trivial_structure(product, pricing_env)
     slots = dcn_fold_slots(ctx)

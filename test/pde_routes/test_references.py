@@ -31,7 +31,7 @@ def test_dcn_recursion_closed_forms():
     mu = r - q - 0.5 * vol * vol
 
     p1, e1 = dcn_case("A", ki_barrier_ratio=0.05, ko_barrier_ratio=20.0)
-    ctx = build_dcn_grid_context(p1)
+    ctx = build_dcn_grid_context(p1, e1)
     strip = 0.0
     for j, c in enumerate(ctx.obs_cols):
         if ctx.obs_is_coupon[j]:
@@ -42,7 +42,7 @@ def test_dcn_recursion_closed_forms():
     assert abs(float(dcn_exact(p1, e1)["pv"][0]) - strip) <= 1e-6
 
     p2, e2 = dcn_case("A", knocked_in_at_valuation=True, ko_barrier_ratio=20.0)
-    ctx = build_dcn_grid_context(p2)
+    ctx = build_dcn_grid_context(p2, e2)
     T = float(ctx.times[-1])
     fwd, k = e2.spot * np.exp((r - q) * T), p2.k_loss
     d1 = (np.log(fwd / k) + 0.5 * vol * vol * T) / (vol * np.sqrt(T))

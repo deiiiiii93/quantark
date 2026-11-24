@@ -398,7 +398,7 @@ def dcn_paths(engine, product, env, *, lifecycle_state=None) -> Dict[str, np.nda
     order = sorted(range(len(calls)), key=lambda i: -1 if calls[i][1].get("batch_id") is None
                    else int(calls[i][1]["batch_id"]))
     paths = np.concatenate([calls[i][2] for i in order], axis=0)
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     n, n_obs = paths.shape[0], ctx.obs_cols.size
     first_col = 0 if ctx.valuation_monitored else 1
     carried = bool(product.knocked_in_at_valuation)

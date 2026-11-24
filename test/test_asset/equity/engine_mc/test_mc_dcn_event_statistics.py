@@ -53,7 +53,7 @@ from quantark.util.calendar.day_counter import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 
-from dcn_fixtures import DCN_A, DCN_B, FLAT, make_dcn
+from dcn_fixtures import DCN_A, DCN_B, FLAT, make_dcn, calendar_env
 from test_asset.equity.engine_mc import mc_same_path_reference as reference
 from test_asset.equity.engine_mc.mc_price_path_routes import ROUTES
 
@@ -315,7 +315,7 @@ def test_a_closed_valuation_day_has_no_knock_in_row_at_zero():
     """A non-SSE run day (A7'): the valuation instant is no schedule date; the first KI row is the next close."""
     stats = _stats("closed_saturday")
     product = CASES["closed_saturday"][1]()
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, calendar_env(product))
     assert not ctx.valuation_monitored
     np.testing.assert_array_equal(stats.ki_table.times, ctx.times[1:])
     assert stats.ki_table.times[0] == (datetime(2024, 6, 11) - SAT).days / 365.0
@@ -328,7 +328,7 @@ def test_a_closed_valuation_day_has_no_knock_in_row_at_zero():
 def test_times_are_the_dcn_axis_with_exact_dates(name):
     stats = _stats(name)
     engine, product, env = _fresh(name)
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     pay = product.payment_dates()
     obs = stats.observations
     np.testing.assert_array_equal(obs.times, ctx.times[ctx.obs_cols])
@@ -383,7 +383,7 @@ def test_coupon_only_rows_carry_no_knock_out():
 def test_fold_slots_are_the_statistics_axis(name):
     stats = _stats(name)
     _, product, _ = _fresh(name)
-    slots = dcn_fold_slots(build_dcn_grid_context(product))
+    slots = dcn_fold_slots(build_dcn_grid_context(product, calendar_env(product)))
     assert [s[1] for s in slots.ko] == stats.observations.times.tolist()
     assert [s[2] for s in slots.ko] == stats.observations.payment_times.tolist()
     assert (slots.determination, slots.payment) == (stats.maturity.time, stats.maturity.payment_time)

@@ -6,7 +6,7 @@ import pytest
 from quantark.asset.equity.product.option.dcn_schedule import build_dcn_schedule
 from quantark.util.exceptions import ValidationError
 
-from dcn_fixtures import DCN_A, DCN_B, SSE, schedule_kwargs
+from dcn_fixtures import DCN_A, DCN_B, SSE, schedule_kwargs, calendar_env
 
 
 def _build(contract):
@@ -125,7 +125,7 @@ def test_merged_row_ko_accrual_counts_only_eligible_month_indices():
     rows.sort(key=lambda m: m.observation_date)
     product.schedule = dataclasses.replace(product.schedule, monthly=tuple(rows))
 
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, calendar_env(product))
     j = ctx.month_index_map.index((5, 6))
     assert ctx.coupon_accruals[j] == pytest.approx(2 * product.accrual_per_period)
     assert ctx.ko_accruals[j] == pytest.approx(product.accrual_per_period)

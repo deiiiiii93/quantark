@@ -84,7 +84,7 @@ class DCNLifecycleTracker:
         date_resolver: Optional[Callable] = None,
         has_lifecycle: bool = True,
     ) -> None:
-        from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
+        from quantark.asset.equity.product.option.dcn_grid import dcn_row_accruals
         from quantark.asset.equity.product.option.dcn_option import DCNOption
 
         if not isinstance(product, DCNOption):
@@ -101,7 +101,8 @@ class DCNLifecycleTracker:
         self.has_lifecycle = has_lifecycle
         self._date_resolver = date_resolver            # accepted for the tracker_for signature; DCN dates are dated
         self._booked = product.schedule
-        self._ctx = build_dcn_grid_context(product)
+        # per-row accruals are contract data: the tracker needs no environment (spec D16)
+        self._coupon_accruals, self._ko_accruals = dcn_row_accruals(product)
         self._payments = product.payment_dates()
         self._row_of = {m.observation_date: j for j, m in enumerate(self._booked.monthly)}
         self._ki_dates = frozenset(self._booked.daily_ki_dates)
@@ -326,7 +327,7 @@ class DCNLifecycleTracker:
         )
 
     def _decide(self, t: datetime, s: float, gap: bool, decided_on: datetime) -> List[LifecycleEvent]:
-        p, state, ctx = self.product, self.lifecycle, self._ctx
+        p, state = self.product, self.lifecycle
         events: List[LifecycleEvent] = []
         # 1) daily knock-in (sticky), before the monthly row
         if t in self._ki_dates and not state.knocked_in and s <= p.ki_barrier:
@@ -343,7 +344,7 @@ class DCNLifecycleTracker:
         # 2) knock-out has priority (either knock-in state); it ends the note
         if row.is_ko_obs and s >= p.ko_barrier:
             before = self._snapshot()
-            unit = part * p.ko_coupon_rate * float(ctx.ko_accruals[j]) * notional
+            unit = part * p.ko_coupon_rate * float(self._ko_accruals[j]) * notional
             payoff, cash, flow = self._cash("knock-out", LifecycleEventType.KNOCK_OUT, t,
                                             self._payments.ko_payment_dates[j], unit, gap, decided_on)
             state.knocked_out, state.ko_date = True, t
@@ -353,7 +354,7 @@ class DCNLifecycleTracker:
         # 3) the fixed coupon: not knocked in, at or above the coupon barrier
         if row.is_coupon_obs and not state.knocked_in and s >= p.coupon_barrier:
             before = self._snapshot()
-            unit = part * p.coupon_rate * float(ctx.coupon_accruals[j]) * notional
+            unit = part * p.coupon_rate * float(self._coupon_accruals[j]) * notional
             payoff, cash, flow = self._cash("coupon", LifecycleEventType.COUPON, t,
                                             self._payments.coupon_payment_dates[j], unit, gap, decided_on)
             events.append(self._event(LifecycleEventType.COUPON, t, s, j, float(p.coupon_barrier), payoff, cash, flow,

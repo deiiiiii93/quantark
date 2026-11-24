@@ -66,7 +66,7 @@ def test_discount_bump_is_exact_cashflow_reweighting():
     )
     up = e.price_detailed(p, env_up)
 
-    ctx = build_dcn_grid_context(p)
+    ctx = build_dcn_grid_context(p, env)
     df0, df1 = make_df_fn(env), make_df_fn(env_up)
     checked = 0
     for j, (c0, c1) in enumerate(zip(base.pv_fixed_coupons_by_period,
@@ -129,7 +129,7 @@ def test_carry_bump_touches_only_overlapping_steps():
 
     p = make_dcn(DCN_A)
     env = _curve_env()
-    ctx = build_dcn_grid_context(p)
+    ctx = build_dcn_grid_context(p, env)
     dt = np.diff(ctx.times)
     base = build_mc_term_inputs(env, 6000.0, float(ctx.times[-1]), dt.size, dt)
 
@@ -161,7 +161,7 @@ def test_vol_bump_touches_only_overlapping_steps():
 
     p = make_dcn(DCN_A)
     env = _curve_env()
-    ctx = build_dcn_grid_context(p)
+    ctx = build_dcn_grid_context(p, env)
     dt = np.diff(ctx.times)
     base = build_mc_term_inputs(env, 6000.0, float(ctx.times[-1]), dt.size, dt)
 

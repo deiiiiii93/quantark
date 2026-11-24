@@ -22,7 +22,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from dcn_fixtures import DCN_A, FLAT, make_dcn
+from dcn_fixtures import DCN_A, FLAT, make_dcn, calendar_env
 
 from quantark.asset.equity.engine.mc import DCNMCEngine
 from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import (
@@ -282,8 +282,8 @@ def test_post_close_schedule_drops_the_observed_day():
 
 
 def test_post_close_grid_starts_at_an_unmonitored_valuation_instant():
-    pre_ctx = build_dcn_grid_context(booked(ROW))
-    post_ctx = build_dcn_grid_context(post_close(booked(ROW), ROW, False))
+    pre_ctx = build_dcn_grid_context(booked(ROW), calendar_env(booked(ROW)))
+    post_ctx = build_dcn_grid_context(post_close(booked(ROW), ROW, False), calendar_env(post_close(booked(ROW), ROW, False)))
     assert pre_ctx.valuation_monitored and not post_ctx.valuation_monitored
     np.testing.assert_array_equal(post_ctx.times, pre_ctx.times)        # same instants, so same MC draws
     np.testing.assert_array_equal(post_ctx.obs_cols, pre_ctx.obs_cols[1:])

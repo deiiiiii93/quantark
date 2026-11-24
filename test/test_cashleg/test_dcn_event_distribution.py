@@ -23,7 +23,7 @@ def test_price_with_events_converts_the_engines_own_statistics(contract):
     detailed = _engine().price_detailed(product, env)
     stats, dist = detailed.event_stats, result.event_distribution
     assert result.npv == detailed.pv
-    ctx = build_dcn_grid_context(product)
+    ctx = build_dcn_grid_context(product, env)
     np.testing.assert_array_equal(dist.stream_times[EventType.KO], ctx.times[ctx.obs_cols])
     np.testing.assert_array_equal(dist.probabilities[EventType.KO], stats.observations.probability)
     assert dist.probabilities[EventType.MATURITY_WITH_KI] == stats.ki_settlement.probability

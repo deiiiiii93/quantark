@@ -168,7 +168,7 @@ def test_helper_is_the_mc_kernel_on_a_one_column_path_bitwise(name, carried):
     c = CONTRACTS[name]
     for spot in SPOTS:
         product, e = final_product(c, carried), env(spot, c["maturity_date"])
-        cf = compute_dcn_cashflows(np.array([[spot]]), product, build_dcn_grid_context(product), make_df_fn(e))
+        cf = compute_dcn_cashflows(np.array([[spot]]), product, build_dcn_grid_context(product, e), make_df_fn(e))
         row = settle_final_observation(product, e)
         assert row.coupon_pv == float(cf.fixed_coupon_pv[0])
         assert row.ko_pv == float(cf.ko_pv[0])
@@ -282,8 +282,8 @@ def test_shrinking_the_last_step_converges_to_the_settled_value(monkeypatch, car
     original = dcn_grid.build_dcn_grid_context
     h = 1.0 / 365.0 / 1440.0
 
-    def shrunk(product):
-        ctx = original(product)
+    def shrunk(product, pricing_env):
+        ctx = original(product, pricing_env)
         shift = float(ctx.times[-1]) - h
         return dataclasses.replace(ctx, times=np.array([0.0, h]), coupon_pay_times=ctx.coupon_pay_times - shift,
                                    ko_pay_times=ctx.ko_pay_times - shift, loss_pay_time=ctx.loss_pay_time - shift)

@@ -551,7 +551,8 @@ def _ko_axis(product_name: str, product) -> Tuple[Tuple[float, ...], Tuple[float
     schedule on it (the leg settles 0.01y after each observation; DCN at the knock-out payment)."""
     spec = PRODUCTS[product_name]
     if product_name.startswith("dcn"):
-        ctx = build_dcn_grid_context(product)
+        from dcn_fixtures import calendar_env
+        ctx = build_dcn_grid_context(product, calendar_env(product))
         obs = tuple(float(t) for t in np.asarray(ctx.times[ctx.obs_cols], dtype=float))
         return obs, tuple(float(t) for t in ctx.ko_pay_times)
     if product_name == "ko_reset_absolute":
