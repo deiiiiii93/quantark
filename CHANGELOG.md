@@ -7,6 +7,47 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-24
+
+QUAD V1 steps carry the exact transition mass. V1 samples each step's Gaussian kernel at the lattice nodes; by Poisson
+summation the samples' trapezoid sum is the exact integral times `Theta = 1 + 2 sum_n exp(-2 pi^2 n^2 (s/h)^2)
+cos(2 pi n phi)`. That alias mass multiplied the value on every step, so on schedules with many steps spanning under
+~1.4 cells it compounded.
+
+### Fixed
+
+- **QUAD V1 exact-mass step kernel.** Every lattice-sampled step (price, event statistics, continuous-KI bridge,
+  forward density, the logged adjoint; snowball, Phoenix, KO-reset) divides its prefactor by the analytic lattice sum
+  (`quad_math.lattice_mass_factor`). One scalar per step, so every transpose stays exact. Where Theta rounds to
+  exactly 1.0 (s/h >~ 1.38), under the Simpson rule, and on local-stencil steps, nothing changes, bit for bit.
+  `SnowballQuadEngine._exact_lattice_mass = False` reproduces 0.12.0.
+  - Daily knock-out with sparse knock-in at default params (the lattice is sized from knock-in dates only, so daily
+    steps spanned 0.77-0.87 cells), against 32001-node references, relative to notional: 2y vol 10% +2.1e-3 ->
+    -1.1e-4 (the remainder is the 1001-node lattice's ordinary O(h^2) error), 3y vol 20% +5.2e-4 -> +4.6e-6, 1y vol 5%
+    +6.2e-5 -> -8.4e-6; an explicit 8001-node grid with 64 quarter-hour knock-in steps +3.7e-3 -> -1.2e-7.
+  - Event statistics on those contracts lost the same mass: the outcome probabilities summed to 1 - 2.2e-3 (2y vol
+    10%; the forward-density route likewise). They now partition to 5e-12.
+
+### Changed (moved values, owner-signed)
+
+- Pinned: `test_quad_v1_local_step::test_resolved_gap_is_bitwise_unchanged` (knock-out and knock-in 8.8 h apart,
+  vol 20%, s/h ~1.05) 98.91842991352458 -> 98.91842987745284 (-3.6e-10 relative). Owner ruling: a move far below the
+  lattice's own discretization error is judged by single cause (0.12.0 reproduces with the switch off) and the exact
+  step mass, since its direction against a reference cannot be measured.
+- No golden, certificate anchor, cash-leg baseline or other pinned value moved (full suite).
+- Unpinned book benchmark (60 synthetic snowballs whose monthly knock-out dates fall 2-6 h off the daily knock-in
+  instants): 120 of 180 prices moved (every discrete-KI trade, up to 2.3e-4 relative). Against 32001-node references,
+  36 of 40 trades moved toward the reference; median error 6.5e-3 -> 7.7e-4, max 1.75e-2 -> 3.9e-3. The 4 that moved
+  away had an alias error that happened to cancel the lattice's ordinary error. Cost: 1.001x (interleaved, idle).
+
+### Known issues
+
+- Simpson rule: its half-frequency parity alias is damped by the spectral filter differently at each kernel site, so
+  it needs a per-site filtered derivation; not corrected (measured 2.7e-7 per step at s/h 0.75 under the default
+  filter). `QuadratureCore` / `DiscreteQuadEngine` (barrier, one-touch): Simpson, unfiltered; not corrected.
+- Daily same-barrier knock-out steps narrower than a cell are still refused by QUAD V1 (a uniform lattice cannot hold
+  the crossing layer); QUAD V2 prices them.
+
 ## [0.12.0] - 2026-11-24
 
 One rule now decides when two numeric event times are the same instant, for every product and engine (contract
