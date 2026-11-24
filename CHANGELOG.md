@@ -7,6 +7,40 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-24
+
+QUAD V1 event statistics have one model, riding the price's own operator.
+
+### Removed
+
+- **QUAD V1 `event_stats_mode` and its `"forward_density"` route (breaking).** The opt-in forward
+  transition-density statistics (provenance `("quad_v1_forward_density", "quad_v1")`) were the only statistics
+  in the library not computed from the pricing operator, and on default grids they were no more accurate than the
+  default (1y daily knock-out, vol 20%, second observation: truth 4.163%, default 4.333%, forward 4.062%).
+  `QuadParams.event_stats_mode` is gone with it: passing it at all, `"stacked"` included, raises `TypeError`.
+  KO-reset used to ignore the flag silently and now fails the same way. Prices, greeks and every default
+  statistics field are unchanged, bit for bit (31 probes across snowball / Phoenix / KO-reset, discrete and
+  continuous KI, KO / KI at valuation, local steps, BGK, auto_converge).
+- **Cost for anyone who used it for speed.** The default route keeps one indicator row per knock-out observation,
+  so its cost grows with observations x steps. Measured `calculate_event_stats` at default params (interleaved,
+  idle; default with / without the KI stream vs forward_density):
+
+  | contract | default | default, no KI stream | forward_density | ratio (no KI) |
+  |---|---|---|---|---|
+  | daily KO 1y, KI at maturity | 7.37 s | 7.40 s | 0.18 s | 41x |
+  | daily KO 2y, KI at maturity | 28.05 s | 28.22 s | 0.37 s | 77x |
+  | monthly KO, daily KI 1y | 1.72 s | 1.29 s | 0.30 s | 4.3x |
+  | Phoenix (no memory, instant), daily KI 1y | 2.50 s | 2.29 s | 0.62 s | 3.7x |
+
+  A fast route on the same model (the knock-out table from the exact adjoint forward pass) is a follow-up.
+
+### Notes
+
+- `quantark/asset/equity/param/` is fingerprinted by the intraday certificate trees (`QUAD_V2_TREES`,
+  `PDE_TREES`, `MC_TREES`): this edit moves the schema-2 implementation digest of the
+  snowball-intraday-daily-ki-bsm arms, so their next amendment re-runs rather than carrying forward. No equity
+  snowball certificate identity hash changes (`event_stats_mode` was never recorded).
+
 ## [0.12.1] - 2026-11-24
 
 QUAD V1 steps carry the exact transition mass. V1 samples each step's Gaussian kernel at the lattice nodes; by Poisson
