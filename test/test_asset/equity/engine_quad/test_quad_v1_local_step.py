@@ -138,12 +138,20 @@ class TestTwoEventLadder:
         assert within(value, ref, rung["hw_delta"] + base["hw_delta"], 1e-3, 1e-6 * 100.0), (value, ref)
 
     def test_resolved_gap_is_bitwise_unchanged(self):
-        """8.8 hours apart at vol 20% resolves (s/h ~1.05): today's operator, untouched -- the value the engine gave
-        before the sub-resolution run (aa6d5a2f), bit for bit."""
+        """8.8 hours apart at vol 20% resolves (s/h ~1.05): no local step. Re-pinned 0.12.1 (owner-signed exact-mass
+        run): the step's sampled kernel carried alias mass ~7e-10, now divided out (``lattice_mass_factor``) --
+        98.91842991352458 -> 98.91842987745284 (-3.6e-10 relative). The 0.12.0 value reproduces bit for bit with the
+        exact-mass switch off. The move is far below this lattice's own O(h^2) error (-3.3e-4 against 32001 nodes), so
+        its direction against a reference is not measurable; the evidence is single cause plus the exact step mass."""
         p = two_event(1e-3)
         e = SnowballQuadEngine(QuadParams())
-        assert e.price(p, env()) == 98.91842991352458
+        assert e.price(p, env()) == 98.91842987745284
         assert not getattr(e, "_last_local_steps", ())
+        saved, SnowballQuadEngine._exact_lattice_mass = SnowballQuadEngine._exact_lattice_mass, False
+        try:
+            assert SnowballQuadEngine(QuadParams()).price(p, env()) == 98.91842991352458
+        finally:
+            SnowballQuadEngine._exact_lattice_mass = saved
 
     def test_event_statistics_pv_is_the_price(self):
         p = two_event(5 * MINUTE)
