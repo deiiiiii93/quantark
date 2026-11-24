@@ -108,6 +108,7 @@ def _clone_env(
         div_yield=env.div_yield,
         day_count_convention=env.day_count_convention,
         bus_days_in_year=env.bus_days_in_year,
+        holiday_time_adjustment=env.holiday_time_adjustment,
     )
     if spot is not None:
         new_env.spot_quote = SpotQuote(spot=float(spot))

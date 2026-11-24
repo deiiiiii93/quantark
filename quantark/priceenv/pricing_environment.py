@@ -8,6 +8,7 @@ from datetime import datetime
 from quantark.param import SpotQuote, VolatilitySurface, RateCurve, DividendYield, BasisYield
 from quantark.util.exceptions import MarketDataError
 from quantark.util.calendar import Calendar, DayCountConvention
+from quantark.util.calendar.business_calendar import BusinessDayConvention
 from quantark.util.numerical import safe_sqrt
 
 
@@ -39,6 +40,12 @@ class PricingEnvironment:
             ``bus_days_in_year`` (see docs/trading-clock.md).
         bus_days_in_year: Number of business days per year for business day convention (default: 252)
         calendar: Optional business day calendar (used when day_count_convention is BUSINESS_DAYS)
+        holiday_time_adjustment: Where a date that is a holiday of ``calendar`` sits on the BUSINESS_DAYS clock
+            (default PRECEDING: at the previous business day's time, which is plain business-day counting;
+            FOLLOWING: at the next business day's time; MODIFIED_* as for payment dates). Contract dates never
+            move; only their model time does. Ignored under every other convention. UNADJUSTED is refused: on a
+            business-day clock a holiday has no time of its own. Read by ``quantark.priceenv.date_axis`` (in
+            0.14.0 only DCN times use it).
     """
 
     rate_curve: RateCurve
@@ -50,6 +57,7 @@ class PricingEnvironment:
     day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS
     bus_days_in_year: int = 252
     calendar: Optional[Calendar] = None
+    holiday_time_adjustment: BusinessDayConvention = BusinessDayConvention.PRECEDING
 
     def __post_init__(self):
         """Validate pricing environment."""
@@ -60,6 +68,16 @@ class PricingEnvironment:
         if self.bus_days_in_year <= 0:
             raise MarketDataError(
                 f"Business days per year must be positive, got {self.bus_days_in_year}"
+            )
+        if not isinstance(self.holiday_time_adjustment, BusinessDayConvention):
+            raise MarketDataError(
+                "holiday_time_adjustment must be a BusinessDayConvention, "
+                f"got {self.holiday_time_adjustment!r}"
+            )
+        if self.holiday_time_adjustment is BusinessDayConvention.UNADJUSTED:
+            raise MarketDataError(
+                "holiday_time_adjustment=UNADJUSTED is not a placement: on a business-day clock a holiday "
+                "has no time of its own (use PRECEDING or FOLLOWING)"
             )
         if self.day_count_convention == DayCountConvention.BUSINESS_DAYS:
             from quantark.priceenv.clock_validation import (

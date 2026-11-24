@@ -143,6 +143,7 @@ class StressApplicator:
             basis_yield=deepcopy(env.basis_yield) if env.basis_yield else None,
             day_count_convention=env.day_count_convention,
             bus_days_in_year=env.bus_days_in_year,
+            holiday_time_adjustment=env.holiday_time_adjustment,
         )
 
     @staticmethod

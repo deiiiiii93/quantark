@@ -126,7 +126,7 @@ def _snapshot_request(request: IntradayValuationRequest) -> IntradayValuationReq
         spot_quote=deepcopy(env.spot_quote), vol_surface=deepcopy(env.vol_surface),
         div_yield=deepcopy(env.div_yield), basis_yield=env.basis_yield,
         day_count_convention=env.day_count_convention, bus_days_in_year=env.bus_days_in_year,
-        calendar=env.calendar)
+        calendar=env.calendar, holiday_time_adjustment=env.holiday_time_adjustment)
     return dataclasses.replace(request, product=deepcopy(request.product), pricing_env=snapshot_env,
                                session_calendar=request.session_calendar.snapshot(),
                                lifecycle_state=deepcopy(request.lifecycle_state))
