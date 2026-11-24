@@ -17,20 +17,24 @@ QUAD V1 event statistics have one model, riding the price's own operator.
   transition-density statistics (provenance `("quad_v1_forward_density", "quad_v1")`) were the only statistics
   in the library not computed from the pricing operator, and on default grids they were no more accurate than the
   default (1y daily knock-out, vol 20%, second observation: truth 4.163%, default 4.333%, forward 4.062%).
-  `QuadParams.event_stats_mode` is gone with it: passing it at all, `"stacked"` included, raises `TypeError`.
+  `QuadParams.event_stats_mode` is gone with it: passing it at all, `"stacked"` included, raises `TypeError` from
+  the constructor, and `ValidationError` ("Unknown parameter keys") from `QuadParams.from_config` / a config file.
   KO-reset used to ignore the flag silently and now fails the same way. Prices, greeks and every default
   statistics field are unchanged, bit for bit (31 probes across snowball / Phoenix / KO-reset, discrete and
   continuous KI, KO / KI at valuation, local steps, BGK, auto_converge).
 - **Cost for anyone who used it for speed.** The default route keeps one indicator row per knock-out observation,
-  so its cost grows with observations x steps. Measured `calculate_event_stats` at default params (interleaved,
-  idle; default with / without the KI stream vs forward_density):
+  so its cost grows with observations x steps. Measured `calculate_event_stats` at default params, 0.12.1,
+  interleaved, idle, median of 5. Two sessions: (a) the full request (the default also runs the KI path pass,
+  which forward_density never offered) and (b) the KI stream excluded, so both arms do the same work:
 
-  | contract | default | default, no KI stream | forward_density | ratio (no KI) |
-  |---|---|---|---|---|
-  | daily KO 1y, KI at maturity | 7.37 s | 7.40 s | 0.18 s | 41x |
-  | daily KO 2y, KI at maturity | 28.05 s | 28.22 s | 0.37 s | 77x |
-  | monthly KO, daily KI 1y | 1.72 s | 1.29 s | 0.30 s | 4.3x |
-  | Phoenix (no memory, instant), daily KI 1y | 2.50 s | 2.29 s | 0.62 s | 3.7x |
+  | contract | (a) default | (a) forward | (a) ratio | (b) default | (b) forward | (b) ratio |
+  |---|---|---|---|---|---|---|
+  | daily KO 1y, KI at maturity | 7.37 s | 0.16 s | 46x | 7.40 s | 0.18 s | 41x |
+  | daily KO 2y, KI at maturity | 28.05 s | 0.34 s | 82x | 28.22 s | 0.37 s | 77x |
+  | daily KO 1y, continuous KI | 7.73 s | 0.22 s | 36x | | | |
+  | monthly KO, daily KI 1y | 1.72 s | 0.29 s | 5.8x | 1.29 s | 0.30 s | 4.3x |
+  | monthly KO, daily KI 2y | 12.10 s | 1.95 s | 6.2x | | | |
+  | Phoenix (no memory, instant), daily KI 1y | 2.50 s | 0.50 s | 5.0x | 2.29 s | 0.62 s | 3.7x |
 
   A fast route on the same model (the knock-out table from the exact adjoint forward pass) is a follow-up.
 

@@ -1172,7 +1172,6 @@ class SnowballQuadEngine(BaseEngine):
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
 
-        disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
         timings = resolve_structured_payment_timings(product, pricing_env, ko_records)
         terminal = timings.terminal
         v_in_cash, v_out_cash = self._terminal_cash_surfaces(product, pricing_env, spot_grid)
@@ -2239,10 +2238,10 @@ class SnowballQuadEngine(BaseEngine):
         """The step's kernel prefactor with the exact lattice mass: ``prefactor / Theta``.
 
         The sampled kernel ``exp(-z^2 / (4 tau) - alpha z)`` is centred at ``-2 alpha tau`` on lattice offsets that
-        are whole multiples of ``h`` (the convolution's ``z_grid``, the bridge offsets); the forward kernel (``+alpha``)
-        is centred at ``+2 alpha tau``, which gives the same Theta (it is even in the phase). The factor is one scalar
-        per step, applied wherever the step's prefactor is applied (base convolution, bridge correction, forward
-        density, the logged adjoint), so every transpose stays exact and cached kernels stay factor-free.
+        are whole multiples of ``h`` (the convolution's ``z_grid``, the bridge offsets); a transposed kernel
+        (``+alpha``) is centred at ``+2 alpha tau``, which gives the same Theta (it is even in the phase). The factor is
+        one scalar per step, applied wherever the step's prefactor is applied (base convolution, bridge correction, the
+        logged adjoint), so every transpose stays exact and cached kernels stay factor-free.
 
         Unchanged (the same float) when the switch is off, under Simpson (its full-frequency term is exactly 1 on
         every step the routing samples; its parity alias is filter-dependent and out of scope), for local steps (the

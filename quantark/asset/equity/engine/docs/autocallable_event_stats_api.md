@@ -434,7 +434,8 @@ decision time on the DCN axis and the payment time `price()` discounted the flow
 - Memory Phoenix with more than 50 observations is refused, as for pricing.
 - One statistics model. The opt-in `event_stats_mode="forward_density"` diagnostic (its own
   finite-grid numbers, provenance `("quad_v1_forward_density", "quad_v1")`) and the
-  `QuadParams.event_stats_mode` field were removed in 0.13.0; passing the field raises `TypeError`.
+  `QuadParams.event_stats_mode` field were removed in 0.13.0; passing the field raises `TypeError`
+  (`ValidationError` through `QuadParams.from_config` / a config file).
 
 ### Path analyzer (`AutocallablePathAnalyzer.analyze_snowball_risk_neutral`)
 

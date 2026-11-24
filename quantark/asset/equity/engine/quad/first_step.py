@@ -23,7 +23,7 @@ each node (``exp(-2 d0 d1 / s^2)``, ``d0``/``d1`` the endpoints' distances to th
 touch is exact too.
 
 Everything here is linear in the pre-event surfaces, so it transposes: :meth:`GaussianFirstStep.lift_transpose`
-gives the adjoint statistics pass its row (``v1_adjoint``) and the forward-density seed.
+gives the adjoint statistics pass its row (``v1_adjoint``).
 
 Several centres can share one evaluation (the t=0 value surface near a barrier: F at each lattice node of a band).
 The event map is pointwise, so the nodes of all centres are evaluated together.

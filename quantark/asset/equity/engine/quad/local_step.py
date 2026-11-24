@@ -70,7 +70,7 @@ def local_step_apply(values: np.ndarray, weights: Sequence[float],
 
 def local_step_transpose(dual: np.ndarray, weights: Sequence[float],
                          coefficients: Optional[Sequence[np.ndarray]] = None) -> np.ndarray:
-    """The transpose of :func:`local_step_apply` (adjoint statistics pass; forward densities)."""
+    """The transpose of :func:`local_step_apply` (the adjoint statistics pass)."""
     dual = np.asarray(dual, dtype=float)
     n = dual.shape[-1]
     out = np.zeros_like(dual)

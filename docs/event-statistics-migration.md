@@ -305,7 +305,8 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     `event_stats_mode="forward_density"` diagnostic (provenance `("quad_v1_forward_density",
     "quad_v1")`, item 13) is gone, and with it the `QuadParams.event_stats_mode` field: QUAD V1
     event statistics have one model, riding the price's own operator. Passing the field at all
-    (`"stacked"` included) raises `TypeError`; drop the argument. KO-reset used to ignore the flag
+    (`"stacked"` included) raises `TypeError` from the constructor and `ValidationError` ("Unknown
+    parameter keys") from `QuadParams.from_config` / a config file; drop it. KO-reset used to ignore the flag
     silently; it now fails the same way at `QuadParams` construction. Prices and the default
     statistics are unchanged, bit for bit.
 
