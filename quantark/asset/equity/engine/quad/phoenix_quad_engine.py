@@ -862,7 +862,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             alpha = float(alpha_vec[step_index])
             beta = float(beta_vec[step_index])
             vol_step = float(vol_vec[step_index])
-            prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
+            prefactor = self._step_prefactor(
+                math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0, tau_step, alpha, math_utils.h)
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
             # Diffuse all surfaces

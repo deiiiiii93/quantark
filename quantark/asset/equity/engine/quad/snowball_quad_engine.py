@@ -34,7 +34,7 @@ from quantark.asset.equity.engine.quad.local_step import (
     local_step_transpose,
     local_step_weights,
 )
-from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.asset.equity.engine.quad.quad_math import QuadratureMath, lattice_mass_factor
 from quantark.asset.equity.engine.quad.quad_adapters import (
     resolve_structured_payment_timings,
 )
@@ -631,7 +631,8 @@ class SnowballQuadEngine(BaseEngine):
             alpha = float(alpha_vec[step_index])
             beta = float(beta_vec[step_index])
             vol_step = float(vol_vec[step_index])
-            prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
+            prefactor = self._step_prefactor(
+                math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0, tau_step, alpha, math_utils.h)
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
             if step_index == 1 and transition_readout and not first_exact:
@@ -759,6 +760,7 @@ class SnowballQuadEngine(BaseEngine):
             candidate = self.__class__(params=candidate_params)
             candidate.record_backward_grids = self.record_backward_grids
             candidate._local_steps_allowed = allow_local
+            candidate._exact_lattice_mass = self._exact_lattice_mass
             try:
                 if fold is None:
                     value = float(candidate.price(product, pricing_env))
@@ -886,6 +888,7 @@ class SnowballQuadEngine(BaseEngine):
         candidate.record_backward_grids = self.record_backward_grids
         # the accepted rung's ladder: rule (i) sizing and the local stencil follow the same switch as the price
         candidate._local_steps_allowed = self._last_convergence_info.get("local_steps_allowed", True)
+        candidate._exact_lattice_mass = self._exact_lattice_mass
         stats = candidate._compute_event_stats(product, pricing_env, streams=streams, pv=pv)
         self._last_v1_march = getattr(candidate, "_last_v1_march", None)
         return stats
@@ -1346,7 +1349,8 @@ class SnowballQuadEngine(BaseEngine):
             alpha = float(alpha_vec[step_index])
             beta = float(beta_vec[step_index])
             vol_step = float(vol_vec[step_index])
-            prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
+            prefactor = self._step_prefactor(
+                math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0, tau_step, alpha, math_utils.h)
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
@@ -2090,6 +2094,8 @@ class SnowballQuadEngine(BaseEngine):
             math.exp(-(alpha * alpha) * tau_step)
             / math.sqrt(math.pi * tau_step) / 2.0
         )
+        # the transpose of the backward step: the same lattice sum (Theta is even in the centre's phase)
+        prefactor_fwd = self._step_prefactor(prefactor_fwd, tau_step, alpha, math_utils.h)
         return omega_fwd, prefactor_fwd
 
     def _diffuse_density(
@@ -2635,6 +2641,36 @@ class SnowballQuadEngine(BaseEngine):
     # (contracts that converge today are bit-identical); the second ladder, run only when every rung refused, turns
     # it back on.
     _local_steps_allowed = True
+
+    # Every lattice-sampled step kernel is divided by its trapezoid lattice sum over its exact integral
+    # (``lattice_mass_factor``), so each step carries the exact transition mass: the sampled kernel's alias mass
+    # 2 exp(-2 pi^2 (s/h)^2) cos(2 pi phi) multiplies the value on every step and compounds (0.12.1; daily knock-out
+    # with sparse knock-in at default params, 2y vol 10%: +2.1e-3 of notional before). Off reproduces 0.12.0; set it
+    # on the CLASS for comparisons (spawned workers and auto_converge rungs copy the class / this instance's value).
+    _exact_lattice_mass = True
+
+    def _step_prefactor(self, prefactor: float, tau_step: float, alpha: float, h: float) -> float:
+        """The step's kernel prefactor with the exact lattice mass: ``prefactor / Theta``.
+
+        The sampled kernel ``exp(-z^2 / (4 tau) - alpha z)`` is centred at ``-2 alpha tau`` on lattice offsets that
+        are whole multiples of ``h`` (the convolution's ``z_grid``, the bridge offsets); the forward kernel (``+alpha``)
+        is centred at ``+2 alpha tau``, which gives the same Theta (it is even in the phase). The factor is one scalar
+        per step, applied wherever the step's prefactor is applied (base convolution, bridge correction, forward
+        density, the logged adjoint), so every transpose stays exact and cached kernels stay factor-free.
+
+        Unchanged (the same float) when the switch is off, under Simpson (its full-frequency term is exactly 1 on
+        every step the routing samples; its parity alias is filter-dependent and out of scope), for local steps (the
+        stencil never samples the kernel), and wherever Theta rounds to exactly 1.0 (s/h >~ 1.38): bit-identical.
+        """
+        if (
+            not self._exact_lattice_mass
+            or str(getattr(self.params, "integration_rule", "trapezoid")).lower() != "trapezoid"
+            or not tau_step > 0.0
+            or self._local_step(tau_step, h)
+        ):
+            return prefactor
+        theta = lattice_mass_factor(tau_step, h, -2.0 * float(alpha) * float(tau_step) / float(h))
+        return prefactor if theta == 1.0 else prefactor / theta
 
     def _local_step(self, tau_step: float, h: float) -> bool:
         """True when this diffusion step is priced by the local stencil (``local_step``): its sampled kernel's mass
