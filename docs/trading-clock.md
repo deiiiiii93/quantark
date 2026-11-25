@@ -99,6 +99,13 @@ env = PricingEnvironment(
   trading tick (never a jump between substeps).
 - `TradingClockDividendYield` is **cumulative-yield preserving**:
   `q_td(u) = q_cal(c)·c/u`, because the engines difference `q(t)·t`.
+- Dated products on this axis place a date that is a holiday of `calendar`
+  by `PricingEnvironment.holiday_time_adjustment` (default `PRECEDING`: the
+  previous business day's time, i.e. plain business-day counting;
+  `FOLLOWING` / `MODIFIED_*` available). Contract dates never move, only
+  their model time; dates sharing one instant are decided at that instant.
+  In 0.14.0 the DCN reads it (`quantark.priceenv.date_axis.env_time`); every
+  other product counts business days (= `PRECEDING`).
 - One clock per configuration: the environment validates that every wrapped
   curve's `TradingClock` matches (`bus_days_in_year`, calendar identity)
   and raises on mismatch. `BUSINESS_DAYS` without a calendar now raises —

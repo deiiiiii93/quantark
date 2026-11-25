@@ -98,7 +98,7 @@ dates, `cash_to_pay`), `knock_in.expected_time`, `knock_in.expected_loss`, `expe
 | `ko_probability` | `obs.probability.sum()` | |
 | `ko_timing_distribution` | `obs.probability` | Array on the shared monthly grid; rows inside `ko_lock_months` are 0. |
 | `coupon_probability` | `coupons.probability` | P(the row's fixed coupon is paid), on the observation grid. |
-| `expected_life_years` | `expected_lifetime` | Same quantity, on the DCN's ACT/365F axis. |
+| `expected_life_years` | `expected_lifetime` | Same quantity, on the DCN's ACT/365F axis (0.14.0: on the pricing environment's axis, like every other DCN time; identical on CALENDAR_DAYS / ACT_365 environments). |
 | `prob_survive_no_ki` | `maturity.probability` | |
 | `prob_survive_ki` | `ki_settlement.probability` | |
 | `expected_discounted_loss_leg` | `ki_settlement.discounted_cash` (signed by `direction_sign`) | Its magnitude is also `knock_in.expected_loss` (unsigned, ≥ 0). |

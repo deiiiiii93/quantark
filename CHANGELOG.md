@@ -7,6 +7,64 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-25
+
+The DCN runs on the pricing environment's clock. Every DCN time -- the diffusion grid, payment discount factors,
+`get_maturity`, event statistics, receivables and folded cash legs -- is measured with the environment's day-count
+convention, calendar and `bus_days_in_year` from the schedule's valuation date, the rule dated snowball records
+already follow. `CALENDAR_DAYS` and `ACT_365` environments are unchanged, bit for bit; `ACT_360` and `BUSINESS_DAYS`
+DCN prices and statistics move on purpose.
+
+### Changed
+
+- **DCN times on the environment's axis (sanctioned price move; retires the 0.11.0 "D12" rule of a DCN-own ACT/365F
+  axis).** `build_dcn_grid_context(product, pricing_env)` now takes the environment (breaking for env-less callers);
+  times are `quantark.priceenv.date_axis.env_time(env, date, anchor=schedule.valuation_date)`, so date-rolled theta
+  and `theta_shift` (which price a schedule dated away from the env) keep their meaning. `DCNOption.get_maturity(env)`
+  is on the same axis (`get_maturity()` without an env keeps the old ACT/365F value for outside callers). Coupon
+  accrual (30/360 contract data) does not move. Size of the move, `SAMPLE_DCN_A` (N = 1e7) at inception, PDE: +20,678
+  on an ACT_360 environment and +12,476 on an SSE `BUSINESS_DAYS` (244) environment vs its CALENDAR_DAYS price
+  (`test_dcn_env_axis_gate.py`).
+- **Schedule dates on one instant share one grid column.** When the environment's clock puts two DCN dates at the
+  same time (a `BUSINESS_DAYS` environment whose calendar closes on an SSE trading day, e.g. 2025-07-04 on a US
+  calendar; 30/360), they are one column (`DCNGridContext.column_dates`); no zero-length step is built. Their
+  decisions run in the contract's same-instant order, which equals date order because KI lies strictly below the
+  coupon and KO barriers. A future date the environment places at time 0 is decided at the valuation instant on
+  today's spot. The KI statistics table has one row per instant, dated by its earliest KI date.
+- **DCN receivables on the same axis.** Pending ledger flows (`pending_pv`, the receivables table's decision and
+  payment times, and the run ledger's `PortfolioLifecycleManager` revaluation of `dcn:*` flows) are timed by
+  `env_time`; a flow paid on an environment holiday right after the valuation date is discounted at DF(0) under
+  `PRECEDING` instead of being refused.
+- `DCNLifecycleTracker.remaining_maturity(date, pricing_env=None)` measures on the given environment's axis; the
+  product replay passes its probe environment (CALENDAR_DAYS: unchanged). The tracker needs no environment
+  (`dcn_row_accruals`).
+
+### Added
+
+- `PricingEnvironment.holiday_time_adjustment` (`BusinessDayConvention`, default `PRECEDING`): where a date that is a
+  holiday of the environment's calendar sits on a `BUSINESS_DAYS` clock -- `PRECEDING` (plain business-day counting),
+  `FOLLOWING`, `MODIFIED_*`. Contract dates never move, only their model time. `UNADJUSTED` and non-convention values
+  raise `MarketDataError`. Ignored under calendar-day conventions; in this release only DCN times read it. Every
+  field-by-field environment rebuild (stress, dynamic scenario, risk report, intraday snapshot) carries it.
+- `quantark.priceenv.date_axis.env_time` / `env_times`: the signed env-axis year fraction from an anchor (past dates
+  negative); under `BUSINESS_DAYS` both ends are rolled by the adjustment, so times never decrease in date order.
+- DCN refuses an environment convention whose times run backwards in date order (`ValidationError`, e.g. ACT_365L
+  across 2024-02-29).
+
+### Fixed
+
+- The 0.11.0 known issue "DCN prices and statistics discount the DCN's ACT/365F grid times on the environment curve,
+  which is wrong under `BUSINESS_DAYS` or `ACT_360` environments" is resolved.
+
+### Notes
+
+- `quantark/priceenv` and the DCN engine directories are fingerprinted by the intraday certificate trees
+  (`COMMON_TREES`, `PDE_TREES`, `MC_TREES`): their next amendment re-runs rather than carrying forward. A new
+  `PricingEnvironment` dataclass field changes every environment's execution-cache fingerprint (cache keys only).
+- Still open: `PricingSession` `EVENT_STATS` is accepted by 1 of the 8 DCN engines (the next release); a dated
+  snowball with two knock-out records on one environment instant is refused by QUAD V2 and priced differently by PDE
+  and MC.
+
 ## [0.13.0] - 2026-11-24
 
 QUAD V1 event statistics have one model, riding the price's own operator.
