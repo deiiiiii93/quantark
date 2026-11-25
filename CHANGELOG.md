@@ -65,6 +65,15 @@ DCN prices and statistics move on purpose.
   snowball with two knock-out records on one environment instant is refused by QUAD V2 and priced differently by PDE
   and MC.
 
+### Known issues
+
+- A `BUSINESS_DAYS` environment with unwrapped (native, calendar-quoted) rate or dividend curves passes
+  `validate_trading_clock_configuration` (it checks only the wrappers present), so r and q are integrated over
+  trading-year time: correct only if the desk quotes them per trading year; otherwise wrap them
+  (`TradingClockRateCurve` / `TradingClockDividendYield`, `docs/trading-clock.md`). Library-wide for every dated
+  product; the DCN now follows the same convention. The environment does not record the quoting basis; a later
+  release decides.
+
 ## [0.13.0] - 2026-11-24
 
 QUAD V1 event statistics have one model, riding the price's own operator.
