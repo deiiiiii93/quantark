@@ -11,6 +11,7 @@ import time
 from copy import deepcopy
 
 from quantark.portfolio import Portfolio
+from quantark.priceenv.clock_validation import calendar_quoted_view, is_clock_wrapped
 from quantark.priceenv import PricingEnvironment
 from quantark.param import (
     SpotQuote,
@@ -421,6 +422,10 @@ class DynamicScenarioEngine:
                     )
             # POSITION level would need position-specific environments
     
+    #: The cash curve each scenario parameter moves (rate and dividend changes skip curve types they cannot shift).
+    _CASH_PARAMETER_FIELDS = {"rate": "rate_curve", "dividend_yield": "div_yield", "div_yield": "div_yield",
+                              "dividend": "div_yield"}
+
     def _apply_parameter_change(
         self,
         env: PricingEnvironment,
@@ -428,7 +433,31 @@ class DynamicScenarioEngine:
         portfolio: Portfolio,
         underlying: str,
     ) -> None:
-        """Apply a single parameter change to a pricing environment."""
+        """Apply a single parameter change to a pricing environment.
+
+        A TradingClock-wrapped cash curve moves through its calendar-quoted inner and stays on its own trading
+        clock (0.15.0 spec D16). A change the native rules would skip on the wrapped curve's inner type is refused:
+        skipping it would silently drop the scenario move.
+        """
+        field = self._CASH_PARAMETER_FIELDS.get(change.parameter.lower())
+        wrapped = getattr(env, field) if field is not None else None
+        with calendar_quoted_view(env):
+            self._apply_native_parameter_change(env, change, portfolio, underlying)
+            if field is not None and is_clock_wrapped(wrapped) and getattr(env, field) is wrapped.inner:
+                raise ValidationError(
+                    f"cannot apply a {change.parameter!r} change to {type(wrapped.inner).__name__}, the "
+                    f"calendar-quoted curve inside {type(wrapped).__name__}; the scenario moves only "
+                    "FlatRateCurve rates and ContinuousDividendYield yields"
+                )
+
+    def _apply_native_parameter_change(
+        self,
+        env: PricingEnvironment,
+        change: ParameterChange,
+        portfolio: Portfolio,
+        underlying: str,
+    ) -> None:
+        """Apply a single parameter change to the environment's (calendar-quoted) market objects."""
         param = change.parameter.lower()
         
         if param == "spot":

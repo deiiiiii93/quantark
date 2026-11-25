@@ -14,6 +14,8 @@ wraps; ``resolve_cash_curve_quoting`` applies the declarations at
 construction and ``re_anchor_declared_curves`` keeps that map on the
 environment's valuation date when it is reassigned.
 """
+from contextlib import contextmanager
+
 from quantark.priceenv.curve_quoting import CurveQuotingBasis
 from quantark.util.calendar import DayCountConvention
 from quantark.util.exceptions import ValidationError
@@ -198,3 +200,57 @@ def re_anchor_declared_curves(env) -> None:
             updates[field] = _on_env_map(env, field, obj, env_map)
     for field, obj in updates.items():
         setattr(env, field, obj)
+
+
+def apply_declared_quoting(env, field: str) -> None:
+    """Re-apply the environment's declaration to a cash-curve field assigned after construction (spec D16).
+
+    Only ``CALENDAR_YEAR`` on ``BUSINESS_DAYS`` acts: a native curve is wrapped on the environment's map and a
+    wrapper is moved onto it. Any other combination leaves the field exactly as assigned.
+    """
+    if env.day_count_convention != DayCountConvention.BUSINESS_DAYS:
+        return
+    if getattr(env, dict(CASH_CURVE_FIELDS)[field]) is not CurveQuotingBasis.CALENDAR_YEAR:
+        return
+    obj = getattr(env, field)
+    if obj is None:
+        return
+    env_map = _EnvMap(env)
+    if is_clock_wrapped(obj):
+        setattr(env, field, _on_env_map(env, field, obj, env_map))
+    else:
+        setattr(env, field, _wrapper_for(field)(obj, env_map.get(field)))
+
+
+@contextmanager
+def calendar_quoted_view(env):
+    """Run a shift on the calendar-quoted curves behind the environment's trading-clock wrappers (spec D16).
+
+    Inside the block every clock-wrapped cash curve (rate, dividend, basis) holds its calendar-quoted ``inner``, so a
+    shift written for native curves moves the curve as quoted (per calendar year, like ``parallel_shifted``) and
+    cross-curve reads (basis from rate and dividend) see one consistent clock. On exit a wrapped field is re-exposed
+    on the map it came from: untouched it gets its very wrapper object back; a new curve is wrapped as
+    ``type(wrapper)(new, wrapper.time_map)``; None stays None. A field that was not wrapped keeps what the block
+    assigned, except that a curve assigned to a ``CALENDAR_YEAR`` field of a ``BUSINESS_DAYS`` environment is
+    wrapped (``apply_declared_quoting``). If the block raises, every field gets its original object back.
+    """
+    names = [f for f, _ in CASH_CURVE_FIELDS]
+    originals = {f: getattr(env, f) for f in names}
+    for f, obj in originals.items():
+        if is_clock_wrapped(obj):
+            setattr(env, f, obj.inner)
+    try:
+        yield env
+    except BaseException:
+        for f, obj in originals.items():
+            setattr(env, f, obj)
+        raise
+    for f, obj in originals.items():
+        new = getattr(env, f)
+        if is_clock_wrapped(obj):
+            if new is obj.inner:
+                setattr(env, f, obj)
+            elif new is not None and not is_clock_wrapped(new):
+                setattr(env, f, type(obj)(new, obj.time_map))
+        elif new is not obj:
+            apply_declared_quoting(env, f)

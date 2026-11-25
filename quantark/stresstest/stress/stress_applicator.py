@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv.clock_validation import calendar_quoted_view
 from quantark.param import (
     SpotQuote,
     VolatilitySurface,
@@ -168,7 +169,10 @@ class StressApplicator:
         param = stress.parameter.lower()
         adapter = StressApplicator._parameter_adapters.get(param)
         if adapter:
-            adapter(env, stress)
+            # cash stresses are per calendar year: a TradingClock-wrapped curve is stressed through its
+            # calendar-quoted inner and re-exposed on its own trading clock (0.15.0 spec D16)
+            with calendar_quoted_view(env):
+                adapter(env, stress)
             return
         raise ValidationError(
             f"Unknown parameter to stress: {stress.parameter}. "

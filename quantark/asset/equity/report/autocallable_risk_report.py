@@ -54,6 +54,7 @@ from quantark.param import FlatVolSurface, SpotQuote
 from quantark.param import TermStructureVolSurface
 from quantark.param.div import ContinuousDividendYield, DividendYield
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv.clock_validation import apply_declared_quoting, is_clock_wrapped
 from quantark.util.enum import EquityGreek
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_divide, safe_log, safe_sqrt
@@ -126,6 +127,9 @@ def _clone_env(
         new_env.div_yield = div_yield
     elif q is not None:
         new_env.div_yield = ContinuousDividendYield(div_yield=float(q))
+    if div_yield is not None or q is not None:
+        # a scenario q is quoted like the environment's dividend yield (0.15.0 spec D16)
+        apply_declared_quoting(new_env, "div_yield")
     return new_env
 
 
@@ -142,6 +146,10 @@ def _shift_dividend_yield(
     """
     if shift == 0.0:
         return base_div_yield
+    if is_clock_wrapped(base_div_yield):
+        # the shift is per calendar year: move the calendar-quoted inner, keep its trading clock (spec D16)
+        return type(base_div_yield)(ShiftedDividendYield(base=base_div_yield.inner, shift=shift),
+                                    base_div_yield.time_map)
     return ShiftedDividendYield(base=base_div_yield, shift=shift)
 
 
