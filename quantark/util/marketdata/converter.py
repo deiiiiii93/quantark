@@ -12,7 +12,7 @@ import pandas as pd
 
 from quantark.util.marketdata.models import MarketDataPoint, TimeSeriesData, MarketDataSet
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield, NoDividend
-from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis, PricingEnvironment
 from quantark.util.calendar import DayCountConvention
 from quantark.util.exceptions import ValidationError
 
@@ -30,7 +30,12 @@ class MarketDataConverter:
     @staticmethod
     def to_pricing_environment(data_point: MarketDataPoint,
                                day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS,
-                               bus_days_in_year: int = 252) -> PricingEnvironment:
+                               bus_days_in_year: int = 252,
+                               *,
+                               calendar=None,
+                               rate_curve_quoting: Optional[CurveQuotingBasis] = None,
+                               div_yield_quoting: Optional[CurveQuotingBasis] = None,
+                               trading_clock_horizon: Optional[datetime] = None) -> PricingEnvironment:
         """
         Convert MarketDataPoint to PricingEnvironment.
         
@@ -38,6 +43,10 @@ class MarketDataConverter:
             data_point: Market data point
             day_count_convention: Day count convention
             bus_days_in_year: Business days per year
+            calendar: Business-day calendar (required by BUSINESS_DAYS)
+            rate_curve_quoting / div_yield_quoting: How the point's rate and dividend yield are quoted
+                (``CurveQuotingBasis``); a BUSINESS_DAYS environment refuses non-zero undeclared ones
+            trading_clock_horizon: Horizon of the trading clock CALENDAR_YEAR curves are wrapped onto
             
         Returns:
             PricingEnvironment object
@@ -69,7 +78,11 @@ class MarketDataConverter:
             div_yield=div_yield,
             valuation_date=data_point.timestamp,
             day_count_convention=day_count_convention,
-            bus_days_in_year=bus_days_in_year
+            bus_days_in_year=bus_days_in_year,
+            calendar=calendar,
+            rate_curve_quoting=rate_curve_quoting,
+            div_yield_quoting=div_yield_quoting,
+            trading_clock_horizon=trading_clock_horizon,
         )
     
     @staticmethod
@@ -111,7 +124,8 @@ class MarketDataConverter:
                                     div_yield_data: Optional[TimeSeriesData] = None,
                                     asset_name: Optional[str] = None,
                                     day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS,
-                                    bus_days_in_year: int = 252) -> Iterator[Tuple[datetime, PricingEnvironment]]:
+                                    bus_days_in_year: int = 252,
+        **clock_options) -> Iterator[Tuple[datetime, PricingEnvironment]]:
         """
         Convert aligned time series to iterator of PricingEnvironments.
         
@@ -125,6 +139,7 @@ class MarketDataConverter:
             asset_name: Asset identifier
             day_count_convention: Day count convention
             bus_days_in_year: Business days per year
+            **clock_options: Forwarded to ``to_pricing_environment`` (calendar, *_quoting, trading_clock_horizon)
             
         Yields:
             Tuple of (timestamp, PricingEnvironment)
@@ -167,7 +182,7 @@ class MarketDataConverter:
             
             # Convert to pricing environment
             pricing_env = MarketDataConverter.to_pricing_environment(
-                data_point, day_count_convention, bus_days_in_year
+                data_point, day_count_convention, bus_days_in_year, **clock_options
             )
             
             yield date, pricing_env
@@ -175,7 +190,8 @@ class MarketDataConverter:
     @staticmethod
     def market_data_set_to_pricing_envs(dataset: MarketDataSet,
                                        day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS,
-                                       bus_days_in_year: int = 252) -> Iterator[Tuple[datetime, PricingEnvironment]]:
+                                       bus_days_in_year: int = 252,
+        **clock_options) -> Iterator[Tuple[datetime, PricingEnvironment]]:
         """
         Convert MarketDataSet to iterator of PricingEnvironments.
         
@@ -183,6 +199,7 @@ class MarketDataConverter:
             dataset: MarketDataSet object
             day_count_convention: Day count convention
             bus_days_in_year: Business days per year
+            **clock_options: Forwarded to ``to_pricing_environment`` (calendar, *_quoting, trading_clock_horizon)
             
         Yields:
             Tuple of (timestamp, PricingEnvironment)
@@ -194,14 +211,16 @@ class MarketDataConverter:
             div_yield_data=dataset.div_yield_data,
             asset_name=dataset.asset_name,
             day_count_convention=day_count_convention,
-            bus_days_in_year=bus_days_in_year
+            bus_days_in_year=bus_days_in_year,
+            **clock_options,
         )
     
     @staticmethod
     def create_pricing_env_at_date(dataset: MarketDataSet,
                                    target_date: datetime,
                                    day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS,
-                                   bus_days_in_year: int = 252) -> Optional[PricingEnvironment]:
+                                   bus_days_in_year: int = 252,
+        **clock_options) -> Optional[PricingEnvironment]:
         """
         Create PricingEnvironment for a specific date from MarketDataSet.
         
@@ -210,6 +229,7 @@ class MarketDataConverter:
             target_date: Target date
             day_count_convention: Day count convention
             bus_days_in_year: Business days per year
+            **clock_options: Forwarded to ``to_pricing_environment`` (calendar, *_quoting, trading_clock_horizon)
             
         Returns:
             PricingEnvironment at target date, or None if date not found
@@ -240,14 +260,15 @@ class MarketDataConverter:
         )
         
         return MarketDataConverter.to_pricing_environment(
-            data_point, day_count_convention, bus_days_in_year
+            data_point, day_count_convention, bus_days_in_year, **clock_options
         )
 
 
 def create_backtest_pricing_envs(dataset: MarketDataSet,
                                  align_dates: bool = True,
                                  day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS,
-                                 bus_days_in_year: int = 252) -> pd.DataFrame:
+                                 bus_days_in_year: int = 252,
+        **clock_options) -> pd.DataFrame:
     """
     Create a DataFrame of PricingEnvironments for backtesting.
     
@@ -259,6 +280,7 @@ def create_backtest_pricing_envs(dataset: MarketDataSet,
         align_dates: Whether to align dates across all time series
         day_count_convention: Day count convention
         bus_days_in_year: Business days per year
+        **clock_options: Forwarded to ``MarketDataConverter.to_pricing_environment``
         
     Returns:
         DataFrame with columns [spot, volatility, rate, div_yield] and PricingEnvironment objects
@@ -271,7 +293,7 @@ def create_backtest_pricing_envs(dataset: MarketDataSet,
     dates = []
     
     for date, pricing_env in MarketDataConverter.market_data_set_to_pricing_envs(
-        dataset, day_count_convention, bus_days_in_year
+        dataset, day_count_convention, bus_days_in_year, **clock_options
     ):
         pricing_envs.append(pricing_env)
         dates.append(date)

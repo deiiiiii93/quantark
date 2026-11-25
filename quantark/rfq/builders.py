@@ -47,6 +47,10 @@ def build_pricing_env_from_market_kwargs(market_kwargs: Dict[str, Any]) -> Prici
         "day_count_convention",
         "bus_days_in_year",
         "calendar",
+        "rate_curve_quoting",
+        "div_yield_quoting",
+        "basis_yield_quoting",
+        "trading_clock_horizon",
     }
     unknown = set(market_kwargs) - allowed
     if unknown:
@@ -99,4 +103,8 @@ def build_pricing_env_from_market_kwargs(market_kwargs: Dict[str, Any]) -> Prici
         day_count_convention=market_kwargs.get("day_count_convention"),
         bus_days_in_year=market_kwargs.get("bus_days_in_year", 252),
         calendar=market_kwargs.get("calendar"),
+        rate_curve_quoting=market_kwargs.get("rate_curve_quoting"),
+        div_yield_quoting=market_kwargs.get("div_yield_quoting"),
+        basis_yield_quoting=market_kwargs.get("basis_yield_quoting"),
+        trading_clock_horizon=market_kwargs.get("trading_clock_horizon"),
     )

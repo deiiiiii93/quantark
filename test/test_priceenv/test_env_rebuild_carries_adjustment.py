@@ -35,3 +35,14 @@ def test_every_rebuild_copies_the_adjustment():
     missing = [f"{path}:{line}" for path, line, kwargs in _rebuild_calls()
                if "holiday_time_adjustment" not in kwargs]
     assert not missing, f"PricingEnvironment rebuilds dropping holiday_time_adjustment: {missing}"
+
+
+#: 0.15.0 (cash-curve quoting spec D12): a rebuild that drops the calendar or a quoting declaration turns a
+#: calendar-quoted curve into an undeclared native one (refused) or leaves the environment unable to re-anchor.
+CLOCK_FIELDS = ("calendar", "rate_curve_quoting", "div_yield_quoting", "basis_yield_quoting", "trading_clock_horizon")
+
+
+def test_every_rebuild_copies_the_clock_fields():
+    missing = [f"{path}:{line} {name}" for path, line, kwargs in _rebuild_calls()
+               for name in CLOCK_FIELDS if name not in kwargs]
+    assert not missing, f"PricingEnvironment rebuilds dropping clock fields: {missing}"

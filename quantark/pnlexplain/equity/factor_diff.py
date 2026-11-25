@@ -62,6 +62,14 @@ def market_objects_equal(a: Any, b: Any, base: Callable[[Any, Any], bool] = obje
     return base(a, b)
 
 
+def basis_market_equal(a: Any, b: Any) -> bool:
+    """Basis yields as a market: clock wrappers by (class, inner, clock) -- the anchor moves with TIME -- and natives
+    by the zero-aware basis rule. A wrapped basis against a native one is a clock change, never equal."""
+    if is_clock_wrapped(a) != is_clock_wrapped(b):
+        return False
+    return market_objects_equal(a, b, _basis_equal)
+
+
 def _float_maturity_only(product: Any) -> bool:
     return (getattr(product, "exercise_date", None) is None
             and getattr(product, "maturity_date", None) is None
@@ -242,7 +250,7 @@ def build_factor_moves(
         changed.add(Factor.RATE)
     if Factor.DIVIDEND in app and not market_objects_equal(e0.div_yield, e1.div_yield, _yields_equal):
         changed.add(Factor.DIVIDEND)
-    if Factor.BASIS in app and not _basis_equal(e0.basis_yield, e1.basis_yield):
+    if Factor.BASIS in app and not basis_market_equal(e0.basis_yield, e1.basis_yield):
         changed.add(Factor.BASIS)
     if Factor.MODEL in app and engine_alive_t1 is not None \
             and not engines_equivalent(snap0.engine, engine_alive_t1):

@@ -365,16 +365,24 @@ class DynamicScenarioEngine:
         # Clone pricing environments
         cloned_envs = {}
         for underlying, env in portfolio.pricing_environments.items():
+            # one memo: a TradingClock wrapper's calendar stays the clone's own calendar object
+            rate_curve, spot_quote, vol_surface, div_yield, basis_yield, calendar = deepcopy(
+                (env.rate_curve, env.spot_quote, env.vol_surface, env.div_yield, env.basis_yield, env.calendar))
             cloned_envs[underlying] = PricingEnvironment(
-                rate_curve=deepcopy(env.rate_curve),
+                rate_curve=rate_curve,
                 valuation_date=env.valuation_date,
-                spot_quote=deepcopy(env.spot_quote) if env.spot_quote else None,
-                vol_surface=deepcopy(env.vol_surface) if env.vol_surface else None,
-                div_yield=deepcopy(env.div_yield) if env.div_yield else None,
-                basis_yield=deepcopy(env.basis_yield) if env.basis_yield else None,
+                spot_quote=spot_quote if env.spot_quote else None,
+                vol_surface=vol_surface if env.vol_surface else None,
+                div_yield=div_yield if env.div_yield else None,
+                basis_yield=basis_yield if env.basis_yield else None,
                 day_count_convention=env.day_count_convention,
                 bus_days_in_year=env.bus_days_in_year,
                 holiday_time_adjustment=env.holiday_time_adjustment,
+                calendar=calendar,
+                rate_curve_quoting=env.rate_curve_quoting,
+                div_yield_quoting=env.div_yield_quoting,
+                basis_yield_quoting=env.basis_yield_quoting,
+                trading_clock_horizon=env.trading_clock_horizon,
             )
         
         # Create new portfolio with cloned environments

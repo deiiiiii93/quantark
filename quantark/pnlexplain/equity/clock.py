@@ -1,7 +1,7 @@
 """Clock-wrapped market objects in the factor model (patch spec 2026-09-03 §8).
 
 A TradingClock wrapper (``TradingClockVolSurface``, ``TradingClockRateCurve``,
-``TradingClockDividendYield``) re-expresses an inner object through a
+``TradingClockDividendYield``, ``TradingClockBasisYield``) re-expresses an inner object through a
 ``BusinessTimeMap`` anchored at the environment's valuation date. Two wrappers
 are the same MARKET when their class, inner object and clock agree; the anchor
 is the valuation date's business and moves with TIME, so every scenario state
@@ -14,7 +14,7 @@ from typing import Any, Callable
 from quantark.pnlexplain.equity.fingerprints import calendars_equal
 from quantark.util.exceptions import ValidationError
 
-CLOCK_FIELDS = ("vol_surface", "rate_curve", "div_yield")
+CLOCK_FIELDS = ("vol_surface", "rate_curve", "div_yield", "basis_yield")
 
 
 def is_clock_wrapped(obj: Any) -> bool:

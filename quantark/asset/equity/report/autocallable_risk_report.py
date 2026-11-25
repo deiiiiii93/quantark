@@ -106,9 +106,15 @@ def _clone_env(
         spot_quote=env.spot_quote,
         vol_surface=env.vol_surface,
         div_yield=env.div_yield,
+        basis_yield=env.basis_yield,
         day_count_convention=env.day_count_convention,
         bus_days_in_year=env.bus_days_in_year,
         holiday_time_adjustment=env.holiday_time_adjustment,
+        calendar=env.calendar,
+        rate_curve_quoting=env.rate_curve_quoting,
+        div_yield_quoting=env.div_yield_quoting,
+        basis_yield_quoting=env.basis_yield_quoting,
+        trading_clock_horizon=env.trading_clock_horizon,
     )
     if spot is not None:
         new_env.spot_quote = SpotQuote(spot=float(spot))
