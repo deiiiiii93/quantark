@@ -160,8 +160,9 @@ env = PricingEnvironment(
   a copy) re-anchor every wrapped cash curve at `d`: an environment-made one on the environment's horizon, a
   hand-made one on its own map's horizon. The `TradingClockVolSurface` of the calendar-axis default re-anchors
   the same way, so a one-day theta that starts on a weekend or holiday is carry only (before 0.15.0 the bumped
-  copy kept the old anchor and decayed a full trading day of variance: about 20x too large across Chinese New
-  Year). A date at or past the horizon raises. An `IntradayTimeMap` (the intraday route's own clock) is never
+  copy kept the old anchor and mis-stated the variance to each product date by [the start day is a trading day] -
+  [the day before that date is a trading day] trading days: about 20x too large for a European across Chinese New
+  Year, and wrong from trading-day starts too for dates that follow a non-trading day). A date at or past the horizon raises. An `IntradayTimeMap` (the intraday route's own clock) is never
   moved by the environment.
 - Cash stresses and scenario moves are per calendar year: they shift the calendar-quoted curve inside a wrapper and
   keep its trading clock (`quantark.priceenv.clock_validation.calendar_quoted_view`). Basis/dividend relationship

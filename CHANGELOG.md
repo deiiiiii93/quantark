@@ -16,7 +16,8 @@ quote by looking at the curve, so it is now declared per curve. A calendar-quote
 clock by the environment itself, and an undeclared non-zero native curve is refused instead of being silently read
 per trading year. Environments on every other convention, and `BUSINESS_DAYS` environments that declare
 `TRADING_YEAR`, price bit for bit as in 0.14.0 -- except environments holding TradingClock wrappers (vol surface or
-cash curves), whose aged and stressed numbers move to the correct values (see Changed).
+cash curves), whose base (when built with a map anchored off the valuation date), aged and stressed numbers move to
+the correct values (see Changed).
 
 ### Changed
 
@@ -38,9 +39,15 @@ cash curves), whose aged and stressed numbers move to the correct values (see Ch
   Size of the move, dated European (K = S = 100, sigma 20%, r 3%, q 2%, expiry 2026-12-15): on the trading-clock
   guide's default setup (calendar axis, `TradingClockVolSurface`), a one-day numerical theta starting on a weekend
   or holiday was about 20x too large -- Sat 2026-02-14 -> Sun inside Chinese New Year -0.0185443 in 0.14.0 ->
-  -0.0008800 now (carry only: the trading clock is flat); a step between trading days was already right. On a
-  hand-wrapped trading-axis environment, numerical theta across Chinese New Year (02-13 -> 02-24) -0.020257 ->
-  -0.027297. Both now equal V(d1) - V(d0) on freshly built environments bit for bit. No existing test pinned a hand-wrapped bumped or rolled number (full suite unchanged); the move is pinned by
+  -0.0008800 now (carry only: the trading clock is flat). In general the stale map mis-stated the variance to each
+  product date X by [d0 is a trading day] - [the day before X is a trading day] trading days, so a step that starts
+  on a trading day was wrong too for any date that follows a non-trading day (Monday observations, an expiry right
+  after a holiday); for this European, whose expiry follows a trading day, it was right. On a hand-wrapped
+  trading-axis environment, numerical theta across Chinese New Year (02-13 -> 02-24) -0.020257 -> -0.027297. Both
+  now equal V(d1) - V(d0) on freshly built environments bit for bit. PDE byte book (`test/golden/pde_bitwise`, not
+  run by pytest; a base-vs-branch gate): three trading-clock rows move their `bump_theta` -- `3a|tc|snowball_monthly`
+  0.046856 -> 0.057386, `3a|tc|phoenix_plain` 0.019096 -> 0.034176, `3b|tc|ko_reset` 0.031928 -> 0.046963 (start
+  Mon 2026-02-09; their observations follow non-trading days). A PDE branch cut from 0.15.0 has them in its base. No existing test pinned a hand-wrapped bumped or rolled number (full suite unchanged); the move is pinned by
   `test_curve_quoting_rebuild_sites.py::test_hand_wrapped_numerical_theta_equals_fresh_env_pnl_bitwise`.
 - **Cash stresses and scenario moves are per calendar year on wrapped curves.** The built-in rate, key-rate, spread,
   dividend and basis stresses (`StressApplicator`) and the dynamic-scenario rate and dividend changes now move the
