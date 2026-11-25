@@ -439,7 +439,7 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
 
 
 def _dcn_structure(product, pricing_env) -> _Structure:
-    """DCN: the shared monthly observation grid and the loss-leg settlement (``dcn_fold_slots``, spec D12 axis)."""
+    """DCN: the shared monthly observation grid and the loss-leg settlement (``dcn_fold_slots``, on the price's axis)."""
     from quantark.asset.equity.engine.dcn_valuation import dcn_fold_slots
     from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 

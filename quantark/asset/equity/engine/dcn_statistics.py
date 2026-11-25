@@ -14,7 +14,7 @@ probabilities their forward pass integrated, and it lays them out exactly as the
   table on the daily KI dates;
 - the receivables of a lifecycle state as ledger rows, never events (a terminated note reports them alone, AC17).
 
-Times and discounting are those of DCN ``price()`` (spec D12): the contract's ACT/365F grid read on the environment's
+Times and discounting are those of DCN ``price()``: the contract's grid on the environment's axis (0.14.0), read on the environment's
 curve (``make_df_fn``); dates are the schedule's. Cash carries ``direction_sign``; probabilities, times and the
 expected loss are unsigned. Every leg amount is the kernel's arithmetic (``dcn_payoff.compute_dcn_cashflows``,
 ``dcn_valuation.observe_valuation_row``): the discounted cash of a deterministic-payment row is ``sign x amount x P x
@@ -85,11 +85,20 @@ class DCNRows:
         self.df_loss = float(self.df(ctx.loss_pay_time))
         self.first_ki_col = 0 if ctx.valuation_monitored else 1
         self.ki_times = np.asarray(ctx.times[self.first_ki_col:], dtype=float)
-        ki_dates = tuple(schedule.daily_ki_dates)
-        self.ki_dates = ki_dates if len(ki_dates) == self.ki_times.size else None
+        # one knock-in row per grid instant, dated by the instant's earliest KI date (a later date on the same instant
+        # sees the same close, so it is never a first knock-in)
+        self.ki_dates = ki_row_dates(ctx, self.first_ki_col)
         self.carried = bool(product.knocked_in_at_valuation)
         self.knocked_in_now = (not self.carried and bool(ctx.valuation_monitored)
                                and float(pricing_env.spot) <= float(product.ki_barrier))
+
+
+def ki_row_dates(ctx, first_ki_col: int) -> tuple:
+    """The date of each knock-in row ``ctx.times[first_ki_col:]``: the earliest KI date of each grid instant."""
+    columns = ctx.column_dates[first_ki_col:]
+    if len(columns) != ctx.times.size - first_ki_col or any(not dates for dates in columns):
+        raise ValueError("every knock-in row of a DCN grid holds at least one KI date")
+    return tuple(dates[0] for dates in columns)
 
 
 def _empty_ki_table() -> KnockInTable:

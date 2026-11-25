@@ -1,6 +1,6 @@
 """DCN Monte Carlo engine (spec WP1.3): curve-aware GBM on the SSE daily grid.
 
-Time grid = the contract's actual trading-day grid (ACT/365F), so daily KI is
+Time grid = the contract's actual trading-day grid on the env's axis, so daily KI is
 exact discrete monitoring by construction — NO barrier continuity correction.
 Each cash flow discounts at its own payment time, from
 ``DCNOption.payment_dates()`` (the loss leg at the independent settlement_date,

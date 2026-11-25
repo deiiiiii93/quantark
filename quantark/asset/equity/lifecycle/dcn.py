@@ -161,19 +161,24 @@ class DCNLifecycleTracker:
         """The booked contract (decisions read its own schedule)."""
         return self.product
 
-    def remaining_maturity(self, date) -> float:
-        """ACT/365F years from ``date`` to the final observation, for maturity-sampling consumers (the replay's
-        surface / term-carry probe). Never refuses and builds no copy: 0.0 on or after the final observation; the
-        booked contract's own maturity before its valuation date (as ``product_for_pricing``). A dead (knocked-out)
-        note keeps the real time to its final observation, the sample it gave before (R28): the probe drives a
-        book-wide column and must not move with one product's state."""
+    def remaining_maturity(self, date, pricing_env=None) -> float:
+        """Years from ``date`` to the final observation on ``pricing_env``'s axis, for maturity-sampling consumers
+        (the replay's surface / term-carry probe passes its probe environment); ``pricing_env=None``: ACT/365F.
+        Never refuses and builds no copy: 0.0 on or after the final observation; the booked contract's own maturity
+        before its valuation date (as ``product_for_pricing``). A dead (knocked-out) note keeps the real time to its
+        final observation, the sample it gave before (R28): the probe drives a book-wide column and must not move
+        with one product's state."""
         _require_date_instant(date)
         d = _day(date)
         if d < self._booked.valuation_date:
-            return float(self.product.get_maturity())
+            return float(self.product.get_maturity(pricing_env))
         if d >= self.final_observation_date:
             return 0.0
-        return (self.final_observation_date - d).days / 365.0
+        if pricing_env is None:
+            return (self.final_observation_date - d).days / 365.0
+        from quantark.priceenv.date_axis import env_time
+
+        return env_time(pricing_env, self.final_observation_date, anchor=d)
 
     def product_for_pricing(self, date, pricing_env=None, *, initial: bool = False) -> Any:
         """The DCN to price on ``date`` (A1); a pure accessor (the state is not touched).

@@ -207,7 +207,7 @@ class HestonDCNPDESolver(BaseEngine):
     def calculate_event_stats(self, product, pricing_env, *, streams=None, lifecycle_state=None):
         """The DCN's ``EventStatistics`` (``pv`` is ``price()``, D23): every outcome and the per-date knock-in table
         from the exact forward adjoint of this solver's own ADI march (``pde/dcn_statistics.py``), times on DCN
-        ``price()``'s ACT/365F axis (D12). ``None`` for a knocked-out or matured lifecycle state with nothing left
+        ``price()``'s axis (the environment's). ``None`` for a knocked-out or matured lifecycle state with nothing left
         unpaid (AC17). ``streams`` is accepted and nothing is pruned (one pass yields every outcome).
 
         Raises:

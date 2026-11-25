@@ -9,8 +9,9 @@ every outcome from the exact forward adjoint of the price's own march (``pde/dcn
 - AC13: the per-date knock-in table on the daily KI dates (exact dates), sum = P(KI), mean = E[KI time];
 - AC14: the forward pass reproduces the backward march of every unit claim (each KO row, each coupon row, the
   maturity, the KI settlement and its loss cash) to round-off, and the backward claim march reproduces the price;
-- AC10 / AC17 / AC18: valuation-date rules, receivables and terminated states, seller signs, the DCN's own ACT/365F
-  axis with exact dates (D12) on ACT/360 and BUSINESS_DAYS environments, the event route equal to the fold route;
+- AC10 / AC17 / AC18: valuation-date rules, receivables and terminated states, seller signs, the environment's axis
+  with exact dates on ACT/360 and BUSINESS_DAYS environments (0.14.0; D12 retired), the event route equal to the fold
+  route;
 - ``price()``, ``calculate_event_stats(...).pv`` and ``price_with_events(...).npv`` bitwise equal (D23).
 """
 from __future__ import annotations
@@ -36,6 +37,7 @@ from quantark.asset.equity.product.option.dcn_option import DCNDirection
 from quantark.cashleg import EventType, FixedPayoffLeg, LegDirection, PaymentTrigger, fold_cash_legs
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv.date_axis import env_times
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.numerical import is_close
@@ -496,7 +498,7 @@ def test_a_terminated_settled_note_has_no_statistics_and_no_event(engine_key):
     assert result.event_distribution.terminated and result.event_distribution.probabilities == {}
 
 
-# --- AC18 / D12: axis, dates, signs, routes --------------------------------------------------------------------------
+# --- AC18 (0.14.0: the environment's axis): axis, dates, signs, routes -----------------------------------------------
 
 @pytest.mark.parametrize("name", ["flat_day", "flat_act_360", "flat_business_days", "heston_business_days",
                                   "flat_closed_saturday", "flat_ko_lock", "lv_closed_holiday"])
@@ -517,6 +519,11 @@ def test_times_are_the_dcn_axis_with_exact_dates_as_the_mc(name):
             assert getattr(getattr(pde, row), field) == getattr(getattr(mc, row), field)
     np.testing.assert_array_equal(pde.ki_table.times, mc.ki_table.times)
     assert pde.ki_table.dates == mc.ki_table.dates
+    # the environment's axis from the schedule's valuation date (0.14.0 retired D12's ACT/365F)
+    v = product.schedule.valuation_date
+    np.testing.assert_array_equal(pde.observations.times, env_times(env, pde.observations.dates, anchor=v))
+    np.testing.assert_array_equal(pde.observations.payment_times,
+                                  env_times(env, pde.observations.payment_dates, anchor=v))
     # AC12: deterministic-payment rows' cash to pay is the discounted cash over the payment DF
     df = make_df_fn(env)
     for table in (pde.observations, pde.coupons):
@@ -575,7 +582,7 @@ def test_event_route_and_fold_route_agree(name, quantity):
 
 @pytest.mark.parametrize("name", ["flat_act_360", "flat_business_days"])
 def test_the_environment_axis_differs_there(name):
-    """D12 sanity: these environments really are on another axis (the axis tests pin the DCN axis)."""
+    """These environments really are on another axis than ACT/365F (so the env-axis tests are not a coincidence)."""
     from quantark.util.calendar.day_counter import calculate_year_fraction
 
     _, product, env = _fresh(name)

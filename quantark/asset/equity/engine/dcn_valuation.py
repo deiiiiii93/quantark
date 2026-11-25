@@ -162,21 +162,23 @@ class DCNStateValuation:
     pending_pv: float
     terminal: bool
     pending: tuple = ()
+    #: the environment the state was resolved against (its clock times the receivables)
+    pricing_env: object = None
 
     def receivables_table(self, valuation_date):
         """The pending flows as the statistics' receivables (spec §4.9c): cash decided at or before the valuation
         and paid after it, ledger rows and never events.
 
         Per row: the source (a DCN ledger carries knock-out, coupon and loss flows), the decision date and its time
-        on the DCN's own ACT/365F axis (<= 0, spec D12), the payment date and the time ``price()`` discounted it at
-        (the pending-receivable resolver's), the discounted cash ``amount x DF`` (signed, as ``pending_pv``) and the
-        cash to pay ``amount``.
+        on the environment's axis (<= 0, ``env_time`` from ``valuation_date``; 0.14.0 retired the DCN's own ACT/365F
+        axis), the payment date and the time ``price()`` discounted it at, the discounted cash ``amount x DF``
+        (signed, as ``pending_pv``) and the cash to pay ``amount``.
 
         Raises:
             ValidationError: a pending flow of another kind (a DCN ledger has no other receivable).
         """
         from quantark.asset.equity.engine.event_stats import ReceivablesTable
-        from quantark.asset.equity.product.option.dcn_grid import DAYS_PER_YEAR
+        from quantark.priceenv.date_axis import env_times
 
         if not self.pending:
             return ReceivablesTable.empty()
@@ -191,8 +193,8 @@ class DCNStateValuation:
             sources.append(source)
         return ReceivablesTable(
             source=tuple(sources),
-            decision_times=[(cashflow.determination_date - valuation_date).days / DAYS_PER_YEAR
-                            for cashflow, _ in self.pending],
+            decision_times=list(env_times(self.pricing_env, [cashflow.determination_date
+                                                             for cashflow, _ in self.pending], anchor=valuation_date)),
             decision_dates=tuple(cashflow.determination_date for cashflow, _ in self.pending),
             payment_times=[float(timing.payment_time) for _, timing in self.pending],
             payment_dates=tuple(cashflow.payment_date for cashflow, _ in self.pending),
@@ -246,22 +248,58 @@ def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Option
         )
     terminal = not lifecycle_state.alive
     check_dcn_ledger(product, valuation_date, lifecycle_state.ledger, alive=not terminal)
-    pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
-    return DCNStateValuation(pending_pv=pending_pv, terminal=terminal,
-                             pending=_pending_flows(lifecycle_state, pricing_env))
+    if lifecycle_state.valuation_point is None:
+        pending_receivable_pv(lifecycle_state, pricing_env)   # refuses a non-empty ledger without a point
+    pending = _pending_flows(lifecycle_state, pricing_env, valuation_date)
+    # ``LifecycleCashflowLedger.pending_pv``'s arithmetic (amount x DF, summed in ledger order) on the DCN's own clock
+    total = 0.0
+    for cashflow, timing in pending:
+        total += cashflow.amount * timing.payment_df
+    return DCNStateValuation(pending_pv=float(total), terminal=terminal, pending=pending, pricing_env=pricing_env)
 
 
-def _pending_flows(lifecycle_state, pricing_env) -> tuple:
-    """``(cashflow, timing)`` of every pending flow, resolved as ``LifecycleCashflowLedger.pending_pv`` resolves it."""
-    from quantark.asset.equity.settlement import SettlementResolver
+#: a pending flow's settlement kind, exactly as ``SettlementResolver.resolve_pending`` maps it (the price accepts every
+#: kind the resolver does; only the statistics' receivables table refuses a non-DCN kind)
+_PENDING_KIND = {"COUPON": "COUPON", "KNOCK_OUT": "REDEMPTION", "KNOCK_IN": "HIT", "MATURITY": "TERMINAL",
+                 "EXPIRY": "TERMINAL"}
+
+
+def _pending_flows(lifecycle_state, pricing_env, valuation_date) -> tuple:
+    """``(cashflow, timing)`` of every pending flow, timed on the environment's axis from the valuation date (spec
+    D15): ``env_time`` of the payment date -- the time ``price()`` gives the same date, honouring
+    ``holiday_time_adjustment`` -- and its DF. A flow paid after the valuation date that the env's clock places at the
+    valuation instant (a holiday right after it, PRECEDING) is still a receivable, discounted at DF(0). On
+    CALENDAR_DAYS / ACT_365 this is ``SettlementResolver.resolve_pending``'s timing bit for bit."""
+    from quantark.asset.equity.settlement import CashflowKind, ResolvedPaymentTiming, SettlementResolver
+    from quantark.priceenv.date_axis import env_times
 
     point = lifecycle_state.valuation_point
     if point is None:
-        return ()                     # ``pending_receivable_pv`` refuses a non-empty ledger without a point
-    return tuple(
-        (cashflow, SettlementResolver.resolve_pending(cashflow, pricing_env, valuation_point=point))
-        for cashflow in lifecycle_state.ledger.pending(point)
-    )
+        return ()
+    flows = lifecycle_state.ledger.pending(point)
+    if not flows:
+        return ()
+    times = env_times(pricing_env, [cashflow.payment_date for cashflow in flows], anchor=valuation_date)
+    determination_df = SettlementResolver._checked_df(pricing_env, 0.0, "pending valuation")
+    out = []
+    for cashflow, t in zip(flows, times):
+        kind = _PENDING_KIND.get(getattr(cashflow.event_type, "name", None))
+        if kind is None:
+            raise ValidationError(
+                f"pending cashflow id={cashflow.cashflow_id!r} has unsupported event type {cashflow.event_type!r}"
+            )
+        if t < 0.0:
+            raise ValidationError(
+                f"pending cashflow id={cashflow.cashflow_id!r} is paid before the valuation instant on the "
+                "environment's clock"
+            )
+        payment_df = SettlementResolver._checked_df(pricing_env, float(t), "pending payment")
+        out.append((cashflow, ResolvedPaymentTiming(
+            kind=CashflowKind[kind], determination_date=point.date, determination_time=0.0,
+            payment_date=cashflow.payment_date, payment_time=float(t), determination_df=determination_df,
+            payment_df=payment_df, delay_df=payment_df / determination_df,
+        )))
+    return tuple(out)
 
 
 def check_dcn_ledger(product, valuation_date, ledger, *, alive: bool) -> None:
@@ -314,7 +352,7 @@ class DCNFoldSlots:
     ``ko`` holds one ``("main", t_obs, ko_pay_time)`` record per monthly observation, the KO stream's axis of
     the DCN statistics (DESIGN §4.2: the KO and coupon rows share one grid; a coupon-only row carries KO
     probability 0). Both maturity branches are determined at ``determination`` (the final observation) and
-    paid at ``payment`` (the loss-leg settlement). Times are on the engine's own axis (spec D12).
+    paid at ``payment`` (the loss-leg settlement). Times are on the price's axis (the environment's).
     """
 
     ko: tuple

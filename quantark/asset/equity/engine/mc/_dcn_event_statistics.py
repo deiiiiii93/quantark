@@ -18,7 +18,7 @@ which only replaces the path generation) record one batch of outcome sums per pr
   events; a terminated note with unpaid cash reports them alone (spec AC17);
 - standard errors from independent batch means (spec AC21).
 
-Times and discounting are those of DCN ``price()`` (spec D12): the contract's ACT/365F grid from the schedule's
+Times and discounting are those of DCN ``price()``: the contract's grid on the environment's axis from the schedule's
 valuation date, read on the environment's curve; dates are the schedule's exact dates. Cash carries ``price()``'s
 sign (``direction_sign``: a seller reports negative cash); probabilities, times and the expected loss are unsigned.
 ``pv`` is the value ``price()`` returned (spec D23); ``reconciliation_error`` and ``probability_residual`` are the
@@ -41,6 +41,7 @@ from quantark.asset.equity.engine.event_stats import (
     StatisticsProvenance,
     build_cash_ledger,
 )
+from quantark.asset.equity.engine.dcn_statistics import ki_row_dates
 from quantark.asset.equity.engine.knock_in_days import at_valuation_dates
 from quantark.asset.equity.engine.mc._mc_event_statistics import (
     FEW_KNOCK_IN_PATHS,
@@ -110,9 +111,8 @@ class _DCNAssembly:
         if self.carried:
             self.layout = KnockInLayout("carried", np.zeros(0), None)
         else:
-            ki_dates = tuple(schedule.daily_ki_dates)
             row_times = np.asarray(ctx.times[self.first_ki_col:], dtype=float)
-            self.layout = KnockInLayout("discrete", row_times, ki_dates if len(ki_dates) == row_times.size else None)
+            self.layout = KnockInLayout("discrete", row_times, ki_row_dates(ctx, self.first_ki_col))
 
     def _ki_time_sum(self, sums: Mapping) -> float:
         """Sum of the first knock-in times (carried or at the valuation close: 0) on the DCN axis."""

@@ -10,8 +10,8 @@ non-SSE run day, ACT/360 and BUSINESS_DAYS environments, valuation-date rows, li
   observation decided at the valuation);
 - AC17: receivables are ledger rows, never events; a terminated note with unpaid cash reports its receivables only;
   a terminated, settled one has no statistics;
-- AC18 / D12: the DCN's own ACT/365F axis with exact dates on every environment, seller cash negative with the
-  identities intact, the event route and the fold route on the same axis;
+- AC18 (0.14.0; D12 retired): the environment's axis with exact dates on every environment, seller cash negative
+  with the identities intact, the event route and the fold route on the same axis;
 - AC21: standard errors from independent batch means;
 - price(), ``price_detailed(...).event_stats.pv`` and ``price_with_events(...).npv`` bitwise equal.
 
@@ -47,6 +47,7 @@ from quantark.cashleg import (
 )
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv.date_axis import env_time, env_times
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.calendar.day_counter import calculate_year_fraction
@@ -321,7 +322,7 @@ def test_a_closed_valuation_day_has_no_knock_in_row_at_zero():
     assert stats.ki_table.times[0] == (datetime(2024, 6, 11) - SAT).days / 365.0
 
 
-# --- AC18 / D12: the DCN's own axis, exact dates ------------------------------------------------------------------
+# --- AC18 (0.14.0: D12 retired): the environment's axis, exact dates ----------------------------------------------
 
 @pytest.mark.parametrize("name", ["dcn_sobol", "act_360", "business_days", "closed_saturday", "ko_lock_after_lock",
                                   "receivable_alive"])
@@ -342,9 +343,11 @@ def test_times_are_the_dcn_axis_with_exact_dates(name):
     for row in (stats.maturity, stats.ki_settlement):
         assert (row.time, row.payment_time) == (float(ctx.times[ctx.obs_cols[-1]]), float(ctx.loss_pay_time))
         assert (row.date, row.payment_date) == (product.schedule.monthly[-1].observation_date, pay.loss_payment_date)
-    # every time is ACT/365F from the schedule's valuation date, whatever the environment's convention
+    # every time is on the environment's axis from the schedule's valuation date (0.14.0 retired D12's ACT/365F)
     v = product.schedule.valuation_date
-    np.testing.assert_array_equal(obs.times, [(d - v).days / 365.0 for d in obs.dates])
+    np.testing.assert_array_equal(obs.times, env_times(env, obs.dates, anchor=v))
+    np.testing.assert_array_equal(obs.payment_times, env_times(env, obs.payment_dates, anchor=v))
+    assert stats.ki_settlement.payment_time == env_time(env, pay.loss_payment_date, anchor=v)
     # AC12: deterministic payment rows -- discounted = cash x the curve read at the row's payment time (D12)
     df = make_df_fn(env)
     np.testing.assert_allclose(obs.discounted_cash, obs.cash_to_pay * np.array([df(t) for t in obs.payment_times]),
@@ -382,8 +385,8 @@ def test_coupon_only_rows_carry_no_knock_out():
 @pytest.mark.parametrize("name", ["dcn_sobol", "act_360", "business_days", "closed_saturday"])
 def test_fold_slots_are_the_statistics_axis(name):
     stats = _stats(name)
-    _, product, _ = _fresh(name)
-    slots = dcn_fold_slots(build_dcn_grid_context(product, calendar_env(product)))
+    _, product, env = _fresh(name)
+    slots = dcn_fold_slots(build_dcn_grid_context(product, env))
     assert [s[1] for s in slots.ko] == stats.observations.times.tolist()
     assert [s[2] for s in slots.ko] == stats.observations.payment_times.tolist()
     assert (slots.determination, slots.payment) == (stats.maturity.time, stats.maturity.payment_time)

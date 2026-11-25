@@ -545,8 +545,8 @@ class ProductReplay:
         remaining_of = getattr(self._tracker, "remaining_maturity", None)
         if remaining_of is not None:
             # the DCN tracker answers without a pricing copy: this probe runs before the day's observation, when a
-            # skipped schedule date is still undecided (A7')
-            remaining = float(remaining_of(date))
+            # skipped schedule date is still undecided (A7'); measured on the probe environment's clock
+            remaining = float(remaining_of(date, probe_env))
             return 1e-8 if is_zero(remaining) or remaining < 0.0 else remaining
         product = self._tracker.product_for_pricing(date, probe_env)
         try:
