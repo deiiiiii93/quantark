@@ -146,3 +146,26 @@ def test_tracker_needs_no_env_and_maturity_takes_one():
     final = product.schedule.monthly[-1].observation_date
     assert tracker.remaining_maturity(JUN3, env) == env_time(env, final, anchor=JUN3)
     assert tracker.remaining_maturity(JUN3) == (final - JUN3).days / 365.0
+
+
+@pytest.mark.parametrize("adjust", [BDC.PRECEDING, BDC.FOLLOWING])
+def test_portfolio_ledger_times_dcn_receivables_as_the_price(adjust):
+    """D15 in the run's ledger: a DCN flow paid on an env holiday right after the run date is valued as DCN price()
+    values it (PRECEDING: time 0, DF 1 -- not refused; FOLLOWING: the next business day's time)."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
+
+    cf = RealizedCashflow(cashflow_id=f"dcn:coupon:{JUN3:%Y-%m-%d}", event_type=LifecycleEventType.COUPON,
+                          amount=10_000.0, determination_date=JUN3, payment_date=JUL4)
+    manager = PortfolioLifecycleManager(JUN3)
+    manager.ledger = LifecycleCashflowLedger([cf])
+    manager._cashflow_underlyings = {cf.cashflow_id: "SPX"}
+    env = us_env(JUL3, adjust=adjust)
+    manager._revalue_ledger(SimpleNamespace(pricing_environments={"SPX": env}), pd.Timestamp(JUL3))
+    expected = 10_000.0 * env.get_discount_factor(env_time(env, JUL4))
+    assert manager.pending_receivable_pv == expected
+    if adjust is BDC.PRECEDING:
+        assert expected == 10_000.0

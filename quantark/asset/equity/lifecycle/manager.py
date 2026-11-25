@@ -132,6 +132,10 @@ def realized_leg_outcome(tracker, book, events: List[LifecycleEvent], date: pd.T
     )
 
 
+#: the id prefix of a DCN tracker's ledger flows (``dcn:<kind>:<YYYY-MM-DD>``, ``lifecycle/dcn.py``)
+_DCN_FLOW_PREFIX = "dcn:"
+
+
 class PortfolioLifecycleManager:
     """Detects and applies realized lifecycle events for a portfolio replay."""
 
@@ -540,7 +544,12 @@ class PortfolioLifecycleManager:
 
             single = LifecycleCashflowLedger([cashflow])
             if single.pending(point):
-                pending_pv += single.pending_pv(point, valuation_env)
+                if point.date is not None and cashflow.cashflow_id.startswith(_DCN_FLOW_PREFIX):
+                    # a DCN flow is timed as DCN price() times it (the environment's axis, spec D15)
+                    from quantark.asset.equity.engine.dcn_valuation import dcn_pending_pv
+                    pending_pv += dcn_pending_pv(single, point, valuation_env)
+                else:
+                    pending_pv += single.pending_pv(point, valuation_env)
             else:
                 paid_cash += cashflow.amount
 

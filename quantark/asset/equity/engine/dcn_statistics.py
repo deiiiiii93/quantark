@@ -40,6 +40,7 @@ from quantark.asset.equity.engine.event_stats import (
     build_cash_ledger,
 )
 from quantark.priceenv.term_sampling import make_df_fn
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_zero
 
 __all__ = [
@@ -97,7 +98,7 @@ def ki_row_dates(ctx, first_ki_col: int) -> tuple:
     """The date of each knock-in row ``ctx.times[first_ki_col:]``: the earliest KI date of each grid instant."""
     columns = ctx.column_dates[first_ki_col:]
     if len(columns) != ctx.times.size - first_ki_col or any(not dates for dates in columns):
-        raise ValueError("every knock-in row of a DCN grid holds at least one KI date")
+        raise ValidationError("every knock-in row of a DCN grid holds at least one KI date")
     return tuple(dates[0] for dates in columns)
 
 

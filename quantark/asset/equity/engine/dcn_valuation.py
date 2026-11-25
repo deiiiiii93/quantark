@@ -152,11 +152,11 @@ _RECEIVABLE_SOURCE = {"KNOCK_OUT": "ko", "COUPON": "coupon", "MATURITY": "dcn_lo
 class DCNStateValuation:
     """A validated ``DCNLifecycleState`` reduced to what a DCN engine adds.
 
-    ``pending_pv``: the ledger's pending receivable PV (signed, via
-    ``LifecycleCashflowLedger.pending_pv``). ``terminal``: knocked out or
+    ``pending_pv``: the ledger's pending receivable PV (signed; ``LifecycleCashflowLedger.pending_pv``'s arithmetic
+    on the environment's axis). ``terminal``: knocked out or
     matured -- the price IS ``pending_pv`` and the engine does not run.
     ``pending``: the pending flows behind ``pending_pv``, each with the payment timing it was discounted at
-    (``SettlementResolver.resolve_pending``), in the ledger's order.
+    (``dcn_pending_flows``, spec D15), in the ledger's order.
     """
 
     pending_pv: float
@@ -248,14 +248,28 @@ def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Option
         )
     terminal = not lifecycle_state.alive
     check_dcn_ledger(product, valuation_date, lifecycle_state.ledger, alive=not terminal)
-    if lifecycle_state.valuation_point is None:
+    point = lifecycle_state.valuation_point
+    if point is None:
         pending_receivable_pv(lifecycle_state, pricing_env)   # refuses a non-empty ledger without a point
-    pending = _pending_flows(lifecycle_state, pricing_env, valuation_date)
-    # ``LifecycleCashflowLedger.pending_pv``'s arithmetic (amount x DF, summed in ledger order) on the DCN's own clock
+        pending = ()
+    else:
+        pending = dcn_pending_flows(lifecycle_state.ledger, point, pricing_env)
+    return DCNStateValuation(pending_pv=_pending_sum(pending), terminal=terminal, pending=pending,
+                             pricing_env=pricing_env)
+
+
+def _pending_sum(pending) -> float:
+    """``LifecycleCashflowLedger.pending_pv``'s arithmetic: amount x DF, summed in ledger order."""
     total = 0.0
     for cashflow, timing in pending:
         total += cashflow.amount * timing.payment_df
-    return DCNStateValuation(pending_pv=float(total), terminal=terminal, pending=pending, pricing_env=pricing_env)
+    return float(total)
+
+
+def dcn_pending_pv(ledger, valuation_point, pricing_env) -> float:
+    """The PV of a DCN ledger's flows pending after a date ``valuation_point``, timed as DCN ``price()`` times them
+    (``dcn_pending_flows``); the run ledger uses it so the book and the price agree on every environment."""
+    return _pending_sum(dcn_pending_flows(ledger, valuation_point, pricing_env))
 
 
 #: a pending flow's settlement kind, exactly as ``SettlementResolver.resolve_pending`` maps it (the price accepts every
@@ -264,22 +278,29 @@ _PENDING_KIND = {"COUPON": "COUPON", "KNOCK_OUT": "REDEMPTION", "KNOCK_IN": "HIT
                  "EXPIRY": "TERMINAL"}
 
 
-def _pending_flows(lifecycle_state, pricing_env, valuation_date) -> tuple:
-    """``(cashflow, timing)`` of every pending flow, timed on the environment's axis from the valuation date (spec
-    D15): ``env_time`` of the payment date -- the time ``price()`` gives the same date, honouring
-    ``holiday_time_adjustment`` -- and its DF. A flow paid after the valuation date that the env's clock places at the
-    valuation instant (a holiday right after it, PRECEDING) is still a receivable, discounted at DF(0). On
-    CALENDAR_DAYS / ACT_365 this is ``SettlementResolver.resolve_pending``'s timing bit for bit."""
+def dcn_pending_flows(ledger, valuation_point, pricing_env) -> tuple:
+    """``(cashflow, timing)`` of every flow of ``ledger`` pending after the date ``valuation_point``, timed on the
+    environment's axis from that date (spec D15): ``env_time`` of the payment date -- the time ``price()`` gives the
+    same date, honouring ``holiday_time_adjustment`` -- and its DF. A flow paid after the valuation date that the env's
+    clock places at the valuation instant (a holiday right after it, PRECEDING) is still a receivable, discounted at
+    DF(0). On CALENDAR_DAYS / ACT_365 this is ``SettlementResolver.resolve_pending``'s timing bit for bit.
+
+    Raises:
+        ValidationError: a time valuation point (a DCN is dated), a point that is not the environment's valuation
+            date, an unsupported flow kind, or a payment the env places before the valuation instant.
+    """
     from quantark.asset.equity.settlement import CashflowKind, ResolvedPaymentTiming, SettlementResolver
     from quantark.priceenv.date_axis import env_times
 
-    point = lifecycle_state.valuation_point
-    if point is None:
-        return ()
-    flows = lifecycle_state.ledger.pending(point)
+    point = valuation_point
+    if point.date is None:
+        raise ValidationError("DCN receivables need a date valuation point (a DCN is dated)")
+    if pricing_env.valuation_date != point.date:
+        raise ValidationError("pricing environment valuation_date must match the ledger valuation point")
+    flows = ledger.pending(point)
     if not flows:
         return ()
-    times = env_times(pricing_env, [cashflow.payment_date for cashflow in flows], anchor=valuation_date)
+    times = env_times(pricing_env, [cashflow.payment_date for cashflow in flows], anchor=point.date)
     determination_df = SettlementResolver._checked_df(pricing_env, 0.0, "pending valuation")
     out = []
     for cashflow, t in zip(flows, times):

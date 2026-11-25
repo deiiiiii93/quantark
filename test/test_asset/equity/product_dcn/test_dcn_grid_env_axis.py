@@ -118,9 +118,14 @@ def test_unmonitored_valuation_prepends_t0():
 def test_thirty_360_merges_and_prices_the_grid():
     """D18: 30/360 maps the 30th and 31st to one time -- merged, not refused."""
     v = datetime(2024, 5, 15)
-    ctx = build_dcn_grid_context(make_dcn(DCN_A, valuation_date=v), env_on(v, DayCountConvention.THIRTY_360_US))
+    product, env = make_dcn(DCN_A, valuation_date=v), env_on(v, DayCountConvention.THIRTY_360_US)
+    ctx = build_dcn_grid_context(product, env)
     assert np.all(np.diff(ctx.times) > 0.0)
     assert any(len(c) > 1 for c in ctx.column_dates)
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+    from quantark.asset.equity.param import PDEParams
+
+    assert np.isfinite(DCNPDEEngine(PDEParams(accuracy="fast")).price(product, env))
 
 
 def test_backwards_convention_is_refused():
