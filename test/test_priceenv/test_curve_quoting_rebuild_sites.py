@@ -5,6 +5,8 @@ the clone cannot re-anchor. The theta routes must see the same market as an envi
 """
 from datetime import datetime
 
+import pytest
+
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.report.autocallable_risk_report import _clone_env
@@ -148,3 +150,35 @@ def test_hand_wrapped_numerical_theta_equals_fresh_env_pnl_bitwise():
     theta = greeks.theta if hasattr(greeks, "theta") else greeks["theta"]
     engine = BlackScholesEngine()
     assert theta == engine.price(option(), hand(D1)) - engine.price(option(), hand(D0))
+
+
+@pytest.mark.parametrize("d0,d1", [
+    (datetime(2026, 2, 14), datetime(2026, 2, 15)),  # Sat -> Sun inside CNY: carry only, no variance decay
+    (datetime(2026, 2, 23), datetime(2026, 2, 24)),  # holiday Mon -> Tue
+    (datetime(2026, 3, 10), datetime(2026, 3, 11)),  # ordinary Tue -> Wed
+])
+def test_calendar_axis_vol_wrapper_theta_equals_fresh_env_pnl_bitwise(d0, d1):
+    """Owner D19, the trading-clock guide's default setup: CALENDAR_DAYS, TradingClockVolSurface, native curves.
+
+    Before 0.15.0 the bumped copy kept a vol map anchored at d0: a one-day theta starting on a non-trading day was
+    ~20x too large (-0.0185 vs the carry-only -0.00088 across CNY).
+    """
+    from quantark.param.vol import TradingClockVolSurface
+    from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
+
+    def cal_axis(d):
+        m = BusinessTimeMap(TradingClock(CAL, 244), d, H)
+        return PricingEnvironment(rate_curve=FlatRateCurve(0.03), div_yield=ContinuousDividendYield(0.02),
+                                  vol_surface=TradingClockVolSurface(FlatVolSurface(0.2), m), valuation_date=d,
+                                  spot_quote=SpotQuote(100.0), calendar=CAL)
+
+    expiry = datetime(2026, 12, 15)
+
+    def option():
+        return EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=expiry)
+
+    greeks = GreeksCalculator().calculate(product=option(), pricing_env=cal_axis(d0), engine=BlackScholesEngine(),
+                                          greeks=["theta"], method="numerical")
+    theta = greeks.theta if hasattr(greeks, "theta") else greeks["theta"]
+    engine = BlackScholesEngine()
+    assert theta == engine.price(option(), cal_axis(d1)) - engine.price(option(), cal_axis(d0))

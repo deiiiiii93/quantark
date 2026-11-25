@@ -93,9 +93,14 @@ def test_axis_equivalence_of_rows():
 def test_fail_closed_rules():
     t0, t1 = datetime(2026, 3, 10), datetime(2026, 3, 11)
     ok0, ok1 = _cal_env(t0), _cal_env(t1)
+    # 0.15.0 (owner D19): a PricingEnvironment re-anchors its vol wrapper at its own valuation date, so a
+    # mis-anchored snapshot can only arise by bypassing the environment; explain must still fail closed on one.
+    stale = _cal_env(t1)
+    assert _cal_env(t1, anchor=t0).vol_surface.time_map.anchor_date == t1  # the environment re-anchored it
+    object.__setattr__(stale, "vol_surface", TradingClockVolSurface(FlatVolSurface(0.20), _map(t0)))
     with pytest.raises(ValidationError, match="anchor"):
         explain(ValuationSnapshot(CALL, ENG, ok0, date=t0),
-                ValuationSnapshot(CALL, ENG, _cal_env(t1, anchor=t0), date=t1), config=WF)
+                ValuationSnapshot(CALL, ENG, stale, date=t1), config=WF)
     native = PricingEnvironment(rate_curve=FlatRateCurve(0.02), valuation_date=t1, spot_quote=SpotQuote(100.0),
                                 vol_surface=FlatVolSurface(0.2), div_yield=ContinuousDividendYield(0.01))
     with pytest.raises(ValidationError, match="clock"):

@@ -201,6 +201,65 @@ def test_undeclared_hand_wrapper_past_its_horizon_refuses():
     assert env.rate_curve is w and env.valuation_date == VAL
 
 
+def test_off_business_horizon_refusal_does_not_advise_declaring():
+    w = TradingClockRateCurve(FlatRateCurve(0.02), _map(horizon=datetime(2026, 6, 1)))
+    env = _env(convention=DayCountConvention.CALENDAR_DAYS, rate_curve=w, div_yield=None, basis_yield=None)
+    with pytest.raises(ValidationError) as err:
+        env.valuation_date = datetime(2026, 7, 1)
+    assert "later horizon" in str(err.value) and "trading_clock_horizon" not in str(err.value)
+
+
+# --- AC7d (owner D19): the vol wrapper re-anchors too -------------------------------------------------------------
+
+def _vol_env(surface, convention=DayCountConvention.CALENDAR_DAYS, **kw):
+    return _env(convention=convention, rate_curve=FlatRateCurve(0.0), div_yield=None, basis_yield=None,
+                vol_surface=surface, **kw)
+
+
+def test_vol_wrapper_on_anchor_is_kept():
+    from quantark.param.vol import TradingClockVolSurface
+    s = TradingClockVolSurface(FlatVolSurface(0.2), _map())
+    assert _vol_env(s).vol_surface is s
+
+
+@pytest.mark.parametrize("convention", [DayCountConvention.CALENDAR_DAYS, DayCountConvention.BUSINESS_DAYS])
+def test_vol_wrapper_off_anchor_re_anchors_at_construction(convention):
+    from quantark.param.vol import TradingClockVolSurface
+    s = TradingClockVolSurface(FlatVolSurface(0.2), _map(anchor=datetime(2026, 1, 5)))
+    env = _vol_env(s, convention=convention)
+    assert env.vol_surface.inner is s.inner
+    assert env.vol_surface.time_map.anchor_date == VAL and env.vol_surface.time_map.horizon_date == HORIZON
+
+
+def test_vol_wrapper_re_anchors_on_assignment():
+    from quantark.param.vol import TradingClockVolSurface
+    env = _vol_env(TradingClockVolSurface(FlatVolSurface(0.2), _map()))
+    d2 = datetime(2026, 2, 14)
+    env.valuation_date = d2
+    fresh = TradingClockVolSurface(FlatVolSurface(0.2), _map(anchor=d2))
+    for t in (1 / 365.0, 10 / 365.0, 0.5):
+        assert env.vol_surface.get_vol(100.0, t, 100.0) == fresh.get_vol(100.0, t, 100.0)
+
+
+def test_vol_wrapper_past_its_horizon_refuses():
+    from quantark.param.vol import TradingClockVolSurface
+    s = TradingClockVolSurface(FlatVolSurface(0.2), _map(horizon=datetime(2026, 6, 1)))
+    env = _vol_env(s)
+    with pytest.raises(ValidationError, match="vol_surface"):
+        env.valuation_date = datetime(2026, 7, 1)
+    assert env.vol_surface is s and env.valuation_date == VAL
+
+
+def test_sticky_view_keeps_its_shock_when_re_anchored():
+    from quantark.param.vol import TradingClockVolSurface
+    from quantark.param.vol.sticky import _StickyMoneynessView
+    view = _StickyMoneynessView(TradingClockVolSurface(FlatVolSurface(0.2), _map(anchor=datetime(2026, 1, 5))),
+                                100.0, 90.0)
+    env = _vol_env(view)
+    assert isinstance(env.vol_surface, _StickyMoneynessView)
+    assert env.vol_surface.time_map.anchor_date == VAL and env.vol_surface._ratio == view._ratio
+
+
 # --- AC7: non-BUSINESS_DAYS -----------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("conv", [DayCountConvention.CALENDAR_DAYS, DayCountConvention.ACT_365])

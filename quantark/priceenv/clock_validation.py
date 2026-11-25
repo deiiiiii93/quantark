@@ -11,13 +11,15 @@ integrated over trading-year time, which is right only if it is quoted per
 trading year. The environment records the quoting basis per curve
 (``CurveQuotingBasis``) and owns one ``BusinessTimeMap`` for the curves it
 wraps; ``resolve_cash_curve_quoting`` applies the declarations at
-construction and ``re_anchor_declared_curves`` keeps that map on the
-environment's valuation date when it is reassigned.
+construction and ``re_anchor_clock_wrappers`` keeps every trading-clock
+wrapper (cash curves and the vol surface) on the environment's valuation
+date when it is reassigned.
 """
 from contextlib import contextmanager
 
 from quantark.priceenv.curve_quoting import CurveQuotingBasis
 from quantark.util.calendar import DayCountConvention
+from quantark.util.calendar.trading_clock import BusinessTimeMap
 from quantark.util.exceptions import ValidationError
 
 #: (curve field, its quoting field) for every cash curve the environment can wrap.
@@ -126,19 +128,27 @@ def _on_env_map(env, field: str, obj, env_map: _EnvMap):
 
 
 def _on_own_horizon(env, field: str, obj):
-    """An undeclared hand-wrapped curve sits at the valuation date on its own map's horizon (owner ruling D7).
+    """An undeclared hand-wrapped curve or the vol wrapper sits at the valuation date on its own map's horizon
+    (owner rulings D7, D19).
 
     Returns ``obj`` itself when its map is already anchored at the valuation date, else the same inner re-exposed on
-    ``time_map.re_anchored(valuation_date)`` (same clock, same horizon: sticky trading tenor).
+    ``time_map.re_anchored(valuation_date)`` (same clock, same horizon: sticky trading tenor). Only a
+    ``BusinessTimeMap`` (the calendar trading clock) is moved; an ``IntradayTimeMap`` is the intraday route's own
+    clock and is left as it is.
     """
     tm = obj.time_map
+    if not isinstance(tm, BusinessTimeMap):
+        # an IntradayTimeMap belongs to the intraday route, which resolves its own clock per timestamp
+        return obj
     if tm.anchor_date == env.valuation_date:
         return obj
     if env.valuation_date >= tm.horizon_date:
+        advice = "rebuild the wrapper with a later horizon"
+        if field != "vol_surface" and env.day_count_convention == DayCountConvention.BUSINESS_DAYS:
+            advice += f", or pass the native curve with {field}_quoting=CALENDAR_YEAR and trading_clock_horizon"
         raise ValidationError(
             f"valuation_date {env.valuation_date} is not before the horizon {tm.horizon_date} of the trading clock "
-            f"{field} is wrapped onto; rebuild the wrapper with a later horizon or declare {field}'s quoting with "
-            "trading_clock_horizon"
+            f"{field} is wrapped onto; {advice}"
         )
     return obj.with_time_map(tm.re_anchored(env.valuation_date))
 
@@ -202,13 +212,18 @@ def resolve_cash_curve_quoting(env) -> None:
             setattr(env, field, _on_env_map(env, field, obj, env_map))
         else:
             setattr(env, field, _wrapper_for(field)(obj, env_map.get(field)))
+    surface = env.vol_surface
+    if is_clock_wrapped(surface):
+        # owner ruling D19: the vol wrapper follows the valuation date like a hand-wrapped cash curve
+        setattr(env, "vol_surface", _on_own_horizon(env, "vol_surface", surface))
 
 
-def re_anchor_cash_curves(env) -> None:
-    """Keep every TradingClock-wrapped cash curve on the environment's valuation date after it is reassigned.
+def re_anchor_clock_wrappers(env) -> None:
+    """Keep every trading-clock wrapper on the environment's valuation date after it is reassigned.
 
     A ``CALENDAR_YEAR`` wrapper on a ``BUSINESS_DAYS`` environment moves onto the environment's own map (spec D13);
-    an undeclared hand-wrapped curve is re-anchored on its own horizon (owner ruling D7), on any convention. Native
+    an undeclared hand-wrapped cash curve and the vol wrapper are re-anchored on their own horizon (owner rulings
+    D7, D19), on any convention. Native
     curves are never touched and the declaration refusals of construction are not re-run, so a bumped copy that
     carries a curve assigned after construction keeps working. It raises only when a re-anchor cannot be built (the
     new date is not before the relevant horizon, or a wrapper's clock no longer matches the environment). Every new
@@ -226,9 +241,10 @@ def re_anchor_cash_curves(env) -> None:
             updates[field] = _on_env_map(env, field, obj, env_map)
         elif quoting is None:
             updates[field] = _on_own_horizon(env, field, obj)
+    if is_clock_wrapped(env.vol_surface):
+        updates["vol_surface"] = _on_own_horizon(env, "vol_surface", env.vol_surface)
     for field, obj in updates.items():
         setattr(env, field, obj)
-
 
 
 def refuse_cross_clock_relationship(env, mode) -> None:
