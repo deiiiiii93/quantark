@@ -38,7 +38,9 @@ time_map = BusinessTimeMap(clock, anchor_date=valuation_date,
   between consecutive trading-date knots. It is deliberately NOT the
   pointwise inverse of `to_trading`; the two agree exactly at every
   trading-date knot, which is where the DF invariance is asserted.
-- The map's `anchor_date` must equal the environment's `valuation_date`.
+- The map's `anchor_date` is the environment's `valuation_date`: since 0.15.0 a `PricingEnvironment` re-anchors
+  every trading-clock wrapper it holds (vol surface and cash curves) at its valuation date, at construction and
+  whenever `valuation_date` is reassigned, keeping the map's clock and horizon.
 - Queries beyond `horizon_date` raise — size the horizon from the product.
 
 ## Default: calendar axis + `TradingClockVolSurface`
@@ -144,9 +146,9 @@ env = PricingEnvironment(
 
 | Declaration | `BUSINESS_DAYS` environment | any other convention |
 |---|---|---|
-| `CALENDAR_YEAR` | the environment wraps the curve on its own `BusinessTimeMap` (needs `calendar` and `trading_clock_horizon`) | read as is (an environment-made wrapper is unwrapped) |
+| `CALENDAR_YEAR` | the environment wraps the curve on its own `BusinessTimeMap` (needs `calendar` and `trading_clock_horizon`) | read as is (a wrapper declared `CALENDAR_YEAR` is unwrapped to its inner) |
 | `TRADING_YEAR` | read as is; a wrapper is refused | refused |
-| none | refused unless the curve is exactly zero or already wrapped | read as is |
+| none | refused unless the curve is exactly zero or already wrapped (a wrapper is re-anchored at the valuation date) | read as is (a wrapper is re-anchored at the valuation date) |
 
 - The environment's wrapping is exactly the hand recipe above (`TradingClockRateCurve` /
   `TradingClockDividendYield` / `TradingClockBasisYield` over `BusinessTimeMap(TradingClock(calendar,
@@ -156,7 +158,11 @@ env = PricingEnvironment(
 - **The map follows the valuation date.** `dataclasses.replace(env, valuation_date=d)` and a plain
   `env.valuation_date = d` (what numerical theta, the product theta helpers, dynamic scenarios and lifecycle do on
   a copy) re-anchor every wrapped cash curve at `d`: an environment-made one on the environment's horizon, a
-  hand-made one on its own map's horizon. A date at or past the horizon raises.
+  hand-made one on its own map's horizon. The `TradingClockVolSurface` of the calendar-axis default re-anchors
+  the same way, so a one-day theta that starts on a weekend or holiday is carry only (before 0.15.0 the bumped
+  copy kept the old anchor and decayed a full trading day of variance: about 20x too large across Chinese New
+  Year). A date at or past the horizon raises. An `IntradayTimeMap` (the intraday route's own clock) is never
+  moved by the environment.
 - Cash stresses and scenario moves are per calendar year: they shift the calendar-quoted curve inside a wrapper and
   keep its trading clock (`quantark.priceenv.clock_validation.calendar_quoted_view`). Basis/dividend relationship
   modes other than `INDEPENDENT` are refused on wrapped curves.

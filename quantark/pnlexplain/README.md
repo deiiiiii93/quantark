@@ -199,13 +199,17 @@ stays informational with its `sum_of_buckets` / `reconciles` view.
 ## TradingClock-wrapped environments
 
 `TradingClockVolSurface` / `TradingClockRateCurve` /
-`TradingClockDividendYield` are supported on the waterfall: wrappers compare
-by (class, inner, clock), each scenario state re-anchors its maps at its own
-valuation date (TIME = the same inner objects seen from the new date), and a
-wrapped field anchored elsewhere, a wrapper on one side only, two clocks, or a
+`TradingClockDividendYield` / `TradingClockBasisYield` are supported on the
+waterfall: wrappers compare by (class, inner, clock), each scenario state
+re-anchors its maps at its own valuation date (TIME = the same inner objects
+seen from the new date), and a wrapper on one side only, two clocks, or a
 float-maturity product on a `BUSINESS_DAYS` environment is a
-`ValidationError`. The Taylor method is rejected on a wrapped environment
-(its theta bump does not re-anchor the map); pass
+`ValidationError`. Since 0.15.0 a `PricingEnvironment` re-anchors its wrappers
+at its own valuation date itself, so a wrapped field anchored elsewhere can
+only reach explain by bypassing the environment; it is still refused. The
+Taylor method is still rejected on a wrapped environment (it was refused
+because its theta bump did not re-anchor the map; 0.15.0 environments now do,
+and lifting the refusal is an open follow-up); pass
 `methods=(ExplainMethod.WATERFALL,)`.
 
 A wrapped factor is SAMPLED on its inner's own axis, at the t1 coordinate

@@ -15,7 +15,8 @@ desk quote) has to be read through the trading clock. The environment cannot tel
 quote by looking at the curve, so it is now declared per curve. A calendar-quoted curve is wrapped onto the trading
 clock by the environment itself, and an undeclared non-zero native curve is refused instead of being silently read
 per trading year. Environments on every other convention, and `BUSINESS_DAYS` environments that declare
-`TRADING_YEAR`, price bit for bit as in 0.14.0.
+`TRADING_YEAR`, price bit for bit as in 0.14.0 -- except environments holding TradingClock wrappers (vol surface or
+cash curves), whose aged and stressed numbers move to the correct values (see Changed).
 
 ### Changed
 
@@ -27,14 +28,19 @@ per trading year. Environments on every other convention, and `BUSINESS_DAYS` en
   `ContinuousDividendYield(0.0)`, `NoDividend`, `FlatBasisYield(0.0)`, `ZeroBasis`, `None`) and TradingClock-wrapped
   curves need no declaration. Every `BUSINESS_DAYS` fixture in the test suite now declares `TRADING_YEAR`; no number
   moved.
-- **Hand-wrapped curves follow the valuation date (owner ruling; sanctioned price move).** A TradingClock-wrapped
-  cash curve whose map is anchored at another date is re-anchored at the environment's valuation date on its own
-  horizon (`BusinessTimeMap.re_anchored`), both at construction and whenever `valuation_date` is reassigned. The ~30
+- **Trading-clock wrappers follow the valuation date (owner rulings; sanctioned price move).** A
+  `TradingClockVolSurface` and a hand-wrapped (undeclared) TradingClock cash curve whose map is anchored at another
+  date are re-anchored at the environment's valuation date on their own horizon (`BusinessTimeMap.re_anchored`),
+  both at construction and whenever `valuation_date` is reassigned; the sticky-moneyness view keeps its spot shock.
+  An `IntradayTimeMap` (the intraday route's own clock) is never moved. The ~30
   library sites that age a copy by `env.valuation_date = bumped_date` (numerical theta, product theta helpers, the
   dynamic-scenario day loop, lifecycle, backtests) used to read r and q on a map still anchored at the old date.
-  Size of the move: a dated European across Chinese New Year (2026-02-13 -> 02-24, r 3%, q 2%), numerical theta on a
-  hand-wrapped environment, -0.020257 in 0.14.0 -> -0.027297 now, which equals V(02-24) - V(02-13) on freshly built
-  environments bit for bit. No existing test pinned a hand-wrapped bumped or rolled number (full suite unchanged); the move is pinned by
+  Size of the move, dated European (K = S = 100, sigma 20%, r 3%, q 2%, expiry 2026-12-15): on the trading-clock
+  guide's default setup (calendar axis, `TradingClockVolSurface`), a one-day numerical theta starting on a weekend
+  or holiday was about 20x too large -- Sat 2026-02-14 -> Sun inside Chinese New Year -0.0185443 in 0.14.0 ->
+  -0.0008800 now (carry only: the trading clock is flat); a step between trading days was already right. On a
+  hand-wrapped trading-axis environment, numerical theta across Chinese New Year (02-13 -> 02-24) -0.020257 ->
+  -0.027297. Both now equal V(d1) - V(d0) on freshly built environments bit for bit. No existing test pinned a hand-wrapped bumped or rolled number (full suite unchanged); the move is pinned by
   `test_curve_quoting_rebuild_sites.py::test_hand_wrapped_numerical_theta_equals_fresh_env_pnl_bitwise`.
 - **Cash stresses and scenario moves are per calendar year on wrapped curves.** The built-in rate, key-rate, spread,
   dividend and basis stresses (`StressApplicator`) and the dynamic-scenario rate and dividend changes now move the
@@ -78,8 +84,8 @@ per trading year. Environments on every other convention, and `BUSINESS_DAYS` en
 - The 0.14.0 known issue "a `BUSINESS_DAYS` environment with unwrapped calendar-quoted rate or dividend curves passes
   `validate_trading_clock_configuration`" is resolved: the environment records the quoting basis and refuses the
   undeclared case.
-- Numerical theta and every date-aged copy of an environment with hand-wrapped cash curves read r and q on a map
-  anchored at the old valuation date (see Changed).
+- Numerical theta and every date-aged copy of an environment with a `TradingClockVolSurface` or hand-wrapped cash
+  curves read variance, r and q on a map anchored at the old valuation date (see Changed).
 
 ### Notes
 
@@ -96,7 +102,8 @@ per trading year. Environments on every other convention, and `BUSINESS_DAYS` en
   environment holding a TradingClock-wrapped cash curve: deriving one curve from the others across the trading clock
   needs the tenor mapped and the derived curve placed on the same clock, which is not built. `INDEPENDENT` works.
 - `FxPricingEnvironment` has no quoting declarations and no trading-clock validation.
-- `TradingClockVolSurface` (the calendar-axis vol wrapper) is not re-anchored when `valuation_date` is reassigned.
+- pnlexplain still refuses the Taylor method on a trading-clock-wrapped environment; its original reason (the theta
+  bump did not re-anchor the map) no longer holds.
 - A greek dividend bump of a `None` dividend yield on a `CALENDAR_YEAR` environment creates a native
   `ContinuousDividendYield(shift)` that is read per trading year.
 
