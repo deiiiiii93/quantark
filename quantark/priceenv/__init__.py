@@ -2,6 +2,7 @@
 Pricing environment for derivative valuation.
 """
 from .pricing_environment import PricingEnvironment
+from .curve_quoting import CurveQuotingBasis
 from .fx_pricing_environment import (
     FxPricingEnvironment,
     FxQuantoMarketData,
@@ -16,6 +17,7 @@ from .market_context import TermMarketContext
 
 __all__ = [
     'PricingEnvironment',
+    'CurveQuotingBasis',
     'FxPricingEnvironment',
     'FxQuantoMarketData',
     'QuantoConversionOrientation',

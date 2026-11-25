@@ -119,6 +119,14 @@ class BasisYield(ABC):
         # b = ln(F/S) / T
         return np.log(futures_price / spot) / time_to_maturity
 
+    def is_identically_zero(self) -> bool:
+        """True only when this basis yield is exactly zero at every tenor, so it means the same thing on any clock.
+
+        A ``BUSINESS_DAYS`` environment accepts such a curve without a quoting declaration. The default is
+        False (declare it); a subclass returns True only from an exact ``== 0.0`` test, never a tolerance.
+        """
+        return False
+
 
 @dataclass
 class FlatBasisYield(BasisYield):
@@ -156,6 +164,9 @@ class FlatBasisYield(BasisYield):
             Constant basis yield
         """
         return self.basis_yield
+
+    def is_identically_zero(self) -> bool:
+        return self.basis_yield == 0.0  # exact by contract: zero is the only clock-invariant basis
 
     def __repr__(self):
         return f"FlatBasisYield(basis={self.basis_yield:.4f})"
@@ -234,6 +245,9 @@ class ZeroBasis(BasisYield):
             Zero
         """
         return 0.0
+
+    def is_identically_zero(self) -> bool:
+        return True
 
     def __repr__(self):
         return "ZeroBasis()"

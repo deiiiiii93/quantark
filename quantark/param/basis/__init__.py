@@ -9,6 +9,7 @@ from .basis_yield import (
     ZeroBasis,
     BasisRelationshipMode,
 )
+from .trading_clock_basis import TradingClockBasisYield
 
 __all__ = [
     "BasisYield",
@@ -16,4 +17,5 @@ __all__ = [
     "TermStructureBasisYield",
     "ZeroBasis",
     "BasisRelationshipMode",
+    "TradingClockBasisYield",
 ]

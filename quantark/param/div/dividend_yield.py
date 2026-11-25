@@ -37,6 +37,14 @@ class DividendYield(ABC):
         """
         return ParallelShiftDividendYield(self, shift)
 
+    def is_identically_zero(self) -> bool:
+        """True only when this yield is exactly zero at every tenor, so it means the same thing on any clock.
+
+        A ``BUSINESS_DAYS`` environment accepts such a curve without a quoting declaration. The default is
+        False (declare it); a subclass returns True only from an exact ``== 0.0`` test, never a tolerance.
+        """
+        return False
+
 
 @dataclass(frozen=True)
 class ParallelShiftDividendYield(DividendYield):
@@ -92,6 +100,9 @@ class ContinuousDividendYield(DividendYield):
     
     def parallel_shifted(self, shift: float) -> "ContinuousDividendYield":
         return ContinuousDividendYield(self.div_yield + shift)
+
+    def is_identically_zero(self) -> bool:
+        return self.div_yield == 0.0  # exact by contract: zero is the only clock-invariant yield
 
     def __repr__(self):
         return f"ContinuousDividendYield(yield={self.div_yield:.2%})"
@@ -162,7 +173,10 @@ class NoDividend(DividendYield):
             Zero
         """
         return 0.0
-    
+
+    def is_identically_zero(self) -> bool:
+        return True
+
     def parallel_shifted(self, shift: float) -> "ContinuousDividendYield":
         """The legacy bump of a zero yield: a continuous constant."""
         return ContinuousDividendYield(0.0 + shift)

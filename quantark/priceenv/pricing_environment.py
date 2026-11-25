@@ -10,6 +10,7 @@ from quantark.util.exceptions import MarketDataError
 from quantark.util.calendar import Calendar, DayCountConvention
 from quantark.util.calendar.business_calendar import BusinessDayConvention
 from quantark.util.numerical import safe_sqrt
+from quantark.priceenv.curve_quoting import CurveQuotingBasis
 
 
 @dataclass
@@ -46,6 +47,16 @@ class PricingEnvironment:
             move; only their model time does. Ignored under every other convention. UNADJUSTED is refused: on a
             business-day clock a holiday has no time of its own. Read by ``quantark.priceenv.date_axis`` (in
             0.14.0 only DCN times use it).
+        rate_curve_quoting / div_yield_quoting / basis_yield_quoting: How ``rate_curve`` / ``div_yield`` /
+            ``basis_yield`` are quoted (``CurveQuotingBasis``; default None = undeclared). On ``BUSINESS_DAYS``
+            every time is a trading-year fraction: ``CALENDAR_YEAR`` makes the environment wrap the curve onto its
+            trading clock (``TradingClockRateCurve`` / ``TradingClockDividendYield`` / ``TradingClockBasisYield``,
+            needs ``trading_clock_horizon``; the field then holds the wrapper), ``TRADING_YEAR`` reads it as is, and
+            an undeclared native curve is refused unless it is exactly zero. On any other convention
+            ``CALENDAR_YEAR`` reads the curve as is and ``TRADING_YEAR`` is refused. See docs/trading-clock.md.
+        trading_clock_horizon: End of the trading clock the environment wraps CALENDAR_YEAR curves onto; strictly
+            after the last date priced (last date + 1 day is safe). Needed only when a curve is wrapped.
+            Reassigning ``valuation_date`` re-anchors the wrapped curves at the new date on the same horizon.
     """
 
     rate_curve: RateCurve
@@ -58,6 +69,18 @@ class PricingEnvironment:
     bus_days_in_year: int = 252
     calendar: Optional[Calendar] = None
     holiday_time_adjustment: BusinessDayConvention = BusinessDayConvention.PRECEDING
+    rate_curve_quoting: Optional[CurveQuotingBasis] = None
+    div_yield_quoting: Optional[CurveQuotingBasis] = None
+    basis_yield_quoting: Optional[CurveQuotingBasis] = None
+    trading_clock_horizon: Optional[datetime] = None
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        # After construction, a new valuation date moves the environment's own trading clock with it (spec D13);
+        # the dataclass __init__ assigns fields before ``_clock_ready`` exists, so construction never lands here.
+        if name == "valuation_date" and self.__dict__.get("_clock_ready", False):
+            from quantark.priceenv.clock_validation import re_anchor_declared_curves
+            re_anchor_declared_curves(self)
 
     def __post_init__(self):
         """Validate pricing environment."""
@@ -79,11 +102,18 @@ class PricingEnvironment:
                 "holiday_time_adjustment=UNADJUSTED is not a placement: on a business-day clock a holiday "
                 "has no time of its own (use PRECEDING or FOLLOWING)"
             )
+        for name in ("rate_curve_quoting", "div_yield_quoting", "basis_yield_quoting"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, CurveQuotingBasis):
+                raise MarketDataError(f"{name} must be a CurveQuotingBasis or None, got {value!r}")
+        from quantark.priceenv.clock_validation import (
+            resolve_cash_curve_quoting,
+            validate_trading_clock_configuration,
+        )
+        resolve_cash_curve_quoting(self)
         if self.day_count_convention == DayCountConvention.BUSINESS_DAYS:
-            from quantark.priceenv.clock_validation import (
-                validate_trading_clock_configuration,
-            )
             validate_trading_clock_configuration(self)
+        object.__setattr__(self, "_clock_ready", True)
 
     @property
     def spot(self) -> float:

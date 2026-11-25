@@ -73,6 +73,14 @@ class RateCurve(ABC):
         """
         return ParallelShiftRateCurve(self, shift)
 
+    def is_identically_zero(self) -> bool:
+        """True only when this rate curve is exactly zero at every tenor, so it means the same thing on any clock.
+
+        A ``BUSINESS_DAYS`` environment accepts such a curve without a quoting declaration. The default is
+        False (declare it); a subclass returns True only from an exact ``== 0.0`` test, never a tolerance.
+        """
+        return False
+
 
 class ParallelShiftRateCurve(RateCurve):
     """
@@ -155,6 +163,9 @@ class FlatRateCurve(RateCurve):
 
     def parallel_shifted(self, shift: float) -> "FlatRateCurve":
         return FlatRateCurve(self.rate + shift)
+
+    def is_identically_zero(self) -> bool:
+        return self.rate == 0.0  # exact by contract: zero is the only clock-invariant rate
     
     def __repr__(self):
         return f"FlatRateCurve(rate={self.rate:.2%})"
