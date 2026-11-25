@@ -202,6 +202,25 @@ def re_anchor_declared_curves(env) -> None:
         setattr(env, field, obj)
 
 
+def refuse_cross_clock_relationship(env, mode) -> None:
+    """Refuse a basis<->dividend relationship mode on an environment holding a TradingClock-wrapped cash curve.
+
+    A relationship derives one cash curve from the others at one ``time_to_maturity``. Across a trading-clock
+    wrapper that needs the tenor mapped onto the calendar axis and the derived curve placed on the same clock as its
+    sources; 0.15.0 does not build that (spec D16, CP2), so it refuses rather than mix units.
+    TODO: map time_to_maturity through time_map.to_calendar and wrap the derived curve on the sources' map.
+    """
+    if getattr(mode, "name", str(mode)).upper() == "INDEPENDENT":
+        return
+    wrapped = [f for f, _ in CASH_CURVE_FIELDS if is_clock_wrapped(getattr(env, f))]
+    if wrapped:
+        raise ValidationError(
+            f"basis/dividend relationship mode {getattr(mode, 'name', mode)} is not supported on trading-clock-"
+            f"wrapped cash curves ({', '.join(wrapped)}): deriving one curve from the others would mix calendar- "
+            "and trading-year quotes; use INDEPENDENT"
+        )
+
+
 def apply_declared_quoting(env, field: str) -> None:
     """Re-apply the environment's declaration to a cash-curve field assigned after construction (spec D16).
 
@@ -232,7 +251,8 @@ def calendar_quoted_view(env):
     on the map it came from: untouched it gets its very wrapper object back; a new curve is wrapped as
     ``type(wrapper)(new, wrapper.time_map)``; None stays None. A field that was not wrapped keeps what the block
     assigned, except that a curve assigned to a ``CALENDAR_YEAR`` field of a ``BUSINESS_DAYS`` environment is
-    wrapped (``apply_declared_quoting``). If the block raises, every field gets its original object back.
+    wrapped (``apply_declared_quoting``). If the block or the re-wrapping on exit raises, every field gets its
+    original object back.
     """
     names = [f for f, _ in CASH_CURVE_FIELDS]
     originals = {f: getattr(env, f) for f in names}
@@ -241,16 +261,21 @@ def calendar_quoted_view(env):
             setattr(env, f, obj.inner)
     try:
         yield env
+        exits, declared = {}, []
+        for f, obj in originals.items():
+            new = getattr(env, f)
+            if is_clock_wrapped(obj):
+                if new is obj.inner:
+                    exits[f] = obj
+                elif new is not None and not is_clock_wrapped(new):
+                    exits[f] = type(obj)(new, obj.time_map)
+            elif new is not obj:
+                declared.append(f)
+        for f, obj in exits.items():
+            setattr(env, f, obj)
+        for f in declared:
+            apply_declared_quoting(env, f)
     except BaseException:
         for f, obj in originals.items():
             setattr(env, f, obj)
         raise
-    for f, obj in originals.items():
-        new = getattr(env, f)
-        if is_clock_wrapped(obj):
-            if new is obj.inner:
-                setattr(env, f, obj)
-            elif new is not None and not is_clock_wrapped(new):
-                setattr(env, f, type(obj)(new, obj.time_map))
-        elif new is not obj:
-            apply_declared_quoting(env, f)

@@ -35,6 +35,7 @@ class MarketDataConverter:
                                calendar=None,
                                rate_curve_quoting: Optional[CurveQuotingBasis] = None,
                                div_yield_quoting: Optional[CurveQuotingBasis] = None,
+                               basis_yield_quoting: Optional[CurveQuotingBasis] = None,
                                trading_clock_horizon: Optional[datetime] = None) -> PricingEnvironment:
         """
         Convert MarketDataPoint to PricingEnvironment.
@@ -46,6 +47,7 @@ class MarketDataConverter:
             calendar: Business-day calendar (required by BUSINESS_DAYS)
             rate_curve_quoting / div_yield_quoting: How the point's rate and dividend yield are quoted
                 (``CurveQuotingBasis``); a BUSINESS_DAYS environment refuses non-zero undeclared ones
+            basis_yield_quoting: Carried for a uniform environment surface (the point builds no basis yield)
             trading_clock_horizon: Horizon of the trading clock CALENDAR_YEAR curves are wrapped onto
             
         Returns:
@@ -82,6 +84,7 @@ class MarketDataConverter:
             calendar=calendar,
             rate_curve_quoting=rate_curve_quoting,
             div_yield_quoting=div_yield_quoting,
+            basis_yield_quoting=basis_yield_quoting,
             trading_clock_horizon=trading_clock_horizon,
         )
     

@@ -11,7 +11,9 @@ import time
 from copy import deepcopy
 
 from quantark.portfolio import Portfolio
-from quantark.priceenv.clock_validation import calendar_quoted_view, is_clock_wrapped
+from quantark.priceenv.clock_validation import (
+    calendar_quoted_view, is_clock_wrapped, refuse_cross_clock_relationship,
+)
 from quantark.priceenv import PricingEnvironment
 from quantark.param import (
     SpotQuote,
@@ -425,6 +427,8 @@ class DynamicScenarioEngine:
     #: The cash curve each scenario parameter moves (rate and dividend changes skip curve types they cannot shift).
     _CASH_PARAMETER_FIELDS = {"rate": "rate_curve", "dividend_yield": "div_yield", "div_yield": "div_yield",
                               "dividend": "div_yield"}
+    #: Changes followed by the configured basis<->dividend relationship.
+    _RELATIONSHIP_PARAMETERS = frozenset({"dividend_yield", "div_yield", "dividend", "basis"})
 
     def _apply_parameter_change(
         self,
@@ -439,7 +443,10 @@ class DynamicScenarioEngine:
         clock (0.15.0 spec D16). A change the native rules would skip on the wrapped curve's inner type is refused:
         skipping it would silently drop the scenario move.
         """
-        field = self._CASH_PARAMETER_FIELDS.get(change.parameter.lower())
+        param = change.parameter.lower()
+        if param in self._RELATIONSHIP_PARAMETERS:
+            refuse_cross_clock_relationship(env, self.config.basis_dividend_relationship_mode)
+        field = self._CASH_PARAMETER_FIELDS.get(param)
         wrapped = getattr(env, field) if field is not None else None
         with calendar_quoted_view(env):
             self._apply_native_parameter_change(env, change, portfolio, underlying)

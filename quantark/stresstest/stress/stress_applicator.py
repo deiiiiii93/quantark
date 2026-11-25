@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from quantark.priceenv import PricingEnvironment
-from quantark.priceenv.clock_validation import calendar_quoted_view
+from quantark.priceenv.clock_validation import calendar_quoted_view, refuse_cross_clock_relationship
 from quantark.param import (
     SpotQuote,
     VolatilitySurface,
@@ -35,6 +35,22 @@ if TYPE_CHECKING:
 
 class StressApplicator:
     _parameter_adapters: Dict[str, Callable[[PricingEnvironment, "Stress"], None]] = {}
+    #: Built-in cash-curve stresses: run on the calendar-quoted inners of TradingClock-wrapped curves (spec D16).
+    #: Every other adapter (spot, vol, user-registered) sees the environment's curves as they are.
+    _CASH_PARAMETERS = frozenset({"rate", "key_rate", "spread", "dividend_yield", "div_yield", "dividend", "basis"})
+    #: Stresses whose metadata may carry a basis<->dividend relationship mode.
+    _RELATIONSHIP_PARAMETERS = frozenset({"dividend_yield", "div_yield", "dividend", "basis"})
+
+    @staticmethod
+    def _relationship_mode(stress: "Stress") -> BasisDividendRelationshipMode:
+        """The stress's relationship mode, read as the dividend and basis stresses read it."""
+        mode_str = stress.metadata.get("relationship_mode") if stress.metadata else None
+        if not mode_str:
+            return BasisDividendRelationshipMode.INDEPENDENT
+        try:
+            return BasisDividendRelationshipMode.from_string(mode_str)
+        except ValueError:
+            return BasisDividendRelationshipMode.INDEPENDENT
 
     @classmethod
     def register_adapter(
@@ -169,8 +185,13 @@ class StressApplicator:
         param = stress.parameter.lower()
         adapter = StressApplicator._parameter_adapters.get(param)
         if adapter:
+            if param not in StressApplicator._CASH_PARAMETERS:
+                adapter(env, stress)
+                return
             # cash stresses are per calendar year: a TradingClock-wrapped curve is stressed through its
             # calendar-quoted inner and re-exposed on its own trading clock (0.15.0 spec D16)
+            if param in StressApplicator._RELATIONSHIP_PARAMETERS:
+                refuse_cross_clock_relationship(env, StressApplicator._relationship_mode(stress))
             with calendar_quoted_view(env):
                 adapter(env, stress)
             return

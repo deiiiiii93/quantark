@@ -162,3 +162,90 @@ def test_report_q_override_is_wrapped_on_a_declared_env():
     clone = _clone_env(_env(), q=0.05)
     assert type(clone.div_yield) is TradingClockDividendYield and clone.div_yield.inner.div_yield == 0.05
     assert clone.div_yield.clock.calendar is clone.calendar
+
+
+# --- CP2 fixes -----------------------------------------------------------------------------------------------------
+
+def test_report_sq_surface_base_point_equals_base_pv_on_declared_env():
+    """No double wrap: the spot x q surface at the base spot and q = base q is the base PV, bitwise."""
+    import numpy as np
+    from quantark.asset.equity.engine.analytical import BlackScholesEngine
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.asset.equity.report.autocallable_risk_report import _compute_pv_surface_sq
+    from quantark.util.enum import OptionType
+
+    env = _env()
+    product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=datetime(2026, 12, 15))
+    engine = BlackScholesEngine()
+    pv = _compute_pv_surface_sq(product=product, pricing_env=env, engine=engine, spot_grid=np.array([90.0, 100.0]),
+                                q_grid=np.array([0.02, 0.03]), base_div_yield=env.div_yield, base_q=0.02)
+    assert pv[1, 0] == engine.price(product, env)
+
+
+@pytest.mark.parametrize("parameter,mode", [
+    ("dividend_yield", "auto_adjust_basis"), ("dividend_yield", "synchronized"),
+    ("basis", "auto_adjust_dividend"), ("basis", "synchronized"),
+])
+def test_cross_curve_relationship_on_wrapped_curves_refuses(parameter, mode):
+    env = _env()
+    before = {f: getattr(env, f) for f in ("rate_curve", "div_yield", "basis_yield")}
+    stress = Stress(parameter, StressType.ABSOLUTE, 0.001, StressLevel.PORTFOLIO, metadata={"relationship_mode": mode})
+    with pytest.raises(ValidationError, match="relationship"):
+        StressApplicator._apply_stress_to_env(env, stress)
+    for f, obj in before.items():
+        assert getattr(env, f) is obj
+
+
+def test_independent_relationship_on_wrapped_curves_still_works():
+    env = _env()
+    StressApplicator._apply_stress_to_env(env, Stress("dividend_yield", StressType.ABSOLUTE, 0.001,
+                                                      StressLevel.PORTFOLIO, metadata={"relationship_mode": "independent"}))
+    assert type(env.div_yield) is TradingClockDividendYield
+
+
+def test_scenario_relationship_on_wrapped_curves_refuses():
+    from quantark.dynamicscenario.config import DynamicScenarioConfig
+    from quantark.stresstest.stress.stress_types import BasisDividendRelationshipMode
+    env = _env()
+    pf = Portfolio(portfolio_name="p", pricing_environments={"X": env})
+    engine = DynamicScenarioEngine(DynamicScenarioConfig(
+        basis_dividend_relationship_mode=BasisDividendRelationshipMode.AUTO_ADJUST_BASIS))
+    with pytest.raises(ValidationError, match="relationship"):
+        engine._apply_parameter_change(env, ParameterChange("dividend_yield", StressType.ABSOLUTE, 0.001), pf, "X")
+
+
+def test_view_exit_failure_restores_every_field():
+    env = _env()
+    before = {f: getattr(env, f) for f in ("rate_curve", "div_yield", "basis_yield")}
+    with pytest.raises(ValidationError):
+        with calendar_quoted_view(env):
+            env.div_yield = ContinuousDividendYield(0.05)
+            env.rate_curve = 0.05  # the re-wrap on exit refuses a non-curve
+    for f, obj in before.items():
+        assert getattr(env, f) is obj
+
+
+def test_custom_adapters_run_outside_the_view():
+    seen = {}
+
+    def adapter(env, stress):
+        seen["rate"] = env.rate_curve
+
+    StressApplicator.register_adapter("probe_param", adapter)
+    try:
+        env = _env()
+        StressApplicator._apply_stress_to_env(env, Stress("probe_param", StressType.ABSOLUTE, 0.0,
+                                                          StressLevel.PORTFOLIO))
+        assert seen["rate"] is env.rate_curve and type(seen["rate"]) is TradingClockRateCurve
+    finally:
+        StressApplicator.unregister_adapter("probe_param")
+
+
+def test_converter_accepts_basis_quoting():
+    from quantark.util.marketdata.converter import MarketDataConverter
+    from quantark.util.marketdata.models import MarketDataPoint
+    point = MarketDataPoint(timestamp=D0, asset_name="X", spot=100.0, volatility=0.2, rate=0.03, div_yield=0.02)
+    env = MarketDataConverter.to_pricing_environment(
+        point, DayCountConvention.BUSINESS_DAYS, 244, calendar=CAL, rate_curve_quoting=CQ, div_yield_quoting=CQ,
+        basis_yield_quoting=CQ, trading_clock_horizon=H)
+    assert env.basis_yield_quoting is CQ

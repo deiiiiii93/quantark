@@ -146,8 +146,17 @@ def _shift_dividend_yield(
     """
     if shift == 0.0:
         return base_div_yield
+    return _shifted_div(base_div_yield, shift)
+
+
+def _shifted_div(base_div_yield: DividendYield, shift: float) -> DividendYield:
+    """``ShiftedDividendYield(base, shift)``, through the calendar-quoted inner of a TradingClock wrapper.
+
+    The shift is per calendar year, so a wrapped yield moves its inner and keeps its own trading clock (spec D16);
+    shifting the wrapper itself would add a trading-axis shift and, on a declared environment, be wrapped a second
+    time. A native yield gets exactly ``ShiftedDividendYield(base, shift)``, as before.
+    """
     if is_clock_wrapped(base_div_yield):
-        # the shift is per calendar year: move the calendar-quoted inner, keep its trading clock (spec D16)
         return type(base_div_yield)(ShiftedDividendYield(base=base_div_yield.inner, shift=shift),
                                     base_div_yield.time_map)
     return ShiftedDividendYield(base=base_div_yield, shift=shift)
@@ -220,7 +229,7 @@ def _compute_pv_surface_sq(
     pv = np.zeros((spot_grid.size, q_grid.size), dtype=float)
     for j, q in enumerate(q_grid):
         shift = float(q) - float(base_q)
-        div_yield = ShiftedDividendYield(base=base_div_yield, shift=shift)
+        div_yield = _shifted_div(base_div_yield, shift)
         for i, s in enumerate(spot_grid):
             env = _clone_env(pricing_env, spot=float(s), div_yield=div_yield)
             if theta_step is None:
@@ -285,7 +294,7 @@ def _compute_pv_surface_sv(
         raise ValidationError(f"base_vol must be positive, got {base_vol}")
     pv = np.zeros((spot_grid.size, vol_grid.size), dtype=float)
     shift = float(q) - float(base_q)
-    div_yield = ShiftedDividendYield(base=base_div_yield, shift=shift)
+    div_yield = _shifted_div(base_div_yield, shift)
     for j, vol in enumerate(vol_grid):
         scale = float(vol) / float(base_vol)
         vol_surface = ScaledVolSurface(base=pricing_env.vol_surface, scale=scale)
@@ -1856,7 +1865,7 @@ def generate_snowball_risk_report(
             )
 
         def price_from_shock(spot_mult: float, q_shift: float) -> float:
-            div_yield = ShiftedDividendYield(base=base_div_yield, shift=q_shift)
+            div_yield = _shifted_div(base_div_yield, q_shift)
             shocked_env = _clone_env(
                 pricing_env, spot=base_spot * spot_mult, div_yield=div_yield
             )
