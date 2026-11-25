@@ -19,6 +19,7 @@ from quantark.param.div import ContinuousDividendYield
 from quantark.pnlexplain import ExplainMethod, PnLExplainConfig, ValuationSnapshot, explain
 from quantark.pnlexplain.equity.lifecycle import float_maturity_decrement
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
@@ -36,7 +37,8 @@ def _env(date, spot=100.0, business=True, calendar=CAL):
               div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=date)
     if business:
         kw.update(day_count_convention=DayCountConvention.BUSINESS_DAYS,
-                  bus_days_in_year=BUS_YEAR, calendar=calendar)
+                  bus_days_in_year=BUS_YEAR, calendar=calendar,
+                  rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR, div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     elif calendar is not None:
         kw.update(calendar=calendar, bus_days_in_year=BUS_YEAR)
     return PricingEnvironment(**kw)
@@ -89,7 +91,8 @@ def test_a_trading_clock_without_a_calendar_says_so():
         spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(volatility=0.22),
         rate_curve=FlatRateCurve(rate=0.02),
         div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=FRI,
-        day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=BUS_YEAR)
+        day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=BUS_YEAR,
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR, div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     eng = BlackScholesEngine()
     with pytest.raises(ValidationError, match="calendar"):
         explain(ValuationSnapshot(_call(M0), eng, env_no_cal, date=FRI),
@@ -101,6 +104,8 @@ def test_a_trading_clock_without_a_calendar_says_so():
                                       div_yield=ContinuousDividendYield(div_yield=0.01),
                                       valuation_date=MON,
                                       day_count_convention=DayCountConvention.BUSINESS_DAYS,
-                                      bus_days_in_year=BUS_YEAR),
+                                      bus_days_in_year=BUS_YEAR,
+                                      rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+                                      div_yield_quoting=CurveQuotingBasis.TRADING_YEAR),
                                   date=MON),
                 config=WF)

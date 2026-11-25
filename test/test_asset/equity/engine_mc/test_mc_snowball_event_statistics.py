@@ -36,6 +36,7 @@ from quantark.cashleg import EventDistribution, EventType, FixedPayoffLeg, LegDi
 from quantark.montecarlo.conditional_snowball import conditional_standard_snowball_event_record
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, create_calendar
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import CouponPayType, ObservationType
@@ -334,7 +335,8 @@ def test_continuous_rows_are_business_days_on_a_dated_contract():
     env = PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(volatility=0.25),
                              rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(div_yield=0.01),
                              valuation_date=valuation, day_count_convention=DayCountConvention.BUSINESS_DAYS,
-                             calendar=cal)
+                             calendar=cal, rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+                             div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     stats = SnowballMCEngine(params=grid.mc()).calculate_event_stats(product, env)
     table = stats.ki_table
     assert table.dates is not None and len(table.dates) == table.size

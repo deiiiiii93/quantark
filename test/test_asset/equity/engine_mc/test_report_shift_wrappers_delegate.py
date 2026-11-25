@@ -23,6 +23,7 @@ from quantark.param.div import (
 )
 from quantark.param.rrf.rate_curve import LinearRateCurve
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
 from quantark.util.exceptions import ValidationError
@@ -77,6 +78,7 @@ def test_cash_greeks_vega_on_a_clock_wrapped_surface_bumps_the_trading_vol():
         spot_quote=SpotQuote(6000.0), vol_surface=TradingClockVolSurface(FlatVolSurface(0.2), m),
         div_yield=ContinuousDividendYield(FLAT["q"]),
         day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=244, calendar=cal,
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR, div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
     p, e = make_dcn(DCN_A), DCNMCEngine(num_paths=2 ** 10, seed=42)
     up = deepcopy(env)

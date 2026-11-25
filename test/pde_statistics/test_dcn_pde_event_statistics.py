@@ -37,6 +37,7 @@ from quantark.asset.equity.product.option.dcn_option import DCNDirection
 from quantark.cashleg import EventType, FixedPayoffLeg, LegDirection, PaymentTrigger, fold_cash_legs
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.priceenv.date_axis import env_times
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
@@ -80,6 +81,8 @@ def env_on(d, spot=6000.0, *, day_count=DayCountConvention.ACT_365, calendar=Non
         spot_quote=SpotQuote(spot=spot), vol_surface=vol, rate_curve=FlatRateCurve(rate=FLAT["r"]),
         div_yield=ContinuousDividendYield(div_yield=FLAT["q"]), valuation_date=d, day_count_convention=day_count,
         calendar=calendar,
+        **({"rate_curve_quoting": CurveQuotingBasis.TRADING_YEAR, "div_yield_quoting": CurveQuotingBasis.TRADING_YEAR}
+           if day_count == DayCountConvention.BUSINESS_DAYS else {}),
     )
 
 

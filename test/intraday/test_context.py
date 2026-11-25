@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from quantark.priceenv import CurveQuotingBasis
 from quantark.intraday.context import resolve_context
 from quantark.intraday.events import EventKind, EventPhase
 from quantark.intraday.fixings import Fixing
@@ -46,7 +47,9 @@ def test_naive_timestamp_business_days_and_prewrapped_surface_are_rejected(sse_c
         resolve_context(_req(sse_calendar, sse_sessions, desk, ts=datetime(2026, 9, 15, 14, 59, 59)))
     req = _req(sse_calendar, sse_sessions, desk)
     env_bd = dataclasses.replace(req.pricing_env, day_count_convention=DayCountConvention.BUSINESS_DAYS,
-                                 calendar=sse_calendar, bus_days_in_year=244)
+                                 calendar=sse_calendar, bus_days_in_year=244,
+                                 rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+                                 div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     with pytest.raises(ValidationError, match="CALENDAR_DAYS"):
         resolve_context(dataclasses.replace(req, pricing_env=env_bd))
     ctx = resolve_context(req)

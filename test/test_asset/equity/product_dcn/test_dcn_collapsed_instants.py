@@ -26,6 +26,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.priceenv.date_axis import env_time
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.calendar.business_calendar import BusinessDayConvention as BDC
@@ -54,7 +55,7 @@ def us_env(d, spot=6000.0, adjust=BDC.PRECEDING, grid=False):
         spot_quote=SpotQuote(spot=spot), vol_surface=vol,
         rate_curve=FlatRateCurve(rate=FLAT["r"]), div_yield=ContinuousDividendYield(div_yield=FLAT["q"]),
         valuation_date=d, day_count_convention=DayCountConvention.BUSINESS_DAYS, calendar=US,
-        holiday_time_adjustment=adjust)
+        holiday_time_adjustment=adjust, rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR, div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
 
 
 ENGINES = {

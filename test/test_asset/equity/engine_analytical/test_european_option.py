@@ -17,6 +17,7 @@ from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import NumericalError, ValidationError
@@ -458,6 +459,8 @@ def test_date_based_option_business_days():
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         bus_days_in_year=252,
         calendar=calendar,
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
 
     # Create call option with dates

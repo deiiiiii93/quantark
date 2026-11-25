@@ -55,6 +55,7 @@ from quantark.asset.equity.product.option.snowball_config import (
 )
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import (
     CalendarType,
     DayCountConvention,
@@ -153,6 +154,8 @@ def create_pricing_env() -> PricingEnvironment:
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         bus_days_in_year=BUS_DAYS_IN_YEAR,
         calendar=BUSINESS_CALENDAR,
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
 
 

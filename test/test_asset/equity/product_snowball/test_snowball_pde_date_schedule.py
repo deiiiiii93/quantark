@@ -23,6 +23,7 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import ObservationType
 from quantark.util.exceptions import ValidationError
@@ -44,6 +45,8 @@ def _env(day_count=None):
               valuation_date=T0, calendar=CAL, bus_days_in_year=244)
     if day_count is not None:
         kw["day_count_convention"] = day_count
+        if day_count == DayCountConvention.BUSINESS_DAYS:
+            kw.update(rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR, div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     return PricingEnvironment(**kw)
 
 

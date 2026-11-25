@@ -26,6 +26,7 @@ from quantark.param.quote.spot_quote import SpotQuote
 from quantark.param.rrf.rate_curve import FlatRateCurve
 from quantark.param.vol.vol_surface import FlatVolSurface
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import (
     CalendarType,
     DayCountConvention,
@@ -229,6 +230,8 @@ def _business_day_pricing_env():
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         bus_days_in_year=244,
         calendar=create_calendar(CalendarType.CHINA_SSE),
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
 
 

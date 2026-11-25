@@ -20,6 +20,7 @@ from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.asset.equity.param import EngineParams
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.enum import OptionType
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 
@@ -314,6 +315,9 @@ def demo_date_based_options():
         # BUSINESS_DAYS requires a real calendar: the old no-calendar
         # fallback computed exactly ACT/365 (the denominator cancels).
         calendar=create_calendar(CalendarType.CHINA_SSE),
+        # native r / q on a BUSINESS_DAYS clock: declare they are quoted per trading year
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
 
     call_business = EuropeanVanillaOption(

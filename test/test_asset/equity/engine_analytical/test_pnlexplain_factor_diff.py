@@ -14,6 +14,7 @@ from quantark.pnlexplain.equity.coordinate import resolve_coordinate
 from quantark.pnlexplain.equity.factor_diff import build_factor_moves, validate_pair
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import OptionType
 from quantark.util.enum.deltaone_enums import DeltaOneType
@@ -107,7 +108,8 @@ def test_validate_pair_rejects_order_clock_quantity_currency():
     with pytest.raises(ValidationError):
         validate_pair(s0, ValuationSnapshot(_call(1.0 - 3 / 365), BlackScholesEngine(), e_us, date=MON))
     e_bd = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON, cal,
-                day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=244)
+                day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=244,
+                rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR, div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     with pytest.raises(ValidationError):
         validate_pair(s0, ValuationSnapshot(_call(1.0 - 3 / 365), BlackScholesEngine(), e_bd, date=MON))
     with pytest.raises(ValidationError):

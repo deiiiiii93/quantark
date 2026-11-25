@@ -6,6 +6,7 @@ from datetime import timedelta
 import pytest
 
 import run_fixings_fixtures as F
+from quantark.priceenv import CurveQuotingBasis
 from quantark.asset.equity.product.option import RangeAccrualConfig, RangeAccrualObservationRecord, RangeAccrualOption
 from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
 from quantark.util.exceptions import ValidationError
@@ -13,6 +14,11 @@ from quantark.util.fixings import MissingFixingWarning, snap_time
 from quantark.util.numerical import is_close
 
 DAY = 1.0 / 365.0
+
+
+#: the fixture environment's native r / q read per trading year on a BUSINESS_DAYS clock
+_EQ_BD_QUOTING = dict(rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+                      div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
 
 
 def _aged(product, days):
@@ -435,7 +441,7 @@ def test_a_fixing_live_for_several_instants_takes_the_first_live_instants_spot()
     kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
     times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
              for d in F.fixing_dates()]
-    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw))
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw, **_EQ_BD_QUOTING))
     pid_d, pid_n = list(pf.positions)
     rec = RunFixingRecorder()
     rec.register(pf)
@@ -485,7 +491,7 @@ def test_business_day_clock_twins_age_identically():
     from quantark.util.calendar import calculate_year_fraction
     times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
              for d in F.fixing_dates()]
-    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, **kw))
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, **kw, **_EQ_BD_QUOTING))
     pid_d, pid_n = list(pf.positions)
     rec = RunFixingRecorder()
     rec.register(pf)
@@ -502,7 +508,7 @@ def test_a_same_date_refresh_on_a_later_instant_keeps_the_first_live_instants_sp
     kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
     times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
              for d in F.fixing_dates()]
-    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw))
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw, **_EQ_BD_QUOTING))
     pid_d, pid_n = list(pf.positions)
     rec = RunFixingRecorder()
     rec.register(pf)
@@ -681,7 +687,7 @@ def test_w6_participants_record_what_the_pre_w4b_step_recorded_when_weekend_rows
         observation_records=[AsianObservationRecord(observation_time=t) for t in times])
     books = {
         "equity": (F.eq_book(F.ra_dated(), F.ra_numeric(times=times), F.asian_dated(), asian_numeric,
-                             env=F.eq_env(0, spot=105.0, **kw)), F.UNDERLYING, 105.0, 120.0),
+                             env=F.eq_env(0, spot=105.0, **kw, **_EQ_BD_QUOTING)), F.UNDERLYING, 105.0, 120.0),
         "fx": (F.fx_book(F.fx_ra("domestic", "dated"), F.fx_ra("domestic", "numeric", times=times, maturity=expiry),
                          F.fx_ra("foreign", "dated"), F.fx_ra("foreign", "numeric", times=times, maturity=expiry),
                          env=F.fx_env(0, spot=1.25, **kw)), "EURUSD", 1.25, 1.35),

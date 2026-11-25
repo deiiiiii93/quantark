@@ -16,6 +16,7 @@ from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculato
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
@@ -46,6 +47,8 @@ def _business_env() -> PricingEnvironment:
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         bus_days_in_year=244,
         calendar=create_calendar(CalendarType.CHINA_SSE),
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
 
 

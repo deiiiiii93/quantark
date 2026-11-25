@@ -17,6 +17,7 @@ from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.product.option import create_ko_reset_snowball
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.enum import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
 
@@ -152,6 +153,8 @@ def _dated_ko_reset_on_business_day_clock():
         bus_days_in_year=244,
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         calendar=calendar,
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
     return product, pricing_env, calendar
 

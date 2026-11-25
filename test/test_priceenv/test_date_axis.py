@@ -11,6 +11,7 @@ import pytest
 
 from quantark.param import FlatRateCurve
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.priceenv.date_axis import env_time, env_times
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.calendar.business_calendar import BusinessDayConvention as BDC
@@ -24,6 +25,8 @@ V = datetime(2025, 6, 30)
 
 def _env(dc=DayCountConvention.CALENDAR_DAYS, calendar=None, adjust=None, v=V, days=252):
     kw = {} if adjust is None else {"holiday_time_adjustment": adjust}
+    if dc == DayCountConvention.BUSINESS_DAYS:
+        kw["rate_curve_quoting"] = CurveQuotingBasis.TRADING_YEAR
     return PricingEnvironment(rate_curve=FlatRateCurve(0.02), valuation_date=v, day_count_convention=dc,
                               calendar=calendar, bus_days_in_year=days, **kw)
 

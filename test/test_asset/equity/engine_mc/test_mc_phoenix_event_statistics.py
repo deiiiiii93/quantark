@@ -25,6 +25,7 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
+from quantark.priceenv import CurveQuotingBasis
 from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.param import MCParams
@@ -353,7 +354,8 @@ def test_continuous_rows_are_business_days_on_a_dated_contract():
     env = PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(volatility=0.25),
                              rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(div_yield=0.01),
                              valuation_date=valuation, day_count_convention=DayCountConvention.BUSINESS_DAYS,
-                             calendar=cal)
+                             calendar=cal, rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+                             div_yield_quoting=CurveQuotingBasis.TRADING_YEAR)
     stats = PhoenixMCEngine(params=grid.mc()).calculate_event_stats(product, env)
     table = stats.ki_table
     assert table.dates is not None and len(table.dates) == table.size

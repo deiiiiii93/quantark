@@ -34,6 +34,7 @@ from quantark.asset.equity.product.option.snowball_config import (
 )
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
@@ -266,6 +267,8 @@ def main():
         bus_days_in_year=bus_days_in_year,
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         calendar=calendar,
+        rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR,
+        div_yield_quoting=CurveQuotingBasis.TRADING_YEAR,
     )
 
     print(
