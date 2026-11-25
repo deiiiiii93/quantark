@@ -111,13 +111,16 @@ class _EnvMap:
         return self._map
 
 
-def _rewrap_if_moved(env, field: str, obj, env_map: _EnvMap) -> None:
-    """A CALENDAR_YEAR wrapper sits on the env's map: same anchor, same horizon; otherwise its inner moves there."""
+def _on_env_map(env, field: str, obj, env_map: _EnvMap):
+    """A CALENDAR_YEAR wrapper sits on the env's map: same anchor, same horizon; otherwise its inner moves there.
+
+    Returns the object the field should hold (``obj`` itself when it already sits on the env's map).
+    """
     _check_clock(field, obj.clock, env)
     tm = obj.time_map
     if tm.anchor_date == env.valuation_date and tm.horizon_date == env.trading_clock_horizon:
-        return
-    setattr(env, field, obj.with_time_map(env_map.get(field)))
+        return obj
+    return obj.with_time_map(env_map.get(field))
 
 
 def resolve_cash_curve_quoting(env) -> None:
@@ -129,6 +132,14 @@ def resolve_cash_curve_quoting(env) -> None:
     is unwrapped to its inner) and ``TRADING_YEAR`` is refused.
     """
     business = env.day_count_convention == DayCountConvention.BUSINESS_DAYS
+    if business and env.calendar is None:
+        # D14 at construction: a later valuation-date move would need the calendar to re-anchor
+        for _field, qfield in CASH_CURVE_FIELDS:
+            if getattr(env, qfield) is CurveQuotingBasis.CALENDAR_YEAR:
+                raise ValidationError(
+                    f"{qfield}=CALENDAR_YEAR on a BUSINESS_DAYS environment without a calendar; the environment "
+                    "needs its calendar to build the trading clock it wraps calendar-quoted curves onto"
+                )
     env_map = _EnvMap(env)
     for field, qfield in CASH_CURVE_FIELDS:
         obj, quoting = getattr(env, field), getattr(env, qfield)
@@ -163,7 +174,7 @@ def resolve_cash_curve_quoting(env) -> None:
         if obj is None:
             continue
         if wrapped:
-            _rewrap_if_moved(env, field, obj, env_map)
+            setattr(env, field, _on_env_map(env, field, obj, env_map))
         else:
             setattr(env, field, _wrapper_for(field)(obj, env_map.get(field)))
 
@@ -171,13 +182,19 @@ def resolve_cash_curve_quoting(env) -> None:
 def re_anchor_declared_curves(env) -> None:
     """Keep every CALENDAR_YEAR wrapper on the environment's valuation date after it is reassigned (spec D13).
 
-    Only re-anchors: an undeclared or TRADING_YEAR curve is never touched and nothing is refused here, so a
-    bumped copy that carries a curve assigned after construction keeps working.
+    Only re-anchors: an undeclared or TRADING_YEAR curve is never touched, and the declaration refusals of
+    construction are not re-run, so a bumped copy that carries a curve assigned after construction keeps working.
+    It raises only when the re-anchor itself cannot be built (the new date is not before
+    ``trading_clock_horizon``, or a wrapper's clock no longer matches the environment). Every new wrapper is built
+    before any field is assigned, so a raise leaves the curve fields as they were.
     """
     if env.day_count_convention != DayCountConvention.BUSINESS_DAYS:
         return
     env_map = _EnvMap(env)
+    updates = {}
     for field, qfield in CASH_CURVE_FIELDS:
         obj = getattr(env, field)
         if getattr(env, qfield) is CurveQuotingBasis.CALENDAR_YEAR and is_clock_wrapped(obj):
-            _rewrap_if_moved(env, field, obj, env_map)
+            updates[field] = _on_env_map(env, field, obj, env_map)
+    for field, obj in updates.items():
+        setattr(env, field, obj)

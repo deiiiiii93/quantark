@@ -211,6 +211,43 @@ def test_calendar_year_without_calendar_refuses():
                            rate_curve_quoting=CAL_Q, trading_clock_horizon=HORIZON)
 
 
+@pytest.mark.parametrize("rate", [
+    pytest.param(lambda: TradingClockRateCurve(FlatRateCurve(0.02), _map()), id="matching-wrapper"),
+    pytest.param(lambda: FlatRateCurve(0.0), id="zero-native"),
+])
+def test_calendar_year_without_calendar_refuses_up_front(rate):
+    """D14 at construction, not at the first theta bump: no map need be built for the refusal."""
+    with pytest.raises(ValidationError, match="calendar"):
+        PricingEnvironment(rate_curve=rate(), valuation_date=VAL, day_count_convention=DayCountConvention.BUSINESS_DAYS,
+                           calendar=None, bus_days_in_year=244, rate_curve_quoting=CAL_Q,
+                           div_yield_quoting=CAL_Q, trading_clock_horizon=HORIZON)
+
+
+def test_failed_reassignment_leaves_env_unchanged():
+    env = _env(**_declared(CAL_Q, trading_clock_horizon=HORIZON))
+    before = {f: getattr(env, f) for f in FIELDS}
+    with pytest.raises(ValidationError):
+        env.valuation_date = datetime(2027, 7, 1)
+    assert env.valuation_date == VAL
+    for f in FIELDS:
+        assert getattr(env, f) is before[f]
+
+
+def test_flat_subclass_is_not_assumed_zero():
+    class Overridden(FlatRateCurve):
+        def get_rate(self, t):
+            return 0.05
+    assert not Overridden(0.0).is_identically_zero()
+
+    class OverriddenQ(ContinuousDividendYield):
+        pass
+
+    class OverriddenB(FlatBasisYield):
+        pass
+    assert not OverriddenQ(0.0).is_identically_zero()
+    assert not OverriddenB(0.0).is_identically_zero()
+
+
 def test_valuation_at_or_past_horizon_refuses_naming_field():
     with pytest.raises(ValidationError, match="trading_clock_horizon"):
         _env(valuation_date=HORIZON, **_declared(CAL_Q, trading_clock_horizon=HORIZON))

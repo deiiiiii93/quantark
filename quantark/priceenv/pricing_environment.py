@@ -75,12 +75,19 @@ class PricingEnvironment:
     trading_clock_horizon: Optional[datetime] = None
 
     def __setattr__(self, name, value):
-        object.__setattr__(self, name, value)
         # After construction, a new valuation date moves the environment's own trading clock with it (spec D13);
         # the dataclass __init__ assigns fields before ``_clock_ready`` exists, so construction never lands here.
-        if name == "valuation_date" and self.__dict__.get("_clock_ready", False):
-            from quantark.priceenv.clock_validation import re_anchor_declared_curves
+        if name != "valuation_date" or not self.__dict__.get("_clock_ready", False):
+            object.__setattr__(self, name, value)
+            return
+        from quantark.priceenv.clock_validation import re_anchor_declared_curves
+        previous = self.valuation_date
+        object.__setattr__(self, name, value)
+        try:
             re_anchor_declared_curves(self)
+        except Exception:
+            object.__setattr__(self, name, previous)  # a refused move leaves the environment as it was
+            raise
 
     def __post_init__(self):
         """Validate pricing environment."""

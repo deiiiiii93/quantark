@@ -166,7 +166,8 @@ class FlatBasisYield(BasisYield):
         return self.basis_yield
 
     def is_identically_zero(self) -> bool:
-        return self.basis_yield == 0.0  # exact by contract: zero is the only clock-invariant basis
+        # exact by contract; a subclass may override the basis, so only this class itself vouches for it
+        return type(self) is FlatBasisYield and self.basis_yield == 0.0
 
     def __repr__(self):
         return f"FlatBasisYield(basis={self.basis_yield:.4f})"

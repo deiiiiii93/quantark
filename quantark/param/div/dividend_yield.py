@@ -102,7 +102,8 @@ class ContinuousDividendYield(DividendYield):
         return ContinuousDividendYield(self.div_yield + shift)
 
     def is_identically_zero(self) -> bool:
-        return self.div_yield == 0.0  # exact by contract: zero is the only clock-invariant yield
+        # exact by contract; a subclass may override the yield, so only this class itself vouches for it
+        return type(self) is ContinuousDividendYield and self.div_yield == 0.0
 
     def __repr__(self):
         return f"ContinuousDividendYield(yield={self.div_yield:.2%})"

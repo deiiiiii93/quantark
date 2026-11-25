@@ -165,7 +165,8 @@ class FlatRateCurve(RateCurve):
         return FlatRateCurve(self.rate + shift)
 
     def is_identically_zero(self) -> bool:
-        return self.rate == 0.0  # exact by contract: zero is the only clock-invariant rate
+        # exact by contract; a subclass may override the rate, so only this class itself vouches for it
+        return type(self) is FlatRateCurve and self.rate == 0.0
     
     def __repr__(self):
         return f"FlatRateCurve(rate={self.rate:.2%})"
