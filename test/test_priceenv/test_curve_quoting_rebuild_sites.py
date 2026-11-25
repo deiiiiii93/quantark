@@ -119,3 +119,32 @@ def test_numerical_theta_equals_fresh_env_pnl_bitwise():
     theta = greeks.theta if hasattr(greeks, "theta") else greeks["theta"]
     engine = BlackScholesEngine()
     assert theta == engine.price(option(), _declared(D1)) - engine.price(option(), _declared(D0))
+
+
+def test_hand_wrapped_numerical_theta_equals_fresh_env_pnl_bitwise():
+    """Owner D7: a 0.14.0 hand-wrapped (undeclared) env re-anchors too, so its theta is the correct one.
+
+    Before 0.15.0 the bumped copy kept a map anchored at D0 and gave -0.020257 across CNY instead of -0.027297.
+    """
+    from quantark.param.div import TradingClockDividendYield
+    from quantark.param.rrf import TradingClockRateCurve
+    from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
+
+    def hand(d):
+        m = BusinessTimeMap(TradingClock(CAL, 244), d, H)
+        return PricingEnvironment(rate_curve=TradingClockRateCurve(FlatRateCurve(0.03), m),
+                                  div_yield=TradingClockDividendYield(ContinuousDividendYield(0.02), m),
+                                  valuation_date=d, spot_quote=SpotQuote(100.0), vol_surface=FlatVolSurface(0.2),
+                                  day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=244,
+                                  calendar=CAL)
+
+    expiry = datetime(2026, 12, 15)
+
+    def option():
+        return EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=expiry)
+
+    greeks = GreeksCalculator().calculate(product=option(), pricing_env=hand(D0), engine=BlackScholesEngine(),
+                                          greeks=["theta"], method="numerical")
+    theta = greeks.theta if hasattr(greeks, "theta") else greeks["theta"]
+    engine = BlackScholesEngine()
+    assert theta == engine.price(option(), hand(D1)) - engine.price(option(), hand(D0))

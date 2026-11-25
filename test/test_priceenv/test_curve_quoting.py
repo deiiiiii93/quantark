@@ -164,14 +164,41 @@ def test_mismatched_clock_still_refuses():
         _env(rate_curve=w, **_declared(CAL_Q, trading_clock_horizon=HORIZON))
 
 
-# --- AC6: undeclared hand wrappers are 0.14.0 behaviour -------------------------------------------------------------
+# --- AC6 (owner D7): undeclared hand wrappers re-anchor on their own horizon ----------------------------------------
 
-def test_undeclared_hand_wrapper_untouched_even_off_anchor():
-    w = TradingClockRateCurve(FlatRateCurve(0.02), _map(anchor=datetime(2026, 1, 5)))
+def test_undeclared_hand_wrapper_on_anchor_is_kept():
+    w = TradingClockRateCurve(FlatRateCurve(0.02), _map())
     env = _env(rate_curve=w, div_yield=None, basis_yield=None)
     assert env.rate_curve is w
-    env.valuation_date = datetime(2026, 3, 2)
-    assert env.rate_curve is w
+
+
+def test_undeclared_hand_wrapper_off_anchor_re_anchors_at_construction():
+    own_horizon = datetime(2027, 3, 1)
+    w = TradingClockRateCurve(FlatRateCurve(0.02), _map(anchor=datetime(2026, 1, 5), horizon=own_horizon))
+    env = _env(rate_curve=w, div_yield=None, basis_yield=None)
+    assert env.rate_curve.inner is w.inner
+    assert env.rate_curve.time_map.anchor_date == VAL and env.rate_curve.time_map.horizon_date == own_horizon
+    hand = TradingClockRateCurve(FlatRateCurve(0.02), _map(horizon=own_horizon))
+    for u in (1 / 244.0, 0.3, 1.0):
+        assert env.get_discount_factor(u) == hand.get_discount_factor(u)
+
+
+@pytest.mark.parametrize("convention", [DayCountConvention.BUSINESS_DAYS, DayCountConvention.CALENDAR_DAYS])
+def test_undeclared_hand_wrapper_re_anchors_on_assignment(convention):
+    w = TradingClockDividendYield(ContinuousDividendYield(0.01), _map())
+    env = _env(convention=convention, calendar=CAL, rate_curve=FlatRateCurve(0.0), div_yield=w, basis_yield=None)
+    d2 = datetime(2026, 3, 2)
+    env.valuation_date = d2
+    assert env.div_yield.time_map.anchor_date == d2 and env.div_yield.time_map.horizon_date == HORIZON
+    assert env.div_yield.inner is w.inner
+
+
+def test_undeclared_hand_wrapper_past_its_horizon_refuses():
+    w = TradingClockRateCurve(FlatRateCurve(0.02), _map(horizon=datetime(2026, 6, 1)))
+    env = _env(rate_curve=w, div_yield=None, basis_yield=None)
+    with pytest.raises(ValidationError, match="rate_curve"):
+        env.valuation_date = datetime(2026, 7, 1)
+    assert env.rate_curve is w and env.valuation_date == VAL
 
 
 # --- AC7: non-BUSINESS_DAYS -----------------------------------------------------------------------------------------

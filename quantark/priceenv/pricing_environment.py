@@ -56,7 +56,8 @@ class PricingEnvironment:
             ``CALENDAR_YEAR`` reads the curve as is and ``TRADING_YEAR`` is refused. See docs/trading-clock.md.
         trading_clock_horizon: End of the trading clock the environment wraps CALENDAR_YEAR curves onto; strictly
             after the last date priced (last date + 1 day is safe). Needed only when a curve is wrapped.
-            Reassigning ``valuation_date`` re-anchors the wrapped curves at the new date on the same horizon.
+            Reassigning ``valuation_date`` re-anchors the wrapped curves at the new date on the same horizon; an
+            undeclared hand-wrapped cash curve is re-anchored on its own map's horizon, at construction too.
     """
 
     rate_curve: RateCurve
@@ -75,16 +76,17 @@ class PricingEnvironment:
     trading_clock_horizon: Optional[datetime] = None
 
     def __setattr__(self, name, value):
-        # After construction, a new valuation date moves the environment's own trading clock with it (spec D13);
+        # After construction, a new valuation date moves every trading-clock-wrapped cash curve with it (spec D13,
+        # owner ruling D7);
         # the dataclass __init__ assigns fields before ``_clock_ready`` exists, so construction never lands here.
         if name != "valuation_date" or not self.__dict__.get("_clock_ready", False):
             object.__setattr__(self, name, value)
             return
-        from quantark.priceenv.clock_validation import re_anchor_declared_curves
+        from quantark.priceenv.clock_validation import re_anchor_cash_curves
         previous = self.valuation_date
         object.__setattr__(self, name, value)
         try:
-            re_anchor_declared_curves(self)
+            re_anchor_cash_curves(self)
         except Exception:
             object.__setattr__(self, name, previous)  # a refused move leaves the environment as it was
             raise
