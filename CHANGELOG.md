@@ -22,7 +22,7 @@ DCN prices and statistics move on purpose.
   times are `quantark.priceenv.date_axis.env_time(env, date, anchor=schedule.valuation_date)`, so date-rolled theta
   and `theta_shift` (which price a schedule dated away from the env) keep their meaning. `DCNOption.get_maturity(env)`
   is on the same axis (`get_maturity()` without an env keeps the old ACT/365F value for outside callers). Coupon
-  accrual (30/360 contract data) does not move. Size of the move, `SAMPLE_DCN_A` (N = 1e7) at inception, PDE: +20,678
+  accrual (30/360 contract data) does not move. Size of the move, `SAMPLE_DCN_A` (N = 1e7) at inception, PDE: -20,678
   on an ACT_360 environment and +12,476 on an SSE `BUSINESS_DAYS` (244) environment vs its CALENDAR_DAYS price
   (`test_dcn_env_axis_gate.py`).
 - **Schedule dates on one instant share one grid column.** When the environment's clock puts two DCN dates at the
@@ -61,7 +61,9 @@ DCN prices and statistics move on purpose.
 - `quantark/priceenv` and the DCN engine directories are fingerprinted by the intraday certificate trees
   (`COMMON_TREES`, `PDE_TREES`, `MC_TREES`): their next amendment re-runs rather than carrying forward. A new
   `PricingEnvironment` dataclass field changes every environment's execution-cache fingerprint (cache keys only).
-- Still open: `PricingSession` `EVENT_STATS` is accepted by 1 of the 8 DCN engines (the next release); a dated
+- Still open: the `PricingSession` `EVENT_STATS` operation is accepted only by `HestonDCNPDESolver` among the 8 DCN
+  engines -- the 5 DCN MC engines serve statistics as a `PRICE_DETAILED` output, `DCNPDEEngine` and
+  `LocalVolDCNPDEEngine` not at all (the next release); a dated
   snowball with two knock-out records on one environment instant is refused by QUAD V2 and priced differently by PDE
   and MC.
 

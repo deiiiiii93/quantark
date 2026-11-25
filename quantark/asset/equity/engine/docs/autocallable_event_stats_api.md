@@ -76,7 +76,7 @@ grid-dependent and shrinking under refinement on the PDE and QUAD V1 (see
 | `post_ki_offsets`, `termination` | REBASED KO-reset only (both or neither) |
 | `receivables` | cash decided at or before valuation and paid after it (possibly empty) |
 | `ledger` | payment-date view of all cash |
-| `expected_lifetime` | E[time of the observation that decides the note]: the KO row's time if it knocks out, otherwise the final observation. A KO at valuation gives 0. On the engine's pricing axis (DCN: its ACT/365F axis). |
+| `expected_lifetime` | E[time of the observation that decides the note]: the KO row's time if it knocks out, otherwise the final observation. A KO at valuation gives 0. On the engine's pricing axis (DCN, 0.14.0: the environment's axis from the schedule's valuation date). |
 | `total_discounted_cash`, `total_cash_to_pay` | the cash sums of the identity (computed) |
 | `reconciliation_error`, `probability_residual` | the identities (computed) |
 | `provenance` | `StatisticsProvenance(statistics_model, price_model)`; required |
@@ -402,11 +402,14 @@ opt-in `("quad_v1_forward_density", "quad_v1")` route was removed in 0.13.0.) Th
 
 ### DCN time axis (all DCN engines)
 
-A DCN prices on its own ACT/365F grid times and discounts them on the environment curve. Its
-statistics use the same axis, so the identities and the folded route agree with `price()`; dates
-are exact. Under a `BUSINESS_DAYS` or `ACT_360` environment those times are not the environment's
-axis. Fixing that moves DCN prices and is left to a separate release. Receivable rows carry the
-decision time on the DCN axis and the payment time `price()` discounted the flow at.
+Since 0.14.0 every DCN time is on the pricing environment's axis
+(`quantark.priceenv.date_axis.env_time`, anchored at the schedule's valuation date): its day-count
+convention, calendar, `bus_days_in_year` and `holiday_time_adjustment`. CALENDAR_DAYS / ACT_365
+environments give the pre-0.14 ACT/365F times bit for bit. The statistics use the same axis, so the
+identities and the folded route agree with `price()`; dates are exact. KI dates the environment puts
+on one instant share one grid column, and the KI table has one row per instant, dated by its earliest
+KI date. Receivable rows carry the decision time and the payment time on the same axis
+(`dcn_valuation.dcn_pending_flows`).
 
 ### QUAD V2
 

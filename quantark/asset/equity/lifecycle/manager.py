@@ -132,7 +132,8 @@ def realized_leg_outcome(tracker, book, events: List[LifecycleEvent], date: pd.T
     )
 
 
-#: the id prefix of a DCN tracker's ledger flows (``dcn:<kind>:<YYYY-MM-DD>``, ``lifecycle/dcn.py``)
+#: the id prefix of a DCN tracker's ledger flows (``dcn:<kind>:<YYYY-MM-DD>``, ``lifecycle/dcn.py``), read on the
+#: tracker's own id before ``_book_events`` namespaces it by position
 _DCN_FLOW_PREFIX = "dcn:"
 
 
@@ -154,6 +155,8 @@ class PortfolioLifecycleManager:
         self.pending_receivable_pv: float = 0.0
         self.paid_cash: float = 0.0
         self._cashflow_underlyings: Dict[str, str] = {}
+        # ledger ids of DCN tracker flows (revalued on the environment's axis as DCN price() does, spec D15)
+        self._dcn_cashflow_ids: set = set()
         # A time-based flow's times run from its tracker's clock origin (the contract's initial_date when set,
         # tracker clock decision A, 2026-10-09), not from base_date: each flow is valued on its own clock.
         self._cashflow_origins: Dict[str, pd.Timestamp] = {}
@@ -510,6 +513,9 @@ class PortfolioLifecycleManager:
                     metadata=metadata,
                 )
                 self.ledger.register(ledger_cashflow)
+                if cashflow.cashflow_id.startswith(_DCN_FLOW_PREFIX):
+                    # a DCN tracker's flow (its own id, before the position namespace): timed as DCN price()
+                    self._dcn_cashflow_ids.add(global_id)
                 self._cashflow_underlyings[global_id] = underlying
                 self._cashflow_origins[global_id] = (
                     self.base_date if clock_origin is None else pd.Timestamp(clock_origin).normalize()
@@ -544,7 +550,7 @@ class PortfolioLifecycleManager:
 
             single = LifecycleCashflowLedger([cashflow])
             if single.pending(point):
-                if point.date is not None and cashflow.cashflow_id.startswith(_DCN_FLOW_PREFIX):
+                if point.date is not None and cashflow.cashflow_id in self._dcn_cashflow_ids:
                     # a DCN flow is timed as DCN price() times it (the environment's axis, spec D15)
                     from quantark.asset.equity.engine.dcn_valuation import dcn_pending_pv
                     pending_pv += dcn_pending_pv(single, point, valuation_env)

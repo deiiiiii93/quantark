@@ -12,7 +12,10 @@ import pytest
 
 from quantark.asset.equity.engine.dcn_valuation import settle_final_observation
 from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
-from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import HestonDCNMCEngine, LocalVolDCNMCEngine
+from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import (
+    HestonDCNMCEngine, LocalVolDCNMCEngine, QEDCNMCEngine, coupled_heston_ladder_pair,
+)
+from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
 from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import HestonDCNPDESolver, LocalVolDCNPDEEngine
 from quantark.asset.equity.lifecycle import DCNLifecycleState, ValuationPoint
@@ -58,6 +61,8 @@ ENGINES = {
     "mc": lambda: DCNMCEngine(num_paths=4096, seed=7),
     "mc_lv": lambda: LocalVolDCNMCEngine(num_paths=4096, seed=7),
     "mc_heston": lambda: HestonDCNMCEngine(model_params=HESTON, num_paths=4096, seed=7, num_batches=2),
+    "mc_qe": lambda: QEDCNMCEngine(model_params=HESTON, num_paths=4096, seed=7, num_batches=2),
+    "mc_coupled": lambda: coupled_heston_ladder_pair(HESTON, 1, HestonMCScheme.QUADEXP_M, num_paths=4096, seed=7)[0],
     "pde": lambda: DCNPDEEngine(PDEParams(accuracy="fast")),
     "pde_lv": lambda: LocalVolDCNPDEEngine(params=PDEParams(accuracy="fast")),
     "adi_heston": lambda: HestonDCNPDESolver(HESTON, n_x=51, n_v=21),
@@ -156,16 +161,30 @@ def test_portfolio_ledger_times_dcn_receivables_as_the_price(adjust):
 
     import pandas as pd
 
+    from quantark.asset.equity.lifecycle.events import LifecycleEvent
     from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
 
-    cf = RealizedCashflow(cashflow_id=f"dcn:coupon:{JUN3:%Y-%m-%d}", event_type=LifecycleEventType.COUPON,
-                          amount=10_000.0, determination_date=JUN3, payment_date=JUL4)
+    def coupon(cashflow_id):
+        return RealizedCashflow(cashflow_id=cashflow_id, event_type=LifecycleEventType.COUPON, amount=10_000.0,
+                                determination_date=JUN3, payment_date=JUL4)
+
     manager = PortfolioLifecycleManager(JUN3)
-    manager.ledger = LifecycleCashflowLedger([cf])
-    manager._cashflow_underlyings = {cf.cashflow_id: "SPX"}
+    # booked as a run books them: the tracker's id, namespaced by position (``pos:dcn:coupon:...``)
+    for position_id, cashflow_id in (("dcn_pos", f"dcn:coupon:{JUN3:%Y-%m-%d}"), ("other_pos", "coupon:2025-06-03")):
+        manager._book_events(position_id, "SPX", [LifecycleEvent(event_type=LifecycleEventType.COUPON, date=JUN3,
+                                                                 spot=6000.0, realized_cashflow=coupon(cashflow_id))])
     env = us_env(JUL3, adjust=adjust)
-    manager._revalue_ledger(SimpleNamespace(pricing_environments={"SPX": env}), pd.Timestamp(JUL3))
-    expected = 10_000.0 * env.get_discount_factor(env_time(env, JUL4))
-    assert manager.pending_receivable_pv == expected
+    portfolio = SimpleNamespace(pricing_environments={"SPX": env})
+    # the non-DCN flow keeps the settlement resolver's business-day counting, which puts 07-04 at the valuation
+    # instant and refuses it -- unchanged by this release
+    with pytest.raises(Exception, match="strictly after valuation"):
+        manager._revalue_ledger(portfolio, pd.Timestamp(JUL3))
+    manager.ledger = LifecycleCashflowLedger([c for c in manager.ledger.cashflows
+                                              if c.cashflow_id.startswith("dcn_pos:")])
+    manager._revalue_ledger(portfolio, pd.Timestamp(JUL3))
+    dcn_pv = 10_000.0 * env.get_discount_factor(env_time(env, JUL4))
+    assert manager.pending_receivable_pv == dcn_pv
     if adjust is BDC.PRECEDING:
-        assert expected == 10_000.0
+        assert dcn_pv == 10_000.0
+    else:
+        assert dcn_pv == 10_000.0 * env.get_discount_factor(1 / 252)   # FOLLOWING: Mon 07-07, one business day
