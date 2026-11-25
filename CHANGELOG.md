@@ -7,6 +7,99 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-25
+
+A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a
+trading-year fraction, so a rate curve, dividend yield or futures basis quoted per calendar year (the usual ACT/365
+desk quote) has to be read through the trading clock. The environment cannot tell a calendar quote from a trading
+quote by looking at the curve, so it is now declared per curve. A calendar-quoted curve is wrapped onto the trading
+clock by the environment itself, and an undeclared non-zero native curve is refused instead of being silently read
+per trading year. Environments on every other convention, and `BUSINESS_DAYS` environments that declare
+`TRADING_YEAR`, price bit for bit as in 0.14.0.
+
+### Changed
+
+- **Breaking: an undeclared native cash curve on a `BUSINESS_DAYS` environment is refused.** A `PricingEnvironment`
+  with `day_count_convention=BUSINESS_DAYS` whose `rate_curve`, `div_yield` or `basis_yield` is an unwrapped curve
+  that is not exactly zero now raises `ValidationError` naming the field and both declarations. To keep 0.14.0
+  numbers, declare `rate_curve_quoting=CurveQuotingBasis.TRADING_YEAR` (and `div_yield_quoting` /
+  `basis_yield_quoting` for the others); the curve is then read as is. Exactly-zero curves (`FlatRateCurve(0.0)`,
+  `ContinuousDividendYield(0.0)`, `NoDividend`, `FlatBasisYield(0.0)`, `ZeroBasis`, `None`) and TradingClock-wrapped
+  curves need no declaration. Every `BUSINESS_DAYS` fixture in the test suite now declares `TRADING_YEAR`; no number
+  moved.
+- **Hand-wrapped curves follow the valuation date (owner ruling; sanctioned price move).** A TradingClock-wrapped
+  cash curve whose map is anchored at another date is re-anchored at the environment's valuation date on its own
+  horizon (`BusinessTimeMap.re_anchored`), both at construction and whenever `valuation_date` is reassigned. The ~30
+  library sites that age a copy by `env.valuation_date = bumped_date` (numerical theta, product theta helpers, the
+  dynamic-scenario day loop, lifecycle, backtests) used to read r and q on a map still anchored at the old date.
+  Size of the move: a dated European across Chinese New Year (2026-02-13 -> 02-24, r 3%, q 2%), numerical theta on a
+  hand-wrapped environment, -0.020257 in 0.14.0 -> -0.027297 now, which equals V(02-24) - V(02-13) on freshly built
+  environments bit for bit. No existing test pinned a hand-wrapped bumped or rolled number (full suite unchanged); the move is pinned by
+  `test_curve_quoting_rebuild_sites.py::test_hand_wrapped_numerical_theta_equals_fresh_env_pnl_bitwise`.
+- **Cash stresses and scenario moves are per calendar year on wrapped curves.** The built-in rate, key-rate, spread,
+  dividend and basis stresses (`StressApplicator`) and the dynamic-scenario rate and dividend changes now move the
+  calendar-quoted curve inside a TradingClock wrapper and re-expose it on the same trading clock
+  (`quantark.priceenv.clock_validation.calendar_quoted_view`). Before, a wrapped rate curve was refused ("Cannot
+  stress curve type"), a wrapped dividend was replaced by a native curve built from a trading-axis reading, and a
+  dynamic-scenario change on a wrapped curve was silently skipped; a dynamic-scenario change the native rules cannot
+  apply to the wrapped curve's inner type now raises. The `AutocallableRiskReport` q scenarios (spot x q and
+  spot x vol surfaces, the q-shift ladders, historical replay) shift a wrapped dividend yield the same way, and a q
+  override follows the environment's declaration. Spot, vol and user-registered stress adapters are unchanged.
+- **Environment rebuilds carry the calendar.** The stress, dynamic-scenario (equity and FI) and risk-report clones
+  dropped `calendar`; they now carry it and the four new fields, and deep-copy curves together with the calendar so
+  a wrapper's clock stays the clone's own calendar. The risk-report clone now also carries `basis_yield`. Effects
+  on clones that were not built for this: a `CALENDAR_DAYS` clone with a calendar reports event statistics on
+  business-day KI rows (`knock_in_day_axis`), and an undeclared `BUSINESS_DAYS` clone resolves auto theta per
+  trading day (the per-day divisor of analytical greeks follows). No price that came out before moves: those clones
+  either ignored the calendar or raised without it.
+
+### Added
+
+- `quantark.priceenv.CurveQuotingBasis` (`CALENDAR_YEAR`, `TRADING_YEAR`) and four `PricingEnvironment` fields:
+  `rate_curve_quoting`, `div_yield_quoting`, `basis_yield_quoting` (default None = undeclared) and
+  `trading_clock_horizon`. On `BUSINESS_DAYS`, `CALENDAR_YEAR` makes the environment build one `BusinessTimeMap`
+  (its calendar and `bus_days_in_year`, anchored at the valuation date, out to `trading_clock_horizon`) and wrap the
+  curve on it -- bit for bit the hand wrapping of `docs/trading-clock.md` on every engine family; the field then
+  holds the wrapper. `TRADING_YEAR` reads the curve as is and refuses a wrapper. On every other convention
+  `CALENDAR_YEAR` reads the curve as is (an environment-made wrapper is unwrapped) and `TRADING_YEAR` is refused.
+  `CALENDAR_YEAR` needs a calendar and a horizon strictly after the valuation date (last date priced + 1 day is
+  safe); non-enum values raise `MarketDataError`.
+- `quantark.param.basis.TradingClockBasisYield`: the futures-basis wrapper, cumulative-preserving like the dividend
+  wrapper (`b_td(u) = b_cal(c)·c/u`, `c = to_calendar(u)`).
+- `is_identically_zero()` on `RateCurve`, `DividendYield` and `BasisYield` (default False; exact `== 0.0` on the flat
+  classes themselves, never on subclasses).
+- `MarketDataConverter.to_pricing_environment` and the builders that forward to it accept `calendar`, the three
+  `*_quoting` fields and `trading_clock_horizon`; the RFQ market-kwargs builder passes them through.
+- pnlexplain treats a wrapped `basis_yield` as a clock field (re-anchored in the TIME state, compared without its
+  anchor).
+
+### Fixed
+
+- The 0.14.0 known issue "a `BUSINESS_DAYS` environment with unwrapped calendar-quoted rate or dividend curves passes
+  `validate_trading_clock_configuration`" is resolved: the environment records the quoting basis and refuses the
+  undeclared case.
+- Numerical theta and every date-aged copy of an environment with hand-wrapped cash curves read r and q on a map
+  anchored at the old valuation date (see Changed).
+
+### Notes
+
+- `quantark/priceenv` is fingerprinted by the intraday certificate trees: their next amendment re-runs rather than
+  carrying forward. The four new dataclass fields change every environment's execution-cache fingerprint (cache keys
+  only). An environment holding TradingClock wrappers fingerprints as uncacheable and the execution planner
+  invalidates conservatively for it (performance only).
+- A `CALENDAR_YEAR` environment builds its trading-clock map at construction and again on every valuation-date move
+  (one pass over the days to the horizon).
+
+### Known issues
+
+- Basis/dividend relationship modes (`AUTO_ADJUST_BASIS`, `AUTO_ADJUST_DIVIDEND`, `SYNCHRONIZED`) are refused on an
+  environment holding a TradingClock-wrapped cash curve: deriving one curve from the others across the trading clock
+  needs the tenor mapped and the derived curve placed on the same clock, which is not built. `INDEPENDENT` works.
+- `FxPricingEnvironment` has no quoting declarations and no trading-clock validation.
+- `TradingClockVolSurface` (the calendar-axis vol wrapper) is not re-anchored when `valuation_date` is reassigned.
+- A greek dividend bump of a `None` dividend yield on a `CALENDAR_YEAR` environment creates a native
+  `ContinuousDividendYield(shift)` that is read per trading year.
+
 ## [0.14.0] - 2026-11-25
 
 The DCN runs on the pricing environment's clock. Every DCN time -- the diffusion grid, payment discount factors,

@@ -77,7 +77,8 @@ n_td/D for the pillar's expiry date).
 For desk replication where engine times are remaining-trading-days/D
 (date-based products + `day_count_convention=BUSINESS_DAYS` + calendar —
 see `example/case_studies/phoenix_engine_diagnostics/phoenix_external_case_compare.py`), the vol surface is native
-and the **cash curves** are wrapped instead:
+and the **cash curves** are wrapped instead. Since 0.15.0 the environment does this itself when the curves are
+declared `CALENDAR_YEAR` (next section); the hand recipe below is what it builds:
 
 ```python
 from quantark.param.rrf import TradingClockRateCurve
@@ -110,10 +111,57 @@ env = PricingEnvironment(
   curve's `TradingClock` matches (`bus_days_in_year`, calendar identity)
   and raises on mismatch. `BUSINESS_DAYS` without a calendar now raises —
   the old fallback silently computed exactly ACT/365.
+- 0.15.0: a native (unwrapped) cash curve on a `BUSINESS_DAYS` environment
+  must be declared (`CALENDAR_YEAR` or `TRADING_YEAR`) unless it is exactly
+  zero; see the next section.
 
 Both axes price the same date schedule identically (analytical European to
 1e-12; PDE/QUAD/MC to discretization tolerance —
 `test/test_asset/equity/product_other/test_trading_clock_axis_equivalence.py`).
+
+## Declaring how cash curves are quoted (0.15.0)
+
+On the trading axis the environment cannot tell a calendar-quoted curve from a trading-quoted one by looking at it,
+so it is told, per curve:
+
+```python
+from quantark.priceenv import CurveQuotingBasis, PricingEnvironment
+
+env = PricingEnvironment(
+    rate_curve=FlatRateCurve(0.02),                    # quoted per calendar year (ACT/365)
+    div_yield=ContinuousDividendYield(0.01),
+    vol_surface=FlatVolSurface(0.20),                  # native trading-quoted
+    day_count_convention=DayCountConvention.BUSINESS_DAYS,
+    bus_days_in_year=244,
+    calendar=cal,
+    rate_curve_quoting=CurveQuotingBasis.CALENDAR_YEAR,
+    div_yield_quoting=CurveQuotingBasis.CALENDAR_YEAR,
+    trading_clock_horizon=product_horizon + timedelta(days=1),
+    ...
+)
+# env.rate_curve is now TradingClockRateCurve(FlatRateCurve(0.02), <the env's map>)
+```
+
+| Declaration | `BUSINESS_DAYS` environment | any other convention |
+|---|---|---|
+| `CALENDAR_YEAR` | the environment wraps the curve on its own `BusinessTimeMap` (needs `calendar` and `trading_clock_horizon`) | read as is (an environment-made wrapper is unwrapped) |
+| `TRADING_YEAR` | read as is; a wrapper is refused | refused |
+| none | refused unless the curve is exactly zero or already wrapped | read as is |
+
+- The environment's wrapping is exactly the hand recipe above (`TradingClockRateCurve` /
+  `TradingClockDividendYield` / `TradingClockBasisYield` over `BusinessTimeMap(TradingClock(calendar,
+  bus_days_in_year), valuation_date, trading_clock_horizon)`): the same prices bit for bit on every engine family.
+- `trading_clock_horizon` must lie strictly after the last date priced. `BusinessTimeMap` counts whole days from the
+  valuation instant, so with a time-of-day valuation (14:55) use last date + 1 day.
+- **The map follows the valuation date.** `dataclasses.replace(env, valuation_date=d)` and a plain
+  `env.valuation_date = d` (what numerical theta, the product theta helpers, dynamic scenarios and lifecycle do on
+  a copy) re-anchor every wrapped cash curve at `d`: an environment-made one on the environment's horizon, a
+  hand-made one on its own map's horizon. A date at or past the horizon raises.
+- Cash stresses and scenario moves are per calendar year: they shift the calendar-quoted curve inside a wrapper and
+  keep its trading clock (`quantark.priceenv.clock_validation.calendar_quoted_view`). Basis/dividend relationship
+  modes other than `INDEPENDENT` are refused on wrapped curves.
+- Exactly zero (`FlatRateCurve(0.0)`, `ContinuousDividendYield(0.0)`, `NoDividend`, `FlatBasisYield(0.0)`,
+  `ZeroBasis`, `None`) means the same on both clocks and needs no declaration.
 
 ## Unit conventions (documented consequence, not a defect)
 
