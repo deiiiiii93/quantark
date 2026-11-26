@@ -67,21 +67,33 @@ class _CouponCashRows:
     carried_arrears: float
     decided_index: Optional[int]
     decided_coupon: float
+    #: rows before the coupon-indicator rows: the ``n_ko`` knock-out rows on the stacked statistics route, none on the
+    #: forward route (the knock-out units are read off the adjoint forward pass)
+    ko_rows: int = -1
+
+    def __post_init__(self):
+        if self.ko_rows < 0:
+            object.__setattr__(self, "ko_rows", self.n_ko)
+
+    @property
+    def indicator_row(self) -> int:
+        """First coupon-trigger indicator row (after the KO rows, if any)."""
+        return self.ko_rows
 
     @property
     def cash_row(self) -> int:
         """First ``U`` row (after the KO and coupon-indicator rows)."""
-        return 2 * self.n_ko
+        return self.ko_rows + self.n_ko
 
     @property
     def release_row(self) -> int:
         """First ``N`` row (memory only)."""
-        return 3 * self.n_ko
+        return self.ko_rows + 2 * self.n_ko
 
     @property
     def termination_row(self) -> int:
         """The ``W`` row (EXPIRY only)."""
-        return (4 if self.memory else 3) * self.n_ko
+        return self.ko_rows + (3 if self.memory else 2) * self.n_ko
 
     @property
     def n_buckets(self) -> int:
@@ -1118,23 +1130,24 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         return stats
 
-    def _compute_event_stats(self, product, pricing_env, *, streams=None, pv=None):
-        """The Snowball stacked recursion, with this product's coupon-cash columns (``_CouponCashRows``).
+    def _compute_event_stats(self, product, pricing_env, *, streams=None, pv=None, _route=None):
+        """The Snowball recursion, with this product's coupon-cash columns (``_CouponCashRows``).
 
         The columns depend on the contract (memory, pay type, amounts, the arrears carried into the
-        first future observation), which the row hooks below are not given; they are resolved here,
-        for this call only.
+        first future observation) and on the statistics route (whether knock-out rows come first),
+        which the row hooks below are not given; they are resolved here, for this call only.
         """
         self._validate_product(product)
+        route = self._resolve_v1_route(_route)
         previous = self.__dict__.get("_coupon_cash_rows")
-        self._coupon_cash_rows = self._resolve_coupon_cash_rows(product, pricing_env)
+        self._coupon_cash_rows = self._resolve_coupon_cash_rows(product, pricing_env, route=route)
         try:
-            return super()._compute_event_stats(product, pricing_env, streams=streams, pv=pv)
+            return super()._compute_event_stats(product, pricing_env, streams=streams, pv=pv, _route=route)
         finally:
             # restore the caller's layout (a nested statistics call must not clear an outer one's)
             self._coupon_cash_rows = previous
 
-    def _resolve_coupon_cash_rows(self, product, pricing_env) -> Optional[_CouponCashRows]:
+    def _resolve_coupon_cash_rows(self, product, pricing_env, *, route: str = "stacked") -> Optional[_CouponCashRows]:
         """The coupon-cash column layout, or ``None`` when the recursion does not run (expired note)."""
         maturity = product.get_maturity(pricing_env)
         if maturity <= 0.0:
@@ -1168,6 +1181,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             carried_arrears=float(decision.arrears) if memory else 0.0,
             decided_index=decided_index,
             decided_coupon=float(decision.coupon) if decided_index is not None else 0.0,
+            ko_rows=0 if route == "forward" else n_ko,
         )
 
     def _event_stats_product_type(self) -> type:
@@ -1302,7 +1316,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             return float(cb[obs_index])
         return float(cb)
 
-    def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn) -> dict:
+    def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn, *,
+                        ko_rows: int) -> dict:
         """The coupon fields from the coupon columns read at the spot (``coupon_table``'s keywords)."""
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
@@ -1310,7 +1325,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             # so ed_coup = E[DF(0->obs) * 1{coupon, alive}].
             df_obs = float(df_fn(float(rec.observation_time)))
             if df_obs > 0.0:
-                coupon_probability[i] = float(values_at_spot[n_ko + i] / df_obs)
+                coupon_probability[i] = float(values_at_spot[ko_rows + i] / df_obs)
         cash_rows = self._coupon_cash_rows
         termination_at_spot = (
             float(values_at_spot[cash_rows.termination_row]) if cash_rows.expiry else None

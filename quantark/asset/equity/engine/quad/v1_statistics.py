@@ -63,7 +63,7 @@ def _df(env, t: float) -> float:
 
 
 def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: bool,
-                   ki_records: Sequence, refusal: Optional[str] = None):
+                   ki_records: Sequence, refusal: Optional[str] = None, result=None):
     """``(probability, expected_time, KnockInTable, expected_time_reason)`` from the forward pass (DESIGN §4.5): rows
     on the product's KI schedule (discrete), or one per trading day of the window (continuous: each interval's bridge
     mass split by its first-passage law, rows ``interpolated`` where a day boundary is not a step time).
@@ -74,7 +74,8 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
     """
     if refusal is not None:
         raise AdjointUnavailable(refusal)
-    result = forward_pass(log)
+    if result is None:
+        result = forward_pass(log)
     t = result.times
     df = np.array([_df(env, x) for x in t])
     event_p = result.first_knock_in / df

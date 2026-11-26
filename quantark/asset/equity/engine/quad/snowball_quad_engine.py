@@ -1004,9 +1004,23 @@ class SnowballQuadEngine(BaseEngine):
         breakpoints; Phoenix: the observation's coupon barrier)."""
         return []
 
-    def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn) -> Optional[dict]:
-        """The coupon fields read from the extra rows at the spot (``None``: no coupons, Snowball)."""
+    def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn, *,
+                        ko_rows: int) -> Optional[dict]:
+        """The coupon fields read from the extra rows at the spot (``None``: no coupons, Snowball); the extra rows
+        start at ``ko_rows`` (0 on the forward route, ``n_ko`` on the stacked one)."""
         return None
+
+    #: the statistics route (run 2026-11-26): "forward" reads every outcome column (knock-out units and the terminal
+    #: maturity / knocked-in settlement columns) off ONE adjoint forward pass of the march; "stacked" marches one
+    #: backward column per outcome (the route a march the adjoint cannot transpose falls back to). Private: tests force
+    #: "stacked" to compare the two.
+    _v1_statistics_route = "forward"
+
+    def _resolve_v1_route(self, route: Optional[str]) -> str:
+        route = self._v1_statistics_route if route is None else route
+        if route not in ("forward", "stacked"):
+            raise ValidationError(f"unknown QUAD V1 statistics route {route!r}")
+        return route
 
     def _terminal_cash_surfaces(self, product, pricing_env, spot_grid):
         """``(knocked-in, not knocked-in)`` maturity redemptions on the lattice, as ``price`` seeds them."""
@@ -1025,10 +1039,14 @@ class SnowballQuadEngine(BaseEngine):
         *,
         streams: Optional[frozenset] = None,
         pv: Optional[float] = None,
+        _route: Optional[str] = None,
     ) -> Optional[EventStatistics]:
         from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnavailable
         from quantark.asset.equity.engine.quad import v1_statistics
         from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, FirstStepLog, MarchLog
+
+        route = self._resolve_v1_route(_route)
 
         self._validate_product(product)
         want_ki = es.want_knock_in_path(streams)
@@ -1178,12 +1196,15 @@ class SnowballQuadEngine(BaseEngine):
         if pv is None:
             pv = float(self.price(product, pricing_env))
 
-        # --- The statistics recursion: one column per outcome, stacked ---
-        # Rows [0..n_ko-1] are knock-out units (one paid at the record's settlement); subclasses append extra rows
-        # (Phoenix coupon columns) that ride the same diffusion/jumps; then the maturity unit and cash (never
-        # knocked in) and the knocked-in settlement unit and cash.
+        # --- The statistics recursion ---
+        # Stacked route: rows [0..n_ko-1] are knock-out units (one paid at the record's settlement); subclasses append
+        # extra rows (Phoenix coupon columns) that ride the same diffusion/jumps; then the maturity unit and cash
+        # (never knocked in) and the knocked-in settlement unit and cash. Forward route: no knock-out rows -- every
+        # outcome is read off the adjoint forward pass of this march (the backward loop still builds its log; the
+        # coupon rows and the terminal rows still march, the latter only as the readout's shape).
         n_ko = len(ko_records)
-        n_main = n_ko + self._n_extra_quad_rows(n_ko)
+        ko_rows = 0 if route == "forward" else n_ko
+        n_main = ko_rows + self._n_extra_quad_rows(n_ko)
         m_unit, m_cash, kis_unit, kis_cash = n_main, n_main + 1, n_main + 2, n_main + 3
         n_rows = n_main + 4
 
@@ -1238,7 +1259,8 @@ class SnowballQuadEngine(BaseEngine):
                 discount_delay = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local
                 )
-                ko_breach[int(ko_index)] = float(discount_delay)
+                if ko_rows:
+                    ko_breach[int(ko_index)] = float(discount_delay)
                 ko_w = self._event_weight(
                     grid, ko_record.barrier, spot, smoothing_width,
                     trigger_is_down=product.is_reverse,
@@ -1274,7 +1296,7 @@ class SnowballQuadEngine(BaseEngine):
                         ko_value=self._node_constant_on(ko_breach, y.size), ko_weight=y_ko_weight,
                         ki_record=ki_record,
                         ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                        coupon_index=ko_index, n_ko=n_ko,
+                        coupon_index=ko_index, n_ko=ko_rows,
                         coupon_record=ko_record, observation_index=ko_index,
                     )
                 first = FirstStepLog(
@@ -1299,7 +1321,7 @@ class SnowballQuadEngine(BaseEngine):
                 ko_record=ko_record if ko_is_reachable else None,
                 ko_value=ko_breach, ko_weight=ko_w, ki_record=ki_record,
                 ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                coupon_index=ko_index, n_ko=n_ko,
+                coupon_index=ko_index, n_ko=ko_rows,
                 coupon_record=ko_record, observation_index=ko_index,
             )
 
@@ -1411,24 +1433,36 @@ class SnowballQuadEngine(BaseEngine):
                 [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_rows)],
                 dtype=float,
             )
-        ed_unit = values_at_spot[:n_ko]
-        log.columns = {("ko", i): float(ed_unit[i]) for i in range(n_ko)}
-        log.columns.update({
-            ("terminal", "maturity_unit"): float(values_at_spot[m_unit]),
-            ("terminal", "maturity_cash"): float(values_at_spot[m_cash]),
-            ("terminal", "ki_settlement_unit"): float(values_at_spot[kis_unit]),
-            ("terminal", "ki_settlement_cash"): float(values_at_spot[kis_cash]),
-        })
         self._last_v1_march = log
+        forward = None
+        if route == "forward":
+            try:
+                forward = v1_statistics.forward_pass(log)
+            except AdjointUnavailable:
+                # no exact transpose of this march: the stacked columns, today's numbers (spec D2)
+                return self._compute_event_stats(product, pricing_env, streams=streams, pv=pv, _route="stacked")
+            ed_unit = np.array([forward.sources.get(("ko", i), 0.0) for i in range(n_ko)], dtype=float)
+            terminal_columns = {name: float(forward.terminal[name]) for name in
+                                ("maturity_unit", "maturity_cash", "ki_settlement_unit", "ki_settlement_cash")}
+        else:
+            ed_unit = np.asarray(values_at_spot[:n_ko], dtype=float)
+            terminal_columns = {"maturity_unit": float(values_at_spot[m_unit]),
+                                "maturity_cash": float(values_at_spot[m_cash]),
+                                "ki_settlement_unit": float(values_at_spot[kis_unit]),
+                                "ki_settlement_cash": float(values_at_spot[kis_cash])}
+        log.columns = {("ko", i): float(ed_unit[i]) for i in range(n_ko)}
+        log.columns.update({("terminal", name): value for name, value in terminal_columns.items()})
 
         df_maturity = float(df_local(maturity))
         timing = dict(time=float(terminal.determination_time), payment_time=float(terminal.payment_time),
                       date=terminal.determination_date, payment_date=terminal.payment_date)
-        maturity_row = es.outcome_row(pricing_env, probability=float(values_at_spot[m_unit]) / df_maturity,
-                                      discounted=float(values_at_spot[m_cash]), **timing)
-        ki_settlement = es.outcome_row(pricing_env, probability=float(values_at_spot[kis_unit]) / df_maturity,
-                                       discounted=float(values_at_spot[kis_cash]), **timing)
-        coupon_fields = self._coupon_columns(values_at_spot, n_ko, ko_records, product, pricing_env, df_local)
+        maturity_row = es.outcome_row(pricing_env, probability=terminal_columns["maturity_unit"] / df_maturity,
+                                      discounted=terminal_columns["maturity_cash"], **timing)
+        ki_settlement = es.outcome_row(pricing_env,
+                                       probability=terminal_columns["ki_settlement_unit"] / df_maturity,
+                                       discounted=terminal_columns["ki_settlement_cash"], **timing)
+        coupon_fields = self._coupon_columns(values_at_spot, n_ko, ko_records, product, pricing_env, df_local,
+                                             ko_rows=ko_rows)
         observations = es.observation_table(
             pricing_env, ko_records, ed_unit,
             is_coupon_obs=None if coupon_fields is None else np.ones(n_ko, dtype=bool),
@@ -1445,7 +1479,7 @@ class SnowballQuadEngine(BaseEngine):
             coupons=coupons, maturity=maturity_row, ki_settlement=ki_settlement, rule=rule, want_knock_in=want_ki,
             forward=lambda: v1_statistics.knock_in_table(
                 product, pricing_env, log, horizon=float(maturity), continuous=bool(ki_continuous),
-                ki_records=product_ki_records,
+                ki_records=product_ki_records, result=forward,
             ),
             unavailable=unavailable, path_dependent_cash=path_dependent_cash, knock_in_refusal=knock_in_refusal,
         )

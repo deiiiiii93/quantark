@@ -409,6 +409,9 @@ class TestRoutes:
         assert stats.pv == price
         expiry = isinstance(product, PhoenixOption) and product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
         assert abs(stats.reconciliation_error) <= (1e-8 if expiry else 1e-12) * max(1.0, abs(price))
+        # the backward columns of the stacked route (0.16.0: the default reads the outcomes off the forward pass)
+        engine._v1_statistics_route = "stacked"
+        engine.calculate_event_stats(product, market)
         log = engine._last_v1_march
         assert log.first_step is not None
         result = forward_pass(log)

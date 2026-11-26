@@ -229,7 +229,11 @@ def test_statistics_and_the_forward_pass_close_on_corrected_steps(name, switch):
     stats = engine.calculate_event_stats(product, _env(vol))
     assert abs(stats.probability_residual) <= 1e-11                     # ~500 steps of rounding
     assert abs(stats.reconciliation_error) <= 1e-12 * max(1.0, abs(stats.pv))
-    log = engine._last_v1_march
+    # the backward columns of the stacked route (0.16.0: the default reads the outcomes off the forward pass itself)
+    stacked = SnowballQuadEngine(params or QuadParams())
+    stacked._v1_statistics_route = "stacked"
+    stacked.calculate_event_stats(product, _env(vol))
+    log = stacked._last_v1_march
     result = forward_pass(log)
     for key, backward in log.columns.items():
         got = result.sources.get(key, 0.0) if key[0] == "ko" else result.terminal[key[1]]

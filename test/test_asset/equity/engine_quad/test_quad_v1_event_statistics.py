@@ -280,8 +280,10 @@ def adjoint_case(name):
 @pytest.mark.parametrize("name", ADJOINT_CASES)
 def test_forward_pass_reproduces_the_backward_columns(name):
     """AC14: the transposed march's masses equal every note-state backward column read at the spot: each knock-out
-    record's unit, the maturity and knocked-in settlement units and cash."""
+    record's unit, the maturity and knocked-in settlement units and cash. The backward columns come from the stacked
+    route (0.16.0: the default statistics read every outcome off the forward pass itself)."""
     engine, product, market = adjoint_case(name)
+    engine._v1_statistics_route = "stacked"
     engine.calculate_event_stats(product, market)
     log = engine._last_v1_march
     result = forward_pass(log)
@@ -586,7 +588,8 @@ def test_carried_knock_in(name, monkeypatch):
     np.testing.assert_array_equal(stats.ki_table.times, [0.0])
     np.testing.assert_array_equal(stats.ki_table.probability, [1.0])
     assert stats.maturity.probability == 0.0 and stats.unavailable == {}
-    assert not calls
+    # 0.16.0: the outcome columns come from the march's one forward pass; the knock-in fields are decided
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("ki", ["cki", "dki"])
@@ -597,7 +600,7 @@ def test_knock_in_at_valuation(ki, monkeypatch):
     assert stats.knock_in.probability == 1.0 and stats.knock_in.expected_time == 0.0
     np.testing.assert_array_equal(stats.ki_table.times, [0.0])
     assert stats.maturity.probability == pytest.approx(0.0, abs=1e-12)
-    assert not calls
+    assert len(calls) == 1
 
 
 def test_no_knock_in_barrier(monkeypatch):
@@ -606,7 +609,7 @@ def test_no_knock_in_barrier(monkeypatch):
     assert stats.knock_in.probability == 0.0 and stats.ki_table.size == 0
     assert stats.ki_settlement.probability == 0.0 and stats.knock_in.expected_loss == 0.0
     assert stats.unavailable["knock_in.expected_time"].startswith("undefined:")
-    assert not calls
+    assert len(calls) == 1
 
 
 # --- D17 ------------------------------------------------------------------------------------------------------------
@@ -615,12 +618,14 @@ def test_no_knock_in_barrier(monkeypatch):
 @pytest.mark.parametrize("name", ["sb_cki", "ph_mem_expiry_cki", "kr_dki"])
 @pytest.mark.parametrize("streams", [frozenset({EventType.KO}),
                                      frozenset({EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI})])
-def test_pruned_request_skips_the_forward_pass(name, streams, monkeypatch):
+def test_pruned_request_prunes_the_knock_in_fields_on_one_pass(name, streams, monkeypatch):
+    """0.16.0: every marched statistics call runs exactly one forward pass (the outcome columns); a pruned request
+    still reports the knock-in path fields as not requested, and its other fields equal the full request's."""
     engine, product, market = route(name)
     full = engine.calculate_event_stats(product, market)
     calls = _spy(monkeypatch)
     pruned = type(engine)(engine.params).calculate_event_stats(product, market, streams=streams)
-    assert not calls
+    assert len(calls) == 1
     for path in ("knock_in.probability", "knock_in.expected_time", "ki_table"):
         assert pruned.unavailable[path] == "not requested"
     if pruned.coupons is not None:
