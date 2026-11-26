@@ -289,3 +289,19 @@ def test_stateful_event_stats_refuses_like_stateful_price(name):
         engine.price(product, env, lifecycle_state=state)
     with pytest.raises(CapabilityError, match="lifecycle_state"):
         _session(engine, product, env, state)
+
+
+# --- final-review fix: the legacy PRICE_DETAILED call forwards the state too ----------------------------------------
+
+def test_heston_dcn_pde_price_detailed_forwards_the_lifecycle_state():
+    name = "HestonDCNPDESolver"
+    product, env = make_dcn(DCN_A, valuation_date=AGED), _env(name, AGED)
+    direct = _engine(name).price_detailed(product, env, lifecycle_state=_receivable_state())
+    stateless = _engine(name).price_detailed(product, env)
+    assert direct.pv != stateless.pv
+    request = PricingRequest(product=product, pricing_env=env, operation=PricingOperation.PRICE_DETAILED,
+                             outputs=frozenset({OutputKind.PV}), lifecycle_state=_receivable_state())
+    with PricingSession() as session:
+        outcome = session.execute(_engine(name), request)
+    assert outcome.value.pv == direct.pv
+    assert dict(outcome.normalized_economics)["pv"] == direct.pv

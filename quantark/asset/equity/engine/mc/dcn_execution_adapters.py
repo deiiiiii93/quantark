@@ -134,7 +134,8 @@ class DCNBatchStats:
     life_sum: float
     batch_mean: float
     totals: Optional[np.ndarray]  # per-path totals; pathwise_iid mode only
-    #: the batch's event-statistics record (``PRICE_DETAILED`` only; the direct path's ``_dcn_batch_record``)
+    #: the batch's event-statistics record (``PRICE_DETAILED`` / ``EVENT_STATS`` only; the direct path's
+    #: ``_dcn_batch_record``)
     record: Optional[dict] = None
 
 
@@ -171,8 +172,9 @@ class _DCNSimContext:
     # W14: the request's validated DCNLifecycleState (pending receivables,
     # added to pv by ``_finalize_dcn_result``); None without a state.
     receivables: object | None = None
-    # a PRICE_DETAILED request: the batches record the event statistics (T11),
-    # as the direct path's ``price_detailed``; a PRICE records nothing
+    # a PRICE_DETAILED or EVENT_STATS request: the batches record the event
+    # statistics (T11), as the direct path's ``price_detailed``; a PRICE
+    # records nothing
     statistics: bool = False
 
 
@@ -266,9 +268,8 @@ def _final_observation_state(request):
 
 
 def _call_with_state(engine, request):
-    """The engine's own entry point with the request's lifecycle state (the
-    legacy adapter forwards a state to ``price`` only, never to
-    ``price_detailed``)."""
+    """The engine's own entry point with the request's lifecycle state, for
+    every operation this adapter serves."""
     state = request.lifecycle_state
     if request.operation is PricingOperation.PRICE:
         value = engine.price(
@@ -290,12 +291,11 @@ def _call_with_state(engine, request):
     )
 
 
-def _require_statistics(stats, engine):
+def _require_statistics(stats, owner):
     """The legacy route's refusal of a ``None`` statistics result (a fully settled terminated note)."""
     if stats is None:
-        raise CapabilityError(
-            f"{type(engine).__qualname__} does not support event stats"
-        )
+        name = owner.__qualname__ if isinstance(owner, type) else type(owner).__qualname__
+        raise CapabilityError(f"{name} does not support event stats")
     return stats
 
 
@@ -625,7 +625,7 @@ class _DCNBatchMixin:
         if operation is PricingOperation.PRICE:
             return result.pv
         if operation is PricingOperation.EVENT_STATS:
-            return _require_statistics(result.event_stats, self)
+            return _require_statistics(result.event_stats, type(self))
         return result
 
     def execute_native(self, engine, request, normalized, context,

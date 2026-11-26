@@ -153,7 +153,10 @@ class LegacyPriceAdapter:
             raise CapabilityError(
                 f"{type(engine).__qualname__} has no price_detailed"
             )
-        return method(request.product, request.pricing_env)
+        return method(
+            request.product, request.pricing_env,
+            **_state_keyword(engine, method, request),
+        )
 
     def _call_event_stats(self, engine, request):
         method = getattr(engine, "calculate_event_stats", None)
@@ -161,29 +164,34 @@ class LegacyPriceAdapter:
             raise CapabilityError(
                 f"{type(engine).__qualname__} has no calculate_event_stats"
             )
-        state = request.lifecycle_state
-        if state is None:
-            stats = method(request.product, request.pricing_env)
-        else:
-            # A lifecycle state is honoured or refused, never dropped: the
-            # same capability check stateful ``price()`` runs (CapabilityError
-            # for an engine without lifecycle support, e.g. the Snowball /
-            # Phoenix MC, PDE and QUAD V1 engines), then the engine's own
-            # keyword.
-            _validate_state_capability(engine, request.product, state)
-            if not _declares_lifecycle_keyword(method):
-                raise CapabilityError(
-                    f"{type(engine).__qualname__}.calculate_event_stats does "
-                    "not accept lifecycle_state"
-                )
-            stats = method(
-                request.product, request.pricing_env, lifecycle_state=state
-            )
+        stats = method(
+            request.product, request.pricing_env,
+            **_state_keyword(engine, method, request),
+        )
         if stats is None:
             raise CapabilityError(
                 f"{type(engine).__qualname__} does not support event stats"
             )
         return stats
+
+
+def _state_keyword(engine, method, request) -> dict:
+    """``{"lifecycle_state": state}`` for a stateful request, ``{}`` for a stateless one.
+
+    A lifecycle state is honoured or refused, never dropped: the same capability check stateful ``price()`` runs
+    (CapabilityError for an engine without lifecycle support, e.g. the Snowball / Phoenix MC, PDE and QUAD V1
+    engines), then ``method`` must name the keyword itself.
+    """
+    state = request.lifecycle_state
+    if state is None:
+        return {}
+    _validate_state_capability(engine, request.product, state)
+    if not _declares_lifecycle_keyword(method):
+        raise CapabilityError(
+            f"{type(engine).__qualname__}.{method.__name__} does not accept "
+            "lifecycle_state"
+        )
+    return {"lifecycle_state": state}
 
 
 def _validate_state_capability(engine, product, state) -> None:

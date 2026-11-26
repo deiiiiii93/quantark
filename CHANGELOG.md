@@ -40,6 +40,9 @@ unchanged, bit for bit.
   now refuse with `CapabilityError`. On these engines, put the trade's history on the product
   (aged schedule, `knocked_in_at_valuation`). Engines that do accept a state (`HestonDCNPDESolver`
   on the legacy route) now receive it. A fully settled note is refused as before.
+- **The same holds for `PRICE_DETAILED` on the legacy route.** A stateful session `PRICE_DETAILED`
+  request on `HestonDCNPDESolver` returned the stateless price (a mid-life receivable note:
+  -9157.76 instead of 841.27). The state is now forwarded, or refused where unsupported.
 
 #### Changed
 
