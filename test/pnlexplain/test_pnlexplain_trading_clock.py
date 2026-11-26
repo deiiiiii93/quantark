@@ -1,4 +1,4 @@
-"""Clock-wrapped environments: waterfall exact on both axes, Taylor fails closed (patch spec §8)."""
+"""Clock-wrapped environments: waterfall exact on both axes (patch spec §8); Taylor runs since 0.16.0."""
 from datetime import datetime
 
 import pytest
@@ -128,8 +128,12 @@ def test_fail_closed_rules():
                                                 maturity=0.5 - 1 / D), ENG, _td_env(t1), date=t1),
         config=WF)
     assert rolled.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=1e-9)
-    with pytest.raises(ValidationError, match="Taylor"):
-        explain(ValuationSnapshot(CALL, ENG, ok0, date=t0), ValuationSnapshot(CALL, ENG, ok1, date=t1))
+    # 0.16.0 (trading-clock run D3): Taylor runs on wrapped environments (numerical route); bucketed stays refused
+    taylor = explain(ValuationSnapshot(CALL, ENG, ok0, date=t0), ValuationSnapshot(CALL, ENG, ok1, date=t1))
+    assert taylor.metadata["route"] == "numerical"
+    with pytest.raises(ValidationError, match="bucketed Taylor"):
+        explain(ValuationSnapshot(CALL, ENG, ok0, date=t0), ValuationSnapshot(CALL, ENG, ok1, date=t1),
+                config=PnLExplainConfig(bucketed=True))
 
 
 def test_re_anchoring_keeps_the_sticky_moneyness_spot_shock():

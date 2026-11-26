@@ -157,11 +157,18 @@ def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrow
 def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "instrument"
                 ) -> Tuple[Tuple[ExplainRow, ...], float, Dict[str, Any]]:
     snap0, moves = cache.snap0, cache.moves
-    if any(is_clock_wrapped(getattr(snap0.pricing_env, f, None)) for f in CLOCK_FIELDS):
+    # 0.16.0 (trading-clock run D3): Taylor runs on a TradingClock-wrapped environment. Every numerical bump goes
+    # through the wrappers' parallel_shifted (the calendar- or trading-quoted inner moves, the clock stays) and
+    # theta through the date advance (the environment re-anchors), so the numerical route is forced: the analytical
+    # formulas read env.get_vol / env.get_rate on the environment's axis while the factor moves are in the inners'
+    # units. Bucketed Taylor stays refused: key-rate / bucket bumps need the curve's tenors and windows on its own
+    # axis, which a wrapper does not expose.
+    wrapped_env = any(is_clock_wrapped(getattr(snap0.pricing_env, f, None)) for f in CLOCK_FIELDS)
+    if wrapped_env and config.bucketed:
         raise ValidationError(
-            "Taylor method on a TradingClock-wrapped environment is not supported: the calculator's "
-            "vol / dividend / rate bumps replace the wrapper with a calendar-quoted object (a different "
-            "clock); use methods=(ExplainMethod.WATERFALL,)"
+            "bucketed Taylor on a TradingClock-wrapped environment is not supported: key-rate and bucket bumps need "
+            "the curve's tenors and windows on its own axis, which a wrapper does not expose; use bucketed=False "
+            "(parallel Taylor runs on wrapped environments) or methods=(ExplainMethod.WATERFALL,)"
         )
     q, days, S0 = snap0.quantity, moves.calendar_days, moves.spot_t0
     terms, subrows = resolve_stencil(config), resolved_subrows(config)
@@ -195,6 +202,8 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         request = [f"{name}{suffix}" if name in TIME_GREEKS else name for name in requested]
         route = config.greeks_method if config.greeks_method != "auto" \
             else calc.resolve_route(snap0.product, request)
+        if wrapped_env:
+            route = "numerical"
         raw = calc.calculate(snap0.product, snap0.pricing_env, cache.bump_engine_t0, method=route,
                              greeks=request, theta_decomposition_mode=config.theta_decomposition_mode)
         greeks = {name: float(raw[f"{name}{suffix}" if name in TIME_GREEKS else name]) for name in requested}
