@@ -164,6 +164,12 @@ def build_div_bumped_env(
     SHAPE is preserved via ``parallel_shifted``. ``current_div`` is kept for
     signature symmetry with the vol helper (the shift needs no level)."""
     env = deepcopy(pricing_env)
+    if env.div_yield is None:
+        # a created dividend is a calendar-year quote: placed per the environment's declaration (0.16.0)
+        from quantark.priceenv.clock_validation import place_created_cash_curve
+
+        place_created_cash_curve(env, "div_yield", shift_dividend_yield(None, direction * div_bump))
+        return env
     env.div_yield = shift_dividend_yield(env.div_yield, direction * div_bump)
     return env
 

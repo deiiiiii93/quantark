@@ -147,6 +147,7 @@ def _futures_central_points(
             bucket_end=edges[i + 1],
             bump=div_bump,
         )
+        _place_created_div(up_env, pricing_env)
         down_env = deepcopy(pricing_env)
         down_env.div_yield = BucketedDividendYield(
             base=base_div,
@@ -154,6 +155,7 @@ def _futures_central_points(
             bucket_end=edges[i + 1],
             bump=-div_bump,
         )
+        _place_created_div(down_env, pricing_env)
         up_price = bump_engine.price(product, up_env)
         down_price = bump_engine.price(product, down_env)
         derivative = (up_price - down_price) / (2.0 * div_bump)
@@ -215,6 +217,7 @@ def _generic_points(
             bucket_end=bucket.end,
             bump=div_bump,
         )
+        _place_created_div(up_env, pricing_env)
         up_price = bump_engine.price(product, up_env)
         if mode == BucketedGreekDifferenceMode.ONE_SIDED_UP:
             derivative = (up_price - base_price) / div_bump
@@ -240,6 +243,7 @@ def _generic_points(
             bucket_end=bucket.end,
             bump=-div_bump,
         )
+        _place_created_div(down_env, pricing_env)
         down_price = bump_engine.price(product, down_env)
         derivative = (up_price - down_price) / (2.0 * div_bump)
         points.append(
@@ -302,6 +306,15 @@ def _node_aligned_points(
         )
         points.append(point)
     return points
+
+
+def _place_created_div(env, source_env) -> None:
+    """A bucket bump built over a CREATED zero yield (the source environment had none) is a calendar-year quote like
+    every other cash curve: placed per the environment's declaration (0.16.0 trading-clock run D1)."""
+    if source_env.div_yield is None:
+        from quantark.priceenv.clock_validation import place_created_cash_curve
+
+        place_created_cash_curve(env, "div_yield", env.div_yield)
 
 
 def bucket_label(bucket) -> str:
@@ -437,6 +450,7 @@ def calculate_futures_rhoq_buckets(
                 bucket_end=edges[i + 1],
                 bump=div_bump,
             )
+            _place_created_div(bumped_env, pricing_env)
             bumped_price = engine.price(product, bumped_env)
             rows.append(
                 _rhoq_bucket_row(

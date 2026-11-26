@@ -286,6 +286,33 @@ def apply_declared_quoting(env, field: str) -> None:
         setattr(env, field, _wrapper_for(field)(obj, env_map.get(field)))
 
 
+def _holds_clock_wrapper(curve, depth: int = 3) -> bool:
+    """True when ``curve`` is, or is built over, a TradingClock wrapper (searched through its attributes)."""
+    if is_clock_wrapped(curve):
+        return True
+    if depth <= 0 or curve is None:
+        return False
+    return any(_holds_clock_wrapper(v, depth - 1) for v in vars(curve).values()
+               if hasattr(v, "__dict__") and not isinstance(v, type)) if hasattr(curve, "__dict__") else False
+
+
+def place_created_cash_curve(env, field: str, curve) -> None:
+    """Assign a cash curve a bump CREATED from nothing (the field was ``None``) per the environment's declaration.
+
+    The created curve is a calendar-year quote like every other cash curve: on a ``BUSINESS_DAYS`` environment whose
+    field is declared ``CALENDAR_YEAR`` it is wrapped on the environment's map (``apply_declared_quoting``); anywhere
+    else it is assigned as is. This is NOT a general assignment hook (0.15.0 D13): a curve built over a wrapper would
+    be wrapped twice, so one is refused.
+    """
+    if curve is not None and _holds_clock_wrapper(curve):
+        raise ValidationError(
+            f"cannot place a created {field} built over a TradingClock wrapper: it would be wrapped twice"
+        )
+    setattr(env, field, curve)
+    if curve is not None:
+        apply_declared_quoting(env, field)
+
+
 @contextmanager
 def calendar_quoted_view(env):
     """Run a shift on the calendar-quoted curves behind the environment's trading-clock wrappers (spec D16).

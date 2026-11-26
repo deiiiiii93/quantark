@@ -63,7 +63,12 @@ def _reprice_rate(product, env, engine, abs_bump):
 def _reprice_div(product, env, engine, abs_bump):
     """q shifted with r held fixed by construction (rhoq convention)."""
     e = deepcopy(env)
-    e.div_yield = shift_dividend_yield(e.div_yield, abs_bump)
+    if e.div_yield is None:
+        from quantark.priceenv.clock_validation import place_created_cash_curve
+
+        place_created_cash_curve(e, "div_yield", shift_dividend_yield(None, abs_bump))
+    else:
+        e.div_yield = shift_dividend_yield(e.div_yield, abs_bump)
     return engine.price(product, e)
 
 
