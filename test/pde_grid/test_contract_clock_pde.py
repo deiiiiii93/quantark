@@ -8,7 +8,7 @@ immediate. Every one of those time-identity tests is now ``same_instant`` / ``me
 event a millisecond ahead is a positive event (review 2026-09-21 R1).
 """
 from datetime import datetime
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -138,13 +138,17 @@ class TestLookups:
         assert terminal_stats._position(recs, recs[1]) == 1
 
     def test_snowball_statistics_column(self):
-        fake = SimpleNamespace(_col_by_time={}, ko_records=records(0.9, 0.9 + GAP), layout=SimpleNamespace(ko=[7, 8]))
+        # _shared_cols: same-instant groups (0.16.0 D14) — two sub-resolution records are NOT one instant
+        fake = SimpleNamespace(_col_by_time={}, _shared_cols={}, ko_records=records(0.9, 0.9 + GAP),
+                               layout=SimpleNamespace(ko=[7, 8]))
         assert SnowballStatistics.column_of_record(fake, 0.9 + GAP) == 8
         assert SnowballStatistics.column_of_record(fake, UP(0.9)) == 7
 
     def test_ko_reset_statistics_column(self):
         fake = SimpleNamespace(ko_records=records(0.9, 0.9 + GAP), post_records=records(),
                                layout=SimpleNamespace(ko=[7, 8], post_ko=[]))
+        # the real same-instant lookup (0.16.0 D14) runs on the fake: two sub-resolution records stay two instants
+        fake._shared_instants = MethodType(KOResetStatistics._shared_instants, fake)
         assert KOResetStatistics.column_of_record(fake, 0.9 + GAP) == 8
 
     def test_adjoint_column_tau_side(self):
