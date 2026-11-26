@@ -657,3 +657,320 @@ def test_phoenix_valuation_instant_coupons_are_attributed_per_record(route, spot
     if knocked_out is not None:
         assert _rows(stats)[knocked_out] == 1.0 and sum(_rows(stats)) == 1.0
     assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+
+
+# === KO-reset (T3bc (c), D14: schedule-1 KO, discrete KI and schedule-2 KO records of one instant, contract order) ===
+
+from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine  # noqa: E402
+from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption  # noqa: E402
+from quantark.asset.equity.product.option.snowball_config import (  # noqa: E402
+    AccrualConfig,
+    BarrierConfig,
+    PayoffConfig,
+)
+from quantark.util.enum import ObservationType, PostKOScheduleMode  # noqa: E402
+
+KOR_PRE = [datetime(2025, 3, 3), datetime(2025, 5, 5), JUL3]
+KOR_POST = [datetime(2025, 9, 3), datetime(2025, 11, 3), datetime(2025, 12, 3)]
+#: 2025-11-27 (Thanksgiving) is a US holiday: its record sits on 2025-11-26's env instant
+NOV26, NOV27 = datetime(2025, 11, 26), datetime(2025, 11, 27)
+
+
+def _kor_schedule(items):
+    """``(date, level)`` or ``(date, level, flat rate)`` records; a float in place of the date is a REBASED offset
+    (years after the knock-in)."""
+    def record(it):
+        when = (dict(observation_time=it[0]) if isinstance(it[0], float) else dict(observation_date=it[0]))
+        return ObservationRecord(barrier=it[1], return_rate=it[2] if len(it) > 2 else None, **when)
+
+    return ObservationSchedule(records=[record(it) for it in items])
+
+
+def ko_reset(pre=None, ki=None, post=None, mode=PostKOScheduleMode.ABSOLUTE, ki_type=ObservationType.DISCRETE,
+             reverse=False):
+    """The run's KO-reset repro (``.ship/.../r4_phx_kor.py``): schedule 1 KO 103 (15%) with a discrete KI 75 on
+    03-03 / 05-05 / 07-03, schedule 2 KO 95 (3%) on 09-03 / 11-03 / 12-03 (ABSOLUTE), 5% rebate, no principal.
+    ``reverse``: the mirrored note (KO 97 / 105 below, KI 125 above) unless the records are given."""
+    pre = [(d, 97.0 if reverse else 103.0) for d in KOR_PRE] if pre is None else pre
+    ki = [(d, 125.0 if reverse else 75.0) for d in KOR_PRE] if ki is None else ki
+    post = [(d, 105.0 if reverse else 95.0) for d in KOR_POST] if post is None else post
+    discrete = ki_type == ObservationType.DISCRETE
+    p = KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0, maturity=None, initial_date=datetime(2025, 1, 3),
+        exercise_date=datetime(2026, 1, 5), is_reverse=reverse,
+        barrier_config=BarrierConfig(ko_barrier=pre[0][1], ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_schedule=_kor_schedule(pre), ki_barrier=ki[0][1],
+                                     ki_observation_type=ki_type,
+                                     ki_observation_schedule=_kor_schedule(ki) if discrete else None),
+        post_barrier_config=BarrierConfig(ko_barrier=post[0][1], ko_rate=0.03,
+                                          ko_observation_type=ObservationType.DISCRETE,
+                                          ko_observation_schedule=_kor_schedule(post)),
+        accrual_config=AccrualConfig(is_annualized=False),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=False), post_ko_mode=mode)
+    p.validate()
+    return p
+
+
+def kor(grid_points=GRID_POINTS, **kwargs):
+    return KOResetSnowballQuadEngine(params=QuadParams(grid_points=grid_points, **kwargs))
+
+
+def kor_route(route, grid_points=GRID_POINTS, **kwargs):
+    engine = kor(grid_points, **kwargs)
+    engine._v1_statistics_route = route
+    return engine
+
+
+_PRE_103 = [(d, 103.0) for d in KOR_PRE]
+_KI_75 = [(d, 75.0) for d in KOR_PRE]
+KOR_CASES = {
+    # a schedule-1 pair: 07-04 steps the knock-out down to 100 (10%); no knock-in record on 07-04 (KO-only)
+    "schedule1_step_down": dict(pre=_PRE_103 + [(JUL4, 100.0, 0.10)]),
+    # a knock-in pair: 07-03 at 75, 07-04 raised to 80 (not dominated: the 75-80 band knocks in on 07-04 only)
+    "ki_pair": dict(ki=_KI_75 + [(JUL4, 80.0)]),
+    # both: schedule-1 step-down and the knock-in pair on 07-03 / 07-04
+    "schedule1_and_ki_pair": dict(pre=_PRE_103 + [(JUL4, 100.0, 0.10)], ki=_KI_75 + [(JUL4, 80.0)]),
+    # a schedule-2 pair: 11-27 steps the knock-out down to 88 (5%); a knock-in at 85 puts mass on schedule 2
+    "schedule2_step_down": dict(ki=[(d, 85.0) for d in KOR_PRE],
+                                post=[(KOR_POST[0], 95.0), (NOV26, 95.0), (NOV27, 88.0, 0.05), (KOR_POST[2], 95.0)]),
+}
+
+
+@pytest.fixture(scope="module")
+def ko_reset_mc():
+    """Each case on Black-Scholes MC (400k paths, seed 7): price and SE."""
+    out = {}
+    for name, spec in KOR_CASES.items():
+        mc = SnowballMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7))
+        value = mc.price(ko_reset(**spec), env())
+        out[name] = (value, mc.get_last_std_error())
+    return out
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", list(KOR_CASES))
+def test_ko_reset_same_instant_records_agree_with_mc(ko_reset_mc, case):
+    """D14 on the KO-reset V1: the instant's records in contract order at one spot -- schedule-1 knock-out, then the
+    knock-in (the knock-out wins a same-date tie), then schedule-2 knock-out, date by date -- within 3 SE + 1e-3
+    relative of MC. Before: V1 kept the instant's first record of each kind (8.871475 on the schedule-1 and knock-in
+    cases)."""
+    ref, se = ko_reset_mc[case]
+    value = kor().price(ko_reset(**KOR_CASES[case]), env())
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se, (value - ref) / se)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", ["schedule1_step_down", "schedule1_and_ki_pair"])
+def test_ko_reset_same_instant_records_as_the_first_observation_agree_with_mc(case):
+    """The exact first step: valuation on 07-02, the 07-03 / 07-04 instant one business day ahead -- every level of
+    the instant is a level of the first step's quadrature."""
+    e = env(datetime(2025, 7, 2))
+    product = ko_reset(**KOR_CASES[case])
+    mc = SnowballMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7))
+    ref = mc.price(product, e)
+    se = mc.get_last_std_error()
+    engine = kor()
+    value = engine.price(product, e)
+    assert engine._last_first_step is not None
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se, (value - ref) / se)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", ["ki_pair", "schedule1_and_ki_pair"])
+def test_ko_reset_same_instant_records_nodal_events_agree_with_mc(ko_reset_mc, case):
+    """Nodal events: the records' maps applied date by date in reverse contract order (no single projection)."""
+    ref, se = ko_reset_mc[case]
+    value = kor(event_projection=EventProjectionMode.NODAL).price(ko_reset(**KOR_CASES[case]), env())
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se, (value - ref) / se)
+
+
+@pytest.mark.parametrize("kind", ["schedule1", "schedule2", "knock_in"])
+def test_ko_reset_duplicate_record_prices_as_the_product_without_it(kind):
+    """A same-instant duplicate (same level) is dominated and dropped: bitwise the product without it."""
+    if kind == "schedule1":
+        dup, base = ko_reset(pre=_PRE_103 + [(JUL4, 103.0, 0.40)]), ko_reset()
+    elif kind == "knock_in":
+        dup, base = ko_reset(ki=_KI_75 + [(JUL4, 75.0)]), ko_reset()
+    else:
+        post = [(KOR_POST[0], 95.0), (NOV26, 95.0), (KOR_POST[2], 95.0)]
+        dup = ko_reset(post=post[:2] + [(NOV27, 95.0, 0.40)] + post[2:])
+        base = ko_reset(post=post)
+    e = env()
+    assert kor().price(dup, e) == kor().price(base, e)
+
+
+# Pinned BEFORE the T3bc change (worktree d4677f84 = f21c7998 for every file the KO-reset V1 reads).
+KOR_PINS = {
+    "base": "0x1.1be31f43f709dp+3",
+    "base_continuous_ki": "0x1.f98d386ea5480p+2",
+    "base_first_step": "0x1.5337d6098b9fap+2",
+    "schedule2_base": "0x1.1bcfc9bab5037p+3",
+}
+KOR_ROW_PINS = {
+    "forward": (["0x1.80415fbd50683p-2", "0x1.2504dfab8b35dp-3", "0x1.296a191de821dp-4", "0x1.bdd25215ee2c2p-11",
+                 "0x1.bd8d9d64c9235p-10", "0x1.428e553c01dc3p-10"], "0x1.6474e8987cde0p-2", "0x1.d46de38a3aa47p-5"),
+    "stacked": (["0x1.80415fbd50684p-2", "0x1.2504dfab8b362p-3", "0x1.296a191de821fp-4", "0x1.bdd25215ee2a0p-11",
+                 "0x1.bd8d9d64c9233p-10", "0x1.428e553c01de0p-10"], "0x1.6474e8987cde0p-2", "0x1.d46de38a3aa4ap-5"),
+}
+
+
+def _kor_pinned_products():
+    return {
+        "base": (ko_reset(), env()),
+        "base_continuous_ki": (ko_reset(ki_type=ObservationType.CONTINUOUS), env()),
+        "base_first_step": (ko_reset(), env(datetime(2025, 7, 2))),
+        "schedule2_base": (ko_reset(post=[(KOR_POST[0], 95.0), (NOV26, 95.0), (KOR_POST[2], 95.0)]), env()),
+    }
+
+
+@pytest.mark.parametrize("name", list(KOR_PINS))
+def test_ko_reset_without_a_shared_instant_prices_bitwise(name):
+    product, e = _kor_pinned_products()[name]
+    assert kor().price(product, e) == float.fromhex(KOR_PINS[name])
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_ko_reset_without_a_shared_instant_reports_bitwise(route):
+    stats = kor_route(route).calculate_event_stats(ko_reset(), env())
+    rows, maturity, ki_settlement = KOR_ROW_PINS[route]
+    assert stats.pv == float.fromhex(KOR_PINS["base"])
+    assert [float(p).hex() for p in _rows(stats)] == rows
+    assert float(stats.maturity.probability).hex() == maturity
+    assert float(stats.ki_settlement.probability).hex() == ki_settlement
+
+
+def test_ko_reset_rebased_stays_refused_on_v1():
+    """The KO-reset V1 prices ABSOLUTE schedule 2 only; a REBASED contract is refused, pair or not (unchanged)."""
+    from quantark.util.exceptions import ValidationError
+
+    product = ko_reset(pre=_PRE_103 + [(JUL4, 100.0, 0.10)], mode=PostKOScheduleMode.REBASED,
+                       post=[(k / 12.0, 95.0) for k in range(1, 7)])
+    with pytest.raises(ValidationError, match="ABSOLUTE"):
+        kor().price(product, env())
+
+
+@pytest.mark.parametrize("grid_points,tol", [(GRID_POINTS, 2e-6), (GRID_EXACT, 2e-8)])
+@pytest.mark.parametrize("reverse", [False, True], ids=["up", "reverse"])
+def test_ko_reset_knock_in_pair_is_the_wider_knock_in(reverse, grid_points, tol):
+    """Exact equivalence (D14): with no knock-out on 07-04 and schedule 2 starting in September, a knock-in at 75 on
+    07-03 then at 80 on 07-04 (zero gap, one spot) knocks in exactly where a single knock-in at 80 on 07-03 does
+    (reverse: 125 then 120 against 120). The pair's single piecewise projection prices it to the lattice's floor
+    (measured up rel 2.7e-7 / 3.4e-8 / 4.3e-9 at 1001 / 2001 / 4001 nodes)."""
+    first, second = (125.0, 120.0) if reverse else (75.0, 80.0)
+    others = [(d, first) for d in KOR_PRE[:2]]
+    pair = ko_reset(ki=others + [(JUL3, first), (JUL4, second)], reverse=reverse)
+    single = ko_reset(ki=others + [(JUL3, second)], reverse=reverse)
+    e = env()
+    a, b = kor(grid_points).price(pair, e), kor(grid_points).price(single, e)
+    assert abs(a / b - 1.0) <= tol, (a, b, a / b - 1.0)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("case", ["schedule1_step_down", "schedule2_step_down"])
+def test_ko_reset_same_instant_statistics_agree_with_mc(route, case):
+    """Statistics (D8 on the KO-reset V1): each knock-out record of a same-instant pair is its own row and adjoint
+    source -- per-record knock-out probability within 3 SE of MC (binomial SE over the paths); the ledger reconciles.
+    Before: the table refused the repeated (time, schedule) on both engines; the dated table keeps one row per record
+    (``ObservationTable``: a repeated time and tag needs distinct dates)."""
+    from quantark.util.exceptions import ValidationError  # noqa: F401  (the refusal named above)
+
+    product, e = ko_reset(**KOR_CASES[case]), env()
+    mc = SnowballMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7)).calculate_event_stats(product, e)
+    stats = kor_route(route).calculate_event_stats(product, e)
+    rows, mc_rows = _rows(stats), _rows(mc)
+    assert len(rows) == len(mc_rows) == 7
+    assert list(stats.observations.dates) == list(mc.observations.dates)
+    for p, m in zip(rows, mc_rows):
+        se = math.sqrt(m * (1.0 - m) / MC_PATHS)
+        assert abs(p - m) <= 3.0 * se, (rows, mc_rows)
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("route", ROUTES)
+def test_ko_reset_knock_in_pair_statistics_agree_with_mc_on_the_wider_knock_in(route):
+    """The knock-in pair's knock-out rows (the knock-in stream not requested): MC cannot report the pair itself (its
+    knock-in table refuses the repeated time), so they are held to MC on the exactly equivalent single knock-in at
+    80 -- within 3 SE per record."""
+    from quantark.cashleg.event_distribution import EventType
+
+    e = env()
+    pair = ko_reset(**KOR_CASES["ki_pair"])
+    single = ko_reset(ki=_KI_75[:2] + [(JUL3, 80.0)])
+    mc = SnowballMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7)).calculate_event_stats(single, e)
+    rows = _rows(kor_route(route).calculate_event_stats(pair, e, streams=frozenset({EventType.KO})))
+    for p, m in zip(rows, _rows(mc)):
+        se = math.sqrt(m * (1.0 - m) / MC_PATHS)
+        assert abs(p - m) <= 3.0 * se, (rows, _rows(mc))
+
+
+def test_ko_reset_same_instant_statistics_routes_agree():
+    """The forward pass attributes the instant's sources as the stacked columns do (adjoint identity), the knock-in
+    pair's single projection included."""
+    from quantark.cashleg.event_distribution import EventType
+
+    product, e = ko_reset(**KOR_CASES["schedule1_and_ki_pair"]), env()
+    streams = frozenset({EventType.KO})
+    fwd = kor_route("forward").calculate_event_stats(product, e, streams=streams)
+    stk = kor_route("stacked").calculate_event_stats(product, e, streams=streams)
+    assert np.allclose(_rows(fwd), _rows(stk), rtol=0.0, atol=1e-12), (_rows(fwd), _rows(stk))
+    assert _rows(fwd)[3] > 0.01                                      # the 07-04 step-down's own row
+    assert abs(fwd.reconciliation_error) <= 1e-9 * abs(fwd.pv)
+
+
+def test_ko_reset_knock_in_pair_knock_in_stream_stays_refused():
+    """Open item (decided in T5): the knock-in table holds one row per knock-in record and refuses two on one time --
+    the KO-reset V1 refuses as MC does, never a silent number."""
+    from quantark.util.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match="KnockInTable.times has duplicate rows"):
+        kor().calculate_event_stats(ko_reset(**KOR_CASES["ki_pair"]), env())
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_ko_reset_dominated_duplicate_has_zero_probability(route):
+    """The dominated schedule-1 record keeps its row at probability 0; the other rows equal the product's without it."""
+    e = env()
+    dup = kor_route(route).calculate_event_stats(ko_reset(pre=_PRE_103 + [(JUL4, 103.0, 0.40)]), e)
+    base = kor_route(route).calculate_event_stats(ko_reset(), e)
+    rows, base_rows = _rows(dup), _rows(base)
+    assert rows[3] == 0.0
+    assert rows[:3] + rows[4:] == base_rows
+    assert dup.pv == base.pv
+
+
+def test_ko_reset_folding_onto_a_same_instant_pair_is_refused():
+    """D10: two effective knock-out records of one schedule on one instant each pay their own cash; the binder is one
+    to one by (schedule, time) -- refused, naming them."""
+    from quantark.cashleg.folding import FoldedEventCash, FoldOverlay
+    from quantark.util.exceptions import ValidationError
+
+    product, e = ko_reset(**KOR_CASES["schedule1_step_down"]), env()
+    pre, _, _ = product._resolve_ko_schedule(product.barrier_config, e)
+    timing = resolve_terminal_timing(product, e)
+    det, pay = float(timing.determination_time), float(timing.payment_time)
+    overlay = FoldOverlay(
+        ko=tuple(FoldedEventCash("pre", float(r.observation_time), float(r.settlement_time), float(k + 1))
+                 for k, r in enumerate(pre)),
+        maturity_no_ki=FoldedEventCash("main", det, pay, 0.25), maturity_ki=FoldedEventCash("main", det, pay, -0.5),
+        constant_pv=0.0)
+    with pytest.raises(ValidationError, match="2025-07-03.*2025-07-04"):
+        kor().price_folded(product, e, overlay)
+
+
+@pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
+def test_ko_reset_valuation_instant_pays_the_deciding_record(spot, deciding):
+    """Valuation on 07-03 (07-03 and 07-04 at t = 0): the product's decision on the known spot knocks out by the first
+    schedule-1 record (contract order) the spot breaches, paying ITS cash; the statistics put probability 1 on that
+    record's own row (by index, not the instant's first record). Indices count the records still ahead (03-03 and
+    05-05 have passed)."""
+    e = env(JUL3, spot=spot)
+    product = ko_reset(**KOR_CASES["schedule1_step_down"])
+    decision = product.decide_observations_at_valuation(spot, e)
+    assert decision.knocked_out and decision.ko_index == deciding
+    expected = decision.ko_record.payoff * e.get_discount_factor(decision.ko_record.settlement_time)
+    assert kor().price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    for route in ROUTES:
+        rows = _rows(kor_route(route).calculate_event_stats(product, e))
+        assert rows[deciding] == 1.0 and sum(rows) == 1.0, (route, rows)

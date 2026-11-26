@@ -9,6 +9,7 @@ Uses two value surfaces (V_out/V_in) with separate KO schedules:
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -31,7 +32,10 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
-from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.product.option.observation_schedule import (
+    ResolvedObservationRecord,
+    same_instant_ko_groups,
+)
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import EngineType
@@ -44,6 +48,37 @@ from quantark.util.numerical import (
     validate_non_negative,
     validate_positive,
 )
+
+
+@dataclass(frozen=True)
+class _ResetInstant:
+    """An env instant holding the records of two or more contract dates (0.16.0 D14 zero-gap rule).
+
+    ``steps``: per contract date in date order, ``(schedule-1 knock-out, discrete knock-in, schedule-2 knock-out)``
+    records (``None`` where the date has none), the instant's dominated records dropped (``same_instant_ko_groups``
+    per schedule; a knock-in whose region an earlier one's contains). The dates are consecutive observations with zero
+    elapsed time: same spot, contract order, each date under the product's same-date order.
+    """
+
+    time: float
+    steps: tuple
+
+    @property
+    def pre_records(self) -> list:
+        return [pre for pre, _, _ in self.steps if pre is not None]
+
+    @property
+    def post_records(self) -> list:
+        return [post for _, _, post in self.steps if post is not None]
+
+    def levels(self, out_live: bool, disable_ko_after_ki: bool) -> list:
+        """The barrier levels the instant observes (the exact first step's quadrature levels)."""
+        out = [float(pre.barrier) for pre in self.pre_records if pre.barrier is not None]
+        if not disable_ko_after_ki:
+            out += [float(post.barrier) for post in self.post_records if post.barrier is not None]
+        if out_live:
+            out += [float(ki.barrier) for _, ki, _ in self.steps if ki is not None]
+        return out
 
 
 class KOResetSnowballQuadEngine(SnowballQuadEngine):
@@ -76,6 +111,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             self._fold_in_life(self._resolve_ko_records(product, pricing_env, config), maturity)
             for config in (product.barrier_config, product.post_barrier_config)
         )
+        self._refuse_fold_on_reset_instants(self._reset_instants(product, pre, post, ()))
         amounts = self._bind_fold_ko(
             fold, [("pre", rec) for rec in pre] + [("post", rec) for rec in post]
         )
@@ -208,14 +244,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 payment_timings.event_delay_dfs,
             )
         }
-        fold_ko: Optional[dict] = None
-        if fold is not None:
-            fold_ko = self._bind_fold_ko(
-                fold,
-                [("pre", rec) for rec in self._fold_in_life(pre_ko_records, maturity)]
-                + [("post", rec) for rec in self._fold_in_life(post_ko_records, maturity)],
-            )
-
         ki_continuous = product.has_ki_barrier and (
             product.barrier_config.ki_continuous
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
@@ -223,6 +251,16 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         ki_records: Sequence = []
         if product.has_ki_barrier and not ki_continuous and not carried_knock_in:
             ki_records = product.resolve_ki_observations(pricing_env)
+        instants = self._reset_instants(product, pre_ko_records, post_ko_records, ki_records)
+
+        fold_ko: Optional[dict] = None
+        if fold is not None:
+            self._refuse_fold_on_reset_instants(instants)
+            fold_ko = self._bind_fold_ko(
+                fold,
+                [("pre", rec) for rec in self._fold_in_life(pre_ko_records, maturity)]
+                + [("post", rec) for rec in self._fold_in_life(post_ko_records, maturity)],
+            )
 
         times = self._merge_times(
             [rec.observation_time for rec in pre_ko_records]
@@ -377,12 +415,18 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
             pre_record = self._match_record(obs_time, pre_ko_records)
             post_record = self._match_record(obs_time, post_ko_records)
+            instant = self._reset_instant_at(obs_time, instants)
 
             def ko_cash(record):
                 if record is None:
                     return 0.0
                 extra = 0.0 if fold_ko is None else fold_ko[id(record)]
                 return (record.payoff + extra) * event_delay_by_record[id(record)]
+
+            group_values = None
+            if instant is not None:
+                # the zero-gap instant (D14): each knock-out record pays its own cash
+                group_values = {id(rec): ko_cash(rec) for rec in instant.pre_records + instant.post_records}
 
             if step_index == 1 and first_exact:
                 # the pre-event states at the first event: a state seeded here holds its maturity seed exactly
@@ -402,19 +446,27 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                         if ki_continuous and log_ki_barrier is not None and out_live else None,
                     ) if level is not None
                 ]
+                if instant is not None:
+                    # every level the instant observes is a level of the first step's quadrature
+                    first_levels = instant.levels(out_live, disable_ko_after_ki) + [
+                        product.barrier_config.ki_barrier
+                    ] * bool(ki_continuous and log_ki_barrier is not None and out_live)
 
                 def first_event(y, out_y, in_y, _t=obs_time, _live=out_live,
-                                _pre=ko_cash(pre_record), _post=ko_cash(post_record)):
+                                _pre=ko_cash(pre_record), _post=ko_cash(post_record),
+                                _instant=instant, _values=group_values):
                     return self._apply_reset_observation(
                         product, y, spot * np.exp(y), spot, 0.0, out_y, in_y,
                         _t, _live, pre_ko_records, post_ko_records, ki_records,
                         ki_continuous, log_ki_barrier, _pre, _post,
+                        instant=_instant, instant_values=_values,
                     )
 
             v_out, v_in = self._apply_reset_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
                 ki_continuous, log_ki_barrier, ko_cash(pre_record), ko_cash(post_record),
+                instant=instant, instant_values=group_values,
             )
 
             # Post-event continuation surfaces at obs_time (v_out = pre-KI/not-yet-KI,
@@ -531,9 +583,17 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     def _apply_reset_observation(
         self, product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
         obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
-        ki_continuous, log_ki_barrier, pre_value, post_value,
+        ki_continuous, log_ki_barrier, pre_value, post_value, *, instant=None, instant_values=None,
     ):
-        """Shared price/statistics event ordering, including overlapping barriers."""
+        """Shared price/statistics event ordering, including overlapping barriers.
+
+        ``instant``: the zero-gap instant at ``obs_time`` (``_reset_instants``), applied by ``_apply_reset_instant``
+        with ``instant_values`` (``{id(record): knock-out value}``) in place of ``pre_value`` / ``post_value``."""
+        if instant is not None:
+            return self._apply_reset_instant(
+                product, grid, spot_grid, spot, smoothing_width, v_out, v_in, instant, out_live,
+                ki_continuous, log_ki_barrier, instant_values,
+            )
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
         pre_ko_weight = None
         pre_ko_last = False
@@ -621,6 +681,164 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             v_out = pre_ko_weight * pre_ko_value + (1.0 - pre_ko_weight) * v_out
 
         return v_out, v_in
+
+    def _apply_reset_instant(self, product, grid, spot_grid, spot, width, v_out, v_in, instant, out_live,
+                             ki_continuous, log_ki_barrier, values):
+        """A zero-gap instant (0.16.0 D14): its contract dates as consecutive observations at one spot, each under the
+        same-date order (schedule-1 knock-out, then the knock-in -- the knock-out wins the tie -- then schedule-2
+        knock-out, in force from the knock-in that enters it). Backward: date by date in reverse contract order, each
+        date's maps as ``_apply_reset_observation`` applies one date's (knock-out weights per node, exact on hard
+        masks and pointwise; the discrete knock-in projected / blended). Two or more knock-in records on cell-average
+        events are ONE piecewise projection with breaks at their levels, the note state chain evaluated per region
+        with each knock-in frozen to the region's side (sequential projections are not one cell-average of the
+        composite map); ``values``: ``{id(record): knock-out value}``."""
+        disable = product.barrier_config.disable_ko_after_ki
+        reverse = bool(product.is_reverse)
+        steps = instant.steps
+
+        def knock_out(surface, record):
+            weight = self._smooth_step_weight(grid, record.barrier, spot, width, trigger_is_down=reverse)
+            if weight is None:
+                weight = (spot_grid <= record.barrier if reverse else spot_grid >= record.barrier).astype(float)
+            return weight * values[id(record)] + (1.0 - weight) * surface
+
+        def chain(v_out, v_in, ki_fires=None):
+            for k in range(len(steps) - 1, -1, -1):
+                pre, ki, post = steps[k]
+                if post is not None and not disable:
+                    v_in = knock_out(v_in, post)
+                if ki is not None and out_live and not ki_continuous:
+                    if ki_fires is None:
+                        v_out = self._blend_ki_transition(
+                            v_out, v_in, grid, spot_grid, ki.barrier, spot, width, reverse,
+                        )
+                    elif ki_fires[k]:
+                        v_out = np.array(v_in, dtype=float, copy=True)
+                if pre is not None:
+                    v_out = knock_out(v_out, pre)
+            return v_out, v_in
+
+        ki_steps = ([k for k, (_, ki, _) in enumerate(steps) if ki is not None]
+                    if out_live and not ki_continuous else [])
+        if len(ki_steps) >= 2 and self._use_cell_average_events() and not self._pointwise_events:
+            logs = {k: safe_log(float(steps[k][1].barrier) / float(spot)) for k in ki_steps}
+            ranked = sorted(ki_steps, key=lambda k: logs[k])
+            rank = {k: r for r, k in enumerate(ranked)}
+            breaks = [logs[k] for k in ranked]
+            branches = []
+            for j in range(len(breaks) + 1):
+                # region j lies between the (j-1)-th and j-th lowest level: a down knock-in (breach at or below its
+                # level) fires there iff its level is at or above the region; an up one (reverse) iff below it
+                fires = {k: (j > rank[k]) if reverse else (j <= rank[k]) for k in ki_steps}
+                branch, v_in_after = chain(v_out, v_in, fires)
+                branches.append(branch)
+            v_out, v_in = self._project_quad_piecewise(grid, breaks, branches), v_in_after
+        else:
+            v_out, v_in = chain(v_out, v_in)
+
+        if out_live and ki_continuous and log_ki_barrier is not None:
+            ki_mask = (
+                spot_grid >= product.barrier_config.ki_barrier
+                if reverse
+                else spot_grid <= product.barrier_config.ki_barrier
+            )
+            v_out[..., ki_mask] = v_in[..., ki_mask]
+        return v_out, v_in
+
+    def _reset_instants(self, product, pre_ko_records, post_ko_records, ki_records) -> list:
+        """The env instants holding records of two or more contract dates (``_ResetInstant``, 0.16.0 D14), in time
+        order; empty when none does (the recursion then runs exactly as before).
+
+        Per instant (``same_instant`` to its first record, the helper's grouping rule): a schedule's record whose
+        breach region an earlier one's of the instant contains can never trigger first and is dropped
+        (``same_instant_ko_groups``); so is a knock-in record whose region an earlier one's contains (the note is
+        knocked in already). A schedule-2 record is dropped that way only when no knock-in of the instant is dated
+        after the instant's first schedule-2 record (a note knocked in later enters schedule 2 past it). An instant
+        whose remaining records share one contract date keeps the single-date step.
+
+        Raises:
+            PricingError: records of one instant without observation dates, or two of one kind on one date (no
+                contract order).
+        """
+        tagged = ([("pre", r) for r in pre_ko_records] + [("ki", r) for r in ki_records]
+                  + [("post", r) for r in post_ko_records])
+        tagged = [item for item in tagged if item[1].observation_time is not None]
+        if len(tagged) < 2:
+            return []
+        ordered = sorted(enumerate(tagged), key=lambda pair: (float(pair[1][1].observation_time), pair[0]))
+        runs: list = []
+        anchor = None
+        for _, item in ordered:
+            t = float(item[1].observation_time)
+            if anchor is None or not same_instant(t, anchor):
+                runs.append([])
+                anchor = t
+            runs[-1].append(item)
+        reverse = bool(product.is_reverse)
+        instants = []
+        for run in runs:
+            if len(run) < 2:
+                continue
+            pre = [r for kind, r in run if kind == "pre"]
+            ki = [r for kind, r in run if kind == "ki"]
+            post = [r for kind, r in run if kind == "post"]
+            pre = same_instant_ko_groups(pre, reverse)[0] if pre else []
+            ki = same_instant_ko_groups(ki, not reverse)[0] if ki else []
+            if post:
+                first = post[0].observation_date
+                late_knock_in = first is not None and any(
+                    r.observation_date is not None and r.observation_date > first for r in ki)
+                if not late_knock_in:
+                    post = same_instant_ko_groups(post, reverse)[0]
+            records = pre + ki + post
+            dates = {r.observation_date for r in records}
+            if len(dates) < 2:
+                continue
+            where = f"t={float(run[0][1].observation_time)!r}"
+            if None in dates:
+                raise PricingError(
+                    f"KO-reset QUAD V1: the records sharing the env instant {where} cannot be put in contract order "
+                    "(a record has no observation date)"
+                )
+            steps = []
+            for day in sorted(dates):
+                picked = [[r for r in group if r.observation_date == day] for group in (pre, ki, post)]
+                if any(len(group) > 1 for group in picked):
+                    raise PricingError(
+                        f"KO-reset QUAD V1: two records of one schedule on {day.date().isoformat()} at the env "
+                        f"instant {where}: no contract order between them"
+                    )
+                steps.append(tuple(group[0] if group else None for group in picked))
+            instants.append(_ResetInstant(time=float(run[0][1].observation_time), steps=tuple(steps)))
+        return instants
+
+    @staticmethod
+    def _reset_instant_at(obs_time: float, instants: Sequence) -> Optional[_ResetInstant]:
+        for instant in instants:
+            if same_instant(float(obs_time), instant.time):
+                return instant
+        return None
+
+    @staticmethod
+    def _refuse_fold_on_reset_instants(instants: Sequence) -> None:
+        """Cash-leg folding onto an instant holding two or more effective knock-out records of one schedule (0.16.0
+        D10): the binder is one to one by (schedule, time); refused, naming the records."""
+        for instant in instants:
+            for records in (instant.pre_records, instant.post_records):
+                if len(records) >= 2:
+                    named = ", ".join(r.observation_date.date().isoformat() for r in records)
+                    raise ValidationError(
+                        f"cash-leg folding cannot bind the knock-out records {named} sharing one env instant: each "
+                        "pays its own cash at that instant (an open item); price the legs on the event route"
+                    )
+
+    @staticmethod
+    def _index_of(record, records: Sequence) -> int:
+        """``record``'s position in ``records`` by identity (records of one instant may compare equal by value)."""
+        for index, candidate in enumerate(records):
+            if candidate is record:
+                return index
+        raise PricingError("KO-reset QUAD V1: a record of the instant is not on its schedule")
 
     def _align_to_the_level_in_force(self, spot, product, carried_knock_in: bool):
         """The lattice is pinned to the knock-out level in force: the second schedule's once knocked in.
@@ -738,6 +956,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         ki_records: Sequence = []
         if product.has_ki_barrier and not ki_continuous and not carried_knock_in:
             ki_records = product.resolve_ki_observations(pricing_env)
+        instants = self._reset_instants(product, pre_ko_records, post_ko_records, ki_records)
 
         times = self._merge_times(
             [rec.observation_time for rec in pre_ko_records]
@@ -891,6 +1110,25 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 if not product.barrier_config.disable_ko_after_ki:
                     sources.append(("ko", post_offset + post_ko_records.index(post_record)))
                     units[sources[-1]] = float(post_unit)
+            instant = self._reset_instant_at(obs_time, instants)
+            group_values = group_units = None
+            if instant is not None:
+                # the zero-gap instant (D14): every knock-out record is its own row / adjoint source
+                sources, units, group_values, group_units = [], {}, {}, []
+                for is_post, schedule, records in ((False, instant.pre_records, pre_ko_records),
+                                                   (True, instant.post_records, post_ko_records)):
+                    for rec in schedule:
+                        key = ("ko", (post_offset if is_post else 0) + self._index_of(rec, records))
+                        unit = float(self._ko_discount(rate, obs_time, rec.settlement_time, df_fn=df_local))
+                        value = np.zeros_like(v_out)
+                        if m_unit:
+                            value[key[1]] = unit
+                        group_values[id(rec)] = value
+                        group_units.append((key, rec, unit))
+                        # a schedule-2 knock-out under disable_ko_after_ki is never applied: no source
+                        if not is_post or not product.barrier_config.disable_ko_after_ki:
+                            sources.append(key)
+                            units[key] = unit
             if step_index == 1 and first_exact:
                 first = self._reset_first_step_statistics(
                     product, pricing_env, math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]),
@@ -898,12 +1136,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     pre_record, post_record, pre_ko_records, post_ko_records, ki_records, ki_continuous,
                     log_ki_barrier, rows=(n_rows, m_unit, m_cash, kis_unit, kis_cash),
                     cash=(terminal.delay_df, first_schedule), pre_unit=float(pre_unit), post_unit=float(post_unit),
-                    pre_key=sources[0] if pre_record is not None else None, log_type=FirstStepLog,
+                    pre_key=sources[0] if pre_record is not None and instant is None else None,
+                    log_type=FirstStepLog, instant=instant, group_values=group_values, group_units=group_units,
                 )
             v_out, v_in = self._apply_reset_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
                 ki_continuous, log_ki_barrier, pre_value, post_value,
+                instant=instant, instant_values=group_values,
             )
 
             tau_step = float(tau[step_index])
@@ -921,7 +1161,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     product, grid, spot_grid, spot, smoothing_width, obs_time, out_live, pre_ko_records,
                     post_ko_records, ki_records, ki_continuous, log_ki_barrier,
                     pre_unit=float(pre_unit), post_unit=float(post_unit),
-                    pre_key=sources[0] if pre_record is not None else None,
+                    pre_key=sources[0] if pre_record is not None and instant is None else None,
+                    instant=instant, group_units=group_units,
                 ),
                 sources=tuple(sources),
                 source_units=units,
@@ -1048,7 +1289,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                                      out_live, seeded, maturity_first, v_out, v_in, pre_value, post_value,
                                      pre_record, post_record, pre_ko_records, post_ko_records, ki_records,
                                      ki_continuous, log_ki_barrier, *, rows, cash, pre_unit, post_unit, pre_key,
-                                     log_type):
+                                     log_type, instant=None, group_values=None, group_units=None):
         """The exact first step of the statistics columns (S3b): the first observation on the quadrature nodes,
         pointwise, on the pre-event columns (a state seeded at the first event holds its maturity columns there,
         evaluated on the nodes), read at the spot; and its log for the adjoint pass."""
@@ -1065,6 +1306,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 product.barrier_config.ki_barrier if bridged else None,
             ) if level is not None
         ]
+        if instant is not None:
+            # every level the zero-gap instant observes (D14)
+            levels = instant.levels(out_live, product.barrier_config.disable_ko_after_ki) + [
+                product.barrier_config.ki_barrier] * bridged
         fs = self._first_step_quadrature(
             math_utils, spot, tau1, alpha1, beta1, levels,
             touch=(log_ki_barrier, product.is_reverse) if bridged else None, band=False,
@@ -1093,17 +1338,21 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             terminal_in = {"ki_settlement_unit": np.ones(y.size), "ki_settlement_cash": in_cash}
         else:
             in_y = fs.lift(v_in)
+        y_values = (None if group_values is None else
+                    {key: self._node_constant_on(value, y.size) for key, value in group_values.items()})
         with self._pointwise():
             out_y, in_y = self._apply_reset_observation(
                 product, y, spots_y, spot, 0.0, out_y, in_y, obs_time, out_live, pre_ko_records,
                 post_ko_records, ki_records, ki_continuous, log_ki_barrier,
                 self._node_constant_on(pre_value, y.size), self._node_constant_on(post_value, y.size),
+                instant=instant, instant_values=y_values,
             )
         return log_type(
             quadrature=fs,
             event=self._pointwise_event(self._reset_statistics_event(
                 product, y, spots_y, spot, 0.0, obs_time, out_live, pre_ko_records, post_ko_records, ki_records,
                 ki_continuous, log_ki_barrier, pre_unit=pre_unit, post_unit=post_unit, pre_key=pre_key,
+                instant=instant, group_units=group_units,
             )),
             terminal_out=terminal_out,
             terminal_in=terminal_in,
@@ -1113,13 +1362,21 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
     def _reset_statistics_event(self, product, grid, spot_grid, spot, width, obs_time, out_live, pre_ko_records,
                                 post_ko_records, ki_records, ki_continuous, log_ki_barrier, *, pre_unit, post_unit,
-                                pre_key):
+                                pre_key, instant=None, group_units=None):
         """The observation's event map on the two note states, for the adjoint pass: ``_apply_reset_observation``
-        with every knock-out source zero (``source=None``) or one schedule's source alone."""
+        with every knock-out source zero (``source=None``) or one schedule's source alone (a zero-gap instant: one
+        record's source alone, ``group_units`` ``(key, record, unit)``)."""
 
         def event(v_out, v_in, source):
             v_out = np.array(v_out, dtype=float)
             v_in = np.array(v_in, dtype=float)
+            if instant is not None:
+                values = {id(rec): (unit if key == source else 0.0) for key, rec, unit in group_units}
+                return self._apply_reset_observation(
+                    product, grid, spot_grid, spot, width, v_out, v_in, obs_time, out_live, pre_ko_records,
+                    post_ko_records, ki_records, ki_continuous, log_ki_barrier, 0.0, 0.0,
+                    instant=instant, instant_values=values,
+                )
             pre_value = np.zeros_like(v_out)
             post_value = np.zeros_like(v_in)
             if source is not None:
@@ -1194,6 +1451,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         records = pre_ko_records if decision.ko_regime == "pre" else post_ko_records
         decided = self._match_record(decision.ko_record.observation_time, records)
+        at_instant = [r for r in records if same_instant(float(r.observation_time),
+                                                          float(decision.ko_record.observation_time))]
+        if len(at_instant) >= 2 and decision.ko_index is not None and decision.ko_index < len(records):
+            # several records of the schedule at the valuation instant: the decision's own record, by index (D4)
+            decided = records[decision.ko_index]
         if decided is None:
             raise PricingError("The knock-out decided at valuation has no record on the engine's schedule.")
         pv = float(self.price(product, pricing_env))
@@ -1303,6 +1565,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     barrier=rec.barrier,
                     payoff=payoff,
                     settlement_time=settlement_time,
+                    # the contract order of records sharing an env instant (D14) and their table rows' dates
+                    observation_date=rec.observation_date,
                 )
             )
         return ko_records
