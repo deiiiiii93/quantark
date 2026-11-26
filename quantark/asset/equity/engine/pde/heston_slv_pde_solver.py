@@ -17,7 +17,7 @@ from quantark.asset.equity.engine.settlement_support import (
 )
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
-from quantark.param.rrf import ParallelShiftRateCurve
+from quantark.priceenv.clock_validation import clock_parallel_shift_rate
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
@@ -135,9 +135,9 @@ class HestonSLVPDESolver(BaseEngine):
         }
         base = g["price"]
         env_ru = deepcopy(pricing_env)
-        env_ru.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, bump.rate_bump)
+        env_ru.rate_curve = clock_parallel_shift_rate(pricing_env.rate_curve, bump.rate_bump)
         env_rd = deepcopy(pricing_env)
-        env_rd.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, -bump.rate_bump)
+        env_rd.rate_curve = clock_parallel_shift_rate(pricing_env.rate_curve, -bump.rate_bump)
         g["rho"] = (
             self.price(product, env_ru, lifecycle_state=lifecycle_state)
             - self.price(product, env_rd, lifecycle_state=lifecycle_state)

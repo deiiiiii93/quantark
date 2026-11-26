@@ -12,7 +12,7 @@ from copy import deepcopy
 from datetime import timedelta
 from typing import Callable, Dict, Optional
 
-from quantark.param.rrf import ParallelShiftRateCurve
+from quantark.priceenv.clock_validation import clock_parallel_shift_rate
 from quantark.util.numerical.constants import Tolerance
 
 
@@ -53,9 +53,9 @@ def local_vol_rho_theta(price_with_surface: Callable, product, pricing_env, lv_s
         base = price_with_surface(product, pricing_env, lv_surface)
     out: Dict[str, float] = {}
     env_ru = deepcopy(pricing_env)
-    env_ru.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, rate_bump)
+    env_ru.rate_curve = clock_parallel_shift_rate(pricing_env.rate_curve, rate_bump)
     env_rd = deepcopy(pricing_env)
-    env_rd.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, -rate_bump)
+    env_rd.rate_curve = clock_parallel_shift_rate(pricing_env.rate_curve, -rate_bump)
     # Repository convention: rho reported per 1% rate move (dV/dr / 100).
     out["rho"] = (
         price_with_surface(product, env_ru, lv_surface)

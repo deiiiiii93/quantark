@@ -268,7 +268,8 @@ def relationship_tenor(env, mode, time_to_maturity: float) -> float:
     name = getattr(mode, "name", str(mode)).upper()
     native = [f for f, obj in curves if not is_clock_wrapped(obj) and not _is_identically_zero(obj)]
     if name == "INDEPENDENT" and native:
-        # a native (trading-year) curve may be the one read: keep 0.15.0's reading at T (checkpoint finding)
+        # a native (trading-year) curve may be the one read: keep 0.15.0's reading at T (checkpoint finding).
+        # Conservative: on such a mixed env a WRAPPED source is read at T too (known limitation, documented).
         return t
     if name != "INDEPENDENT":
         if native:
@@ -350,6 +351,20 @@ def _holds_clock_wrapper(curve, depth: int = 3) -> bool:
             if isinstance(slot, str) and hasattr(curve, slot):
                 children.append(getattr(curve, slot))
     return any(_holds_clock_wrapper(v, depth - 1) for v in children)
+
+
+def clock_parallel_shift_rate(curve, shift: float):
+    """``ParallelShiftRateCurve`` on the curve's own axis (0.16.0 trading-clock run D5).
+
+    A TradingClock-wrapped curve is a calendar quote: the shift is applied to its ``inner`` (per calendar year, like
+    every other cash shift) and re-wrapped on the same map. Any other curve gets exactly
+    ``ParallelShiftRateCurve(curve, shift)``.
+    """
+    from quantark.param.rrf.rate_curve import ParallelShiftRateCurve
+
+    if is_clock_wrapped(curve):
+        return type(curve)(ParallelShiftRateCurve(curve.inner, shift), curve.time_map)
+    return ParallelShiftRateCurve(curve, shift)
 
 
 def declared_time_map(env, field: str):

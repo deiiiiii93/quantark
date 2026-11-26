@@ -24,7 +24,7 @@ from quantark.asset.bond.engine.pde.convertible import (
     ConvertibleBondTFEngine,
 )
 from quantark.priceenv import PricingEnvironment
-from quantark.param.rrf import ParallelShiftRateCurve
+from quantark.priceenv.clock_validation import clock_parallel_shift_rate
 from quantark.util.enum.engine_enums import EngineType, ConvertibleBondMethod, PDEMethod
 from quantark.util.exceptions import ValidationError
 
@@ -496,15 +496,11 @@ class ConvertibleBondEngine:
             return 0.0
 
         env_up = deepcopy(self.pricing_env)
-        env_up.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=rate_bump
-        )
+        env_up.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, rate_bump)
         price_up = self._floor_bond_price_with_env(bond, env_up)
 
         env_down = deepcopy(self.pricing_env)
-        env_down.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=-rate_bump
-        )
+        env_down.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, -rate_bump)
         price_down = self._floor_bond_price_with_env(bond, env_down)
 
         return (price_down - price_up) / 2.0
@@ -562,15 +558,11 @@ class ConvertibleBondEngine:
             return 0.0
 
         env_up = deepcopy(self.pricing_env)
-        env_up.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=rate_bump
-        )
+        env_up.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, rate_bump)
         price_up = self._floor_bond_price_with_env(bond, env_up)
 
         env_down = deepcopy(self.pricing_env)
-        env_down.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=-rate_bump
-        )
+        env_down.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, -rate_bump)
         price_down = self._floor_bond_price_with_env(bond, env_down)
 
         return (price_up + price_down - 2.0 * base_price) / (
@@ -598,17 +590,13 @@ class ConvertibleBondEngine:
 
         # Price with rate bumped up
         env_up = deepcopy(self.pricing_env)
-        env_up.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=rate_bump
-        )
+        env_up.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, rate_bump)
         engine_up = self._create_bumped_engine(env_up)
         price_up = engine_up.price(bond)
 
         # Price with rate bumped down
         env_down = deepcopy(self.pricing_env)
-        env_down.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=-rate_bump
-        )
+        env_down.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, -rate_bump)
         engine_down = self._create_bumped_engine(env_down)
         price_down = engine_down.price(bond)
 
@@ -713,17 +701,13 @@ class ConvertibleBondEngine:
 
         # Price with rate bumped up
         env_up = deepcopy(self.pricing_env)
-        env_up.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=rate_bump
-        )
+        env_up.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, rate_bump)
         engine_up = self._create_bumped_engine(env_up)
         price_up = engine_up.price(bond)
 
         # Price with rate bumped down
         env_down = deepcopy(self.pricing_env)
-        env_down.rate_curve = ParallelShiftRateCurve(
-            self.pricing_env.rate_curve, shift=-rate_bump
-        )
+        env_down.rate_curve = clock_parallel_shift_rate(self.pricing_env.rate_curve, -rate_bump)
         engine_down = self._create_bumped_engine(env_down)
         price_down = engine_down.price(bond)
 
