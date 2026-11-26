@@ -580,32 +580,41 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         """Shared price/statistics event ordering, including overlapping barriers.
 
         ``instant``: the zero-gap instant at ``obs_time`` (``_reset_instants``), applied by ``_apply_reset_instant``
-        with ``instant_values`` (``{id(record): knock-out value}``) in place of ``pre_value`` / ``post_value``."""
+        with ``instant_values`` (``{id(record): knock-out value}``) in place of ``pre_value`` / ``post_value``.
+
+        Knock-outs (0.16.0 D1): on the lattice under ``event_projection=CELL_AVERAGE`` (the default) each record is
+        Snowball's dual-cell projection of the complete event (``_project_quad_event``); under NODAL events, and on
+        the exact first step's quadrature nodes (pointwise, width 0), the nodal weight (cosine smoothing over
+        ``smoothing_width``, a node mask at width 0) as before. The one event map serves price, statistics, the exact
+        first step and the adjoint pass (``_reset_statistics_event``)."""
         if instant is not None:
             return self._apply_reset_instant(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in, instant, out_live,
                 ki_continuous, log_ki_barrier, instant_values,
             )
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
+        projected = self._projected_knock_outs()
         pre_ko_weight = None
         pre_ko_last = False
         pre_ko_record = self._match_record(obs_time, pre_ko_records)
         if pre_ko_record is not None:
             ko_value = pre_value
-            ko_weight = self._smooth_step_weight(
-                grid,
-                pre_ko_record.barrier,
-                spot,
-                smoothing_width,
-                trigger_is_down=product.is_reverse,
-            )
-            if ko_weight is None:
-                ko_mask = (
-                    spot_grid <= pre_ko_record.barrier
-                    if product.is_reverse
-                    else spot_grid >= pre_ko_record.barrier
+            ko_weight = None
+            if not projected:
+                ko_weight = self._smooth_step_weight(
+                    grid,
+                    pre_ko_record.barrier,
+                    spot,
+                    smoothing_width,
+                    trigger_is_down=product.is_reverse,
                 )
-                ko_weight = ko_mask.astype(float)
+                if ko_weight is None:
+                    ko_mask = (
+                        spot_grid <= pre_ko_record.barrier
+                        if product.is_reverse
+                        else spot_grid >= pre_ko_record.barrier
+                    )
+                    ko_weight = ko_mask.astype(float)
 
             pre_ko_weight = ko_weight
             pre_ko_value = ko_value
@@ -622,27 +631,35 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 and self._match_record(obs_time, ki_records) is not None
             )
             if not pre_ko_last:
-                v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
+                v_out = (
+                    self._project_reset_knock_out(grid, spot, v_out, pre_ko_record.barrier, ko_value,
+                                                  product.is_reverse)
+                    if projected else ko_weight * ko_value + (1.0 - ko_weight) * v_out
+                )
 
         post_ko_record = self._match_record(obs_time, post_ko_records)
         if post_ko_record is not None and not disable_ko_after_ki:
             ko_value = post_value
-            ko_weight = self._smooth_step_weight(
-                grid,
-                post_ko_record.barrier,
-                spot,
-                smoothing_width,
-                trigger_is_down=product.is_reverse,
-            )
-            if ko_weight is None:
-                ko_mask = (
-                    spot_grid <= post_ko_record.barrier
-                    if product.is_reverse
-                    else spot_grid >= post_ko_record.barrier
+            if projected:
+                v_in = self._project_reset_knock_out(grid, spot, v_in, post_ko_record.barrier, ko_value,
+                                                     product.is_reverse)
+            else:
+                ko_weight = self._smooth_step_weight(
+                    grid,
+                    post_ko_record.barrier,
+                    spot,
+                    smoothing_width,
+                    trigger_is_down=product.is_reverse,
                 )
-                ko_weight = ko_mask.astype(float)
+                if ko_weight is None:
+                    ko_mask = (
+                        spot_grid <= post_ko_record.barrier
+                        if product.is_reverse
+                        else spot_grid >= post_ko_record.barrier
+                    )
+                    ko_weight = ko_mask.astype(float)
 
-            v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
+                v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
 
         if out_live and ki_continuous and log_ki_barrier is not None:
             ki_mask = (
@@ -656,7 +673,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if ki_record is not None:
                 # Resolution-aware smoothed KI transition (same O(h)
                 # bias fix as SnowballQuadEngine), narrowed by the
-                # pre-KO weight on simultaneous observations.
+                # pre-KO weight on simultaneous observations -- the breach
+                # fraction under projected knock-outs (as Snowball's). (A
+                # same-date first-schedule knock-out is applied last, so the
+                # narrowing is not reached; the cell-average blend projects
+                # the whole branches and takes no weight.)
+                if not pre_ko_last and pre_ko_record is not None and projected:
+                    pre_ko_weight = self._event_weight(
+                        grid, pre_ko_record.barrier, spot, smoothing_width, trigger_is_down=product.is_reverse)
                 v_out = self._blend_ki_transition(
                     v_out,
                     v_in,
@@ -670,9 +694,31 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 )
 
         if pre_ko_last:
-            v_out = pre_ko_weight * pre_ko_value + (1.0 - pre_ko_weight) * v_out
+            v_out = (
+                self._project_reset_knock_out(grid, spot, v_out, pre_ko_record.barrier, pre_ko_value,
+                                              product.is_reverse)
+                if projected else pre_ko_weight * pre_ko_value + (1.0 - pre_ko_weight) * v_out
+            )
 
         return v_out, v_in
+
+    def _projected_knock_outs(self) -> bool:
+        """Whether this event map applies knock-outs by the cell-average projection (0.16.0 D1): under
+        ``event_projection=CELL_AVERAGE`` on the lattice. NODAL events, and the exact first step's quadrature nodes
+        (``_pointwise``: each node on its own side of the barrier, width 0), keep the nodal weights."""
+        return self._use_cell_average_events() and not self._pointwise_events
+
+    def _project_reset_knock_out(self, grid, spot, surface, barrier, value, is_reverse: bool):
+        """One knock-out record on ``surface`` by Snowball's dual-cell projection (``_project_quad_event``): the
+        breach branch ``value`` (a scalar, or one value per row and node) above the barrier (below, reverse)."""
+        surface = np.asarray(surface, dtype=float)
+        value = np.asarray(value, dtype=float)
+        if surface.ndim > 1 and value.ndim == 0:
+            # stacked columns (the adjoint probes) against one cash value: the projection core moves the spatial
+            # axis of both branches
+            value = np.full(surface.shape, float(value))
+        return self._project_quad_event(grid, barrier, spot, v_survive=surface, v_breach=value,
+                                        breach_up=not is_reverse)
 
     def _apply_reset_instant(self, product, grid, spot_grid, spot, width, v_out, v_in, instant, out_live,
                              ki_continuous, log_ki_barrier, values):
@@ -682,9 +728,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         contract order -- so forward the first schedule-1 record breached pays, the knock-out beating the instant's
         knock-in, and a note knocked in at the instant meets its schedule-2 records. Knock-out weights are per node
         (exact on hard masks and pointwise), as ``_apply_reset_observation``'s; ``values``: ``{id(record): knock-out
-        value}``."""
+        value}``.
+
+        Projected knock-outs (0.16.0 D1, ``_projected_knock_outs``): one schedule's records of the instant are one
+        pass of Snowball's piecewise group projection (``_knock_out_group``: the first record in contract order whose
+        barrier is breached takes the value); a schedule with one record is ``_project_reset_knock_out``."""
         disable = product.barrier_config.disable_ko_after_ki
         reverse = bool(product.is_reverse)
+        projected = self._projected_knock_outs()
 
         def knock_out(surface, record):
             weight = self._smooth_step_weight(grid, record.barrier, spot, width, trigger_is_down=reverse)
@@ -692,15 +743,26 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 weight = (spot_grid <= record.barrier if reverse else spot_grid >= record.barrier).astype(float)
             return weight * values[id(record)] + (1.0 - weight) * surface
 
+        def knock_out_schedule(surface, records):
+            if not records:
+                return surface
+            if not projected:
+                for record in reversed(records):
+                    surface = knock_out(surface, record)
+                return surface
+            if len(records) == 1:
+                return self._project_reset_knock_out(grid, spot, surface, records[0].barrier, values[id(records[0])],
+                                                     reverse)
+            return self._knock_out_group(grid, spot, width, surface,
+                                         tuple((None, record, values[id(record)]) for record in records), reverse)
+
         if not disable:
-            for record in reversed(instant.post):
-                v_in = knock_out(v_in, record)
+            v_in = knock_out_schedule(v_in, instant.post)
         if instant.ki and out_live and not ki_continuous:
             v_out = self._blend_ki_transition(
                 v_out, v_in, grid, spot_grid, float(instant.ki[-1].barrier), spot, width, reverse,
             )
-        for record in reversed(instant.pre):
-            v_out = knock_out(v_out, record)
+        v_out = knock_out_schedule(v_out, instant.pre)
 
         if out_live and ki_continuous and log_ki_barrier is not None:
             ki_mask = (

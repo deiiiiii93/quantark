@@ -801,18 +801,26 @@ def test_ko_reset_duplicate_record_prices_as_the_product_without_it(kind):
     assert kor().price(dup, e) == kor().price(base, e)
 
 
-# Pinned BEFORE the T3bc change (worktree d4677f84 = f21c7998 for every file the KO-reset V1 reads).
+# Pinned BEFORE the T3bc change (worktree d4677f84 = f21c7998 for every file the KO-reset V1 reads). Re-pinned by
+# 0.16.0 D1 (QUAD numerics run 5: KO-reset V1 knock-outs by the cell-average projection) -- the previous values:
+#   base 0x1.1be31f43f709dp+3 (8.87147486948407), base_continuous_ki 0x1.f98d386ea5480p+2, schedule2_base
+#   0x1.1bcfc9bab5037p+3; base_first_step unchanged (its knock-in one business day ahead carries no mass to the
+#   schedule-2 events); rows forward ["0x1.80415fbd50683p-2", "0x1.2504dfab8b35dp-3", "0x1.296a191de821dp-4",
+#   "0x1.bdd25215ee2c2p-11", "0x1.bd8d9d64c9235p-10", "0x1.428e553c01dc3p-10"] / "0x1.6474e8987cde0p-2" /
+#   "0x1.d46de38a3aa47p-5", stacked ["0x1.80415fbd50684p-2", "0x1.2504dfab8b362p-3", "0x1.296a191de821fp-4",
+#   "0x1.bdd25215ee2a0p-11", "0x1.bd8d9d64c9233p-10", "0x1.428e553c01de0p-10"] / "0x1.6474e8987cde0p-2" /
+#   "0x1.d46de38a3aa4ap-5".
 KOR_PINS = {
-    "base": "0x1.1be31f43f709dp+3",
-    "base_continuous_ki": "0x1.f98d386ea5480p+2",
+    "base": "0x1.1bd6ebe4d78e9p+3",
+    "base_continuous_ki": "0x1.f96feee4b40b8p+2",
     "base_first_step": "0x1.5337d6098b9fap+2",
-    "schedule2_base": "0x1.1bcfc9bab5037p+3",
+    "schedule2_base": "0x1.1bc3631600048p+3",
 }
 KOR_ROW_PINS = {
-    "forward": (["0x1.80415fbd50683p-2", "0x1.2504dfab8b35dp-3", "0x1.296a191de821dp-4", "0x1.bdd25215ee2c2p-11",
-                 "0x1.bd8d9d64c9235p-10", "0x1.428e553c01dc3p-10"], "0x1.6474e8987cde0p-2", "0x1.d46de38a3aa47p-5"),
-    "stacked": (["0x1.80415fbd50684p-2", "0x1.2504dfab8b362p-3", "0x1.296a191de821fp-4", "0x1.bdd25215ee2a0p-11",
-                 "0x1.bd8d9d64c9233p-10", "0x1.428e553c01de0p-10"], "0x1.6474e8987cde0p-2", "0x1.d46de38a3aa4ap-5"),
+    "forward": (["0x1.80415fbd50683p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab10p-4", "0x1.bd335c527f2fep-11",
+                 "0x1.bd361567b524fp-10", "0x1.4209b90434a97p-10"], "0x1.6491837c68afap-2", "0x1.d487ade805274p-5"),
+    "stacked": (["0x1.80415fbd50684p-2", "0x1.24d5a02fa4dc0p-3", "0x1.294df5d37ab10p-4", "0x1.bd335c527f29fp-11",
+                 "0x1.bd361567b524cp-10", "0x1.4209b90434a9bp-10"], "0x1.6491837c68af9p-2", "0x1.d487ade80527ap-5"),
 }
 
 

@@ -1364,78 +1364,78 @@
   }
  },
  "kor_base_v1_fwd": {
-  "price": "0x1.1be31f43f709dp+3",
+  "price": "0x1.1bd6ebe4d78e9p+3",
   "stats": {
-   "pv": "0x1.1be31f43f709dp+3",
+   "pv": "0x1.1bd6ebe4d78e9p+3",
    "ko": [
     "0x1.80415fbd50683p-2",
-    "0x1.2504dfab8b35dp-3",
-    "0x1.296a191de821dp-4",
-    "0x1.bdd25215ee2c2p-11",
-    "0x1.bd8d9d64c9235p-10",
-    "0x1.428e553c01dc3p-10"
+    "0x1.24d5a02fa4dbdp-3",
+    "0x1.294df5d37ab10p-4",
+    "0x1.bd335c527f2fep-11",
+    "0x1.bd361567b524fp-10",
+    "0x1.4209b90434a97p-10"
    ],
    "ko_cash": [
     "0x1.67204856a2871p+2",
-    "0x1.10e14c461c7bep+1",
-    "0x1.140d3abb15f2fp+0",
-    "0x1.49f00323aa291p-9",
-    "0x1.48a441b16cf1cp-8",
-    "0x1.db150bdc764bdp-9"
+    "0x1.10b54c1a5d0a0p+1",
+    "0x1.13f31cd70e3e3p+0",
+    "0x1.497a5f0db1838p-9",
+    "0x1.4863b17af0a51p-8",
+    "0x1.da51baa2e45f6p-9"
    ],
-   "maturity": "0x1.6474e8987cde0p-2",
-   "ki_settlement": "0x1.d46de38a3aa47p-5",
-   "lifetime": "0x1.81363ea6825e6p-2",
-   "recon": "-0x1.0000000000000p-48",
-   "ki": "0x1.f3660c6798b4bp-5",
-   "ki_time": "0x1.b3ef72b50b62ep-2",
+   "maturity": "0x1.6491837c68afap-2",
+   "ki_settlement": "0x1.d487ade805274p-5",
+   "lifetime": "0x1.813b66d41d6e3p-2",
+   "recon": "0x0.0p+0",
+   "ki": "0x1.f37679ccae71ep-5",
+   "ki_time": "0x1.b3f11d140c8f8p-2",
    "ki_rows": [
     "0x1.e174d9b8cee09p-10",
-    "0x1.7ed2e9753c0dbp-6",
-    "0x1.24f0f0df3436dp-5"
+    "0x1.7ed7ce7d73bcdp-6",
+    "0x1.24feebc02e1c7p-5"
    ],
    "ki_surv": [
     "0x1.3eee95b47b648p-1",
-    "0x1.d36d8cfbdd6d2p-2",
-    "0x1.6474e8987cddcp-2"
+    "0x1.d384de694d1f4p-2",
+    "0x1.6491837c68af6p-2"
    ]
   }
  },
  "kor_base_v1_stk": {
-  "price": "0x1.1be31f43f709dp+3",
+  "price": "0x1.1bd6ebe4d78e9p+3",
   "stats": {
-   "pv": "0x1.1be31f43f709dp+3",
+   "pv": "0x1.1bd6ebe4d78e9p+3",
    "ko": [
     "0x1.80415fbd50684p-2",
-    "0x1.2504dfab8b362p-3",
-    "0x1.296a191de821fp-4",
-    "0x1.bdd25215ee2a0p-11",
-    "0x1.bd8d9d64c9233p-10",
-    "0x1.428e553c01de0p-10"
+    "0x1.24d5a02fa4dc0p-3",
+    "0x1.294df5d37ab10p-4",
+    "0x1.bd335c527f29fp-11",
+    "0x1.bd361567b524cp-10",
+    "0x1.4209b90434a9bp-10"
    ],
    "ko_cash": [
     "0x1.67204856a2872p+2",
-    "0x1.10e14c461c7c3p+1",
-    "0x1.140d3abb15f31p+0",
-    "0x1.49f00323aa278p-9",
-    "0x1.48a441b16cf1ap-8",
-    "0x1.db150bdc764e8p-9"
+    "0x1.10b54c1a5d0a3p+1",
+    "0x1.13f31cd70e3e3p+0",
+    "0x1.497a5f0db17f2p-9",
+    "0x1.4863b17af0a4ep-8",
+    "0x1.da51baa2e45fcp-9"
    ],
-   "maturity": "0x1.6474e8987cde0p-2",
-   "ki_settlement": "0x1.d46de38a3aa4ap-5",
-   "lifetime": "0x1.81363ea6825e7p-2",
-   "recon": "-0x1.0000000000000p-48",
-   "ki": "0x1.f3660c6798b4bp-5",
-   "ki_time": "0x1.b3ef72b50b62ep-2",
+   "maturity": "0x1.6491837c68af9p-2",
+   "ki_settlement": "0x1.d487ade80527ap-5",
+   "lifetime": "0x1.813b66d41d6e4p-2",
+   "recon": "-0x1.0000000000000p-47",
+   "ki": "0x1.f37679ccae71ep-5",
+   "ki_time": "0x1.b3f11d140c8f8p-2",
    "ki_rows": [
     "0x1.e174d9b8cee09p-10",
-    "0x1.7ed2e9753c0dbp-6",
-    "0x1.24f0f0df3436dp-5"
+    "0x1.7ed7ce7d73bcdp-6",
+    "0x1.24feebc02e1c7p-5"
    ],
    "ki_surv": [
     "0x1.3eee95b47b648p-1",
-    "0x1.d36d8cfbdd6d2p-2",
-    "0x1.6474e8987cddcp-2"
+    "0x1.d384de694d1f4p-2",
+    "0x1.6491837c68af6p-2"
    ]
   }
  },
@@ -1516,78 +1516,78 @@
   }
  },
  "kor_wide_v1_fwd": {
-  "price": "0x1.eee13c82e26eap+2",
+  "price": "0x1.eec283d91d79bp+2",
   "stats": {
-   "pv": "0x1.eee13c82e26eap+2",
+   "pv": "0x1.eec283d91d79bp+2",
    "ko": [
     "0x1.80415fbd50683p-2",
-    "0x1.2504dfab8b35dp-3",
-    "0x1.296a191de821dp-4",
-    "0x1.013533c6b215ep-9",
-    "0x1.280cc718746d7p-8",
-    "0x1.84b27c79f3cdfp-9"
+    "0x1.24d5a02fa4dbdp-3",
+    "0x1.294df5d37ab10p-4",
+    "0x1.00ba5f2c678fdp-9",
+    "0x1.27e6aaa62ad7fp-8",
+    "0x1.841fb0487fd01p-9"
    ],
    "ko_cash": [
     "0x1.67204856a2871p+2",
-    "0x1.10e14c461c7bep+1",
-    "0x1.140d3abb15f2fp+0",
-    "0x1.7cb3a3ca088c0p-8",
-    "0x1.b4bc262bdec24p-7",
-    "0x1.1e3fee8a2edd8p-7"
+    "0x1.10b54c1a5d0a0p+1",
+    "0x1.13f31cd70e3e3p+0",
+    "0x1.7bfdd59a68688p-8",
+    "0x1.b483ed643b2dap-7",
+    "0x1.1dd3d337e463cp-7"
    ],
-   "maturity": "0x1.37226b140722ep-2",
-   "ki_settlement": "0x1.884cf25216d17p-4",
-   "lifetime": "0x1.96b35b5f09100p-2",
-   "recon": "0x1.8000000000000p-48",
-   "ki": "0x1.aefcfc45a3470p-4",
-   "ki_time": "0x1.d3ee4b056966bp-2",
+   "maturity": "0x1.373c3fef2f3c1p-2",
+   "ki_settlement": "0x1.886b0ff5331f2p-4",
+   "lifetime": "0x1.96ba3275b60e9p-2",
+   "recon": "0x1.6000000000000p-47",
+   "ki": "0x1.af104b1b3d074p-4",
+   "ki_time": "0x1.d3efc851cfc5bp-2",
    "ki_rows": [
     "0x1.e174d9b8cee09p-10",
-    "0x1.7ed2e9753c0dbp-6",
-    "0x1.47c26e8171081p-4"
+    "0x1.7ed7ce7d73bcdp-6",
+    "0x1.47d48414fcdc9p-4"
    ],
    "ki_surv": [
     "0x1.3eee95b47b648p-1",
-    "0x1.d36d8cfbdd6d2p-2",
-    "0x1.37226b140722ap-2"
+    "0x1.d384de694d1f4p-2",
+    "0x1.373c3fef2f3bep-2"
    ]
   }
  },
  "kor_wide_v1_stk": {
-  "price": "0x1.eee13c82e26eap+2",
+  "price": "0x1.eec283d91d79bp+2",
   "stats": {
-   "pv": "0x1.eee13c82e26eap+2",
+   "pv": "0x1.eec283d91d79bp+2",
    "ko": [
     "0x1.80415fbd50684p-2",
-    "0x1.2504dfab8b362p-3",
-    "0x1.296a191de821fp-4",
-    "0x1.013533c6b2147p-9",
-    "0x1.280cc718746d3p-8",
-    "0x1.84b27c79f3cdcp-9"
+    "0x1.24d5a02fa4dc0p-3",
+    "0x1.294df5d37ab10p-4",
+    "0x1.00ba5f2c678f4p-9",
+    "0x1.27e6aaa62ad78p-8",
+    "0x1.841fb0487fd12p-9"
    ],
    "ko_cash": [
     "0x1.67204856a2872p+2",
-    "0x1.10e14c461c7c3p+1",
-    "0x1.140d3abb15f31p+0",
-    "0x1.7cb3a3ca0889fp-8",
-    "0x1.b4bc262bdec20p-7",
-    "0x1.1e3fee8a2edd6p-7"
+    "0x1.10b54c1a5d0a3p+1",
+    "0x1.13f31cd70e3e3p+0",
+    "0x1.7bfdd59a6867bp-8",
+    "0x1.b483ed643b2d2p-7",
+    "0x1.1dd3d337e4648p-7"
    ],
-   "maturity": "0x1.37226b140722fp-2",
-   "ki_settlement": "0x1.884cf25216d1ap-4",
-   "lifetime": "0x1.96b35b5f09103p-2",
-   "recon": "0x1.0000000000000p-50",
-   "ki": "0x1.aefcfc45a3470p-4",
-   "ki_time": "0x1.d3ee4b056966bp-2",
+   "maturity": "0x1.373c3fef2f3c1p-2",
+   "ki_settlement": "0x1.886b0ff5331fbp-4",
+   "lifetime": "0x1.96ba3275b60ebp-2",
+   "recon": "0x1.e000000000000p-47",
+   "ki": "0x1.af104b1b3d074p-4",
+   "ki_time": "0x1.d3efc851cfc5bp-2",
    "ki_rows": [
     "0x1.e174d9b8cee09p-10",
-    "0x1.7ed2e9753c0dbp-6",
-    "0x1.47c26e8171081p-4"
+    "0x1.7ed7ce7d73bcdp-6",
+    "0x1.47d48414fcdc9p-4"
    ],
    "ki_surv": [
     "0x1.3eee95b47b648p-1",
-    "0x1.d36d8cfbdd6d2p-2",
-    "0x1.37226b140722ap-2"
+    "0x1.d384de694d1f4p-2",
+    "0x1.373c3fef2f3bep-2"
    ]
   }
  },
@@ -1790,25 +1790,25 @@
   }
  },
  "kor_base_v1_val78": {
-  "price": "-0x1.4af6b5cae3e80p+4",
+  "price": "-0x1.4af9c10c76f70p+4",
   "stats": {
-   "pv": "-0x1.4af6b5cae3e80p+4",
+   "pv": "-0x1.4af9c10c76f70p+4",
    "ko": [
     "0x0.0p+0",
-    "0x1.a3eb3ab5d8ca5p-6",
-    "0x1.0db5dd5f9a0c8p-4",
-    "0x1.49d5e1a9666a6p-5"
+    "0x1.a3c69849a1c3cp-6",
+    "0x1.0da5312b4c773p-4",
+    "0x1.49b175d533775p-5"
    ],
    "ko_cash": [
     "0x0.0p+0",
-    "0x1.39e41f108490dp-4",
-    "0x1.91e0a287da66fp-3",
-    "0x1.eaafb41487d19p-4"
+    "0x1.39c8bca78dfb8p-4",
+    "0x1.91c7cac3a90dep-3",
+    "0x1.ea79854cb41afp-4"
    ],
    "maturity": "0x0.0p+0",
-   "ki_settlement": "0x1.bc8c8c63c7913p-1",
-   "lifetime": "0x1.e4e2dda8a29ddp-2",
-   "recon": "0x0.0p+0",
+   "ki_settlement": "0x1.bc920dbaf62b6p-1",
+   "lifetime": "0x1.e4e4ad7280942p-2",
+   "recon": "-0x1.0000000000000p-48",
    "ki": "0x1.0000000000000p+0",
    "ki_time": "0x0.0p+0",
    "ki_rows": [
@@ -2010,25 +2010,25 @@
   }
  },
  "kor_base_v1_val74": {
-  "price": "-0x1.8d4b6801b452bp+4",
+  "price": "-0x1.8d4d1bb567da5p+4",
   "stats": {
-   "pv": "-0x1.8d4b6801b452bp+4",
+   "pv": "-0x1.8d4d1bb567da5p+4",
    "ko": [
     "0x0.0p+0",
-    "0x1.c0861f4e605a2p-8",
-    "0x1.213cbdb236203p-5",
-    "0x1.b782301c11127p-6"
+    "0x1.c05729ba5be09p-8",
+    "0x1.2129f3623c66bp-5",
+    "0x1.b750e7b6d3082p-6"
    ],
    "ko_cash": [
     "0x0.0p+0",
-    "0x1.4f4603a98d39cp-6",
-    "0x1.aef9207434e55p-4",
-    "0x1.46ebfdbcf41acp-4"
+    "0x1.4f22e97b8a316p-6",
+    "0x1.aedd20edafabep-4",
+    "0x1.46c75538b766ap-4"
    ],
    "maturity": "0x0.0p+0",
-   "ki_settlement": "0x1.dcaf16655f548p-1",
-   "lifetime": "0x1.f174f3b2db9d8p-2",
-   "recon": "0x1.0000000000000p-48",
+   "ki_settlement": "0x1.dcb22b38b0e96p-1",
+   "lifetime": "0x1.f175d51ad63f1p-2",
+   "recon": "0x1.0000000000000p-46",
    "ki": "0x1.0000000000000p+0",
    "ki_time": "0x0.0p+0",
    "ki_rows": [
@@ -2275,6 +2275,220 @@
    "ki_surv": [
     "0x1.f09a9e05b01f1p-1"
    ]
+  }
+ },
+ "_superseded_by_0.16.0_D1": {
+  "kor_base_v1_fwd": {
+   "price": "0x1.1be31f43f709dp+3",
+   "stats": {
+    "pv": "0x1.1be31f43f709dp+3",
+    "ko": [
+     "0x1.80415fbd50683p-2",
+     "0x1.2504dfab8b35dp-3",
+     "0x1.296a191de821dp-4",
+     "0x1.bdd25215ee2c2p-11",
+     "0x1.bd8d9d64c9235p-10",
+     "0x1.428e553c01dc3p-10"
+    ],
+    "ko_cash": [
+     "0x1.67204856a2871p+2",
+     "0x1.10e14c461c7bep+1",
+     "0x1.140d3abb15f2fp+0",
+     "0x1.49f00323aa291p-9",
+     "0x1.48a441b16cf1cp-8",
+     "0x1.db150bdc764bdp-9"
+    ],
+    "maturity": "0x1.6474e8987cde0p-2",
+    "ki_settlement": "0x1.d46de38a3aa47p-5",
+    "lifetime": "0x1.81363ea6825e6p-2",
+    "recon": "-0x1.0000000000000p-48",
+    "ki": "0x1.f3660c6798b4bp-5",
+    "ki_time": "0x1.b3ef72b50b62ep-2",
+    "ki_rows": [
+     "0x1.e174d9b8cee09p-10",
+     "0x1.7ed2e9753c0dbp-6",
+     "0x1.24f0f0df3436dp-5"
+    ],
+    "ki_surv": [
+     "0x1.3eee95b47b648p-1",
+     "0x1.d36d8cfbdd6d2p-2",
+     "0x1.6474e8987cddcp-2"
+    ]
+   }
+  },
+  "kor_base_v1_stk": {
+   "price": "0x1.1be31f43f709dp+3",
+   "stats": {
+    "pv": "0x1.1be31f43f709dp+3",
+    "ko": [
+     "0x1.80415fbd50684p-2",
+     "0x1.2504dfab8b362p-3",
+     "0x1.296a191de821fp-4",
+     "0x1.bdd25215ee2a0p-11",
+     "0x1.bd8d9d64c9233p-10",
+     "0x1.428e553c01de0p-10"
+    ],
+    "ko_cash": [
+     "0x1.67204856a2872p+2",
+     "0x1.10e14c461c7c3p+1",
+     "0x1.140d3abb15f31p+0",
+     "0x1.49f00323aa278p-9",
+     "0x1.48a441b16cf1ap-8",
+     "0x1.db150bdc764e8p-9"
+    ],
+    "maturity": "0x1.6474e8987cde0p-2",
+    "ki_settlement": "0x1.d46de38a3aa4ap-5",
+    "lifetime": "0x1.81363ea6825e7p-2",
+    "recon": "-0x1.0000000000000p-48",
+    "ki": "0x1.f3660c6798b4bp-5",
+    "ki_time": "0x1.b3ef72b50b62ep-2",
+    "ki_rows": [
+     "0x1.e174d9b8cee09p-10",
+     "0x1.7ed2e9753c0dbp-6",
+     "0x1.24f0f0df3436dp-5"
+    ],
+    "ki_surv": [
+     "0x1.3eee95b47b648p-1",
+     "0x1.d36d8cfbdd6d2p-2",
+     "0x1.6474e8987cddcp-2"
+    ]
+   }
+  },
+  "kor_wide_v1_fwd": {
+   "price": "0x1.eee13c82e26eap+2",
+   "stats": {
+    "pv": "0x1.eee13c82e26eap+2",
+    "ko": [
+     "0x1.80415fbd50683p-2",
+     "0x1.2504dfab8b35dp-3",
+     "0x1.296a191de821dp-4",
+     "0x1.013533c6b215ep-9",
+     "0x1.280cc718746d7p-8",
+     "0x1.84b27c79f3cdfp-9"
+    ],
+    "ko_cash": [
+     "0x1.67204856a2871p+2",
+     "0x1.10e14c461c7bep+1",
+     "0x1.140d3abb15f2fp+0",
+     "0x1.7cb3a3ca088c0p-8",
+     "0x1.b4bc262bdec24p-7",
+     "0x1.1e3fee8a2edd8p-7"
+    ],
+    "maturity": "0x1.37226b140722ep-2",
+    "ki_settlement": "0x1.884cf25216d17p-4",
+    "lifetime": "0x1.96b35b5f09100p-2",
+    "recon": "0x1.8000000000000p-48",
+    "ki": "0x1.aefcfc45a3470p-4",
+    "ki_time": "0x1.d3ee4b056966bp-2",
+    "ki_rows": [
+     "0x1.e174d9b8cee09p-10",
+     "0x1.7ed2e9753c0dbp-6",
+     "0x1.47c26e8171081p-4"
+    ],
+    "ki_surv": [
+     "0x1.3eee95b47b648p-1",
+     "0x1.d36d8cfbdd6d2p-2",
+     "0x1.37226b140722ap-2"
+    ]
+   }
+  },
+  "kor_wide_v1_stk": {
+   "price": "0x1.eee13c82e26eap+2",
+   "stats": {
+    "pv": "0x1.eee13c82e26eap+2",
+    "ko": [
+     "0x1.80415fbd50684p-2",
+     "0x1.2504dfab8b362p-3",
+     "0x1.296a191de821fp-4",
+     "0x1.013533c6b2147p-9",
+     "0x1.280cc718746d3p-8",
+     "0x1.84b27c79f3cdcp-9"
+    ],
+    "ko_cash": [
+     "0x1.67204856a2872p+2",
+     "0x1.10e14c461c7c3p+1",
+     "0x1.140d3abb15f31p+0",
+     "0x1.7cb3a3ca0889fp-8",
+     "0x1.b4bc262bdec20p-7",
+     "0x1.1e3fee8a2edd6p-7"
+    ],
+    "maturity": "0x1.37226b140722fp-2",
+    "ki_settlement": "0x1.884cf25216d1ap-4",
+    "lifetime": "0x1.96b35b5f09103p-2",
+    "recon": "0x1.0000000000000p-50",
+    "ki": "0x1.aefcfc45a3470p-4",
+    "ki_time": "0x1.d3ee4b056966bp-2",
+    "ki_rows": [
+     "0x1.e174d9b8cee09p-10",
+     "0x1.7ed2e9753c0dbp-6",
+     "0x1.47c26e8171081p-4"
+    ],
+    "ki_surv": [
+     "0x1.3eee95b47b648p-1",
+     "0x1.d36d8cfbdd6d2p-2",
+     "0x1.37226b140722ap-2"
+    ]
+   }
+  },
+  "kor_base_v1_val78": {
+   "price": "-0x1.4af6b5cae3e80p+4",
+   "stats": {
+    "pv": "-0x1.4af6b5cae3e80p+4",
+    "ko": [
+     "0x0.0p+0",
+     "0x1.a3eb3ab5d8ca5p-6",
+     "0x1.0db5dd5f9a0c8p-4",
+     "0x1.49d5e1a9666a6p-5"
+    ],
+    "ko_cash": [
+     "0x0.0p+0",
+     "0x1.39e41f108490dp-4",
+     "0x1.91e0a287da66fp-3",
+     "0x1.eaafb41487d19p-4"
+    ],
+    "maturity": "0x0.0p+0",
+    "ki_settlement": "0x1.bc8c8c63c7913p-1",
+    "lifetime": "0x1.e4e2dda8a29ddp-2",
+    "recon": "0x0.0p+0",
+    "ki": "0x1.0000000000000p+0",
+    "ki_time": "0x0.0p+0",
+    "ki_rows": [
+     "0x1.0000000000000p+0"
+    ],
+    "ki_surv": [
+     "0x0.0p+0"
+    ]
+   }
+  },
+  "kor_base_v1_val74": {
+   "price": "-0x1.8d4b6801b452bp+4",
+   "stats": {
+    "pv": "-0x1.8d4b6801b452bp+4",
+    "ko": [
+     "0x0.0p+0",
+     "0x1.c0861f4e605a2p-8",
+     "0x1.213cbdb236203p-5",
+     "0x1.b782301c11127p-6"
+    ],
+    "ko_cash": [
+     "0x0.0p+0",
+     "0x1.4f4603a98d39cp-6",
+     "0x1.aef9207434e55p-4",
+     "0x1.46ebfdbcf41acp-4"
+    ],
+    "maturity": "0x0.0p+0",
+    "ki_settlement": "0x1.dcaf16655f548p-1",
+    "lifetime": "0x1.f174f3b2db9d8p-2",
+    "recon": "0x1.0000000000000p-48",
+    "ki": "0x1.0000000000000p+0",
+    "ki_time": "0x0.0p+0",
+    "ki_rows": [
+     "0x1.0000000000000p+0"
+    ],
+    "ki_surv": [
+     "0x0.0p+0"
+    ]
+   }
   }
  }
 }

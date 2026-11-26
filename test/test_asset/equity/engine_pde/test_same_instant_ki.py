@@ -349,7 +349,11 @@ def test_knock_in_table_repeats_a_time_only_with_distinct_dates():
 
 _PINS_PATH = os.path.join(os.path.dirname(__file__), "same_instant_ki_pins.json")
 with open(_PINS_PATH) as _f:
-    #: float.hex pins captured at ac8c0b2a BEFORE the T5a change: price and full statistics (KI rows included)
+    #: float.hex pins captured at ac8c0b2a BEFORE the T5a change: price and full statistics (KI rows included).
+    #: 0.16.0 D1 (QUAD numerics run 5, KO-reset V1 knock-outs by the cell-average projection) re-pinned the six
+    #: KO-reset V1 default-projection entries (kor_{base,wide}_v1_{fwd,stk}, kor_base_v1_val78 / _val74); their
+    #: previous values are kept in the file under "_superseded_by_0.16.0_D1" (e.g. kor_base_v1_fwd price
+    #: 0x1.1be31f43f709dp+3 = 8.87147486948407 -> 0x1.1bd6ebe4d78e9p+3 = 8.869985529858655)
     PINS = json.load(_f)
 
 
