@@ -2,12 +2,13 @@
 Stress application logic for modifying pricing environments.
 """
 
+import dataclasses
 import re
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from quantark.priceenv import PricingEnvironment
-from quantark.priceenv.clock_validation import calendar_quoted_view, refuse_cross_clock_relationship
+from quantark.priceenv.clock_validation import calendar_quoted_view, relationship_tenor
 from quantark.param import (
     SpotQuote,
     VolatilitySurface,
@@ -191,7 +192,14 @@ class StressApplicator:
             # cash stresses are per calendar year: a TradingClock-wrapped curve is stressed through its
             # calendar-quoted inner and re-exposed on its own trading clock (0.15.0 spec D16)
             if param in StressApplicator._RELATIONSHIP_PARAMETERS:
-                refuse_cross_clock_relationship(env, StressApplicator._relationship_mode(stress))
+                # the tenor on the curves' own axis, decided while the wrappers are visible (0.16.0 run D2)
+                metadata = dict(stress.metadata or {})
+                tenor = float(metadata.get("time_to_maturity", 1.0))
+                if tenor > 0.0:
+                    mapped = relationship_tenor(env, StressApplicator._relationship_mode(stress), tenor)
+                    if mapped != tenor:
+                        metadata["time_to_maturity"] = mapped
+                        stress = dataclasses.replace(stress, metadata=metadata)
             with calendar_quoted_view(env):
                 adapter(env, stress)
             return

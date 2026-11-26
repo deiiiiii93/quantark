@@ -12,7 +12,7 @@ from copy import deepcopy
 
 from quantark.portfolio import Portfolio
 from quantark.priceenv.clock_validation import (
-    calendar_quoted_view, is_clock_wrapped, refuse_cross_clock_relationship,
+    calendar_quoted_view, is_clock_wrapped, relationship_tenor,
 )
 from quantark.priceenv import PricingEnvironment
 from quantark.param import (
@@ -444,12 +444,15 @@ class DynamicScenarioEngine:
         skipping it would silently drop the scenario move.
         """
         param = change.parameter.lower()
+        tenor = None
         if param in self._RELATIONSHIP_PARAMETERS:
-            refuse_cross_clock_relationship(env, self.config.basis_dividend_relationship_mode)
+            # the tenor on the curves' own axis, decided while the wrappers are visible (0.16.0 run D2)
+            tenor = relationship_tenor(env, self.config.basis_dividend_relationship_mode,
+                                       self._infer_time_to_maturity(change, portfolio, underlying, env))
         field = self._CASH_PARAMETER_FIELDS.get(param)
         wrapped = getattr(env, field) if field is not None else None
         with calendar_quoted_view(env):
-            self._apply_native_parameter_change(env, change, portfolio, underlying)
+            self._apply_native_parameter_change(env, change, portfolio, underlying, time_to_maturity=tenor)
             if field is not None and is_clock_wrapped(wrapped) and getattr(env, field) is wrapped.inner:
                 raise ValidationError(
                     f"cannot apply a {change.parameter!r} change to {type(wrapped.inner).__name__}, the "
@@ -463,8 +466,13 @@ class DynamicScenarioEngine:
         change: ParameterChange,
         portfolio: Portfolio,
         underlying: str,
+        time_to_maturity: Optional[float] = None,
     ) -> None:
-        """Apply a single parameter change to the environment's (calendar-quoted) market objects."""
+        """Apply a single parameter change to the environment's (calendar-quoted) market objects.
+
+        ``time_to_maturity`` is the dividend / basis tenor already mapped onto the curves' axis
+        (``relationship_tenor``); without it the tenor is inferred here, as before.
+        """
         param = change.parameter.lower()
         
         if param == "spot":
@@ -506,9 +514,10 @@ class DynamicScenarioEngine:
                 if new_value < 0:
                     new_value = 0.0
                 env.div_yield = ContinuousDividendYield(div_yield=new_value)
-            time_to_maturity = self._infer_time_to_maturity(
-                change, portfolio, underlying, env
-            )
+            if time_to_maturity is None:
+                time_to_maturity = self._infer_time_to_maturity(
+                    change, portfolio, underlying, env
+                )
             self._apply_basis_dividend_relationship(
                 env,
                 change,
@@ -517,9 +526,10 @@ class DynamicScenarioEngine:
             )
 
         elif param == "basis":
-            time_to_maturity = self._infer_time_to_maturity(
-                change, portfolio, underlying, env
-            )
+            if time_to_maturity is None:
+                time_to_maturity = self._infer_time_to_maturity(
+                    change, portfolio, underlying, env
+                )
             current = (
                 env.basis_yield.get_basis_yield(time_to_maturity)
                 if env.basis_yield

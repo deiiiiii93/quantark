@@ -186,14 +186,15 @@ def test_report_sq_surface_base_point_equals_base_pv_on_declared_env():
     ("dividend_yield", "auto_adjust_basis"), ("dividend_yield", "synchronized"),
     ("basis", "auto_adjust_dividend"), ("basis", "synchronized"),
 ])
-def test_cross_curve_relationship_on_wrapped_curves_refuses(parameter, mode):
+def test_cross_curve_relationship_on_wrapped_curves_derives_on_the_same_clock(parameter, mode):
+    """0.16.0 (trading-clock run D2) lifts the 0.15.0 refusal: the relationship runs on the calendar inners at the
+    mapped tenor and every cash curve stays on its clock (test_curve_quoting_relationships.py checks the values)."""
     env = _env()
     before = {f: getattr(env, f) for f in ("rate_curve", "div_yield", "basis_yield")}
     stress = Stress(parameter, StressType.ABSOLUTE, 0.001, StressLevel.PORTFOLIO, metadata={"relationship_mode": mode})
-    with pytest.raises(ValidationError, match="relationship"):
-        StressApplicator._apply_stress_to_env(env, stress)
+    StressApplicator._apply_stress_to_env(env, stress)
     for f, obj in before.items():
-        assert getattr(env, f) is obj
+        assert type(getattr(env, f)) is type(obj) and getattr(env, f).time_map is obj.time_map
 
 
 def test_independent_relationship_on_wrapped_curves_still_works():
@@ -203,15 +204,16 @@ def test_independent_relationship_on_wrapped_curves_still_works():
     assert type(env.div_yield) is TradingClockDividendYield
 
 
-def test_scenario_relationship_on_wrapped_curves_refuses():
+def test_scenario_relationship_on_wrapped_curves_derives_on_the_same_clock():
     from quantark.dynamicscenario.config import DynamicScenarioConfig
     from quantark.stresstest.stress.stress_types import BasisDividendRelationshipMode
     env = _env()
+    basis0 = env.basis_yield
     pf = Portfolio(portfolio_name="p", pricing_environments={"X": env})
     engine = DynamicScenarioEngine(DynamicScenarioConfig(
         basis_dividend_relationship_mode=BasisDividendRelationshipMode.AUTO_ADJUST_BASIS))
-    with pytest.raises(ValidationError, match="relationship"):
-        engine._apply_parameter_change(env, ParameterChange("dividend_yield", StressType.ABSOLUTE, 0.001), pf, "X")
+    engine._apply_parameter_change(env, ParameterChange("dividend_yield", StressType.ABSOLUTE, 0.001), pf, "X")
+    _same_map(env.basis_yield, basis0, TradingClockBasisYield)
 
 
 def test_view_exit_failure_restores_every_field():

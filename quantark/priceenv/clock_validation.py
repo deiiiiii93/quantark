@@ -21,6 +21,7 @@ from quantark.priceenv.curve_quoting import CurveQuotingBasis
 from quantark.util.calendar import DayCountConvention
 from quantark.util.calendar.trading_clock import BusinessTimeMap
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 #: (curve field, its quoting field) for every cash curve the environment can wrap.
 CASH_CURVE_FIELDS = (
@@ -247,6 +248,47 @@ def re_anchor_clock_wrappers(env) -> None:
         setattr(env, field, obj)
 
 
+def relationship_tenor(env, mode, time_to_maturity: float) -> float:
+    """The tenor a basis<->dividend shift reads its curves at, on the curves' own axis (0.16.0 trading-clock run D2).
+
+    ``time_to_maturity`` is on the environment's axis. With no TradingClock-wrapped cash curve it is returned as is.
+    Otherwise the shift runs on the calendar-quoted inners (``calendar_quoted_view``), so every read at the tenor --
+    the source curve's current value and the relationship's rate / dividend / basis -- uses the calendar time the
+    wrappers map it to. A relationship mode (not INDEPENDENT) also needs one clock for every involved curve: it is
+    refused when a non-zero cash curve is native next to a wrapped one, when a slot it may derive into (``None`` or
+    exactly zero) is declared ``TRADING_YEAR``, or when the wrappers map the tenor to different calendar times.
+    """
+    t = float(time_to_maturity)
+    curves = [(f, getattr(env, f)) for f, _ in CASH_CURVE_FIELDS]
+    wrapped = [(f, obj) for f, obj in curves if is_clock_wrapped(obj)]
+    if not wrapped:
+        return t
+    name = getattr(mode, "name", str(mode)).upper()
+    if name != "INDEPENDENT":
+        native = [f for f, obj in curves if not is_clock_wrapped(obj) and not _is_identically_zero(obj)]
+        if native:
+            raise ValidationError(
+                f"basis/dividend relationship mode {name} is not supported on a partially wrapped environment: "
+                f"{', '.join(native)} is a native non-zero curve next to TradingClock-wrapped "
+                f"{', '.join(f for f, _ in wrapped)}; deriving one curve from the others would mix calendar- and "
+                "trading-year quotes"
+            )
+        trading = [f for f, q in CASH_CURVE_FIELDS
+                   if not is_clock_wrapped(getattr(env, f)) and getattr(env, q) is CurveQuotingBasis.TRADING_YEAR]
+        if trading:
+            raise ValidationError(
+                f"basis/dividend relationship mode {name} could derive a calendar-quoted curve into "
+                f"{', '.join(trading)}, declared TRADING_YEAR; declare CALENDAR_YEAR or use INDEPENDENT"
+            )
+    times = [float(obj.to_inner_time(t)) for _, obj in wrapped]
+    if any(not is_close(times[0], x) for x in times[1:]):
+        raise ValidationError(
+            f"basis/dividend relationship mode {name}: the wrapped cash curves map the tenor {t} to different "
+            f"calendar times {times}; they are not on one clock"
+        )
+    return times[0]
+
+
 def refuse_cross_clock_relationship(env, mode) -> None:
     """Refuse a basis<->dividend relationship mode on an environment holding a TradingClock-wrapped cash curve.
 
@@ -328,12 +370,15 @@ def calendar_quoted_view(env):
     """
     names = [f for f, _ in CASH_CURVE_FIELDS]
     originals = {f: getattr(env, f) for f in names}
+    # the clock the block's calendar quotes came from: a curve it creates in an empty slot is re-exposed on it
+    common_map = next((obj.time_map for obj in originals.values() if is_clock_wrapped(obj)), None)
     for f, obj in originals.items():
         if is_clock_wrapped(obj):
             setattr(env, f, obj.inner)
     try:
         yield env
         exits, declared = {}, []
+        quoting = dict(CASH_CURVE_FIELDS)
         for f, obj in originals.items():
             new = getattr(env, f)
             if is_clock_wrapped(obj):
@@ -342,7 +387,13 @@ def calendar_quoted_view(env):
                 elif new is not None and not is_clock_wrapped(new):
                     exits[f] = type(obj)(new, obj.time_map)
             elif new is not obj:
-                declared.append(f)
+                if (common_map is not None and new is not None and not is_clock_wrapped(new)
+                        and _is_identically_zero(obj) and getattr(env, quoting[f]) is None):
+                    # an empty (None / exactly zero) undeclared slot filled from calendar-quoted inners holds a
+                    # calendar quote too (0.16.0 trading-clock run D2): on the sources' clock, never native
+                    exits[f] = _wrapper_for(f)(new, common_map)
+                else:
+                    declared.append(f)
         for f, obj in exits.items():
             setattr(env, f, obj)
         for f in declared:
