@@ -75,8 +75,15 @@ _BATCH_OUTPUTS = frozenset(
     {OutputKind.PV, OutputKind.ERROR_ESTIMATE, OutputKind.EVENT_STATS}
 )
 _BATCH_OPS = frozenset(
-    {PricingOperation.PRICE, PricingOperation.PRICE_DETAILED}
+    {PricingOperation.PRICE, PricingOperation.PRICE_DETAILED,
+     PricingOperation.EVENT_STATS}
 )
+#: operations whose batches record the event statistics (the direct path's ``statistics=True``)
+_RECORDING_OPS = frozenset(
+    {PricingOperation.PRICE_DETAILED, PricingOperation.EVENT_STATS}
+)
+#: the EVENT_STATS operation keeps the legacy PV-only output guarantee (as every other adapter)
+_EVENT_STATS_OUTPUTS = frozenset({OutputKind.PV})
 
 
 def _estimate_surface_bytes(vol_surface) -> int:
@@ -273,9 +280,23 @@ def _call_with_state(engine, request):
             request.product, request.pricing_env, lifecycle_state=state
         )
         return value, (("pv", float(value.pv)),)
+    if request.operation is PricingOperation.EVENT_STATS:
+        value = _require_statistics(engine.calculate_event_stats(
+            request.product, request.pricing_env, lifecycle_state=state
+        ), engine)
+        return value, (("pv", float(value.pv)),)
     raise CapabilityError(
         f"operation {request.operation} unsupported by {_BATCH_ADAPTER_ID}"
     )
+
+
+def _require_statistics(stats, engine):
+    """The legacy route's refusal of a ``None`` statistics result (a fully settled terminated note)."""
+    if stats is None:
+        raise CapabilityError(
+            f"{type(engine).__qualname__} does not support event stats"
+        )
+    return stats
 
 
 class _DCNBatchMixin:
@@ -310,7 +331,12 @@ class _DCNBatchMixin:
                 f"operation {request.operation} unsupported by "
                 f"{_BATCH_ADAPTER_ID}"
             )
-        extra = request.outputs - _BATCH_OUTPUTS
+        allowed = (
+            _EVENT_STATS_OUTPUTS
+            if request.operation is PricingOperation.EVENT_STATS
+            else _BATCH_OUTPUTS
+        )
+        extra = request.outputs - allowed
         if extra:
             raise CapabilityError(
                 f"outputs {sorted(k.value for k in extra)} unsupported by "
@@ -390,7 +416,7 @@ class _DCNBatchMixin:
             receivables=resolve_dcn_lifecycle_state(
                 product, env, request.lifecycle_state
             ),
-            statistics=request.operation is PricingOperation.PRICE_DETAILED,
+            statistics=request.operation in _RECORDING_OPS,
         )
 
     def _attach_draw_provider(self, clone, context):
@@ -598,6 +624,8 @@ class _DCNBatchMixin:
     def project_operation(self, result, operation):
         if operation is PricingOperation.PRICE:
             return result.pv
+        if operation is PricingOperation.EVENT_STATS:
+            return _require_statistics(result.event_stats, self)
         return result
 
     def execute_native(self, engine, request, normalized, context,
