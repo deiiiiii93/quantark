@@ -153,6 +153,121 @@ Open items:
   wrapper's own `parallel_shifted` would keep the anchor (`AnchoredParallelShiftRateCurve`). The numbers agree up
   to rounding.
 
+### Same-instant observation records on dated products
+
+A dated autocallable can carry two observation records that resolve to one environment instant: for
+example, on a US `BUSINESS_DAYS` clock with `PRECEDING` holiday placement, a 07-03 record and a
+07-04 (holiday) record both sit at the same env time. Before, the engines disagreed on such a
+product. The PDE applied the records in a backward march, so the later record overwrote the earlier.
+QUAD V1 kept the first record and dropped the rest. QUAD V2 refused. MC tested both. Every product
+whose records never share an instant prices and reports statistics bit for bit as in 0.15.0. Pinned
+products, with price and full statistics, cover Snowball, Phoenix (every coupon variant, nodal,
+valuation instant) and KO-reset on 1D, local-vol and Heston.
+
+#### The zero-gap rule
+
+Records on one env instant are consecutive observations with zero elapsed time: the same spot, in
+contract order, under each product's own per-date rules. The desk rule "a knock-out beats a
+same-instant discrete knock-in" holds across the whole instant.
+
+- **Snowball.** Both knock-out records are tested at the same spot; the first that triggers pays its
+  own coupon. A record whose knock-out region is contained in an earlier one at the instant can
+  never fire and drops out (`same_instant_ko_groups` in `observation_schedule.py`), so a pure
+  duplicate is exactly the product without it.
+- **Phoenix.** No record is dropped. Each record tests its coupon (memory carries) and then its
+  knock-out; a knock-out ends the note, and later records at the instant do nothing. Under `EXPIRY`
+  payment, a coupon earned by record 1 and then ended by record 2's knock-out at the same instant
+  is paid at record 2's settlement.
+- **KO-reset.** The instant is one unit: every schedule-1 knock-out record, then the knock-in
+  (schedule switch), then every schedule-2 knock-out record.
+- **Knock-in pairs.** Two discrete knock-in records at one instant are one knock-in test at the
+  widest level, since a knock-in is idempotent at one spot. In the statistics, the instant's
+  knock-in probability sits on the first record in contract order whose level is breached; later
+  records at the instant carry 0.
+
+#### Changed: moved prices (sanctioned)
+
+US `BUSINESS_DAYS` repro, records 03-03/05-05/07-03/07-04/09-03/11-03, KI 75, 07-03 and 07-04 at
+env time 0.5:
+
+| product | engine | 0.15.0 | 0.16.0 | MC |
+|---|---|---|---|---|
+| Snowball, 07-04 step-down | 1D PDE | -0.445991 | -0.2697 | -0.255036 |
+| Snowball, 07-04 step-down | QUAD V1 | -0.150679 (step-down ignored) | -0.2653 | |
+| Snowball, 07-04 step-down | QUAD V2 | refused | -0.2647 | |
+| Snowball, 07-04 duplicate | 1D / Heston PDE | -0.152781 / -0.316627 (drift) | = the product without the duplicate (-0.155122 / -0.318811) | |
+| Phoenix, duplicate | PDE / QUAD V1 | -1.41192 / -1.412 (07-04 coupon dropped) | -1.071155 / -1.070890 | -1.049648 (z -1.26) |
+| Phoenix, step-down | PDE / QUAD V1 | -1.42396 / -1.410 | -1.083196 / -1.081637 | -1.059157 (z -1.42) |
+| Phoenix, any pair | QUAD V2 | refused | priced (within 1.4 SE of MC) | |
+| KO-reset, schedule-1 step-down | PDE | 8.657 | 9.016354 | 8.995255 (z +1.23) |
+| KO-reset, knock-in pair 80 → 75 | PDE | 8.8717 | 7.732242 | 7.713325 (z +0.94) |
+| KO-reset, step-down | QUAD V1 | 8.871475 (step-down ignored) | within 1.2 SE of MC | 9.136 |
+| KO-reset, overlapping KI/KO levels at one instant | QUAD V1 | 4.87 / 4.19 | within 3 SE of MC | 6.03 / 4.33 |
+
+- **Snowball PDE equal-level knock-in duplicates** move to the product without the duplicate (1D
+  2.474447 → 2.476399; local-vol and Heston likewise). The repeated cell-average projection drifted.
+- **Valuation-instant decisions.** A same-instant pair decided at the valuation instant pays the
+  deciding record. Phoenix V1 valuation-instant coupons are each discounted at their own
+  settlement; they were discounted at the last paid record's, a -3.97e-4 error. The Phoenix V1
+  memory state at the valuation instant is fixed; the both-missed case was -19.485 vs MC -19.139,
+  z -12.7. The Heston KO-reset decision by record 2 now pays 10.0, not record 1's 15.0.
+
+Each engine is gated against MC (3 SE, plus 1e-3 relative on the PDE): 1D, local-vol and Heston
+PDE, QUAD V1, QUAD V2, for single, duplicate, step-down and knock-in-pair products
+(`test/test_asset/equity/cross_engine/test_same_instant_ko_gate.py`). Exact references: a two-record
+Snowball and Phoenix are priced in closed form over the bands of the instant's spot. QUAD V1/V2 are
+within 1e-6 relative, and the PDE within 1e-3 relative, converging under refinement.
+
+#### Changed: statistics and readers
+
+- Event statistics report one row per record on every engine, per-record knock-out, coupon and
+  knock-in probabilities and cash. Before, they raised `ObservationTable` / `KnockInTable` "duplicate
+  rows". The tables accept a repeated time only for dated rows with distinct dates; every other
+  repeated-time table still refuses.
+- `ProductReplay`'s `next_ko_probability` sums every knock-out record of the first instant. Before,
+  it read only the first record's share. On a KO-reset whose two schedules share a date, the sum also covers the
+  schedule-1 and schedule-2 rows of that date, so it is the full probability of knocking out there. Before, a
+  knocked-in note read the dead schedule-1 row; at inception the move is round-off (0.37514546 → 0.37514552 in one
+  probe). The autocallable risk report's barrier watch shows the
+  instant's most reachable knock-out level and the widest knock-in level.
+- QUAD V1 and PDE KO-reset statistics tables now carry observation `dates` on dated products. This
+  is metadata only; prices and rows are bitwise.
+
+#### Changed: cash-leg folding
+
+Folding cash (`FoldOverlay`) onto a same-instant group of two or more effective knock-out records
+raises `ValidationError` naming the dates, because the binder is one-to-one by time. A pure
+duplicate binds its effective record; cash folded onto the dominated record is never paid.
+
+#### Fixed: holiday-placed pending flows
+
+A date-based pending flow paid after the valuation date, whose env time is 0 (paid on a holiday
+placed onto the valuation instant), is timed at 0 (`settlement.resolve_pending`). It used to be
+refused with "payment must be strictly after valuation".
+
+#### Added
+
+- A guard test (`test/test_backtest/test_replay_probe_env_clock.py`) keeps `ProductReplay`'s maturity
+  probe on the same clock keywords as its day environment.
+
+Pins moved: refusal and old-behaviour pins only. These are the 0.14.0 collapsed-instant refusal in
+`test_dcn_collapsed_instants.py`, and the old-behaviour Phoenix / KO-reset pair prices in
+`test_same_instant_ko.py`, whose old hex values are kept in a comment.
+
+Open items:
+- KO-reset MC sits +2 to +3 SE above the PDE / QUAD V1 / QUAD V2 at 4M paths on ordinary products,
+  and the three agree with each other. With `disable_ko_after_ki` and a schedule-1 knock-in it is
+  z −9. This reproduces without a shared instant and needs its own investigation.
+- KO-reset with `disable_ko_after_ki` and a schedule-2 knock-out record on the knock-in instant
+  (also on a single date): MC, PDE and V1 disable that record, while V2 lets it knock out. The
+  contract reading needs a ruling.
+- QUAD V2 KO-reset knock-out pairs still refuse. KO-reset `REBASED` on QUAD V1 and the PDE stays
+  refused (pre-existing).
+- Heston PDE knock-in statistics rows before a shared instant are 3.5–10 SE off MC, and so is one
+  record (route discretisation). 1D nodal knock-in rows are 3.6 SE off with one record.
+- A breached knock-in pair at t=0 reports the single "knocked in at valuation" row without naming
+  the deciding record.
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a
