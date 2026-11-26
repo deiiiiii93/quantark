@@ -539,3 +539,36 @@ def test_phoenix_forward_route_transposes_the_group(variant, pay, memory, ki):
     if variant == "duplicate":
         # the dominated knock-out keeps its row at probability 0; its coupon still counts
         assert forward.observations.probability[3] == 0.0 and forward.coupons.probability[3] > 0.1
+
+
+# --- D10: cash-leg folding onto a same-instant group ----------------------------------------------------------------
+
+def test_snowball_folding_onto_a_two_record_group_is_refused():
+    """D10: the fold binder is one to one by time; a group of two effective records is refused, naming it (before:
+    V1 bound the two records' cash by time and priced silently)."""
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+    from quantark.util.exceptions import ValidationError
+
+    product, e = repro(), env()
+    with pytest.raises(ValidationError, match="2025-07-03.*2025-07-04"):
+        v1().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+
+def test_snowball_folding_onto_a_duplicate_only_group_binds_the_effective_record():
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+
+    e = env()
+    dup, dedup = repro(103.0, 0.40), repro(drop_jul4=True)
+    folded = v1().price_folded(dup, e, _overlay(dup, e, [1.0, 2.0, 3.0, 9.0, 5.0, 6.0]))
+    assert folded == v1().price_folded(dedup, e, _overlay(dedup, e, [1.0, 2.0, 3.0, 5.0, 6.0]))
+    assert folded != v1().price(dedup, e)
+
+
+def test_phoenix_folding_onto_a_same_instant_pair_is_refused():
+    """D10/D14: every Phoenix record of the instant pays its own cash; the one-to-one-by-time binder is refused."""
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+    from quantark.util.exceptions import ValidationError
+
+    product, e = phoenix_repro("stepdown"), env()
+    with pytest.raises(ValidationError, match="2025-07-03.*2025-07-04"):
+        phx().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))

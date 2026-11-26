@@ -328,6 +328,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         if decision.knocked_out:
             if fold is not None:
+                self._refuse_fold_on_shared_instants(product, product.resolve_ko_observations(pricing_env))
                 in_life = self._fold_in_life(
                     product.resolve_ko_observations(pricing_env), maturity
                 )
@@ -364,6 +365,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         fold_ko: Optional[dict] = None
         fold_terminal = None
         if fold is not None:
+            self._refuse_fold_on_shared_instants(product, ko_records)
             fold_ko = self._bind_fold_ko(
                 fold, [("main", rec) for rec in self._fold_in_life(ko_records, maturity)]
             )

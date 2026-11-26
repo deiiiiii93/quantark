@@ -364,6 +364,7 @@ class SnowballQuadEngine(BaseEngine):
 
         fold_ko: Optional[dict] = None
         if fold is not None:
+            self._refuse_fold_on_shared_instants(product, ko_records)
             fold_ko = self._bind_fold_ko(
                 fold, [("main", rec) for rec in self._fold_in_life(ko_records, maturity)]
             )
@@ -2738,6 +2739,25 @@ class SnowballQuadEngine(BaseEngine):
         if len(active) >= 2:
             return active[0], tuple(active)
         return (active[0] if active else effective[0]), None
+
+    def _refuse_fold_on_shared_instants(self, product, ko_records) -> None:
+        """Cash-leg folding onto an instant holding two or more effective knock-out records (0.16.0 D10): the binder
+        is one to one by time, while each record pays its own cash there -- refused, naming the records. An instant
+        whose later records are dominated (``same_instant_ko_groups``) binds its effective record."""
+        seen = set()
+        for records in self._shared_ko_instants(product, ko_records).values():
+            if id(records) in seen:
+                continue
+            seen.add(id(records))
+            effective = [r for r in same_instant_ko_groups(list(records), bool(product.is_reverse))[0]
+                         if r.barrier is not None]
+            if len(effective) >= 2:
+                named = ", ".join(
+                    rec.observation_date.date().isoformat() if rec.observation_date is not None
+                    else f"t={float(rec.observation_time)!r}" for rec in effective)
+                raise ValidationError(
+                    f"cash-leg folding cannot bind the knock-out records {named} sharing one env instant: each pays "
+                    "its own cash at that instant (an open item); price the legs on the event route")
 
     def _valuation_ko_record(self, product, pricing_env, ko_records, ko_record_0, shared: dict):
         """The statistics' knock-out record at the valuation instant when it holds several records: the one the
