@@ -431,4 +431,3 @@ def test_mc_duplicate_is_bitwise_the_single_record(model, rate):
     jul4 = REPRO_DATES.index(JUL4)
     assert rows[jul4] == 0.0                      # the dominated 07-04 record never fires
     assert rows[:jul4] + rows[jul4 + 1:] == single_rows
-
