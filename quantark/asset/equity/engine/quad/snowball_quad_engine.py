@@ -21,6 +21,7 @@ from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_event_values as _project_event_values,
+    project_piecewise_event as _project_piecewise_event,
 )
 from quantark.asset.equity.engine.quad.first_step import (
     GaussianFirstStep,
@@ -43,6 +44,7 @@ from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.accrual import leg_annualized
+from quantark.asset.equity.product.option.observation_schedule import same_instant_ko_groups
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
@@ -366,7 +368,11 @@ class SnowballQuadEngine(BaseEngine):
                 fold, [("main", rec) for rec in self._fold_in_life(ko_records, maturity)]
             )
 
+        # instants holding several knock-out records (0.16.0 D6): empty unless a plain Snowball has one
+        shared = self._shared_ko_instants(product, ko_records)
         ko_record_0 = self._match_record(0.0, ko_records)
+        if shared:
+            ko_record_0 = self._deciding_ko_record_at_spot(product, spot, ko_record_0, shared)
         if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
             if fold_ko is not None:
                 return self._get_immediate_ko_payoff(
@@ -548,17 +554,23 @@ class SnowballQuadEngine(BaseEngine):
 
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
+        def ko_value_of(record):
+            discount = event_delay_by_record[id(record)]
+            if fold_ko is None:
+                return record.payoff * discount
+            return (record.payoff + fold_ko[id(record)]) * discount
+
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
             ko_record = self._match_record(obs_time, ko_records)
             ko_weight = None
+            ko_group = None
+            group_records = None
+            if ko_record is not None and shared:
+                ko_record, group_records = self._instant_ko_records(ko_record, shared, reachable_by_record)
             if ko_record is not None:
                 ko_is_reachable = bool(reachable_by_record[id(ko_record)])
-                discount = event_delay_by_record[id(ko_record)]
-                if fold_ko is None:
-                    ko_value = ko_record.payoff * discount
-                else:
-                    ko_value = (ko_record.payoff + fold_ko[id(ko_record)]) * discount
+                ko_value = ko_value_of(ko_record)
                 ko_weight = (
                     self._event_weight(
                         grid,
@@ -570,6 +582,11 @@ class SnowballQuadEngine(BaseEngine):
                     if ko_is_reachable
                     else np.zeros_like(grid)
                 )
+                if group_records is not None:
+                    # a same-instant group (0.16.0 D6): one piecewise breach, each record paying its own cash
+                    ko_group = tuple((None, rec, ko_value_of(rec)) for rec in group_records)
+                    ko_weight = self._group_union_weight(
+                        grid, spot, smoothing_width, group_records, product.is_reverse)
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
             if step_index == 1 and first_exact:
                 first_ko = ko_record if ko_record is not None and ko_is_reachable else None
@@ -583,16 +600,22 @@ class SnowballQuadEngine(BaseEngine):
                         ki_barrier_continuous if ki_continuous else None,
                     ) if level is not None
                 ]
+                if ko_group is not None:
+                    # every effective barrier of the group is a breakpoint of the exact first step (D6)
+                    first_levels += [float(rec.barrier) for _, rec, _ in ko_group[1:]]
 
-                def first_event(y, out_y, in_y, _ko=first_ko, _value=first_ko_value, _ki=ki_record):
-                    weight = (
-                        self._event_weight(y, _ko.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
-                        if _ko is not None else None
-                    )
+                def first_event(y, out_y, in_y, _ko=first_ko, _value=first_ko_value, _ki=ki_record, _group=ko_group):
+                    weight = None
+                    if _group is not None:
+                        weight = self._group_union_weight(y, spot, 0.0, [rec for _, rec, _ in _group],
+                                                          product.is_reverse)
+                    elif _ko is not None:
+                        weight = self._event_weight(y, _ko.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
                     return self._apply_observation(
                         product, y, spot * np.exp(y), spot, 0.0, out_y, in_y,
                         ko_record=_ko, ko_value=_value, ko_weight=weight, ki_record=_ki,
                         ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                        ko_group=_group,
                     )
             v_out, v_in = self._apply_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
@@ -600,6 +623,7 @@ class SnowballQuadEngine(BaseEngine):
                 ko_value=ko_value if ko_record is not None else 0.0,
                 ko_weight=ko_weight, ki_record=ki_record,
                 ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                ko_group=ko_group,
             )
 
             # Post-event continuation surfaces AT obs_time (before diffusing back to
@@ -931,13 +955,19 @@ class SnowballQuadEngine(BaseEngine):
         self, product, grid, spot_grid, spot, width, v_out, v_in, *,
         ko_record=None, ko_value=0.0, ko_weight=None, ki_record=None,
         ki_barrier_continuous=None, coupon_index=None, n_ko=0,
-        coupon_record=None, observation_index=None,
+        coupon_record=None, observation_index=None, ko_group=None,
     ):
-        """Apply the value's event order and projection to any number of columns."""
+        """Apply the value's event order and projection to any number of columns.
+
+        ``ko_group``: a same-instant knock-out group of two or more records (0.16.0 D6), ``(index, record, value)``
+        per record in contract order, applied as one stage where ``ko_record`` (its first record) would be; then
+        ``ko_weight`` is the group's union breach weight (the knock-in yields to it)."""
         disable = product.barrier_config.disable_ko_after_ki
         ko_last = ko_record is not None and ki_record is not None and disable
 
         def knock_out(surface):
+            if ko_group is not None:
+                return self._knock_out_group(grid, spot, width, surface, ko_group, product.is_reverse)
             if self._use_cell_average_events():
                 return self._project_quad_event(
                     grid, ko_record.barrier, spot, v_survive=surface,
@@ -1018,9 +1048,11 @@ class SnowballQuadEngine(BaseEngine):
         return None
 
     def _statistics_step_extension(self, product, grid, spot_grid, spot, width, *, ko_record, ko_weight, ki_record,
-                                   ki_barrier_continuous, coupon_record, observation_index, pre, pointwise=False):
+                                   ki_barrier_continuous, coupon_record, observation_index, pre, pointwise=False,
+                                   group=None):
         """The extension's data for one step (``EventStep.extension`` / ``FirstStepLog.extension``), built from the
-        columns before its event (``pre``); ``None``: the extension maps its rows by the step's event map."""
+        columns before its event (``pre``); ``None``: the extension maps its rows by the step's event map.
+        ``group``: a same-instant group's ``(index, record, discount)`` per record, contract order."""
         return None
 
     #: the statistics route (run 2026-11-26): "forward" reads every outcome column (knock-out units and the terminal
@@ -1097,7 +1129,11 @@ class SnowballQuadEngine(BaseEngine):
             ki_records = product.resolve_ki_observations(pricing_env)
         product_ki_records = list(ki_records)
 
+        # instants holding several knock-out records (0.16.0 D6/D8): empty unless the product has one
+        shared = self._shared_ko_instants(product, ko_records)
         ko_record_0 = self._match_record(0.0, ko_records)
+        if shared and type(product) is SnowballOption:
+            ko_record_0 = self._deciding_ko_record_at_spot(product, spot, ko_record_0, shared)
         # Valuation-time KI state follows the contractual monitoring semantics,
         # so it must be determined before any BGK schedule conversion.
         knocked_in_at_valuation = self._is_knocked_in_at_valuation(
@@ -1255,6 +1291,9 @@ class SnowballQuadEngine(BaseEngine):
                        extension=self._statistics_march_extension() if route == "forward" else None)
         log_ki_barrier = (safe_log(ki_barrier_continuous / spot) if ki_continuous else None)
 
+        reachable_by_record = {id(record): bool(active) for record, active in zip(ko_records, reachable_ko)}
+        index_of_record = {id(record): idx for idx, record in enumerate(ko_records)}
+
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
@@ -1266,10 +1305,21 @@ class SnowballQuadEngine(BaseEngine):
                     ko_index = idx
                     ko_record = rec
                     break
+            # a same-instant group (0.16.0 D6/D8): ``(index, record, discount)`` per record, contract order
+            group = None
+            if ko_record is not None and shared:
+                ko_record, group_records = self._instant_ko_records(ko_record, shared, reachable_by_record)
+                ko_index = index_of_record[id(ko_record)]
+                if group_records is not None:
+                    group = tuple(
+                        (index_of_record[id(rec)], rec,
+                         float(self._ko_discount(rate, obs_time, rec.settlement_time, df_fn=df_local)))
+                        for rec in group_records)
 
             ko_is_reachable = ko_record is not None and bool(reachable_ko[int(ko_index)])
             ko_breach = np.zeros_like(v_out)
             discount_delay = 1.0
+            ko_group = None
             if ko_record is not None:
                 discount_delay = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local
@@ -1280,16 +1330,25 @@ class SnowballQuadEngine(BaseEngine):
                     grid, ko_record.barrier, spot, smoothing_width,
                     trigger_is_down=product.is_reverse,
                 ) if ko_is_reachable else np.zeros_like(grid)
+                if group is not None:
+                    ko_group = self._group_sources(group, v_out, ko_rows)
+                    ko_w = self._group_union_weight(
+                        grid, spot, smoothing_width, [rec for _, rec, _ in group], product.is_reverse)
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
             if step_index == 1 and first_exact:
                 # the exact first step (S3b): the same event on the quadrature nodes, the columns read at the spot
+                group_levels = [] if group is None else [float(rec.barrier) for _, rec, _ in group[1:]]
+                extra_levels = self._first_event_extra_levels(product, ko_index)
+                if group is not None:
+                    for idx, _, _ in group[1:]:
+                        extra_levels = extra_levels + self._first_event_extra_levels(product, idx)
                 fs = self._first_step_quadrature(
                     math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]),
                     [level for level in (
                         ko_record.barrier if ko_is_reachable else None,
                         ki_record.barrier if ki_record is not None else None,
                         ki_barrier_continuous if ki_continuous else None,
-                    ) if level is not None] + self._first_event_extra_levels(product, ko_index),
+                    ) if level is not None] + group_levels + extra_levels,
                     touch=(log_ki_barrier, product.is_reverse) if ki_continuous else None, band=False,
                     terminal=product if len(times) == 1 else None, pricing_env=pricing_env,
                 )
@@ -1299,6 +1358,9 @@ class SnowballQuadEngine(BaseEngine):
                         self._event_weight(y, ko_record.barrier, spot, 0.0, trigger_is_down=product.is_reverse)
                         if ko_is_reachable else None
                     )
+                    if group is not None:
+                        y_ko_weight = self._group_union_weight(
+                            y, spot, 0.0, [rec for _, rec, _ in group], product.is_reverse)
                 if len(times) == 1:
                     y_in_cash, y_out_cash = self._terminal_cash_surfaces(product, pricing_env, spot * np.exp(y))
                     pre_y = terminal_stack(y_out_cash * terminal.delay_df, y_in_cash * terminal.delay_df)
@@ -1308,8 +1370,10 @@ class SnowballQuadEngine(BaseEngine):
                     product, y, spot * np.exp(y), spot, 0.0,
                     ko_record=ko_record if ko_is_reachable else None, ko_weight=y_ko_weight, ki_record=ki_record,
                     ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                    coupon_record=ko_record, observation_index=ko_index, pre=pre_y, pointwise=True,
+                    coupon_record=ko_record, observation_index=ko_index, pre=pre_y, pointwise=True, group=group,
                 )
+                y_group = None if ko_group is None else tuple(
+                    (idx, rec, self._node_constant_on(target, y.size)) for idx, rec, target in ko_group)
                 with self._pointwise():
                     post_y = self._apply_observation(
                         product, y, spot * np.exp(y), spot, 0.0, pre_y[0], pre_y[1],
@@ -1318,7 +1382,7 @@ class SnowballQuadEngine(BaseEngine):
                         ki_record=ki_record,
                         ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
                         coupon_index=ko_index, n_ko=ko_rows,
-                        coupon_record=ko_record, observation_index=ko_index,
+                        coupon_record=ko_record, observation_index=ko_index, ko_group=y_group,
                     )
                 first = FirstStepLog(
                     quadrature=fs,
@@ -1328,7 +1392,7 @@ class SnowballQuadEngine(BaseEngine):
                         ki_record=ki_record,
                         ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
                         n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
-                        discount=float(discount_delay),
+                        discount=float(discount_delay), group=group,
                     )),
                     terminal_out=None if len(times) > 1 else {
                         "maturity_unit": np.ones(y.size), "maturity_cash": y_out_cash * terminal.delay_df},
@@ -1342,7 +1406,7 @@ class SnowballQuadEngine(BaseEngine):
                 product, grid, spot_grid, spot, smoothing_width,
                 ko_record=ko_record if ko_is_reachable else None, ko_weight=ko_w, ki_record=ki_record,
                 ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                coupon_record=ko_record, observation_index=ko_index, pre=(v_out, v_in),
+                coupon_record=ko_record, observation_index=ko_index, pre=(v_out, v_in), group=group,
             )
             v_out, v_in = self._apply_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
@@ -1350,7 +1414,7 @@ class SnowballQuadEngine(BaseEngine):
                 ko_value=ko_breach, ko_weight=ko_w, ki_record=ki_record,
                 ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
                 coupon_index=ko_index, n_ko=ko_rows,
-                coupon_record=ko_record, observation_index=ko_index,
+                coupon_record=ko_record, observation_index=ko_index, ko_group=ko_group,
             )
 
             tau_step = float(tau[step_index])
@@ -1373,12 +1437,21 @@ class SnowballQuadEngine(BaseEngine):
                     ki_record=ki_record,
                     ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
                     n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
-                    discount=float(discount_delay),
+                    discount=float(discount_delay), group=group,
                 )
+            if group is not None:
+                # each record of the group is its own knock-out source (D8)
+                sources = tuple(("ko", int(idx)) for idx, _, _ in group)
+                source_units = {("ko", int(idx)): float(unit) for idx, _, unit in group}
+            elif ko_is_reachable:
+                sources = (("ko", int(ko_index)),)
+                source_units = {("ko", int(ko_index)): float(discount_delay)}
+            else:
+                sources, source_units = (), {}
             log.steps.append(EventStep(
                 time=float(obs_time), event=event,
-                sources=(("ko", int(ko_index)),) if ko_is_reachable else (),
-                source_units={("ko", int(ko_index)): float(discount_delay)} if ko_is_reachable else {},
+                sources=sources,
+                source_units=source_units,
                 diffusion=(tau_step, alpha, beta, prefactor, omega_array),
                 bridge=(log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
                 if ki_continuous else None,
@@ -1514,23 +1587,42 @@ class SnowballQuadEngine(BaseEngine):
         )
 
     def _statistics_event(self, product, grid, spot_grid, spot, width, *, ko_record, ko_weight, ki_record,
-                          ki_barrier_continuous, n_ko, coupon_record, observation_index, discount):
+                          ki_barrier_continuous, n_ko, coupon_record, observation_index, discount, group=None):
         """The observation's event map on the two note states, for the adjoint pass: ``event(v_out, v_in, source)``
         is ``_apply_observation`` with every knock-out source zero (``source=None``) or with the record's own
-        source alone (its discounted unit, as the knock-out column breaches); coupon columns are not touched."""
+        source alone (its discounted unit, as the knock-out column breaches); coupon columns are not touched.
+        ``group``: a same-instant group's ``(index, record, discount)`` per record -- source ``("ko", index)`` puts
+        the unit on that record's band alone (D8)."""
 
         def event(v_out, v_in, source):
             v_out = np.array(v_out, dtype=float)
             v_in = np.array(v_in, dtype=float)
             ko_value = np.zeros_like(v_out) if source is None else np.full_like(v_out, discount)
+            ko_group = None
+            if group is not None:
+                ko_group = tuple(
+                    (idx, rec, np.full_like(v_out, unit) if source == ("ko", int(idx)) else np.zeros_like(v_out))
+                    for idx, rec, unit in group)
             return self._apply_observation(
                 product, grid, spot_grid, spot, width, v_out, v_in,
                 ko_record=ko_record, ko_value=ko_value, ko_weight=ko_weight, ki_record=ki_record,
                 ki_barrier_continuous=ki_barrier_continuous, coupon_index=None, n_ko=n_ko,
-                coupon_record=coupon_record, observation_index=observation_index,
+                coupon_record=coupon_record, observation_index=observation_index, ko_group=ko_group,
             )
 
         return event
+
+    @staticmethod
+    def _group_sources(group, columns, ko_rows: int):
+        """A same-instant group's knock-out values on the stacked columns: per record ``(index, record, value)``,
+        its discounted unit on its own knock-out row (zero columns on the forward route: no knock-out rows)."""
+        out = []
+        for idx, rec, unit in group:
+            value = np.zeros_like(columns)
+            if ko_rows:
+                value[int(idx)] = float(unit)
+            out.append((idx, rec, value))
+        return tuple(out)
 
     def _decided_ko_statistics(self, product, pricing_env, ko_records, ko_record_0, *, streams=None):
         """A knock-out decided at the valuation instant: certain, on its record (DESIGN §4.5); the whole price is
@@ -2599,6 +2691,98 @@ class SnowballQuadEngine(BaseEngine):
             if same_instant(target_time, rec.observation_time):
                 return rec
         return None
+
+    def _shared_ko_instants(self, product, ko_records: Sequence) -> dict:
+        """``{id(record): effective records}`` for every knock-out record on an env instant holding two or more
+        records of a plain Snowball (0.16.0 DCN/dated D2/D6): the instant's records an engine tests, in contract order
+        (``same_instant_ko_groups``: a record whose breach region an earlier one's contains is dropped) that carry a
+        barrier. Empty for every other product, and for a schedule whose instants all hold one record -- the
+        recursion then runs exactly as before. Phoenix overrides it (D14: no record is dropped)."""
+        if type(product) is not SnowballOption:
+            return {}
+        return self._instants_of(ko_records, lambda records: same_instant_ko_groups(
+            records, bool(product.is_reverse))[0])
+
+    @staticmethod
+    def _instants_of(ko_records: Sequence, members) -> dict:
+        """``{id(record): members(instant's records)}`` for every record on an instant holding two or more records
+        (``same_instant`` to the instant's first record, the helper's grouping rule); empty when there is none."""
+        if len(ko_records) < 2:
+            return {}
+        timed = sorted((r for r in ko_records if r.observation_time is not None),
+                       key=lambda r: float(r.observation_time))
+        out: dict = {}
+        start = 0
+        for k in range(1, len(timed) + 1):
+            if k < len(timed) and same_instant(float(timed[k].observation_time), float(timed[start].observation_time)):
+                continue
+            if k - start >= 2:
+                instant = timed[start:k]
+                chosen = tuple(members(instant))
+                for rec in instant:
+                    out[id(rec)] = chosen
+            start = k
+        return out
+
+    def _instant_ko_records(self, ko_record, shared: dict, reachable: dict):
+        """``(record, group)`` the recursion applies at ``ko_record``'s instant: the record a single-record step
+        applies (reachability decided on it), and the group of two or more reachable effective records applied as one
+        piecewise breach (``None``: a single record, as before). A duplicate-only instant applies its first record
+        alone -- bitwise the product without the duplicate (AC4)."""
+        effective = [r for r in shared.get(id(ko_record), ()) if r.barrier is not None]
+        if not effective:
+            return ko_record, None
+        active = [r for r in effective if reachable[id(r)]]
+        if len(active) >= 2:
+            return active[0], tuple(active)
+        return (active[0] if active else effective[0]), None
+
+    def _deciding_ko_record_at_spot(self, product, spot: float, ko_record_0, shared: dict):
+        """The knock-out record the valuation instant decides on the known spot: the first record of its instant
+        (contract order) whose barrier the spot breaches (D1), or the instant's first record when none does."""
+        effective = [r for r in shared.get(id(ko_record_0), ()) if r.barrier is not None] if ko_record_0 else []
+        for rec in effective:
+            if self._ko_record_triggers_at_spot(product, spot, rec):
+                return rec
+        return effective[0] if effective else ko_record_0
+
+    def _group_union_weight(self, grid, spot, width, records, is_reverse: bool):
+        """The breach weight of a same-instant group (the knock-in yields to it on the nodal blend): the union of
+        nested breach regions -- the extreme barrier's fraction on the cell-average projection, ``1 - prod(1 - w)``
+        of the nodal weights."""
+        if self._use_cell_average_events():
+            return self._event_weight(grid, records[-1].barrier, spot, width, trigger_is_down=is_reverse)
+        survive = np.ones_like(grid, dtype=float)
+        for rec in records:
+            survive = survive * (1.0 - self._event_weight(grid, rec.barrier, spot, width, trigger_is_down=is_reverse))
+        return 1.0 - survive
+
+    def _knock_out_group(self, grid, spot, width, surface, group, is_reverse: bool):
+        """A same-instant knock-out group (0.16.0 D6) on ``surface``: the first record (contract order) whose barrier
+        is breached takes the value -- one pass of the piecewise cell-average projection with breaks at the effective
+        barriers (strictly monotone: branches [continuation, c_n, ..., c_1], mirrored on a reverse product), else
+        (nodal weights, or pointwise on the exact first step's nodes) the records in reverse contract order, so the
+        earliest record writes last. ``group``: ``(index, record, value)`` per record, contract order."""
+        if self._use_cell_average_events() and not self._pointwise_events:
+            order = list(range(len(group))) if is_reverse else list(range(len(group)))[::-1]
+            breaks = [safe_log(float(group[k][1].barrier) / float(spot)) for k in order]
+            values = [group[k][2] for k in order]
+            branches = values + [surface] if is_reverse else [surface] + values
+            return self._project_quad_piecewise(grid, breaks, branches)
+        for _, record, value in reversed(group):
+            weight = self._event_weight(grid, record.barrier, spot, width, trigger_is_down=is_reverse)
+            surface = weight * value + (1.0 - weight) * surface
+        return surface
+
+    @staticmethod
+    def _project_quad_piecewise(grid, breaks, branches):
+        """``project_piecewise_event`` with spatial dimension last (stacked rows x points, or one surface)."""
+        arrays = [np.asarray(b, dtype=float) for b in branches]
+        stacked = any(a.ndim > 1 for a in arrays)
+        if stacked:
+            arrays = [np.moveaxis(a, -1, 0) if a.ndim > 1 else a for a in arrays]
+        projected = _project_piecewise_event(grid, breaks, arrays)
+        return np.moveaxis(projected, 0, -1) if stacked else projected
 
     def _ko_record_triggers_at_spot(
         self,

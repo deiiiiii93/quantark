@@ -1229,7 +1229,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         self, product, grid, spot_grid, spot, width, v_out, v_in, *,
         ko_record=None, ko_value=0.0, ko_weight=None, ki_record=None,
         ki_barrier_continuous=None, coupon_index=None, n_ko=0,
-        coupon_record=None, observation_index=None,
+        coupon_record=None, observation_index=None, ko_group=None,
     ):
         # These are indicator columns, independent of coupon memory amounts.
         # Nevertheless every column must see the price's joint coupon/KI/KO
@@ -1320,7 +1320,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         return cash_rows if isinstance(cash_rows, ForwardCouponRows) else None
 
     def _statistics_step_extension(self, product, grid, spot_grid, spot, width, *, ko_record, ko_weight, ki_record,
-                                   ki_barrier_continuous, coupon_record, observation_index, pre, pointwise=False):
+                                   ki_barrier_continuous, coupon_record, observation_index, pre, pointwise=False,
+                                   group=None):
         """Forward route, a coupon observation: its branch-resolved event map and the ``W`` row before it."""
         cash_rows = self._coupon_cash_rows
         if not isinstance(cash_rows, ForwardCouponRows) or coupon_record is None:
