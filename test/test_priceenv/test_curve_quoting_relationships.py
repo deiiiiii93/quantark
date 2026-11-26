@@ -151,11 +151,43 @@ def test_trading_year_target_slot_refuses():
         StressApplicator._apply_stress_to_env(env, stress("dividend_yield", Mode.AUTO_ADJUST_BASIS))
 
 
-def test_independent_basis_stress_reads_the_source_at_t_cal():
+def test_independent_basis_change_reads_the_wrapped_source_at_t_cal():
+    """ABSOLUTE on a sloped term-structure source writes a FLAT basis = source(T_read) + step: T_read shows."""
     env = declared(basis=BASIS_TS)
     c = t_cal(env)
-    s = Stress("basis", StressType.VALUE, 0.02, StressLevel.PORTFOLIO, metadata={"time_to_maturity": T})
-    StressApplicator._apply_stress_to_env(env, s)
-    # a VALUE stress on a term structure moves every node by the same amount; T_cal only picks the reported node
+    apply_dynamic(env, "basis", Mode.INDEPENDENT)
     assert type(env.basis_yield) is TradingClockBasisYield
+    assert env.basis_yield.inner.get_basis_yield(1.0) == pytest.approx(BASIS_TS.get_basis_yield(c) + STEP, abs=1e-15)
     assert BASIS_TS.get_basis_yield(c) != BASIS_TS.get_basis_yield(T)
+
+
+def test_independent_on_partially_wrapped_env_reads_native_at_t():
+    """Checkpoint finding: a native TRADING_YEAR source next to a wrapped rate is read at T, as in 0.15.0."""
+    env = declared(basis=BASIS_TS, basis_yield_quoting=TQ)
+    assert type(env.basis_yield) is TermStructureBasisYield and type(env.rate_curve) is TradingClockRateCurve
+    assert relationship_tenor(env, Mode.INDEPENDENT, T) == T
+    apply_dynamic(env, "basis", Mode.INDEPENDENT)
+    assert env.basis_yield.get_basis_yield(1.0) == pytest.approx(BASIS_TS.get_basis_yield(T) + STEP, abs=1e-15)
+
+
+def test_dynamic_hand_wrapped_env_wraps_the_derived_curve():
+    env = hand_wrapped(None)
+    c = t_cal(env)
+    apply_dynamic(env, "dividend_yield", Mode.AUTO_ADJUST_BASIS)
+    assert type(env.basis_yield) is TradingClockBasisYield
+    expected = calculate_basis_from_rate_dividend(RATE.get_rate(c), 0.02 + STEP)
+    assert env.basis_yield.inner.get_basis_yield(1.0) == pytest.approx(expected, abs=1e-15)
+
+
+def test_synchronized_basis_change_moves_the_dividend_at_t_cal():
+    env = declared(div=ContinuousDividendYield(0.02))
+    StressApplicator._apply_stress_to_env(env, stress("basis", Mode.SYNCHRONIZED))
+    assert type(env.div_yield) is TradingClockDividendYield
+    assert env.div_yield.inner.get_yield(1.0) == pytest.approx(0.02 + STEP, abs=1e-15)
+
+
+def test_calendar_axis_env_never_maps_the_tenor():
+    m = BusinessTimeMap(TradingClock(CAL, 244), D0, H)
+    env = PricingEnvironment(rate_curve=TradingClockRateCurve(RATE, m), valuation_date=D0, spot_quote=SpotQuote(100.0),
+                             vol_surface=FlatVolSurface(0.2), calendar=CAL)
+    assert relationship_tenor(env, Mode.AUTO_ADJUST_BASIS, T) == T

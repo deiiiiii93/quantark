@@ -141,21 +141,9 @@ def _futures_central_points(
         edges[-1] = maturity
     for i, quote in enumerate(futures_curve.quotes):
         up_env = deepcopy(pricing_env)
-        up_env.div_yield = BucketedDividendYield(
-            base=base_div,
-            bucket_start=edges[i],
-            bucket_end=edges[i + 1],
-            bump=div_bump,
-        )
-        _place_created_div(up_env, pricing_env)
+        up_env.div_yield = _bucket_bump(pricing_env, edges[i], edges[i + 1], div_bump)
         down_env = deepcopy(pricing_env)
-        down_env.div_yield = BucketedDividendYield(
-            base=base_div,
-            bucket_start=edges[i],
-            bucket_end=edges[i + 1],
-            bump=-div_bump,
-        )
-        _place_created_div(down_env, pricing_env)
+        down_env.div_yield = _bucket_bump(pricing_env, edges[i], edges[i + 1], -div_bump)
         up_price = bump_engine.price(product, up_env)
         down_price = bump_engine.price(product, down_env)
         derivative = (up_price - down_price) / (2.0 * div_bump)
@@ -211,13 +199,7 @@ def _generic_points(
     points: List[BucketedGreekPoint] = []
     for bucket in buckets:
         up_env = deepcopy(pricing_env)
-        up_env.div_yield = BucketedDividendYield(
-            base=base_div,
-            bucket_start=bucket.start,
-            bucket_end=bucket.end,
-            bump=div_bump,
-        )
-        _place_created_div(up_env, pricing_env)
+        up_env.div_yield = _bucket_bump(pricing_env, bucket.start, bucket.end, div_bump)
         up_price = bump_engine.price(product, up_env)
         if mode == BucketedGreekDifferenceMode.ONE_SIDED_UP:
             derivative = (up_price - base_price) / div_bump
@@ -237,13 +219,7 @@ def _generic_points(
             continue
 
         down_env = deepcopy(pricing_env)
-        down_env.div_yield = BucketedDividendYield(
-            base=base_div,
-            bucket_start=bucket.start,
-            bucket_end=bucket.end,
-            bump=-div_bump,
-        )
-        _place_created_div(down_env, pricing_env)
+        down_env.div_yield = _bucket_bump(pricing_env, bucket.start, bucket.end, -div_bump)
         down_price = bump_engine.price(product, down_env)
         derivative = (up_price - down_price) / (2.0 * div_bump)
         points.append(
@@ -308,13 +284,35 @@ def _node_aligned_points(
     return points
 
 
-def _place_created_div(env, source_env) -> None:
-    """A bucket bump built over a CREATED zero yield (the source environment had none) is a calendar-year quote like
-    every other cash curve: placed per the environment's declaration (0.16.0 trading-clock run D1)."""
-    if source_env.div_yield is None:
-        from quantark.priceenv.clock_validation import place_created_cash_curve
+def _bucket_bump(pricing_env, start: float, end: float, bump: float):
+    """The dividend curve with ``bump`` added on the window ``(start, end]`` (environment axis), on the curve's own
+    axis (0.16.0 trading-clock run):
 
-        place_created_cash_curve(env, "div_yield", env.div_yield)
+    * a TradingClock-wrapped dividend: the window is mapped onto its calendar axis (``to_calendar``) and the bucket
+      is built on the calendar-quoted inner, re-wrapped on the same map -- a bump per calendar year, as every other
+      cash shift, whose window the wrapper reads at the same calendar times as the product;
+    * no dividend on a ``BUSINESS_DAYS`` environment declaring it ``CALENDAR_YEAR``: the same, on a created zero
+      calendar quote and the environment's map;
+    * otherwise exactly the 0.15.0 curve.
+    """
+    from quantark.asset.equity.report.term_structure import BucketedDividendYield
+    from quantark.param.div import ContinuousDividendYield
+    from quantark.priceenv.clock_validation import declared_time_map, is_clock_wrapped
+
+    div = pricing_env.div_yield
+    if is_clock_wrapped(div):
+        inner, time_map, wrapper = div.inner, div.time_map, type(div)
+    elif div is None and declared_time_map(pricing_env, "div_yield") is not None:
+        from quantark.param.div.trading_clock_yield import TradingClockDividendYield
+
+        inner, time_map, wrapper = (ContinuousDividendYield(0.0), declared_time_map(pricing_env, "div_yield"),
+                                    TradingClockDividendYield)
+    else:
+        base = div if div is not None else ContinuousDividendYield(0.0)
+        return BucketedDividendYield(base=base, bucket_start=start, bucket_end=end, bump=bump)
+    bucket = BucketedDividendYield(base=inner, bucket_start=float(time_map.to_calendar(float(start))),
+                                   bucket_end=float(time_map.to_calendar(float(end))), bump=bump)
+    return wrapper(bucket, time_map)
 
 
 def bucket_label(bucket) -> str:
@@ -444,13 +442,7 @@ def calculate_futures_rhoq_buckets(
             edges[-1] = maturity
         for i, quote in enumerate(futures_curve.quotes):
             bumped_env = deepcopy(pricing_env)
-            bumped_env.div_yield = BucketedDividendYield(
-                base=base_div,
-                bucket_start=edges[i],
-                bucket_end=edges[i + 1],
-                bump=div_bump,
-            )
-            _place_created_div(bumped_env, pricing_env)
+            bumped_env.div_yield = _bucket_bump(pricing_env, edges[i], edges[i + 1], div_bump)
             bumped_price = engine.price(product, bumped_env)
             rows.append(
                 _rhoq_bucket_row(

@@ -259,13 +259,18 @@ def relationship_tenor(env, mode, time_to_maturity: float) -> float:
     exactly zero) is declared ``TRADING_YEAR``, or when the wrappers map the tenor to different calendar times.
     """
     t = float(time_to_maturity)
+    if env.day_count_convention != DayCountConvention.BUSINESS_DAYS:
+        return t
     curves = [(f, getattr(env, f)) for f, _ in CASH_CURVE_FIELDS]
     wrapped = [(f, obj) for f, obj in curves if is_clock_wrapped(obj)]
     if not wrapped:
         return t
     name = getattr(mode, "name", str(mode)).upper()
+    native = [f for f, obj in curves if not is_clock_wrapped(obj) and not _is_identically_zero(obj)]
+    if name == "INDEPENDENT" and native:
+        # a native (trading-year) curve may be the one read: keep 0.15.0's reading at T (checkpoint finding)
+        return t
     if name != "INDEPENDENT":
-        native = [f for f, obj in curves if not is_clock_wrapped(obj) and not _is_identically_zero(obj)]
         if native:
             raise ValidationError(
                 f"basis/dividend relationship mode {name} is not supported on a partially wrapped environment: "
@@ -329,13 +334,32 @@ def apply_declared_quoting(env, field: str) -> None:
 
 
 def _holds_clock_wrapper(curve, depth: int = 3) -> bool:
-    """True when ``curve`` is, or is built over, a TradingClock wrapper (searched through its attributes)."""
+    """True when ``curve`` is, or is built over, a TradingClock wrapper: searched through its attributes
+    (``__dict__`` and ``__slots__``) and the items of lists, tuples and dicts it holds, ``depth`` levels deep."""
     if is_clock_wrapped(curve):
         return True
-    if depth <= 0 or curve is None:
+    if depth <= 0 or curve is None or isinstance(curve, (str, bytes, int, float, bool, type)):
         return False
-    return any(_holds_clock_wrapper(v, depth - 1) for v in vars(curve).values()
-               if hasattr(v, "__dict__") and not isinstance(v, type)) if hasattr(curve, "__dict__") else False
+    if isinstance(curve, dict):
+        children = list(curve.values())
+    elif isinstance(curve, (list, tuple)):
+        children = list(curve)
+    else:
+        children = list(getattr(curve, "__dict__", {}).values())
+        for slot in getattr(type(curve), "__slots__", ()) or ():
+            if isinstance(slot, str) and hasattr(curve, slot):
+                children.append(getattr(curve, slot))
+    return any(_holds_clock_wrapper(v, depth - 1) for v in children)
+
+
+def declared_time_map(env, field: str):
+    """The environment's own map when ``field`` is declared ``CALENDAR_YEAR`` on a ``BUSINESS_DAYS`` environment
+    (a curve created for that field is a calendar quote and lives on it), else ``None``."""
+    if env.day_count_convention != DayCountConvention.BUSINESS_DAYS:
+        return None
+    if getattr(env, dict(CASH_CURVE_FIELDS)[field]) is not CurveQuotingBasis.CALENDAR_YEAR:
+        return None
+    return _EnvMap(env).get(field)
 
 
 def place_created_cash_curve(env, field: str, curve) -> None:
@@ -388,6 +412,7 @@ def calendar_quoted_view(env):
                     exits[f] = type(obj)(new, obj.time_map)
             elif new is not obj:
                 if (common_map is not None and new is not None and not is_clock_wrapped(new)
+                        and env.day_count_convention == DayCountConvention.BUSINESS_DAYS
                         and _is_identically_zero(obj) and getattr(env, quoting[f]) is None):
                     # an empty (None / exactly zero) undeclared slot filled from calendar-quoted inners holds a
                     # calendar quote too (0.16.0 trading-clock run D2): on the sources' clock, never native

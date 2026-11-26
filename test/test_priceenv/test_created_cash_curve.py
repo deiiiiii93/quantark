@@ -77,6 +77,33 @@ def test_carry_rhoq_bucket_bump_of_none_is_calendar_quoted(monkeypatch):
     assert all(isinstance(d.inner, BucketedDividendYield) for d in bumped)
 
 
+@pytest.mark.parametrize("div", [None, ContinuousDividendYield(0.0), ContinuousDividendYield(0.03)],
+                         ids=["none", "zero", "nonzero"])
+def test_carry_rhoq_buckets_sum_to_the_parallel_rho_q(div):
+    """Checkpoint finding: bucket windows on the env axis read through the wrapper's calendar time missed every
+    bucket (an all-zero table). The windows are now mapped onto the calendar axis: the buckets tile the product's
+    life and their one-sided sum equals the parallel one-sided rho-q, and no bucket table is all zero."""
+    from quantark.asset.equity.riskmeasures.bucketed_greeks import (
+        BucketedGreekCoordinate,
+        BucketedGreekDifferenceMode,
+        BucketedGreeksRequest,
+    )
+
+    base = env(div=div)
+    request = BucketedGreeksRequest(coordinates=(BucketedGreekCoordinate.CARRY_RHOQ,), carry_bump=SHIFT,
+                                    difference_mode_overrides={BucketedGreekCoordinate.CARRY_RHOQ:
+                                                               BucketedGreekDifferenceMode.ONE_SIDED_UP})
+    res = GreeksCalculator().calculate_bucketed_greeks(CALL, base, ENG, request)
+    points = res.by_coordinate(BucketedGreekCoordinate.CARRY_RHOQ)
+    assert points and all(p.status == "ok" for p in points)
+    bucket_pnl = sum(p.up_price - p.base_price for p in points)
+    parallel = build_div_bumped_env(base, CALL, 0.0, SHIFT, direction=1.0)
+    parallel_pnl = ENG.price(CALL, parallel) - ENG.price(CALL, base)
+    assert parallel_pnl < 0.0
+    # one-sided bucket bumps: exact additivity up to second-order cross terms
+    assert bucket_pnl == pytest.approx(parallel_pnl, rel=2e-2)
+
+
 @pytest.mark.parametrize("quoting, convention", [(TRD_Q, DayCountConvention.BUSINESS_DAYS),
                                                  (None, DayCountConvention.ACT_365)])
 def test_other_environments_assign_as_before(quoting, convention):
