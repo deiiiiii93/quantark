@@ -135,7 +135,6 @@ def _futures_central_points(
         return points
 
     base_price = bump_engine.price(product, pricing_env)
-    base_div = pricing_env.div_yield or ContinuousDividendYield(0.0)
     edges = [0.0] + [q.maturity for q in futures_curve.quotes]
     if maturity > edges[-1]:
         edges[-1] = maturity
@@ -194,7 +193,6 @@ def _generic_points(
     bump_engine = calc._resolve_bump_engine(product, pricing_env, engine)
     maturity = product.get_maturity(pricing_env)
     buckets = tuple(request.tenor_buckets or default_tenor_buckets(maturity))
-    base_div = pricing_env.div_yield or ContinuousDividendYield(0.0)
     base_price = bump_engine.price(product, pricing_env)
     points: List[BucketedGreekPoint] = []
     for bucket in buckets:
@@ -310,9 +308,20 @@ def _bucket_bump(pricing_env, start: float, end: float, bump: float):
     else:
         base = div if div is not None else ContinuousDividendYield(0.0)
         return BucketedDividendYield(base=base, bucket_start=start, bucket_end=end, bump=bump)
-    bucket = BucketedDividendYield(base=inner, bucket_start=float(time_map.to_calendar(float(start))),
-                                   bucket_end=float(time_map.to_calendar(float(end))), bump=bump)
+    bucket = BucketedDividendYield(base=inner, bucket_start=_edge_to_calendar(time_map, start),
+                                   bucket_end=_edge_to_calendar(time_map, end), bump=bump)
     return wrapper(bucket, time_map)
+
+
+def _edge_to_calendar(time_map, edge: float) -> float:
+    """A window edge on the trading axis, in calendar time. The wrapper refuses every read past the map's last
+    knot, so an edge beyond it is never compared with a read: it is placed past the last calendar knot by the same
+    distance (order kept, so ``start < end`` still holds) and every reading of the bumped curve is exact."""
+    u_max = float(time_map._u_knots[-1])
+    edge = float(edge)
+    if edge <= u_max:
+        return float(time_map.to_calendar(edge))
+    return float(time_map.to_calendar(u_max)) + (edge - u_max)
 
 
 def bucket_label(bucket) -> str:
@@ -430,9 +439,6 @@ def calculate_futures_rhoq_buckets(
             )
     else:  # THEORETICAL_CARRY: pricing_env.div_yield is the carry source
         base_price = engine.price(product, pricing_env)
-        base_div = pricing_env.div_yield
-        if base_div is None:
-            base_div = ContinuousDividendYield(0.0)
         edges = [0.0] + [q.maturity for q in futures_curve.quotes]
         # a product maturing beyond the last futures tenor still carries
         # dividend exposure on (T_last, T*]; attribute that tail to the

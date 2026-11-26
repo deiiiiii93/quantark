@@ -100,8 +100,33 @@ def test_carry_rhoq_buckets_sum_to_the_parallel_rho_q(div):
     parallel = build_div_bumped_env(base, CALL, 0.0, SHIFT, direction=1.0)
     parallel_pnl = ENG.price(CALL, parallel) - ENG.price(CALL, base)
     assert parallel_pnl < 0.0
-    # one-sided bucket bumps: exact additivity up to second-order cross terms
-    assert bucket_pnl == pytest.approx(parallel_pnl, rel=2e-2)
+    # Black-Scholes reads q only at expiry: exactly one bucket moves, by the parallel amount
+    assert bucket_pnl == pytest.approx(parallel_pnl, rel=1e-9)
+
+
+@pytest.mark.parametrize("div", [None, ContinuousDividendYield(0.03)], ids=["none", "nonzero"])
+def test_carry_rhoq_custom_buckets_tile_and_survive_an_edge_past_the_horizon(div):
+    """A bucket edge past the trading-clock horizon used to raise in to_calendar (re-review finding); the bumped
+    windows tile the calendar axis: at every readable time exactly one bucket adds the bump."""
+    from quantark.asset.equity.report.term_structure import TenorBucket
+    from quantark.asset.equity.riskmeasures.bucketed_coordinates.carry_rhoq import _bucket_bump
+
+    base = env(div=div)
+    edges = [0.0, 0.25, 0.5, 5.0]
+    curves = [_bucket_bump(base, a, b, SHIFT) for a, b in zip(edges[:-1], edges[1:])]
+    q0 = base.div_yield.inner.get_yield if base.div_yield is not None else (lambda t: 0.0)
+    for u in (0.01, 0.2, 0.25, 0.3, 0.5, 0.7, 1.2):
+        c_time = curves[0].to_inner_time(u)          # the calendar time the wrapper reads its inner at
+        moved = [c.inner.get_yield(c_time) - q0(c_time) for c in curves]
+        assert sum(abs(m) > 0.0 for m in moved) == 1
+        assert sum(moved) == pytest.approx(SHIFT, abs=1e-15)
+    from quantark.asset.equity.riskmeasures.bucketed_greeks import BucketedGreekCoordinate, BucketedGreeksRequest
+
+    request = BucketedGreeksRequest(coordinates=(BucketedGreekCoordinate.CARRY_RHOQ,), carry_bump=SHIFT,
+                                    tenor_buckets=tuple(TenorBucket(label=f"b{i}", start=a, end=b)
+                                                        for i, (a, b) in enumerate(zip(edges[:-1], edges[1:]))))
+    res = GreeksCalculator().calculate_bucketed_greeks(CALL, base, ENG, request)
+    assert all(p.status == "ok" for p in res.by_coordinate(BucketedGreekCoordinate.CARRY_RHOQ))
 
 
 @pytest.mark.parametrize("quoting, convention", [(TRD_Q, DayCountConvention.BUSINESS_DAYS),
