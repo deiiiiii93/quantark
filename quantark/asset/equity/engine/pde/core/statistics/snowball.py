@@ -18,10 +18,12 @@ from __future__ import annotations
 import numpy as np
 
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import same_instant
 
-from quantark.asset.equity.engine.pde.grid import project_between
+from quantark.asset.equity.engine.pde.grid import project_between, project_piecewise
+from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
 
 from ..groups import VALUE, Backend, ColumnGroup
 from . import adjoint
@@ -85,6 +87,14 @@ class SnowballStatistics(RollingStatistics):
         self.layout = self._layout()
         for k, rec in enumerate(self.ko_records):
             self._col_by_time.setdefault(float(rec.observation_time), int(self.layout.ko[k]))
+        #: an env instant holding several records of a plain Snowball (0.16.0 D4): its records by their own time, each
+        #: with its column, so a record resolves by contract index (time alone names the instant's first record)
+        self._shared_cols = {}
+        for records, _ in self.solver._shared_ko_instants(self.product, self.ko_records):
+            members = [(rec, int(self.layout.ko[k])) for k, rec in enumerate(self.ko_records)
+                       if any(rec is r for r in records)]
+            for rec, _col in members:
+                self._shared_cols[float(rec.observation_time)] = members
         self.n_cols = self.layout.n_cols
         self.group = ColumnGroup("stats", ("stats_v0", "stats_v1"), Backend.BANDED, VALUE, rolling=True)
         self.breach = self._breach()
@@ -102,6 +112,15 @@ class SnowballStatistics(RollingStatistics):
 
     def column_of_record(self, record_or_time, surface="alive"):
         t = float(getattr(record_or_time, "observation_time", record_or_time))
+        if self._shared_cols and isinstance(record_or_time, ResolvedObservationRecord):
+            members = self._shared_cols.get(t)
+            if members is not None:
+                for rec, col in members:
+                    if rec is record_or_time:
+                        return col
+                for rec, col in members:      # the same record resolved again (equal values)
+                    if rec == record_or_time:
+                        return col
         col = self._col_by_time.get(t)
         if col is not None:
             return col
@@ -138,14 +157,13 @@ class SnowballStatistics(RollingStatistics):
             solver._ki_continuous or (num_t - 1) in solver._ki_observation_indices)
         terminal_ko = solver._has_terminal_ko and solver._ko_terminal_record is not None
         ko_last = terminal_ko and is_terminal_ki and solver._ko_jump_goes_last(product)
-        rec = solver._ko_terminal_record
         cols, names = self._ko_targets(v0, v1)
         if terminal_ko and not ko_last:
-            solver._terminal_ko_columns(cols, self.s, rec, product, env, breach=self.breach, surfaces=names)
+            solver._terminal_knock_out(cols, self.s, product, env, breach=self.breach, surfaces=names)
         if is_terminal_ki:
             solver._ki_columns(v0, v1, self.s, num_t - 1, num_t, product)
         if ko_last:
-            solver._terminal_ko_columns(cols, self.s, rec, product, env, breach=self.breach, surfaces=names)
+            solver._terminal_knock_out(cols, self.s, product, env, breach=self.breach, surfaces=names)
 
     def _ko_targets(self, v0, v1):
         if self.solver._ko_survives_ki(self.product):
@@ -410,16 +428,70 @@ class SnowballStatistics(RollingStatistics):
         """``solver._two_surface_events`` at ``j``."""
         solver = self.solver
         record = solver._ko_observation_indices.get(j)
+        group = solver._ko_groups_at_step.get(j) if solver._ko_groups_at_step else None
         ki = self._adjoint_ki_applies(j)
         ko_last = record is not None and ki and solver._ko_jump_goes_last(self.product)
+
+        def knock_out():
+            if group is not None:
+                return self._adjoint_ko_group(j, group, self._ko_surfaces(), ops)
+            return self._adjoint_ko_columns(j, record, self._ko_surfaces(), ops)
+
         stages = []
         if record is not None and not ko_last:
-            stages += self._adjoint_ko_columns(j, record, self._ko_surfaces(), ops)
+            stages += knock_out()
         if ki:
             stages.append(self._adjoint_ki_columns(j, ops))
         if ko_last:
-            stages += self._adjoint_ko_columns(j, record, self._ko_surfaces(), ops)
+            stages += knock_out()
         return stages
+
+    def _group_maps(self, surfaces, ops, key, projection, mask_of, group_barriers):
+        """The adjoint stages of a same-instant knock-out group (0.16.0 D5) on ``surfaces``: the nodal masks' union
+        (every node a mask takes gets some record's target), or the piecewise projection's linear part and its
+        knock-out weights (``projection(branches)`` the march's own one-pass map; ``branches`` in contract order)."""
+        if projection is None:
+            mask = np.zeros(len(self.s), dtype=bool)
+            for b in group_barriers:
+                mask |= np.asarray(mask_of(b), dtype=bool)
+            return [ops.nodal_ko(sf, mask) for sf in surfaces]
+        n, k = len(self.s), len(group_barriers)
+        linear = lambda: projection(ops.eye.copy(), [0.0] * k)  # noqa: E731
+        breach = lambda: projection(np.zeros(n), [np.ones(n)] * k)  # noqa: E731
+        return [ops.joint(sf, key, linear, breach) for sf in surfaces]
+
+    def _piecewise(self, barriers, rev, use_layout):
+        """``fn(continuation, targets)``: the group's one-pass projection (``targets`` in contract order) -- the
+        adapter's ``project_piecewise`` on the layout (``use_layout``) or the solver's on ``log(s)``."""
+        order = list(range(len(barriers))) if rev else list(range(len(barriers)))[::-1]
+        ascending = [float(barriers[i]) for i in order]
+        spatial = self.prepared.layout.spatial
+
+        def fn(continuation, targets):
+            ordered = [targets[i] for i in order]
+            branches = ordered + [continuation] if rev else [continuation] + ordered
+            if use_layout:
+                return project_piecewise(spatial, ascending, branches)
+            x = np.log(np.asarray(self.s, dtype=float))
+            return project_piecewise_event(x, [float(np.log(b)) for b in ascending], branches)
+
+        return fn
+
+    def _adjoint_ko_group(self, j, group, surfaces, ops):
+        """``solver._ko_group_columns`` at ``j`` on ``surfaces``."""
+        solver, s, rev = self.solver, self.s, bool(self.product.is_reverse)
+        barriers = tuple(float(r.barrier) for r in group)
+        projection = self._piecewise(barriers, rev, False) if solver._event_uses_projection(j) else None
+        return self._group_maps(surfaces, ops, ("ko_group_columns", barriers, rev), projection,
+                                lambda b: solver._event_nodal_mask(s, b, rev, True, at_valuation=(j == 0)), barriers)
+
+    def _adjoint_terminal_ko_group(self, group, surfaces, ops):
+        """``solver._terminal_ko_group_columns`` on ``surfaces``."""
+        solver, s, rev = self.solver, self.s, bool(self.product.is_reverse)
+        barriers = tuple(float(r.barrier) for r in group)
+        projection = self._piecewise(barriers, rev, False) if solver._use_cell_average_events() else None
+        return self._group_maps(surfaces, ops, ("ko_group_columns", barriers, rev), projection,
+                                lambda b: solver._get_barrier_mask(s, b, rev, is_up_barrier=True), barriers)
 
     def _adjoint_schedule(self, j, schedule, ops):
         """The event table's interior stages at ``j`` (its evidence rows are its staging order) and its continuous
@@ -439,6 +511,12 @@ class SnowballStatistics(RollingStatistics):
                     def fn(vs, vb, _b=barrier, _up=breach_up):
                         return project_between(spatial, _b, _up, vb, vs)
                     stages += [ops.surface_map(sf, ("schedule_ko", barrier, breach_up), fn) for sf in surfaces]
+            elif row[0] == "ko_group" and row[1] == j:
+                _, _, _, barriers, _, breach_up, hits_ki, treatment = row
+                surfaces = [adjoint.ALIVE, adjoint.KI] if hits_ki else [adjoint.ALIVE]
+                projection = None if treatment == "nodal" else self._piecewise(barriers, rev, True)
+                stages += self._group_maps(surfaces, ops, ("schedule_ko_group", barriers, breach_up), projection,
+                                           lambda b: solver._event_nodal_mask(spatial.s, b, rev, True), barriers)
             elif row[0] == "ki" and row[1] == j:
                 _, _, _, barrier, breach_up, treatment = row
                 if treatment == "nodal":
@@ -463,11 +541,18 @@ class SnowballStatistics(RollingStatistics):
         terminal_ko = solver._has_terminal_ko and solver._ko_terminal_record is not None
         ko_last = terminal_ko and is_terminal_ki and solver._ko_jump_goes_last(product)
         surfaces = [adjoint.ALIVE, adjoint.KI] if solver._ko_survives_ki(product) else [adjoint.ALIVE]
+        group = solver._ko_terminal_group
+
+        def knock_out():
+            if group is not None:
+                return self._adjoint_terminal_ko_group(group, surfaces, ops)
+            return self._adjoint_terminal_ko(solver._ko_terminal_record, surfaces, ops)
+
         stages = []
         if terminal_ko and not ko_last:
-            stages += self._adjoint_terminal_ko(solver._ko_terminal_record, surfaces, ops)
+            stages += knock_out()
         if is_terminal_ki:
             stages.append(self._adjoint_ki_columns(num_t - 1, ops))
         if ko_last:
-            stages += self._adjoint_terminal_ko(solver._ko_terminal_record, surfaces, ops)
+            stages += knock_out()
         return stages

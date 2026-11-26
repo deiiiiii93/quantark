@@ -42,7 +42,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     PDESessionOutputs,
     PDESolutionResult,
 )
-from quantark.asset.equity.engine.pde.grid.events import project_event_values
+from quantark.asset.equity.engine.pde.grid.events import project_event_values, project_piecewise_event
 from quantark.asset.equity.engine.pde.grid import (
     EventSchedule,
     GridRequest,
@@ -55,7 +55,10 @@ from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.accrual import leg_annualized
-from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.product.option.observation_schedule import (
+    ResolvedObservationRecord,
+    same_instant_ko_groups,
+)
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_config import AirbagConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -397,6 +400,10 @@ class SnowballPDESolver(BasePDESolver):
         self._ko_observation_indices: Dict[int, ResolvedObservationRecord] = {}
         self._ko_terminal_record: Optional[ResolvedObservationRecord] = None
         self._has_terminal_ko: bool = False
+        # same-instant knock-out groups of >= 2 effective records (plain Snowball, 0.16.0 D3/D4): the step's
+        # group in contract order; ``_ko_observation_indices`` holds its first (deciding at the edge) record
+        self._ko_groups_at_step: Dict[int, Tuple[ResolvedObservationRecord, ...]] = {}
+        self._ko_terminal_group: Optional[Tuple[ResolvedObservationRecord, ...]] = None
 
         # KI observation tracking
         self._ki_observation_indices: Set[int] = set()
@@ -630,6 +637,18 @@ class SnowballPDESolver(BasePDESolver):
             return None
         tau = float(product.get_maturity(pricing_env))
         tagged = self._fold_ko_records(product, pricing_env, tau)
+        dominated = set()
+        for records, effective in self._shared_ko_instants(product, [rec for _, rec in tagged]):
+            if len(effective) >= 2:
+                # the binder is one to one by time; the records of one instant each pay their own cash (0.16.0 D10)
+                named = ", ".join(
+                    rec.observation_date.date().isoformat() if rec.observation_date is not None
+                    else f"t={float(rec.observation_time)!r}" for rec in effective)
+                raise ValidationError(
+                    f"cash-leg folding cannot bind the knock-out records {named} sharing one env instant: "
+                    "each pays its own cash at that instant (an open item); price the legs on the event route")
+            # a duplicate-only instant binds its effective record; the dropped ones never fire
+            dominated.update(id(rec) for rec in records if not any(rec is e for e in effective))
         amounts = fold.bind_ko([
             (tag, float(rec.observation_time),
              float(rec.settlement_time if rec.settlement_time is not None else rec.observation_time))
@@ -637,6 +656,8 @@ class SnowballPDESolver(BasePDESolver):
         ])
         ko: Dict[Tuple[str, float], float] = {}
         for (tag, rec), amount in zip(tagged, amounts):
+            if id(rec) in dominated:
+                continue
             key = (tag, float(rec.observation_time))
             if key in ko:
                 raise ValidationError(f"two knock-out records share {key}: their folded cash is ambiguous")
@@ -1031,6 +1052,78 @@ class SnowballPDESolver(BasePDESolver):
                 return rec
         return None
 
+    @staticmethod
+    def _shared_ko_instants(product, records) -> Tuple[Tuple[list, list], ...]:
+        """``(records, effective records)`` of every env instant holding two or more knock-out records of a plain
+        Snowball (0.16.0 DCN/dated D2): the instant's records in contract order, and the ones an engine tests
+        (``same_instant_ko_groups``: a record whose breach region an earlier one's contains is dropped) that carry a
+        barrier. Empty for every other product, and for a schedule whose instants all hold one record -- the
+        engines then run exactly as before. Phoenix and KO-reset are out of scope (their records stay time-keyed)."""
+        if type(product) is not SnowballOption or len(records) < 2:
+            return ()
+        timed = sorted((r for r in records if r.observation_time is not None),
+                       key=lambda r: float(r.observation_time))
+        raw: List[list] = []
+        anchor = None
+        for rec in timed:              # the helper's grouping rule: same_instant to the instant's first record
+            t = float(rec.observation_time)
+            if anchor is None or not same_instant(t, anchor):
+                raw.append([])
+                anchor = t
+            raw[-1].append(rec)
+        shared = [g for g in raw if len(g) >= 2]
+        if not shared:
+            return ()
+        effective = same_instant_ko_groups([r for g in shared for r in g], bool(product.is_reverse))
+        if len(effective) != len(shared):  # pragma: no cover - the helper groups the same instants
+            raise PricingError("same-instant knock-out groups disagree with the helper's")
+        return tuple((g, [r for r in e if r.barrier is not None]) for g, e in zip(shared, effective))
+
+    def _ko_group_targets(self, group, cols, surfaces, pricing_env, current_time, breach):
+        """Per record of ``group`` (contract order), the targets of ``cols``: the record's discounted cash, or the
+        statistics breach's per-column target (``_ko_columns``' rule, record by record)."""
+        out = []
+        for rec in group:
+            if breach is None:
+                payoff = rec.payoff if rec.payoff is not None else 0.0
+                if self._fold is not None:
+                    payoff = float(payoff) + self._fold_ko_cash(rec, surfaces)
+                cash = self._cashflow_value_at_time(pricing_env=pricing_env, cashflow=payoff,
+                                                    current_time=current_time, settlement_time=rec.settlement_time)
+                out.append([cash] * len(cols))
+            else:
+                out.append([breach.ko(rec, col, name) for col, name in zip(cols, surfaces)])
+        return out
+
+    @staticmethod
+    def _ko_group_breaks(group, is_reverse: bool):
+        """``(order, ascending barriers)``: the records of a same-instant group in the order its barriers ascend.
+        The effective barriers are strictly monotone in contract order (down on a standard product, up on a reverse
+        one), so the piecewise event's regions are [continuation, c_n, ..., c_1] (mirrored on a reverse product)."""
+        order = list(range(len(group)))
+        if not is_reverse:
+            order.reverse()
+        return order, [float(group[k].barrier) for k in order]
+
+    def _apply_ko_group(self, cols, s_vec, group, targets, is_reverse: bool, projection: bool, mask_of) -> None:
+        """One stage for a same-instant knock-out group (0.16.0 D3), in place: the first record (contract order) whose
+        barrier is breached takes the node. ``projection``: one pass of the piecewise cell-average projection with
+        breaks at the effective barriers; else the nodal masks (``mask_of(barrier)``) in reverse contract order, so
+        the earliest record writes last."""
+        if projection:
+            order, barriers = self._ko_group_breaks(group, is_reverse)
+            x_vec = np.log(np.asarray(s_vec, dtype=float))
+            breaks = [float(np.log(b)) for b in barriers]
+            for c, col in enumerate(cols):
+                ordered = [targets[k][c] for k in order]
+                branches = ordered + [col] if is_reverse else [col] + ordered
+                col[...] = project_piecewise_event(x_vec, breaks, branches)
+            return
+        for rec, per_col in zip(reversed(group), reversed(targets)):
+            mask = mask_of(rec.barrier)
+            for col, target in zip(cols, per_col):
+                col[mask] = target if np.ndim(target) == 0 else target[mask]
+
     def _is_already_knocked_in(self, product: SnowballOption, spot: float) -> bool:
         """Check if spot is in the knocked-in region (spot-only proxy)."""
         if not product.has_ki_barrier:
@@ -1085,6 +1178,17 @@ class SnowballPDESolver(BasePDESolver):
         carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         return product.decide_observations_at_valuation(pricing_env.spot, pricing_env, knocked_in=carried)
 
+    def _deciding_record_at_valuation(self, product, pricing_env, ko_records, first):
+        """The knock-out record a knock-out decided at valuation pays: ``first`` (the record at time zero), unless the
+        valuation instant holds several records of a plain Snowball -- then the valuation-date decision's own record,
+        the first in contract order whose barrier the spot breaches (0.16.0 D4)."""
+        if type(product) is not SnowballOption:
+            return first
+        if sum(1 for rec in ko_records if same_instant(rec.observation_time, 0.0)) < 2:
+            return first
+        decision = self._valuation_decision(product, pricing_env)
+        return decision.ko_record if decision.knocked_out and decision.ko_record is not None else first
+
     def _knocked_out_value(self, product, pricing_env: PricingEnvironment, decision) -> float:
         """The value of a knock-out the valuation-date decision fired (the immediate knock-out payoff)."""
         return self._get_immediate_ko_payoff(product, pricing_env)
@@ -1099,6 +1203,7 @@ class SnowballPDESolver(BasePDESolver):
             raise ValidationError(
                 "Immediate KO payoff requested but no KO observation exists at valuation date."
             )
+        ko_record_0 = self._deciding_record_at_valuation(product, pricing_env, ko_records, ko_record_0)
 
         payoff = ko_record_0.payoff if ko_record_0.payoff is not None else 0.0
         settlement_time = ko_record_0.settlement_time
@@ -1441,6 +1546,27 @@ class SnowballPDESolver(BasePDESolver):
                 self._has_terminal_ko = True
             elif 0.0 < obs_time < tau:
                 self._ko_observation_indices[step_of(obs_time)] = rec
+        self._ko_groups_at_step.clear()
+        self._ko_terminal_group = None
+        for _, effective in self._shared_ko_instants(product, self._get_cached_ko_records(pricing_env, product)):
+            # a record sharing its instant (0.16.0 D3/D4): the instant holds its first effective record -- the one a
+            # node beyond every level of the group knocks out on -- and a group of two or more is staged as one
+            if not effective:
+                continue
+            group = tuple(effective) if len(effective) >= 2 else None
+            obs_time = effective[0].observation_time
+            if is_close(obs_time, 0.0):
+                self._ko_observation_indices[0] = effective[0]
+                if group is not None:
+                    self._ko_groups_at_step[0] = group
+            elif same_instant(obs_time, tau):
+                self._ko_terminal_record = effective[0]
+                self._ko_terminal_group = group
+            elif 0.0 < obs_time < tau:
+                step = step_of(obs_time)
+                self._ko_observation_indices[step] = effective[0]
+                if group is not None:
+                    self._ko_groups_at_step[step] = group
 
         if (
             product.has_ki_barrier
@@ -1995,10 +2121,19 @@ class SnowballPDESolver(BasePDESolver):
         ko_cols = [v0, v1] if survives else [v0]
         ko_names = ("alive", "ki") if survives else ("alive",)
 
+        group = self._ko_groups_at_step.get(t_idx) if self._ko_groups_at_step else None
+
+        def knock_out():
+            if group is not None:   # a same-instant group: one stage (0.16.0 D3)
+                self._ko_group_columns(ko_cols, s_vec, t_idx, group, product, pricing_env, current_time,
+                                       breach=breach, surfaces=ko_names)
+            else:
+                self._ko_columns(ko_cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
+                                 breach=breach, surfaces=ko_names)
+
         # 1. Apply KO jump if this is a KO observation time
         if ko_record is not None and not ko_last:
-            self._ko_columns(ko_cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
-                             breach=breach, surfaces=ko_names)
+            knock_out()
 
         # 2. Apply KI jump
         # For continuous KI: apply at every time step
@@ -2007,8 +2142,7 @@ class SnowballPDESolver(BasePDESolver):
             self._ki_columns(v0, v1, s_vec, t_idx, num_t, product)
 
         if ko_last:
-            self._ko_columns(ko_cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
-                             breach=breach, surfaces=ko_names)
+            knock_out()
 
     def _ko_jump_goes_last(self, product: SnowballOption) -> bool:
         """Whether a knock-out sharing an observation with a knock-in must be applied after it.
@@ -2038,6 +2172,33 @@ class SnowballPDESolver(BasePDESolver):
         names = ("alive", "ki")[:len(grids)]
         self._ko_columns([g[:, t_idx] for g in grids], s_vec, t_idx, ko_record, product, pricing_env,
                          current_time, surfaces=names)
+
+    def _ko_group_columns(self, cols, s_vec, t_idx, group, product, pricing_env, current_time,
+                          breach=None, surfaces=("alive", "ki")) -> None:
+        """``_ko_columns`` for a same-instant knock-out group at ``t_idx`` (0.16.0 D3): the projection where the
+        single record's stage projects, else its nodal masks (inclusive at the valuation instant)."""
+        targets = self._ko_group_targets(group, cols, surfaces, pricing_env, current_time, breach)
+        reverse = bool(product.is_reverse)
+        self._apply_ko_group(
+            cols, s_vec, group, targets, reverse, self._event_uses_projection(t_idx),
+            lambda b: self._event_nodal_mask(s_vec, b, reverse, True, at_valuation=(t_idx == 0)))
+
+    def _terminal_ko_group_columns(self, cols, s_vec, group, product, pricing_env, breach=None,
+                                   surfaces=("alive", "ki")) -> None:
+        """``_terminal_ko_columns`` for a same-instant knock-out group at maturity (0.16.0 D3)."""
+        targets = self._ko_group_targets(group, cols, surfaces, pricing_env, self._total_tau, breach)
+        reverse = bool(product.is_reverse)
+        self._apply_ko_group(cols, s_vec, group, targets, reverse, self._use_cell_average_events(),
+                             lambda b: self._get_barrier_mask(s_vec, b, reverse, is_up_barrier=True))
+
+    def _terminal_knock_out(self, cols, s_vec, product, pricing_env, breach=None, surfaces=("alive", "ki")) -> None:
+        """The terminal knock-out stage on columns: the maturity instant's group when it holds one, else its record."""
+        if self._ko_terminal_group is not None:
+            self._terminal_ko_group_columns(cols, s_vec, self._ko_terminal_group, product, pricing_env,
+                                            breach=breach, surfaces=surfaces)
+        else:
+            self._terminal_ko_columns(cols, s_vec, self._ko_terminal_record, product, pricing_env, breach=breach,
+                                      surfaces=surfaces)
 
     def _ko_columns(self, cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
                     breach=None, surfaces=("alive", "ki")):

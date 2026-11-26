@@ -12,6 +12,7 @@ import numpy as np
 from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.util.enum import CouponPayType
 from quantark.util.numerical import same_instant
 
@@ -20,9 +21,20 @@ from . import event_statistics as es
 __all__ = ["knocked_out_event_statistics"]
 
 
-def _position(records, record):
-    """The decision's record in a resolved schedule (the one observed at the valuation instant)."""
+def _position(records, record, by_record=False):
+    """The decision's record in a resolved schedule (the one observed at the valuation instant). ``by_record`` (the
+    plain Snowball, 0.16.0 D4/D8): the deciding record itself, by contract index -- the valuation instant may hold
+    several records, and the first that the spot breaches decides; else the first record at that instant."""
     t = float(record.observation_time)
+    if by_record:
+        same = [k for k, rec in enumerate(records) if same_instant(rec.observation_time, t)]
+        if len(same) > 1:
+            for k in same:
+                if records[k] is record:
+                    return k
+            for k in same:
+                if records[k] == record:
+                    return k
     return next(k for k, rec in enumerate(records) if same_instant(rec.observation_time, t))
 
 
@@ -49,7 +61,7 @@ def knocked_out_event_statistics(solver, product, env, request, decision, pv=Non
     else:
         tau = float(product.get_maturity(env))
         records = solver._filter_observations_by_tau(product.resolve_ko_observations(env), tau)
-        pos = _position(records, decision.ko_record)
+        pos = _position(records, decision.ko_record, by_record=type(product) is SnowballOption)
         rec0 = records[pos]
         # paid from the valuation instant (t = 0 on every layout)
         df_delay0 = solver._cashflow_value_at_time(pricing_env=env, cashflow=1.0, current_time=0.0,

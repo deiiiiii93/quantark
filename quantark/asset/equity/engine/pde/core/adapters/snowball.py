@@ -11,7 +11,7 @@ from contextlib import nullcontext
 
 import numpy as np
 
-from quantark.asset.equity.engine.pde.grid import EventSchedule, project_between
+from quantark.asset.equity.engine.pde.grid import EventSchedule, project_between, project_piecewise
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close, same_instant
 
@@ -188,7 +188,17 @@ class SnowballAdapter(FamilyAdapter):
 
         # KO: both surfaces projected against the discounted redemption
         # (breach_up = up-barrier XOR reverse — certified direction rule).
-        for rec in solver._get_cached_ko_records(pricing_env, product):
+        ko_records = solver._get_cached_ko_records(pricing_env, product)
+        # an env instant holding several records of a plain Snowball (0.16.0 D3): its first effective record stands
+        # for the instant -- staged alone when the others are dominated (bitwise the product without them), else as
+        # ONE piecewise stage for the whole group; every other record of the instant is not staged
+        skipped, groups = set(), {}
+        for records, effective in solver._shared_ko_instants(product, ko_records):
+            keep = effective[0] if effective else None
+            skipped.update(id(r) for r in records if r is not keep)
+            if len(effective) >= 2:
+                groups[id(keep)] = tuple(effective)
+        for rec in ko_records:
             t_obs = rec.observation_time
             if (
                 t_obs is None
@@ -197,7 +207,15 @@ class SnowballAdapter(FamilyAdapter):
                 or not (0.0 < t_obs < tau)
             ):
                 continue
+            if skipped and id(rec) in skipped:
+                continue
             step = layout.time.step_at(t_obs)
+            group = groups.get(id(rec)) if groups else None
+            if group is not None:
+                stage, row = self._ko_group_stage(product, pricing_env, layout, group, step, nodal, treatment)
+                ko_stages[step] = _chain(ko_stages.get(step), stage)
+                ko_rows.append(row)
+                continue
             payoff = rec.payoff if rec.payoff is not None else 0.0
             if solver._fold is not None:
                 payoff = float(payoff) + solver._fold_ko_cash(rec, ("alive", "ki"))
@@ -326,6 +344,53 @@ class SnowballAdapter(FamilyAdapter):
             rows.append(("continuous_ki", kib, is_reverse))
         return EventSchedule(interior=interior, continuous=continuous, evidence=tuple(rows))
 
+    def _ko_group_stage(self, product, pricing_env, layout, group, step, nodal, treatment):
+        """``(stage, evidence row)`` of a same-instant knock-out group (0.16.0 D3, D5): ONE stage in which the first
+        record (contract order) whose barrier is breached takes the node -- the nodal masks in reverse contract order,
+        or one pass of the piecewise cell-average projection with breaks at the effective barriers and branches
+        [continuation, c_n, ..., c_1] (mirrored on a reverse product). Sequential single-threshold projections are
+        not this map (a cell-average projection is not idempotent, and two straddled adjacent cells differ). The
+        evidence row ``("ko_group", step, t, barriers, cashes, breach_up, hits_ki, treatment)`` (contract order) is
+        what the forward adjoint replays."""
+        solver = self.solver
+        spatial = layout.spatial
+        is_reverse = bool(getattr(product, "is_reverse", False))
+        t_obs = float(group[0].observation_time)
+        cashes = []
+        for rec in group:
+            payoff = rec.payoff if rec.payoff is not None else 0.0
+            if solver._fold is not None:   # pragma: no cover - _bind_fold refuses a folded group (D10)
+                payoff = float(payoff) + solver._fold_ko_cash(rec, ("alive", "ki"))
+            cashes.append(float(solver._cashflow_value_at_time(pricing_env=pricing_env, cashflow=payoff,
+                                                               current_time=t_obs,
+                                                               settlement_time=rec.settlement_time)))
+        barriers = tuple(float(rec.barrier) for rec in group)
+        breach_up = not is_reverse
+        hits_ki = solver._ko_survives_ki(product)
+        order, ascending = solver._ko_group_breaks(group, is_reverse)
+
+        def _ko_group(states, breach=None, _group=group, _cashes=tuple(cashes), _hits_ki=hits_ki):
+            surfaces = ("alive", "ki") if _hits_ki else ("alive",)
+            out = dict(states)
+            for surface in surfaces:
+                block = states[surface]
+                targets = [c if breach is None else breach.ko(rec, block, surface)
+                           for rec, c in zip(_group, _cashes)]
+                if nodal:
+                    new = block.copy()
+                    for rec, target in zip(reversed(_group), reversed(targets)):
+                        mask = solver._event_nodal_mask(spatial.s, rec.barrier, is_reverse, True)
+                        new[mask] = target if breach is None else target[mask]
+                    out[surface] = new
+                    continue
+                ordered = [targets[k] for k in order]
+                branches = ordered + [block] if is_reverse else [block] + ordered
+                out[surface] = project_piecewise(spatial, ascending, branches)
+            return {"alive": out["alive"], "ki": out["ki"]}
+
+        row = ("ko_group", int(step), t_obs, barriers, tuple(cashes), breach_up, bool(hits_ki), treatment)
+        return _ko_group, row
+
     # --- march --------------------------------------------------------------------
 
     def allocate(self, prepared) -> dict:
@@ -353,12 +418,20 @@ class SnowballAdapter(FamilyAdapter):
         # the knock-out wins a tie with a knock-in observed with it (see _ko_jump_goes_last)
         ko_last = terminal_ko and is_terminal_ki and solver._ko_jump_goes_last(product)
 
+        def knock_out():
+            if solver._ko_terminal_group is not None:   # the maturity instant's group: one stage (0.16.0 D3)
+                grids = (grid_v0, grid_v1) if solver._ko_survives_ki(product) else (grid_v0,)
+                solver._terminal_ko_group_columns([g[:, -1] for g in grids], s_vec, solver._ko_terminal_group,
+                                                  product, env, surfaces=("alive", "ki")[:len(grids)])
+            else:
+                solver._apply_terminal_ko(grid_v0, grid_v1, s_vec, product, env, solver._ko_terminal_record)
+
         if terminal_ko and not ko_last:
-            solver._apply_terminal_ko(grid_v0, grid_v1, s_vec, product, env, solver._ko_terminal_record)
+            knock_out()
         if is_terminal_ki:
             solver._apply_ki_jump(grid_v0, grid_v1, s_vec, num_t - 1, product)
         if ko_last:
-            solver._apply_terminal_ko(grid_v0, grid_v1, s_vec, product, env, solver._ko_terminal_record)
+            knock_out()
 
         if prepared.request.life_surface:
             # Branch columns for a life-surface readout: the terminal column

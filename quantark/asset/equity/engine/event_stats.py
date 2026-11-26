@@ -204,7 +204,9 @@ class ObservationTable:
     One row per observation in the union of KO and coupon observations, sorted by time. A
     coupon-only row (``is_ko_obs`` False) carries zero KO probability and cash. KO-reset rows of
     both schedules sit in one table tagged ``schedule`` ``"pre"``/``"post"`` (a time may repeat
-    once per tag); REBASED ``post`` rows live in :class:`PostKIOffsetTable` instead.
+    once per tag); REBASED ``post`` rows live in :class:`PostKIOffsetTable` instead. A dated
+    knock-out-only table (no coupon row, no tag) may repeat a time with distinct ``dates``: a
+    Snowball's knock-out records on one env instant, one row per contract record.
 
     Attributes:
         times, payment_times: determination and settlement time of each row (pricing axis).
@@ -248,7 +250,13 @@ class ObservationTable:
         values["schedule"] = schedule
 
         _check_not_before_valuation(owner, "times", times)
-        _check_ordered_rows(owner, "times", times, schedule)
+        keys = schedule
+        if schedule is None and values["dates"] is not None and not np.any(values["is_coupon_obs"]):
+            # a dated knock-out-only table keeps one row per contract record: a Snowball's records on one env
+            # instant repeat its time with their own dates (0.16.0 DCN/dated D8). Coupon tables (Phoenix, DCN) and
+            # tagged tables (KO-reset) keep one row per time: their same-instant records are an open item.
+            keys = values["dates"]
+        _check_ordered_rows(owner, "times", times, keys)
         _check_payment_not_before(owner, times, values["payment_times"])
         _check_probability(owner, "probability", values["probability"])
         _check_survival(owner, "survival", values["survival"])
