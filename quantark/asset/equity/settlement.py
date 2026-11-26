@@ -390,6 +390,15 @@ class SettlementResolver:
                 pricing_env,
                 "pending payment",
             )
+            if (
+                payment_date > point_date
+                and isfinite(resolved_payment_time)
+                and abs(resolved_payment_time) <= _TIME_TOLERANCE
+            ):
+                # still owed (paid after the valuation date), but the environment's clock puts the payment at the
+                # valuation instant -- an env holiday right after the run date under business-day counting: timed at
+                # 0 (DF(0)), as DCN flows are (0.16.0 DCN/dated run D7)
+                resolved_payment_time = 0.0
             determination_date = point_date
         else:
             if payment_time is None:
@@ -408,7 +417,11 @@ class SettlementResolver:
             determination_date = None
             payment_date = None
 
-        if (
+        on_valuation_instant = (
+            point_date is not None and payment_date is not None and payment_date > point_date
+            and resolved_payment_time == 0.0
+        )
+        if not on_valuation_instant and (
             not isfinite(resolved_payment_time)
             or resolved_payment_time <= _TIME_TOLERANCE
         ):
