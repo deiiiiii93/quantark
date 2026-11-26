@@ -55,8 +55,8 @@ unchanged, bit for bit.
 The QUAD V1 event statistics (`SnowballQuadEngine`, `PhoenixQuadEngine`,
 `KOResetSnowballQuadEngine`) read every outcome off one adjoint forward pass of the march. That
 covers the knock-out units, the maturity and knocked-in settlement columns, and the Phoenix coupon
-columns. Before, they marched one backward column per knock-out record, plus one to three per
-Phoenix observation. That is what made 0.13.0's default statistics 41–82× slower on daily-KO
+columns. Before, they marched one backward column per knock-out record, plus two to eight per
+Phoenix observation (two for no-memory instant coupons, up to eight for memory expiry coupons). That is what made 0.13.0's default statistics 41–82× slower on daily-KO
 books. Prices and greeks are unchanged, bit for bit.
 
 #### Changed
@@ -77,10 +77,12 @@ books. Prices and greeks are unchanged, bit for bit.
   | carried KI, monthly KO 1y | 1.47 s | 1.01 s | 1.5× |
   | quarterly KO, continuous KI 2y, `streams={KO}` | 0.054 s | 0.059 s | 0.9× |
   | Phoenix quarterly (memory), continuous KI 1y, `streams={KO}` | 0.058 s | 0.068 s | 0.85× |
+  | no KI barrier, monthly KO 1y | 0.037 s | 0.038 s | 1.0× |
 
-  - **Sparse books.** On these books 0.15.0 ran no forward pass (pruned streams, carried or
-    current knock-in, no KI barrier). The pass's fixed per-step cost is not repaid on a few
-    observations, so they are about 10 ms slower.
+  - **Sparse books.** 0.15.0 ran no forward pass on a pruned request (`streams={KO}`) or a note
+    without a KI barrier. On a few observations the pass's fixed per-step cost is not repaid, so
+    these calls are up to about 10 ms slower (the last three rows). A carried knock-in also ran
+    no pass before, but its book is large enough to gain (1.5×).
   - **Memory Phoenix.** A memory Phoenix is capped at 50 observations by `price()`. At 50
     observations its statistics are 2–3× faster, with `price()` itself the remaining cost.
 - **Statistics move at round-off.** Forward pass vs the 0.15.0 columns:
