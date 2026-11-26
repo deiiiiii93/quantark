@@ -665,11 +665,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         *,
         streams: Optional[frozenset] = None,
         pv: Optional[float] = None,
+        _route: Optional[str] = None,
     ) -> Optional[EventStatistics]:
         from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
+        from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnavailable
         from quantark.asset.equity.engine.quad import v1_statistics
         from quantark.asset.equity.engine.quad.v1_adjoint import EventStep, FirstStepLog, MarchLog
 
+        route = self._resolve_v1_route(_route)
         self._validate_product(product)
         want_ki = es.want_knock_in_path(streams)
         carried_knock_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
@@ -799,12 +802,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             vol_vec**4
         ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
-        # Columns: knock-out units of both schedules, then the maturity unit and cash (the first schedule's end:
-        # v_out is seeded there, as ``price`` seeds it) and the knocked-in settlement unit and cash.
+        # Columns (stacked route): knock-out units of both schedules, then the maturity unit and cash (the first
+        # schedule's end: v_out is seeded there, as ``price`` seeds it) and the knocked-in settlement unit and cash.
+        # Forward route: no knock-out rows -- every outcome is read off the adjoint forward pass of this march.
         n_pre = len(pre_ko_records)
         n_post = len(post_ko_records)
         post_offset = n_pre
-        m_unit = n_pre + n_post
+        n_ko = n_pre + n_post
+        m_unit = 0 if route == "forward" else n_ko
         m_cash, kis_unit, kis_cash = m_unit + 1, m_unit + 2, m_unit + 3
         n_rows = m_unit + 4
 
@@ -874,12 +879,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             pre_unit = post_unit = 0.0
             if pre_record is not None:
                 pre_unit = self._ko_discount(rate, obs_time, pre_record.settlement_time, df_fn=df_local)
-                pre_value[pre_ko_records.index(pre_record)] = pre_unit
+                if m_unit:
+                    pre_value[pre_ko_records.index(pre_record)] = pre_unit
                 sources.append(("ko", pre_ko_records.index(pre_record)))
                 units[sources[-1]] = float(pre_unit)
             if post_record is not None:
                 post_unit = self._ko_discount(rate, obs_time, post_record.settlement_time, df_fn=df_local)
-                post_value[post_offset + post_ko_records.index(post_record)] = post_unit
+                if m_unit:
+                    post_value[post_offset + post_ko_records.index(post_record)] = post_unit
                 if not product.barrier_config.disable_ko_after_ki:
                     sources.append(("ko", post_offset + post_ko_records.index(post_record)))
                     units[sources[-1]] = float(post_unit)
@@ -995,21 +1002,32 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             values_at_spot = np.array(
                 [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_rows)], dtype=float
             )
-        unit = values_at_spot[:m_unit]
-        log.columns = {("ko", i): float(unit[i]) for i in range(m_unit)
-                       if not (i >= post_offset and product.barrier_config.disable_ko_after_ki)}
-        log.columns.update({
-            ("terminal", "maturity_unit"): float(values_at_spot[m_unit]),
-            ("terminal", "maturity_cash"): float(values_at_spot[m_cash]),
-            ("terminal", "ki_settlement_unit"): float(values_at_spot[kis_unit]),
-            ("terminal", "ki_settlement_cash"): float(values_at_spot[kis_cash]),
-        })
         self._last_v1_march = log
+        forward = None
+        if route == "forward":
+            try:
+                forward = v1_statistics.forward_pass(log)
+            except AdjointUnavailable:
+                # no exact transpose of this march: the stacked columns, today's numbers (spec D2)
+                return self._compute_event_stats(product, pricing_env, streams=streams, pv=pv, _route="stacked")
+            # a post-schedule record under disable_ko_after_ki has no source (its KO is never applied): unit 0
+            unit = np.array([forward.sources.get(("ko", i), 0.0) for i in range(n_ko)], dtype=float)
+            terminal_columns = {name: float(forward.terminal[name]) for name in
+                                ("maturity_unit", "maturity_cash", "ki_settlement_unit", "ki_settlement_cash")}
+        else:
+            unit = np.asarray(values_at_spot[:m_unit], dtype=float)
+            terminal_columns = {"maturity_unit": float(values_at_spot[m_unit]),
+                                "maturity_cash": float(values_at_spot[m_cash]),
+                                "ki_settlement_unit": float(values_at_spot[kis_unit]),
+                                "ki_settlement_cash": float(values_at_spot[kis_cash])}
+        log.columns = {("ko", i): float(unit[i]) for i in range(n_ko)
+                       if not (i >= post_offset and product.barrier_config.disable_ko_after_ki)}
+        log.columns.update({("terminal", name): value for name, value in terminal_columns.items()})
 
         observations, maturity_row, ki_settlement = self._reset_rows(
             product, pricing_env, pre_ko_records, post_ko_records, unit, terminal,
-            maturity_unit=float(values_at_spot[m_unit]), maturity_cash=float(values_at_spot[m_cash]),
-            ki_unit=float(values_at_spot[kis_unit]), ki_cash=float(values_at_spot[kis_cash]),
+            maturity_unit=terminal_columns["maturity_unit"], maturity_cash=terminal_columns["maturity_cash"],
+            ki_unit=terminal_columns["ki_settlement_unit"], ki_cash=terminal_columns["ki_settlement_cash"],
             pre_maturity=pre_maturity, maturity=float(maturity),
         )
         rule = es.knock_in_rule(product, knocked_out_now=False, knocked_in_now=bool(knocked_in_at_valuation))
@@ -1020,7 +1038,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             maturity=maturity_row, ki_settlement=ki_settlement, rule=rule, want_knock_in=want_ki,
             forward=lambda: v1_statistics.knock_in_table(
                 product, pricing_env, log, horizon=pre_maturity, continuous=bool(ki_continuous),
-                ki_records=product_ki_records,
+                ki_records=product_ki_records, result=forward,
             ),
             unavailable={},
         )
