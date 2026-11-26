@@ -849,12 +849,13 @@ class SnowballQuadEngine(BaseEngine):
     ) -> Optional[EventStatistics]:
         """``EventStatistics`` of the price's own recursion (unified event statistics spec T17).
 
-        One stacked recursion marches a column per termination outcome through the price's operators: per
-        knock-out record its discounted unit, the maturity unit and cash (never knocked in), the knocked-in
-        settlement unit and cash (and the Phoenix coupon columns). P(knock in before any knock-out), its expected
-        time and the per-date knock-in table come from the forward adjoint pass of that recursion
-        (``v1_adjoint.py``), run only when ``streams`` asks for the knock-in stream (spec D17); every other column
-        is never pruned. ``pv`` is ``price()`` (spec D23). ``None`` for an expired note or one with no knock-out
+        Every termination outcome through the price's operators -- per knock-out record its discounted unit, the
+        maturity unit and cash (never knocked in), the knocked-in settlement unit and cash, and the Phoenix coupon
+        columns -- is read off ONE forward adjoint pass of the march (``v1_adjoint.py``, 0.16.0); the stacked
+        recursion (one backward column per outcome) runs only when the march has no exact transpose.
+        P(knock in before any knock-out), its expected time and the per-date knock-in table come from the same pass,
+        reported only when ``streams`` asks for the knock-in stream (spec D17); every other field is never
+        pruned. ``pv`` is ``price()`` (spec D23). ``None`` for an expired note or one with no knock-out
         record left.
         """
         if not isinstance(product, self._event_stats_product_type()):

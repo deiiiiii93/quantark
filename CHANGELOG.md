@@ -50,6 +50,53 @@ unchanged, bit for bit.
   (their statistics are the `EVENT_STATS` operation's forward pass, not an output of the value
   solve).
 
+### QUAD V1 statistics from one forward pass
+
+The QUAD V1 event statistics (`SnowballQuadEngine`, `PhoenixQuadEngine`,
+`KOResetSnowballQuadEngine`) read every outcome off one adjoint forward pass of the march. That
+covers the knock-out units, the maturity and knocked-in settlement columns, and the Phoenix coupon
+columns. Before, they marched one backward column per knock-out record, plus one to three per
+Phoenix observation. That is what made 0.13.0's default statistics 41–82× slower on daily-KO
+books. Prices and greeks are unchanged, bit for bit.
+
+#### Changed
+
+- **Speed** (back to back on one machine, `calculate_event_stats` wall time including its
+  `price()`; base = 0.15.0):
+
+  | contract | 0.15.0 | 0.16.0 | ratio |
+  |---|---|---|---|
+  | daily KO 1y, KI at maturity | 7.46 s | 0.53 s | 14.1× |
+  | daily KO 2y, KI at maturity | 28.46 s | 1.06 s | 26.8× |
+  | daily KO 1y, continuous KI | 7.50 s | 0.66 s | 11.4× |
+  | monthly KO, daily KI 1y | 1.49 s | 0.83 s | 1.8× |
+  | monthly KO, daily KI 2y | 10.47 s | 4.36 s | 2.4× |
+  | Phoenix (no memory, instant), daily KI 1y | 2.87 s | 0.87 s | 3.3× |
+  | Phoenix daily observations 1y, no memory, instant | 23.34 s | 0.91 s | 25.8× |
+  | Phoenix daily observations 1y, no memory, expiry | 38.73 s | 1.52 s | 25.4× |
+  | carried KI, monthly KO 1y | 1.47 s | 1.01 s | 1.5× |
+  | quarterly KO, continuous KI 2y, `streams={KO}` | 0.054 s | 0.059 s | 0.9× |
+  | Phoenix quarterly (memory), continuous KI 1y, `streams={KO}` | 0.058 s | 0.068 s | 0.85× |
+
+  - **Sparse books.** On these books 0.15.0 ran no forward pass (pruned streams, carried or
+    current knock-in, no KI barrier). The pass's fixed per-step cost is not repaid on a few
+    observations, so they are about 10 ms slower.
+  - **Memory Phoenix.** A memory Phoenix is capped at 50 observations by `price()`. At 50
+    observations its statistics are 2–3× faster, with `price()` itself the remaining cost.
+- **Statistics move at round-off.** Forward pass vs the 0.15.0 columns:
+  - knock-out probability: at most 3e-16 per record;
+  - terminal probabilities: 1e-15;
+  - coupon probability and cash: 2e-15;
+  - EXPIRY ledger buckets: 3e-13 (100 notional).
+
+  Partition residuals and cash reconciliation stay within their 0.15.0 bounds. The knock-in path
+  fields come from the same pass as before and are bitwise.
+- Every statistics call that runs the march now runs exactly one forward pass. Before, a pruned
+  request, a carried or current knock-in, or a note without a KI barrier ran none. The knock-in
+  fields are still reported only when requested.
+- A march the adjoint cannot transpose (an event map that is not local in the probe band) falls
+  back to the stacked backward columns, which give 0.15.0's numbers.
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a

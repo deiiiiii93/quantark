@@ -1,17 +1,19 @@
 """``EventStatistics`` of the QUAD V1 engines (unified event statistics spec §Contracts, T17).
 
-The V1 statistics recursion marches one column per termination outcome through the price's own operators
+The V1 statistics read every termination outcome off the price's own operators
 (``SnowballQuadEngine._compute_event_stats``, ``KOResetSnowballQuadEngine._compute_event_stats``): per knock-out
-record its discounted unit (one paid at its settlement), the maturity unit and cash (never knocked in) and the
-knocked-in settlement unit and cash, read at the spot; the Phoenix coupon columns (``_CouponCashRows``). This module
-turns them into the one result type:
+record its discounted unit (one paid at its settlement), the maturity unit and cash (never knocked in), the
+knocked-in settlement unit and cash, and the Phoenix coupon columns. Since 0.16.0 they all come from ONE adjoint
+forward pass of the march (``v1_adjoint.forward_pass``; the Phoenix coupon columns as its extension,
+``v1_coupons_forward.ForwardCouponRows``); the stacked route (one backward column per outcome, ``_CouponCashRows``)
+runs only when the march has no exact transpose. This module turns them into the one result type:
 
-* every outcome from its own column (DESIGN §4.7), the maturity row marched directly (never ``pv - Σ KO``);
+* every outcome from its own mass (DESIGN §4.7), the maturity row read directly (never ``pv - Σ KO``);
 * cash to pay ``discounted / DF(payment)`` on rows paid at a deterministic time; EXPIRY coupons are path-dependent
   (the coupon earned at the row, undiscounted) and the ledger books them at the ending events (the payment buckets);
 * the knock-in path statistics by the valuation-date rules (DESIGN §4.5); elsewhere P(knock in before any knock-out),
-  the expected first knock-in time and the per-date knock-in table from the forward adjoint pass (``v1_adjoint.py``),
-  run only when the request asks for the knock-in stream (spec D17);
+  the expected first knock-in time and the per-date knock-in table from the same forward pass, reported only when
+  the request asks for the knock-in stream (spec D17);
 * the expected knocked-in loss ``principal DF(payment) P(KI settlement) - KI settlement cash``.
 
 ``pv`` is ``price()``'s value (spec D23).

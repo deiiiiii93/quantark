@@ -646,9 +646,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     ) -> Optional[EventStatistics]:
         """``EventStatistics`` of the price's own KO-reset recursion (unified event statistics spec T17).
 
-        Columns: per knock-out record of both schedules its discounted unit, the maturity unit and cash (the first
-        schedule's end, never knocked in), the knocked-in settlement unit and cash. The knock-in path statistics come
-        from the forward adjoint pass, run only when ``streams`` asks for the knock-in stream (spec D17).
+        Outcomes: per knock-out record of both schedules its discounted unit, the maturity unit and cash (the first
+        schedule's end, never knocked in), the knocked-in settlement unit and cash -- read off one forward adjoint
+        pass of the march (0.16.0; the stacked columns only when the march has no exact transpose). The knock-in path
+        statistics come from the same pass, reported only when ``streams`` asks for the knock-in stream (spec D17).
         """
         if not isinstance(product, KnockOutResetSnowballOption):
             return None

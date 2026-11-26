@@ -437,8 +437,12 @@ KI date. Receivable rows carry the decision time and the payment time on the sam
 
 ### QUAD V1
 
-- The maturity outcomes are direct columns; the KI path statistics come from the exact transpose of
-  V1's own backward step. Ties follow the backward event: KO wins.
+- Since 0.16.0 every outcome comes from ONE exact transpose of V1's own backward step (the adjoint
+  forward pass): the knock-out units, the maturity and knocked-in settlement columns, the Phoenix
+  coupon columns (memory arrears and EXPIRY buckets as extra forward duals) and the KI path
+  statistics. One pass per marched call, O(1) backward rows whatever the number of observations;
+  a march the adjoint cannot transpose falls back to one backward column per outcome (the 0.15.0
+  numbers). Ties follow the backward event: KO wins.
 - The BGK continuous-KI approximation reports the KI path fields unavailable.
 - Phoenix EXPIRY: `reconciliation_error` is about 7e-9 × pv at 401 nodes (1e-9 at 1001, 7e-11 at
   4001). The price knocks out the termination surface with nodal weights while the statistics use
