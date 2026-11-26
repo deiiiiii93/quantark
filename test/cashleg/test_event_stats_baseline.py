@@ -92,6 +92,12 @@ D9_CAUSES: Dict[str, str] = {
          "readout. Checked by recomputing every QUAD V1 record with the exact first step off "
          "(``_without_exact_first_step``): that must reproduce the bank under every other cause, so the first step is "
          "the only new source of a move; ``test_quad_v1_first_step_moves_are_bounded`` measures the moves themselves",
+    "t": "QUAD V1 KO-reset knock-outs by the cell-average projection (0.16.0 D1, QUAD numerics run 5): under the "
+         "default event_projection both schedules' knock-outs are Snowball's dual-cell projection instead of the "
+         "nodal cosine smoothing. Checked by recomputing every QUAD V1 record with the previous nodal knock-outs "
+         "(``_legacy_ko_reset_knock_outs``, the 0.15 code path bit for bit) on top of cause (s)'s first step off: that "
+         "must reproduce the bank under every other cause, so D1 is the only new source of a move; "
+         "``test_ko_reset_v1_projection_moves_are_bounded`` measures the moves themselves",
     "r": "D34 intraday twin carries the D33 payment: a numeric KO-reset with first_schedule_settlement_time (the "
          "intraday twin of a dated D33-class note) is paid there; only intraday prices of D33-class notes move (no "
          "banked case carries it: test_no_banked_case_is_in_the_d34_intraday_twin_class)",
@@ -1402,10 +1408,28 @@ D29_ALSO = frozenset(rid for rid in _D29_MOVES if rid in EXPECTED_MOVES and EXPE
 # --- live recomputation (cached per worker: one event route / one drilldown per case) -------------
 
 @contextmanager
+def _legacy_ko_reset_knock_outs(case_id: str):
+    """Cause (t): QUAD V1 records are recomputed with the KO-reset knock-outs on the previous nodal rule
+    (``_projected_knock_outs`` False: the code path before 0.16.0 D1, bit for bit; Snowball / Phoenix never read it)."""
+    if not str(BANKED["cases"][case_id]["engine"]).startswith("quad_v1"):
+        yield
+        return
+    from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
+
+    saved = KOResetSnowballQuadEngine.__dict__["_projected_knock_outs"]
+    KOResetSnowballQuadEngine._projected_knock_outs = lambda self: False
+    try:
+        yield
+    finally:
+        KOResetSnowballQuadEngine._projected_knock_outs = saved
+
+
+@contextmanager
 def _without_exact_first_step(case_id: str):
     """Cause (s): QUAD V1 records are recomputed with the exact first step off (``_FIRST_STEP_S_F = 0``: the lattice
     readout every first step it resolves used before the sub-resolution run, bit for bit), so every other cause's
-    check keeps comparing like with like and the first step is the only new source of a QUAD V1 move."""
+    check keeps comparing like with like and the first step is the only new source of a QUAD V1 move. Cause (t)'s
+    legacy KO-reset knock-outs ride along (``_legacy_ko_reset_knock_outs``): the bank predates both."""
     if not str(BANKED["cases"][case_id]["engine"]).startswith("quad_v1"):
         yield
         return
@@ -1414,7 +1438,8 @@ def _without_exact_first_step(case_id: str):
     saved = SnowballQuadEngine._FIRST_STEP_S_F
     SnowballQuadEngine._FIRST_STEP_S_F = 0.0
     try:
-        yield
+        with _legacy_ko_reset_knock_outs(case_id):
+            yield
     finally:
         SnowballQuadEngine._FIRST_STEP_S_F = saved
 
@@ -1763,10 +1788,12 @@ QUAD_V1_CASES = sorted(cid for cid in (BANKED or {}).get("cases", {})
 @pytest.mark.parametrize("case_id", QUAD_V1_CASES or ["<none>"])
 def test_quad_v1_first_step_moves_are_bounded(case_id):
     """Cause (s), measured: with the exact first step on, a QUAD V1 case's price moves by at most 2e-4 relative and
-    every event-route leg by at most 5e-3 relative (owner-signed; S3b measured 7.8e-5 / 4.0e-3)."""
+    every event-route leg by at most 5e-3 relative (owner-signed; S3b measured 7.8e-5 / 4.0e-3). Both sides keep cause
+    (t)'s legacy KO-reset knock-outs, so this measures the first step alone."""
     assert QUAD_V1_CASES, "no QUAD V1 case is banked"
     off = _event(case_id)
-    on = cases.event_route(_case(case_id))
+    with _legacy_ko_reset_knock_outs(case_id):
+        on = cases.event_route(_case(case_id))
     if "raises" in off["price"]:
         assert "raises" in on["price"], (case_id, on["price"])
         return
@@ -1781,7 +1808,8 @@ def test_quad_v1_first_step_moves_are_bounded(case_id):
     # the fold routes too (final review: S3b's largest move, 4.0e-3, is a KO-reset fold_drilldown leg)
     drill_set = list(BANKED["cases"][case_id]["drilldown_set"])
     if drill_set:
-        d_off, d_on = _drilldown(case_id), cases.fold_drilldown(_case(case_id), drill_set)
+        with _legacy_ko_reset_knock_outs(case_id):
+            d_off, d_on = _drilldown(case_id), cases.fold_drilldown(_case(case_id), drill_set)
         for key in ("total", "npv"):
             if "value" in d_off[key]:
                 old, new = float(d_off[key]["value"]), float(d_on[key]["value"])
@@ -1795,8 +1823,54 @@ def test_quad_v1_first_step_moves_are_bounded(case_id):
 def test_the_exact_first_step_moves_some_quad_v1_price():
     """Cause (s) is live: the check above is not comparing the readout with itself."""
     moved = [cid for cid in QUAD_V1_CASES if "value" in _event(cid)["price"]
-             and cases.event_route(_case(cid))["price"]["value"] != _event(cid)["price"]["value"]]
+             and _first_step_on_price(cid) != _event(cid)["price"]["value"]]
     assert moved, "no QUAD V1 price moved with the exact first step on"
+
+
+def _first_step_on_price(case_id):
+    with _legacy_ko_reset_knock_outs(case_id):
+        return cases.event_route(_case(case_id))["price"]["value"]
+
+
+def _route_values(event: dict, drilldown: dict) -> dict:
+    out = {("price",): event["price"]}
+    out.update({("event", leg): outcome for leg, outcome in event["legs"].items()})
+    if drilldown is not None:
+        out.update({("drilldown", key): drilldown[key] for key in ("total", "npv")})
+        out.update({("drilldown", leg): outcome for leg, outcome in drilldown["per_leg"].items()})
+    return out
+
+
+@pytest.mark.parametrize("case_id", QUAD_V1_CASES or ["<none>"])
+def test_ko_reset_v1_projection_moves_are_bounded(case_id):
+    """Cause (t), measured (both sides with the exact first step on): a QUAD V1 KO-reset case's price moves by at most
+    2e-4 relative and every event-route and fold-drilldown value by at most 5e-3 relative (the cause (s) bounds;
+    measured on the banked ko_reset_absolute at 401 nodes: price 94.542085178648 -> 94.52639841532303, 1.66e-4; worst
+    leg fixed_at_maturity_no_ko 2.82e-3, event and drilldown); Snowball and Phoenix cases do not move at all."""
+    assert QUAD_V1_CASES, "no QUAD V1 case is banked"
+    drill_set = list(BANKED["cases"][case_id]["drilldown_set"])
+    with _legacy_ko_reset_knock_outs(case_id):
+        old = _route_values(cases.event_route(_case(case_id)),
+                            cases.fold_drilldown(_case(case_id), drill_set) if drill_set else None)
+    new = _route_values(cases.event_route(_case(case_id)),
+                        cases.fold_drilldown(_case(case_id), drill_set) if drill_set else None)
+    ko_reset = BANKED["cases"][case_id]["engine"] == "quad_v1_ko_reset"
+    for key, outcome in old.items():
+        if "raises" in outcome:
+            assert new[key].get("raises") == outcome["raises"], (case_id, key)
+            continue
+        before, after = float(outcome["value"]), float(new[key]["value"])
+        if not ko_reset:
+            assert after == before, (case_id, key, before, after)
+            continue
+        bound = 2e-4 if key == ("price",) else 5e-3
+        assert abs(after - before) <= bound * max(1.0, abs(before)), (case_id, key, before, after)
+
+
+def test_the_projection_moves_the_ko_reset_quad_v1_price():
+    """Cause (t) is live: the check above is not comparing the legacy knock-outs with themselves."""
+    case_id = "quad_v1_ko_reset__ko_reset_absolute"
+    assert _first_step_on_price(case_id) != cases.event_route(_case(case_id))["price"]["value"]
 
 
 def test_rebanks_absorbed_no_move_without_a_cause_check():
