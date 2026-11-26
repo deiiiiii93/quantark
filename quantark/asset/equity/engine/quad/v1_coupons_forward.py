@@ -24,6 +24,13 @@ so it reads off the ONE forward pass (``v1_adjoint.forward_pass``) instead, with
 * EXPIRY earned coupons (memory): row ``j``'s cash with unit 1 for the discount.
 
 The decided coupon at the valuation instant is added at the readout, as on the stacked route.
+
+Records on one env instant (0.16.0 D14 zero-gap rule, ``CouponGroupStep``): the backward event is one piecewise
+projection whose region ``r`` takes the records' chain on that region's indicators (``PhoenixQuadEngine.
+_apply_group_observation``). Its transpose: each dual is projected onto region ``r`` (``W_r^T``, read off by the
+coloured probes), and there the chain is pointwise -- record k, still alive, passes its coupon (paid / missed) and
+knock-out sources exactly as a single record's, the arrears-weighted and deferred duals map by its miss / full / paid
+branch as selections -- so every per-record mass above is the sum over the regions of the same formula.
 """
 from __future__ import annotations
 
@@ -32,9 +39,9 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 
-from .v1_adjoint import probe_event, transpose_pair
+from .v1_adjoint import AdjointUnavailable, probe_event, transpose_pair
 
-__all__ = ["CouponStep", "ForwardCouponRows"]
+__all__ = ["CouponGroupStep", "CouponStep", "ForwardCouponRows", "NodalGroupStep"]
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,29 @@ class CouponStep:
     branches: Callable
     w_out: Optional[np.ndarray] = None
     w_in: Optional[np.ndarray] = None
+
+
+@dataclass(frozen=True)
+class CouponGroupStep:
+    """The coupon observations of one env instant (0.16.0 D14): per record (contract order) its index; per region of
+    the group's piecewise event its projection ``project(v)`` (region ``r`` alone on the stacked nodes, spot last),
+    the records' coupon and knock-out indicators there (an inert knock-out never hits) and whether a discrete
+    knock-in hits there; ``ki_mask``: the continuous knock-in's nodes (the event then copies the knocked-in columns
+    onto the not-knocked-in ones there); ``disable``: knock-outs stop after a knock-in; under EXPIRY the termination
+    row after the instant (``w_out``, ``w_in``)."""
+
+    indices: Tuple[int, ...]
+    regions: Tuple[Tuple[Callable, Tuple[bool, ...], Tuple[bool, ...], bool], ...]
+    disable: bool
+    ki_mask: Optional[np.ndarray] = None
+    w_out: Optional[np.ndarray] = None
+    w_in: Optional[np.ndarray] = None
+
+
+class NodalGroupStep:
+    """A same-instant group on nodal events: the records blend with fractional weights, so the region decomposition
+    ``CouponGroupStep`` transposes does not exist; the pass refuses it (``AdjointUnavailable``) and the statistics take
+    the stacked route."""
 
 
 @dataclass(frozen=True)
@@ -176,6 +206,13 @@ class _CouponRun:
         return x_out, x_in
 
     def event(self, data: Optional[CouponStep], banded, n, time, p_out, p_in, x_out, x_in):
+        if isinstance(data, CouponGroupStep):
+            return self._group_event(data, n, time, p_out, p_in, x_out, x_in)
+        if isinstance(data, NodalGroupStep):
+            raise AdjointUnavailable(
+                f"undefined: the coupon observations sharing the instant t = {time!r} blend by nodal weights; the "
+                "forward coupon extension has no transpose of them"
+            )
         new_out, new_in = np.zeros_like(x_out), np.zeros_like(x_in)
         if data is None:
             # no coupon here: every extra row maps by the event map itself
@@ -238,6 +275,98 @@ class _CouponRun:
         out, inn = data.branches(pay_out, pay_in, np.zeros((k, n)), np.zeros((k, n)), breach_pay, breach_miss)
         return np.asarray(out, dtype=float), np.asarray(inn, dtype=float)
 
+    def _group_event(self, data: CouponGroupStep, n, time, p_out, p_in, x_out, x_in):
+        """A same-instant group (module docstring): the masses of every record, region by region and note state by
+        note state, and the extra duals mapped onto the columns after the instant."""
+        rows = self.rows
+        new_out, new_in = np.zeros_like(x_out), np.zeros_like(x_in)
+        duals = {"p": [np.asarray(p_out, dtype=float), np.asarray(p_in, dtype=float)]}
+        if self.m is not None:
+            duals["m"] = [np.asarray(x_out[self.m], dtype=float), np.asarray(x_in[self.m], dtype=float)]
+        if self.d is not None:
+            duals["d"] = [np.asarray(x_out[self.d], dtype=float), np.asarray(x_in[self.d], dtype=float)]
+        if data.ki_mask is not None:
+            # the continuous knock-in copies the knocked-in columns onto the not-knocked-in ones on its nodes (after
+            # the group, backward): its transpose moves the not-knocked-in dual there onto the knocked-in state
+            mask = np.asarray(data.ki_mask, dtype=float)
+            duals = {key: [out * (1.0 - mask), inn + out * mask] for key, (out, inn) in duals.items()}
+        w_after = {"out": data.w_out, "in": data.w_in}
+        for project, coupon_hits, ko_hits, knocked_in in data.regions:
+            banded = probe_event(_region_event(project), n, time)
+            region = {key: [banded.transpose("out", "out", out), banded.transpose("out", "out", inn)]
+                      for key, (out, inn) in duals.items()}
+            # the not-knocked-in output: knock-outs active, landing on the knocked-in columns where a knock-in hits;
+            # the knocked-in output: knock-outs active unless disabled after a knock-in
+            for state, ko_active, land in ((0, True, "in" if knocked_in else "out"), (1, not data.disable, "in")):
+                m, d = self._group_chain(data, coupon_hits, ko_hits, ko_active, w_after[land],
+                                         {key: value[state] for key, value in region.items()})
+                target_out = land == "out"
+                if self.m is not None:
+                    (new_out if target_out else new_in)[self.m] += m
+                if self.d is not None:
+                    (new_out if target_out else new_in)[self.d] += d
+        return new_out, new_in
+
+    def _group_chain(self, data, coupon_hits, ko_hits, ko_active, w_land, duals):
+        """One region and note state of a group: the records in contract order on pointwise duals (``p`` the paths
+        alive before the record, ``m`` arrears-weighted, ``d`` deferred), each record's masses as a single record's
+        (``event``); returns the ``m`` and ``d`` duals reaching the columns after the instant."""
+        rows = self.rows
+        p = duals["p"]
+        m = duals.get("m")
+        d = duals.get("d")
+        k_last = len(data.indices)
+        # the termination row's continuation after each record (EXPIRY): its settlement where a later record of the
+        # group knocks out, else the row after the instant
+        w_cont = [None] * k_last
+        if rows.expiry:
+            w = np.asarray(w_land, dtype=float)
+            for pos in range(k_last - 1, -1, -1):
+                w_cont[pos] = w
+                if ko_active and ko_hits[pos]:
+                    w = np.full_like(w, float(rows.delay_dfs[data.indices[pos]]))
+        for pos, j in enumerate(data.indices):
+            c = float(rows.amounts[j])
+            df = float(rows.delay_dfs[j])
+            paid = bool(coupon_hits[pos])
+            ko = bool(ko_active and ko_hits[pos])
+            p_mass = float(np.sum(p))
+            p_ind = p_mass if paid else 0.0
+            p_ko_pay = p_mass if (ko and paid) else 0.0
+            p_ko_miss = p_mass if (ko and not paid) else 0.0
+            p_w = float(p @ w_cont[pos]) if (rows.expiry and paid and not ko) else 0.0
+            self.indicator[j] += p_ind
+            cash = c * (p_w + df * p_ko_pay) if rows.expiry else c * df * p_ind
+            new_m = None
+            if m is not None:
+                m_mass = float(np.sum(m))
+                m_ind = m_mass if paid else 0.0
+                m_ko_pay = m_mass if (ko and paid) else 0.0
+                m_ko_miss = m_mass if (ko and not paid) else 0.0
+                m_w = float(m @ w_cont[pos]) if (rows.expiry and paid and not ko) else 0.0
+                cash += m_w + df * (m_ko_pay + m_ko_miss) if rows.expiry else df * (m_ind + m_ko_miss)
+                if rows.expiry:
+                    self.earned[j] += c * p_ind + m_ind + m_ko_miss
+                # the miss branch carries the arrears (and this record's missed coupon) on
+                new_m = m + c * p if (not paid and not ko) else np.zeros_like(m)
+            self.cash[j] += cash
+            new_d = None
+            if d is not None:
+                d_mass = float(np.sum(d))
+                d_ko = d_mass if ko else 0.0
+                self.units[j] += df * (p_ko_pay + p_ko_miss)
+                bucket = df * d_ko + c * df * p_ko_pay
+                deferred = c * p
+                if m is not None:
+                    bucket += df * (m_ko_pay + m_ko_miss)
+                    deferred = deferred + m
+                self.buckets[j] += bucket
+                new_d = np.zeros_like(d) if ko else (d + deferred if paid else d)
+            if ko:
+                p = np.zeros_like(p)
+            m, d = new_m, new_d
+        return m, d
+
     def finish(self, p_out, p_in, x_out, x_in) -> None:
         """The end of the note: the maturity bucket's unit (one paid at the terminal payment, valued at maturity) and
         the deferred coupons paid there."""
@@ -250,6 +379,16 @@ class _CouponRun:
     def result(self) -> _CouponMasses:
         return _CouponMasses(indicator=self.indicator, cash=self.cash, earned=self.earned, units=self.units,
                              buckets=self.buckets)
+
+
+def _region_event(project: Callable) -> Callable:
+    """A group region's projection as an event map ``event(v_out, v_in, source)`` (both states alike), for the
+    coloured-probe recovery of ``W_r``."""
+
+    def event(v_out, v_in, _source):
+        return project(np.asarray(v_out, dtype=float)), project(np.asarray(v_in, dtype=float))
+
+    return event
 
 
 def _branch(branches: Callable, which: str) -> Callable:

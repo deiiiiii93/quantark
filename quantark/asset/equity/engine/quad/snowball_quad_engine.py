@@ -1132,8 +1132,8 @@ class SnowballQuadEngine(BaseEngine):
         # instants holding several knock-out records (0.16.0 D6/D8): empty unless the product has one
         shared = self._shared_ko_instants(product, ko_records)
         ko_record_0 = self._match_record(0.0, ko_records)
-        if shared and type(product) is SnowballOption:
-            ko_record_0 = self._deciding_ko_record_at_spot(product, spot, ko_record_0, shared)
+        if shared:
+            ko_record_0 = self._valuation_ko_record(product, pricing_env, ko_records, ko_record_0, shared)
         # Valuation-time KI state follows the contractual monitoring semantics,
         # so it must be determined before any BGK schedule conversion.
         knocked_in_at_valuation = self._is_knocked_in_at_valuation(
@@ -1311,8 +1311,9 @@ class SnowballQuadEngine(BaseEngine):
                 ko_record, group_records = self._instant_ko_records(ko_record, shared, reachable_by_record)
                 ko_index = index_of_record[id(ko_record)]
                 if group_records is not None:
+                    # a record whose knock-out is unreachable keeps its place (a Phoenix coupon date), its test inert
                     group = tuple(
-                        (index_of_record[id(rec)], rec,
+                        (index_of_record[id(rec)], rec if reachable_by_record[id(rec)] else replace(rec, barrier=None),
                          float(self._ko_discount(rate, obs_time, rec.settlement_time, df_fn=df_local)))
                         for rec in group_records)
 
@@ -1337,7 +1338,8 @@ class SnowballQuadEngine(BaseEngine):
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
             if step_index == 1 and first_exact:
                 # the exact first step (S3b): the same event on the quadrature nodes, the columns read at the spot
-                group_levels = [] if group is None else [float(rec.barrier) for _, rec, _ in group[1:]]
+                group_levels = [] if group is None else [
+                    float(rec.barrier) for _, rec, _ in group[1:] if rec.barrier is not None]
                 extra_levels = self._first_event_extra_levels(product, ko_index)
                 if group is not None:
                     for idx, _, _ in group[1:]:
@@ -2737,6 +2739,11 @@ class SnowballQuadEngine(BaseEngine):
             return active[0], tuple(active)
         return (active[0] if active else effective[0]), None
 
+    def _valuation_ko_record(self, product, pricing_env, ko_records, ko_record_0, shared: dict):
+        """The statistics' knock-out record at the valuation instant when it holds several records: the one the
+        known spot decides (``_deciding_ko_record_at_spot``; Phoenix: its own decision)."""
+        return self._deciding_ko_record_at_spot(product, float(pricing_env.spot), ko_record_0, shared)
+
     def _deciding_ko_record_at_spot(self, product, spot: float, ko_record_0, shared: dict):
         """The knock-out record the valuation instant decides on the known spot: the first record of its instant
         (contract order) whose barrier the spot breaches (D1), or the instant's first record when none does."""
@@ -2750,8 +2757,13 @@ class SnowballQuadEngine(BaseEngine):
         """The breach weight of a same-instant group (the knock-in yields to it on the nodal blend): the union of
         nested breach regions -- the extreme barrier's fraction on the cell-average projection, ``1 - prod(1 - w)``
         of the nodal weights."""
+        records = [rec for rec in records if rec.barrier is not None]
+        if not records:
+            return np.zeros_like(np.asarray(grid, dtype=float))
         if self._use_cell_average_events():
-            return self._event_weight(grid, records[-1].barrier, spot, width, trigger_is_down=is_reverse)
+            levels = [float(rec.barrier) for rec in records]
+            extreme = max(levels) if is_reverse else min(levels)
+            return self._event_weight(grid, extreme, spot, width, trigger_is_down=is_reverse)
         survive = np.ones_like(grid, dtype=float)
         for rec in records:
             survive = survive * (1.0 - self._event_weight(grid, rec.barrier, spot, width, trigger_is_down=is_reverse))

@@ -21,7 +21,7 @@ from quantark.asset.equity.engine.quad.quad_adapters import (
 )
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from quantark.asset.equity.engine.quad.v1_coupons_forward import ForwardCouponRows
+from quantark.asset.equity.engine.quad.v1_coupons_forward import CouponGroupStep, ForwardCouponRows, NodalGroupStep
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -621,6 +621,28 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
+        # records on one env instant (0.16.0 D14): each record's index -> the instant's record indices
+        group_of_index = self._shared_ko_indices(product, ko_records)
+
+        def observe_group(indices, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out,
+                          discrete_ki_record):
+            """The records of one env instant (D14 zero-gap rule): consecutive observations with zero elapsed time --
+            the same spot, contract order; record k, still alive, pays its coupon (memory: with the arrears since the
+            last paid coupon) and then tests its knock-out (``_zero_gap_group``). Returns ``(v_in_list, v_out_list,
+            w_in, w_out, union knock-out weight, discrete knock-in applied)``."""
+            records = [
+                (j, float(ko_records[j].payoff or 0.0) + (fold_ko[id(ko_records[j])] if fold_ko is not None else 0.0),
+                 float(event_delay_by_record[id(ko_records[j])]), float(coupon_amounts[j]),
+                 float(coupon_barriers[j]),
+                 float(ko_records[j].barrier) if reachable_ko[j] and ko_records[j].barrier is not None else None)
+                for j in indices
+            ]
+            return self._zero_gap_group(
+                product, grid, spot, smoothing_width, records, v_in_list, v_out_list, w_in, w_out,
+                ki_barrier=None if discrete_ki_record is None else float(discrete_ki_record.barrier),
+                use_memory=use_memory, expiry=expiry_coupons, accumulated_before=accumulated_before,
+            )
+
         def observe(obs_time, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out):
             """The observation at ``obs_time`` on every memory state (and the termination surfaces), on any points
             (the lattice, or the exact first step's quadrature nodes)."""
@@ -638,6 +660,13 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     ko_index = idx
                     ko_record = rec
                     break
+            if group_of_index and ko_index is not None and ko_index in group_of_index:
+                # the instant holds several records: one zero-gap stage replaces the single record's (D14)
+                v_in_list, v_out_list, w_in, w_out, ko_weight, ki_applied_jointly = observe_group(
+                    group_of_index[ko_index], grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out,
+                    discrete_ki_record,
+                )
+                ko_record = ko_index = None
 
             # If this is an observation $i$ (0-based index `ko_index`),
             # we are moving from $t_{i+1}$ (where we have valid surfaces) to $t_i$.
@@ -865,6 +894,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         product.barrier_config.ki_barrier if ki_continuous and log_ki_barrier is not None else None,
                     ) if level is not None
                 ]
+                for j in group_of_index.get(first_ko_index, ())[1:]:
+                    # every record of the instant: its knock-out and coupon barriers are breakpoints (D6/D14)
+                    first_levels += [level for level in (ko_records[j].barrier, coupon_barriers[j])
+                                     if level is not None]
             v_in_list, v_out_list, w_in, w_out = observe(
                 obs_time, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out
             )
@@ -979,6 +1012,12 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         missed_now = observed_now and decision.coupon_index is None
         memory_state = 1 if (use_memory and missed_now) else 0
+        now = [j for j, record in enumerate(ko_records) if at_valuation_instant(record.observation_time)]
+        if use_memory and len(now) >= 2:
+            # several records at the valuation instant (D14 zero-gap): the periods missed there after the last
+            # one paid (all of them when none paid) -- the surfaces' memory index
+            memory_state = (len(now) if decision.coupon_index is None
+                            else sum(1 for j in now if j > decision.coupon_index))
         knocked_in_now = carried_knock_in or (decision.knocked_in and not ki_continuous)
         value_surface = (
             v_in_list[memory_state] if knocked_in_now else v_out_list[memory_state]
@@ -1003,6 +1042,131 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 ]
             value += float(decision.coupon) * float(coupon_discount)
         return value
+
+    def _shared_ko_instants(self, product, ko_records) -> dict:
+        """``{id(record): the instant's records}`` for every record on an env instant holding two or more records
+        (0.16.0 D14): every Phoenix record is its own coupon date, so none is dropped -- only its knock-out test can be
+        inert. Empty when no instant holds two records (the recursion runs exactly as before)."""
+        if not isinstance(product, PhoenixOption):
+            return {}
+        return self._instants_of(ko_records, lambda records: records)
+
+    def _shared_ko_indices(self, product, ko_records) -> dict:
+        """``{index: indices of the instant's records}`` (contract order) of ``_shared_ko_instants``."""
+        shared = self._shared_ko_instants(product, ko_records)
+        if not shared:
+            return {}
+        index_of = {id(rec): j for j, rec in enumerate(ko_records)}
+        out = {}
+        for j, rec in enumerate(ko_records):
+            if id(rec) in shared:
+                out[j] = tuple(sorted(index_of[id(r)] for r in shared[id(rec)]))
+        return out
+
+    def _zero_gap_group(self, product, grid, spot, width, records, v_in_list, v_out_list, w_in, w_out, *,
+                        ki_barrier, use_memory, expiry, accumulated_before):
+        """The records of one env instant on every memory state (0.16.0 D14 zero-gap rule).
+
+        ``records``: per record in contract order ``(index, knock-out redemption, settlement delay, coupon, coupon
+        barrier, knock-out barrier or None when its test is inert)``; ``v_*_list`` the states entering the next
+        observation (memory: the periods missed), ``w_*`` the termination rows (EXPIRY), ``ki_barrier`` a discrete
+        knock-in observed at the instant. Record k, still alive, pays its coupon plus the arrears since the last paid
+        coupon where the spot meets its coupon barrier (memory moves to 0, else it grows by one), then knocks out
+        paying its redemption, the arrears carried into it and its coupon where paid; the knock-out wins a tie with
+        the knock-in, which switches the regime of a note no record knocked out. Cell-average events: one pass of the
+        piecewise projection whose branches are that chain on each region's indicators (``_project_joint_phoenix_event``
+        for several records); nodal events: the records' blends in reverse contract order, then the knock-in.
+        Returns ``(v_in_list, v_out_list, w_in, w_out, union knock-out weight, discrete knock-in applied)``."""
+        reverse = bool(product.is_reverse)
+        disable = product.barrier_config.disable_ko_after_ki
+
+        if self._use_cell_average_events():
+            def log_of(level):
+                return safe_log(float(level) / float(spot))
+
+            levels = [r[4] for r in records] + [r[5] for r in records if r[5] is not None]
+            if ki_barrier is not None:
+                levels.append(ki_barrier)
+            breaks = sorted({log_of(level) for level in levels if level > 0.0})
+            samples = ([breaks[0] - 1.0] + [0.5 * (a + b) for a, b in zip(breaks[:-1], breaks[1:])]
+                       + [breaks[-1] + 1.0])
+
+            def hit(sample, level):
+                return sample <= log_of(level) if reverse else sample >= log_of(level)
+
+            def chain(coupon_hits, ko_hits, knocked_in, regime_out):
+                lists, w = ((v_out_list, w_out) if regime_out and not knocked_in else (v_in_list, w_in))
+                ko_active = regime_out or not disable
+                for pos in range(len(records) - 1, -1, -1):
+                    j, base, delay, coupon, _, _ = records[pos]
+                    paid, ko = coupon_hits[pos], ko_active and ko_hits[pos]
+                    paid_discount = w if expiry else delay
+                    new = []
+                    for k in range((j if use_memory else 0) + 1):
+                        arrears = accumulated_before(j, k) if use_memory else 0.0
+                        if ko:
+                            new.append((base + arrears + (coupon if paid else 0.0)) * delay)
+                        elif paid:
+                            new.append(lists[0] + (coupon + arrears) * paid_discount)
+                        else:
+                            new.append(lists[k + 1 if use_memory else 0])
+                    lists = new
+                    if expiry and ko:
+                        w = delay
+                return lists, w
+
+            out_branches, in_branches = [], []
+            for sample in samples:
+                coupon_hits = [hit(sample, r[4]) for r in records]
+                ko_hits = [r[5] is not None and hit(sample, r[5]) for r in records]
+                knocked_in = ki_barrier is not None and (
+                    sample >= log_of(ki_barrier) if reverse else sample <= log_of(ki_barrier))
+                out_branches.append(chain(coupon_hits, ko_hits, knocked_in, True))
+                in_branches.append(chain(coupon_hits, ko_hits, False, False))
+            project = pointwise_piecewise_event if self._pointwise_events else project_piecewise_event
+
+            def projected(branches, k):
+                return np.asarray(project(grid, breaks, [b[0][k] for b in branches]), dtype=float)
+
+            n_states = len(out_branches[0][0])
+            new_out = [projected(out_branches, k) for k in range(n_states)]
+            new_in = [projected(in_branches, k) for k in range(n_states)]
+            if expiry:
+                w_out = np.asarray(project(grid, breaks, [b[1] for b in out_branches]), dtype=float)
+                w_in = np.asarray(project(grid, breaks, [b[1] for b in in_branches]), dtype=float)
+            union = None
+            ko_levels = [r[5] for r in records if r[5] is not None]
+            if ko_levels:
+                extreme = max(ko_levels) if reverse else min(ko_levels)
+                union = self._event_weight(grid, extreme, spot, width, trigger_is_down=reverse)
+            return new_in, new_out, w_in, w_out, union, ki_barrier is not None
+
+        survive = np.ones_like(np.asarray(grid, dtype=float))
+        for pos in range(len(records) - 1, -1, -1):
+            j, base, delay, coupon, coupon_barrier, ko_barrier = records[pos]
+            pay_weight = self._event_weight(grid, coupon_barrier, spot, width, trigger_is_down=reverse)
+            ko_weight = (self._event_weight(grid, ko_barrier, spot, width, trigger_is_down=reverse)
+                         if ko_barrier is not None else np.zeros_like(survive))
+            paid_out, paid_in = (w_out, w_in) if expiry else (delay, delay)
+            new_out, new_in = [], []
+            for k in range((j if use_memory else 0) + 1):
+                arrears = accumulated_before(j, k) if use_memory else 0.0
+                miss = k + 1 if use_memory else 0
+                out = pay_weight * (v_out_list[0] + (coupon + arrears) * paid_out) + (1.0 - pay_weight) * v_out_list[miss]
+                inn = pay_weight * (v_in_list[0] + (coupon + arrears) * paid_in) + (1.0 - pay_weight) * v_in_list[miss]
+                ko_value = (base + arrears) * delay + pay_weight * coupon * delay
+                out = ko_weight * ko_value + (1.0 - ko_weight) * out
+                if not disable:
+                    inn = ko_weight * ko_value + (1.0 - ko_weight) * inn
+                new_out.append(out)
+                new_in.append(inn)
+            v_out_list, v_in_list = new_out, new_in
+            if expiry:
+                w_out = ko_weight * delay + (1.0 - ko_weight) * w_out
+                if not disable:
+                    w_in = ko_weight * delay + (1.0 - ko_weight) * w_in
+            survive = survive * (1.0 - ko_weight)
+        return v_in_list, v_out_list, w_in, w_out, 1.0 - survive, False
 
     def _phoenix_first_step(self, product, math_utils, spot, tau1, alpha1, beta1, levels, pre, terminal_lists,
                             terminal_w, expiry, observe, first_time, v_in_list, v_out_list, w_in, w_out, *, touch=None,
@@ -1104,7 +1268,11 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         decided = ko_record_0
         if decision.knocked_out:
-            decided = self._match_record(decision.ko_record.observation_time, ko_records) or ko_record_0
+            if self._shared_ko_instants(product, ko_records) and decision.ko_index is not None:
+                # several records at the valuation instant: the decision's own record, by contract index (D4)
+                decided = ko_records[decision.ko_index]
+            else:
+                decided = self._match_record(decision.ko_record.observation_time, ko_records) or ko_record_0
         pv = float(self._decided_at_valuation(product, pricing_env, float(pricing_env.spot)))
         unit = self._decided_ko_unit(pricing_env, ko_records, decided)
         observations = es.observation_table(pricing_env, ko_records, unit,
@@ -1235,6 +1403,11 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # Nevertheless every column must see the price's joint coupon/KI/KO
         # projection: even a non-jumping continuation is averaged at its breaks.
         record = coupon_record
+        if ko_group is not None:
+            return self._apply_group_observation(
+                product, grid, spot_grid, spot, width, v_out, v_in, ko_group=ko_group, ki_record=ki_record,
+                ki_barrier_continuous=ki_barrier_continuous, write_coupons=coupon_index is not None,
+            )
         if record is None:
             return super()._apply_observation(
                 product, grid, spot_grid, spot, width, v_out, v_in,
@@ -1301,6 +1474,178 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             ki_record=ki_record, ki_barrier_continuous=ki_barrier_continuous,
         )
 
+    def _instant_ko_records(self, ko_record, shared: dict, reachable: dict):
+        """Every record of the instant (D14: each is its own coupon date; an unreachable one keeps its place with its
+        knock-out test inert)."""
+        records = shared.get(id(ko_record), ())
+        if len(records) < 2:
+            return ko_record, None
+        return records[0], tuple(records)
+
+    def _valuation_ko_record(self, product, pricing_env, ko_records, ko_record_0, shared: dict):
+        """The record a knock-out decided at the valuation instant pays: the product's zero-gap decision, by
+        contract index (D14)."""
+        decision = product.decide_observations_at_valuation(
+            float(pricing_env.spot), pricing_env,
+            knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+        )
+        if decision.knocked_out and decision.ko_index is not None:
+            return ko_records[decision.ko_index]
+        return ko_record_0
+
+    def _group_branches(self, product, columns, group, *, write_coupons: bool):
+        """Per record of a same-instant group (contract order), the function giving its branch values -- the
+        continuation after a paid (``pay``) and a missed (``miss``) coupon, the knock-out values with (``breach_pay``)
+        and without (``breach_miss``) it -- from the columns after it (stacked rows x points), as the single record's
+        observation builds them (``_CouponCashRows.write_observation`` on the stacked route)."""
+        cash_rows = self._coupon_cash_rows
+
+        def branches(j, value, after):
+            pay_out, pay_in = after.copy(), after.copy()
+            miss_out, miss_in = after.copy(), after.copy()
+            breach_miss = np.zeros_like(after) + value
+            breach_pay = breach_miss.copy()
+            if write_coupons and cash_rows is not None:
+                cash_rows.write_observation(j, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss)
+            return pay_out, miss_out, breach_pay, breach_miss
+
+        return branches
+
+    def _apply_group_observation(self, product, grid, spot_grid, spot, width, v_out, v_in, *, ko_group, ki_record,
+                                 ki_barrier_continuous, write_coupons: bool):
+        """The statistics' columns through the records of one env instant (0.16.0 D14 zero-gap rule, the price's
+        ``_zero_gap_group`` on the stacked rows): record k, still alive, takes its coupon branch and then its knock-out
+        branch; the knock-out wins a tie with a knock-in, which switches the regime of a note no record knocked out.
+        Cell-average events: one pass of the piecewise projection whose branches are the records' chain on each
+        region's indicators; nodal events: the records in reverse contract order, then the knock-in.
+        ``ko_group``: ``(index, record, knock-out value)`` per record (barrier ``None``: its test is inert)."""
+        reverse = bool(product.is_reverse)
+        disable = product.barrier_config.disable_ko_after_ki
+        branches = self._group_branches(product, v_out, ko_group, write_coupons=write_coupons)
+        v_out = np.asarray(v_out, dtype=float)
+        v_in = np.asarray(v_in, dtype=float)
+
+        if self._use_cell_average_events():
+            breaks, regions = self._group_regions(product, spot, ko_group, ki_record)
+
+            def chain(after, coupon_hits, ko_hits, ko_active):
+                for pos in range(len(ko_group) - 1, -1, -1):
+                    j, _, value = ko_group[pos]
+                    pay, miss, breach_pay, breach_miss = branches(j, value, after)
+                    if ko_active and ko_hits[pos]:
+                        after = breach_pay if coupon_hits[pos] else breach_miss
+                    else:
+                        after = pay if coupon_hits[pos] else miss
+                return after
+
+            out_branches, in_branches = [], []
+            for coupon_hits, ko_hits, knocked_in in regions:
+                out_branches.append(chain(v_in if knocked_in else v_out, coupon_hits, ko_hits, True))
+                in_branches.append(chain(v_in, coupon_hits, ko_hits, not disable))
+            project = pointwise_piecewise_event if self._pointwise_events else project_piecewise_event
+            stacked = v_out.ndim > 1
+
+            def projected(branch_list):
+                arrays = [np.moveaxis(np.asarray(b), -1, 0) for b in branch_list] if stacked else branch_list
+                result = project(grid, breaks, arrays)
+                return np.moveaxis(result, 0, -1) if stacked else result
+
+            v_out, v_in = projected(out_branches), projected(in_branches)
+            ki_record = None
+        else:
+            survive = np.ones_like(np.asarray(grid, dtype=float))
+            for pos in range(len(ko_group) - 1, -1, -1):
+                j, rec, value = ko_group[pos]
+                pay_out, miss_out, breach_pay, breach_miss = branches(j, value, v_out)
+                pay_in, miss_in, _, _ = branches(j, value, v_in)
+                pay_weight = self._event_weight(grid, self._coupon_barrier_for_obs(product, j), spot, width,
+                                                trigger_is_down=reverse)
+                ko_weight = (self._event_weight(grid, rec.barrier, spot, width, trigger_is_down=reverse)
+                             if rec.barrier is not None else np.zeros_like(survive))
+                v_out = pay_weight * pay_out + (1.0 - pay_weight) * miss_out
+                v_in = pay_weight * pay_in + (1.0 - pay_weight) * miss_in
+                breach = pay_weight * breach_pay + (1.0 - pay_weight) * breach_miss
+                v_out = ko_weight * breach + (1.0 - ko_weight) * v_out
+                if not disable:
+                    v_in = ko_weight * breach + (1.0 - ko_weight) * v_in
+                survive = survive * (1.0 - ko_weight)
+            if ki_record is not None:
+                v_out = self._blend_ki_transition(
+                    v_out, v_in, grid, spot_grid, ki_record.barrier, spot, width, reverse, ko_weight=1.0 - survive,
+                )
+                ki_record = None
+        return SnowballQuadEngine._apply_observation(
+            self, product, grid, spot_grid, spot, width, v_out, v_in,
+            ki_record=ki_record, ki_barrier_continuous=ki_barrier_continuous,
+        )
+
+    def _group_regions(self, product, spot, ko_group, ki_record):
+        """``(breaks, regions)`` of a same-instant group's piecewise event: the log breaks (every record's coupon
+        barrier and active knock-out barrier, a discrete knock-in) and per region the records' coupon and knock-out
+        indicators and whether the knock-in hits there."""
+        reverse = bool(product.is_reverse)
+
+        def log_of(level):
+            return safe_log(float(level) / float(spot))
+
+        levels = [self._coupon_barrier_for_obs(product, j) for j, _, _ in ko_group]
+        levels += [float(rec.barrier) for _, rec, _ in ko_group if rec.barrier is not None]
+        if ki_record is not None:
+            levels.append(float(ki_record.barrier))
+        breaks = sorted({log_of(level) for level in levels if level > 0.0})
+        samples = ([breaks[0] - 1.0] + [0.5 * (a + b) for a, b in zip(breaks[:-1], breaks[1:])]
+                   + [breaks[-1] + 1.0])
+
+        def hit(sample, level):
+            return sample <= log_of(level) if reverse else sample >= log_of(level)
+
+        regions = []
+        for sample in samples:
+            coupon_hits = tuple(hit(sample, self._coupon_barrier_for_obs(product, j)) for j, _, _ in ko_group)
+            ko_hits = tuple(rec.barrier is not None and hit(sample, rec.barrier) for _, rec, _ in ko_group)
+            knocked_in = ki_record is not None and (
+                sample >= log_of(ki_record.barrier) if reverse else sample <= log_of(ki_record.barrier))
+            regions.append((coupon_hits, ko_hits, bool(knocked_in)))
+        return breaks, regions
+
+    def _group_coupon_step(self, product, grid, spot_grid, spot, group, ki_record, ki_barrier_continuous, pre,
+                           pointwise: bool):
+        """Forward route, a same-instant group of coupon observations (``CouponGroupStep``): the regions' projections
+        and indicators of ``_apply_group_observation``'s event, the continuous knock-in's nodes and the termination
+        row after the instant."""
+        if not self._use_cell_average_events():
+            # the nodal events blend the records with fractional weights: the region decomposition the forward
+            # coupon extension transposes does not exist; the statistics take the stacked route (AdjointUnavailable)
+            return NodalGroupStep()
+        breaks, regions = self._group_regions(product, spot, group, ki_record)
+        project_fn = pointwise_piecewise_event if pointwise else project_piecewise_event
+        n_regions = len(regions)
+
+        def region_projection(r):
+            def project(values):
+                values = np.asarray(values, dtype=float)
+                stacked = values.ndim > 1
+                v = np.moveaxis(values, -1, 0) if stacked else values
+                result = project_fn(grid, breaks, [v if i == r else 0.0 for i in range(n_regions)])
+                return np.moveaxis(result, 0, -1) if stacked else result
+            return project
+
+        ki_mask = None
+        if ki_barrier_continuous is not None:
+            ki_mask = (spot_grid >= ki_barrier_continuous if product.is_reverse
+                       else spot_grid <= ki_barrier_continuous).astype(float)
+        cash_rows = self._coupon_cash_rows
+        w_out = w_in = None
+        if cash_rows.expiry:
+            w = cash_rows.termination_row
+            w_out, w_in = np.array(pre[0][w], dtype=float), np.array(pre[1][w], dtype=float)
+        return CouponGroupStep(
+            indices=tuple(int(j) for j, _, _ in group),
+            regions=tuple((region_projection(r), coupon_hits, ko_hits, knocked_in)
+                          for r, (coupon_hits, ko_hits, knocked_in) in enumerate(regions)),
+            disable=bool(product.barrier_config.disable_ko_after_ki), ki_mask=ki_mask, w_out=w_out, w_in=w_in,
+        )
+
     #: the coupon layout of the statistics call in progress (``_compute_event_stats``)
     _coupon_cash_rows = None
 
@@ -1326,6 +1671,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         cash_rows = self._coupon_cash_rows
         if not isinstance(cash_rows, ForwardCouponRows) or coupon_record is None:
             return None
+        if group is not None:
+            return self._group_coupon_step(product, grid, spot_grid, spot, group, ki_record, ki_barrier_continuous,
+                                           pre, pointwise)
 
         def branches(pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss):
             arrays = [np.array(a, dtype=float) for a in (pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss)]

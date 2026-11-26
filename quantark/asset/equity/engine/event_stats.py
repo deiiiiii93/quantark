@@ -251,10 +251,13 @@ class ObservationTable:
 
         _check_not_before_valuation(owner, "times", times)
         keys = schedule
-        if schedule is None and values["dates"] is not None and not np.any(values["is_coupon_obs"]):
-            # a dated knock-out-only table keeps one row per contract record: a Snowball's records on one env
-            # instant repeat its time with their own dates (0.16.0 DCN/dated D8). Coupon tables (Phoenix, DCN) and
-            # tagged tables (KO-reset) keep one row per time: their same-instant records are an open item.
+        coupons = values["is_coupon_obs"]
+        if schedule is None and values["dates"] is not None and (
+                not np.any(coupons) or np.all(coupons & values["is_ko_obs"])):
+            # a dated table of contract records keeps one row per record: a Snowball's knock-out records on one env
+            # instant (0.16.0 DCN/dated D8), or a Phoenix's coupon-and-knock-out records there (D14: each is its own
+            # coupon date), repeat its time with their own dates. Tagged tables (KO-reset) keep one row per time and
+            # tag; a DCN decides one monthly row per instant (``build_dcn_grid_context`` refuses two).
             keys = values["dates"]
         _check_ordered_rows(owner, "times", times, keys)
         _check_payment_not_before(owner, times, values["payment_times"])

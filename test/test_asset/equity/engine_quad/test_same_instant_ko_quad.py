@@ -267,3 +267,275 @@ def test_snowball_step_down_statistics_agree_with_mc(snowball_mc, route):
         se = math.sqrt(m * (1.0 - m) / MC_PATHS)
         assert abs(p - m) <= 3.0 * se, (p, m, se)
     assert rows[3] > 0.01
+
+
+# === Phoenix (D14: every record of the instant is its own coupon date) ==============================================
+
+PHX_DATES = [datetime(2025, 3, 3), datetime(2025, 5, 5), JUL3, JUL4, datetime(2025, 9, 3), datetime(2025, 11, 3)]
+COUPON_BARRIER = 80.0
+#: the Phoenix exact-reference lattice: V1's own floor on ONE record (coupon 80, KO 103) is +2.3e-6 at 4001 nodes and
+#: +5.5e-7 at 8001; the pair at 8001: +2.4e-7 (b2 < b1) / +1.8e-9 (b2 > b1) (4001: -3.0e-6 / -1.5e-6)
+GRID_PHX_EXACT = 8001
+
+
+def phoenix(records, ki=70.0):
+    """A dated memory Phoenix (1% per period, not annualized, coupon barrier 80, no principal) on ``records``."""
+    p = create_standard_phoenix(100.0, 100.0, 1.0, ko_barrier=103.0, ki_barrier=70.0, coupon_barrier=COUPON_BARRIER,
+                                coupon_rate=0.01, num_observations=12, memory_coupon=True, is_annualized=False)
+    p.barrier_config = replace(p.barrier_config, ki_barrier=ki, ko_observation_dates=None,
+                               ko_observation_schedule=ObservationSchedule(records=records))
+    p.maturity = None
+    p.initial_date = datetime(2025, 1, 3)
+    p.exercise_date = datetime(2026, 1, 5)
+    p.validate()
+    return p
+
+
+def phoenix_repro(variant):
+    """The run's Phoenix repro (``.ship/.../r4_phx_kor.py``): KO 103 on every date, KI 70; ``single`` drops 07-04,
+    ``duplicate`` keeps it at 103, ``stepdown`` puts it at 100."""
+    records = []
+    for d in PHX_DATES:
+        if d == JUL4:
+            if variant == "single":
+                continue
+            records.append(ObservationRecord(observation_date=d, barrier=100.0 if variant == "stepdown" else 103.0))
+        else:
+            records.append(ObservationRecord(observation_date=d, barrier=103.0))
+    return phoenix(records)
+
+
+def phoenix_pair(b1, b2):
+    """AC7: the pair alone (07-03 at ``b1``, 07-04 at ``b2`` paying 10%), no KI, memory on."""
+    return phoenix([ObservationRecord(observation_date=JUL3, barrier=b1),
+                    ObservationRecord(observation_date=JUL4, barrier=b2, return_rate=0.10)], ki=None)
+
+
+def _zero_gap_cash(product, e, s):
+    """The zero-gap rule's cash on a spot ``s`` at the shared instant, each leg discounted at its own settlement:
+    record k (alive) pays its coupon plus the arrears since the last paid coupon where ``s`` meets the coupon barrier,
+    then knocks out paying its redemption (plus the arrears carried into it when its coupon missed); else the
+    maturity redemption (the arrears are paid by a coupon or a knock-out only)."""
+    records = product.resolve_ko_observations(e)
+    fractions = product.get_coupon_period_year_fractions(e)
+    df = e.get_discount_factor
+    cash, arrears = 0.0, 0.0
+    for k, rec in enumerate(records):
+        c = product.get_coupon_payoff(k, year_fraction=fractions[k])
+        hit = s >= COUPON_BARRIER
+        if hit:
+            cash += (c + arrears) * df(rec.settlement_time)
+        if s >= rec.barrier:
+            return cash + (rec.payoff + (0.0 if hit else arrears)) * df(rec.settlement_time)
+        arrears = 0.0 if hit else arrears + c
+    m = product.get_maturity_payoff_v0(s, pricing_env=e)
+    assert product.get_maturity_payoff_v0(60.0, pricing_env=e) == m == product.get_maturity_payoff_v0(160.0, pricing_env=e)
+    return cash + m * df(resolve_terminal_timing(product, e).payment_time)
+
+
+def _exact_phoenix_pair(product, e):
+    """AC7: ``V = sum over the bands of S_t1 of P(band) x zero-gap cash``; also each record's knock-out and coupon
+    probability (coupon: alive before the record and the coupon barrier met)."""
+    r1, r2 = product.resolve_ko_observations(e)
+    t1 = r1.observation_time
+    assert t1 == r2.observation_time
+    levels = sorted({COUPON_BARRIER, float(r1.barrier), float(r2.barrier)})
+    edges = [0.0] + levels + [math.inf]
+    above = lambda b: 0.0 if b == math.inf else (1.0 if b == 0.0 else _p_breach(b, t1))   # noqa: E731
+    value = 0.0
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        sample = 0.5 * (lo + hi) if hi < math.inf else lo + 1.0
+        value += (above(lo) - above(hi)) * _zero_gap_cash(product, e, sample)
+    b1, b2 = float(r1.barrier), float(r2.barrier)
+    ko = (above(b1), max(above(b2) - above(b1), 0.0))
+    coupon = (above(COUPON_BARRIER), above(COUPON_BARRIER) - above(b1))
+    return value, ko, coupon
+
+
+def phx(grid_points=GRID_POINTS, **kwargs):
+    return PhoenixQuadEngine(params=QuadParams(grid_points=grid_points, **kwargs))
+
+
+def _coupon_rows(stats):
+    return list(stats.coupons.probability)
+
+
+@pytest.mark.parametrize("b1,b2", [(103.0, 100.0), (100.0, 103.0)], ids=["b2_below_b1", "b2_above_b1"])
+def test_phoenix_pair_matches_the_exact_reference(b1, b2):
+    """AC7 (QUAD V1, grid_points=8001): the pair alone, no KI, memory on, rel 1e-6. ``b2 > b1``: record 2's
+    knock-out is inert (its region lies inside record 1's) but its coupon still counts. Before the change V1 dropped
+    the 07-04 record: rel error -0.56 / -0.31."""
+    product = phoenix_pair(b1, b2)
+    e = env()
+    ref, _, _ = _exact_phoenix_pair(product, e)
+    value = phx(GRID_PHX_EXACT).price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-6, (value, ref)
+
+
+def test_phoenix_pair_nodal_events_follow_the_zero_gap_rule():
+    """The nodal events apply the records in reverse contract order (first-order: one barrier is aligned)."""
+    product = phoenix_pair(103.0, 100.0)
+    e = env()
+    ref, _, _ = _exact_phoenix_pair(product, e)
+    value = phx(event_projection=EventProjectionMode.NODAL).price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-3, (value, ref)
+
+
+def test_phoenix_pair_as_the_first_observation_matches_the_exact_reference():
+    """The exact first step: valuation on 07-02; every record's knock-out and coupon barrier is a level."""
+    product = phoenix_pair(103.0, 100.0)
+    e = env(datetime(2025, 7, 2))
+    ref, _, _ = _exact_phoenix_pair(product, e)
+    engine = phx()
+    value = engine.price(product, e)
+    assert engine._last_first_step is not None
+    assert abs(value / ref - 1.0) <= 1e-12, (value, ref)
+
+
+# Pinned BEFORE the T3 change (worktree e4ffd608).
+PHOENIX_PIN = "-0x1.695e6b15e0dbdp+0"
+PHOENIX_ROW_PINS = {
+    "forward": (["0x1.80415fbd50682p-2", "0x1.24d64730c2803p-3", "0x1.2966df7925555p-4", "0x1.7e1f32a0c2d28p-5",
+                 "0x1.0feb0162982e6p-5"],
+                ["0x1.f9bb323cadd62p-1", "0x1.1f743539bf739p-1", "0x1.8579ece10550cp-2", "0x1.2248f09b18930p-2",
+                 "0x1.c6d0a9eca64abp-3"]),
+    "stacked": (["0x1.80415fbd50684p-2", "0x1.24d64730c2808p-3", "0x1.2966df7925553p-4", "0x1.7e1f32a0c2d29p-5",
+                 "0x1.0feb0162982e7p-5"],
+                ["0x1.f9bb323cadd61p-1", "0x1.1f743539bf738p-1", "0x1.8579ece10550cp-2", "0x1.2248f09b18930p-2",
+                 "0x1.c6d0a9eca64adp-3"]),
+}
+
+
+def test_phoenix_without_a_shared_instant_prices_bitwise():
+    assert phx().price(phoenix_repro("single"), env()) == float.fromhex(PHOENIX_PIN)
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_phoenix_without_a_shared_instant_reports_bitwise(route):
+    stats = v1_route(route, PhoenixQuadEngine).calculate_event_stats(phoenix_repro("single"), env())
+    assert stats.pv == float.fromhex(PHOENIX_PIN)
+    ko, coupon = PHOENIX_ROW_PINS[route]
+    assert [float(p).hex() for p in _rows(stats)] == ko
+    assert [float(p).hex() for p in _coupon_rows(stats)] == coupon
+
+
+@pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
+def test_phoenix_valuation_instant_pays_the_deciding_record(spot, deciding):
+    """AC5: valuation on 07-03 with the pair at t = 0: knocked out at valuation by the deciding record, paying its
+    redemption and the coupons of the records up to it (the product's own decision, zero-gap)."""
+    e = env(JUL3, spot=spot)
+    product = phoenix_repro("stepdown")
+    decision = product.decide_observations_at_valuation(spot, e)
+    records = [r for r in product.resolve_ko_observations(e) if r.observation_time == 0.0]
+    assert decision.knocked_out and decision.ko_record.observation_date == records[deciding].observation_date
+    expected = (decision.ko_record.payoff + decision.coupon) * e.get_discount_factor(decision.ko_record.settlement_time)
+    assert phx().price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    for route in ROUTES:
+        probs = _rows(v1_route(route, PhoenixQuadEngine).calculate_event_stats(product, e))
+        assert probs[deciding] == 1.0 and sum(probs) == 1.0, (route, probs)
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("b1,b2", [(103.0, 100.0), (100.0, 103.0)], ids=["b2_below_b1", "b2_above_b1"])
+def test_phoenix_pair_statistics_attribute_each_record_exactly(route, b1, b2):
+    """AC7 statistics (exact): each record's knock-out probability and coupon probability, abs 1e-6 at 8001 nodes;
+    the ledger reconciles with the price."""
+    product = phoenix_pair(b1, b2)
+    e = env()
+    _, ko, coupon = _exact_phoenix_pair(product, e)
+    stats = v1_route(route, PhoenixQuadEngine, grid_points=GRID_PHX_EXACT).calculate_event_stats(product, e)
+    assert _rows(stats) == pytest.approx(list(ko), abs=1e-6)
+    assert _coupon_rows(stats) == pytest.approx(list(coupon), abs=1e-6)
+    assert abs(stats.reconciliation_error) <= 1e-9 * abs(stats.pv)
+
+
+@pytest.fixture(scope="module")
+def phoenix_mc():
+    """The Phoenix repro on Black-Scholes MC (400k paths, seed 7): per variant the price, its SE and statistics."""
+    out = {}
+    for variant in ("single", "duplicate", "stepdown"):
+        mc = PhoenixMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7))
+        value = mc.price(phoenix_repro(variant), env())
+        se = mc.get_last_std_error()
+        stats = PhoenixMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7)).calculate_event_stats(
+            phoenix_repro(variant), env())
+        out[variant] = (value, se, stats)
+    return out
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("variant", ["single", "duplicate", "stepdown"])
+def test_phoenix_repro_agrees_with_mc(phoenix_mc, variant):
+    """AC7: the repro Phoenix (KI 70) within 3 SE + 1e-3 relative of MC, single / duplicate / step-down."""
+    ref, se, _ = phoenix_mc[variant]
+    value = phx().price(phoenix_repro(variant), env())
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("variant", ["duplicate", "stepdown"])
+def test_phoenix_repro_statistics_agree_with_mc(phoenix_mc, route, variant):
+    """AC7: each record's knock-out and coupon probability within 3 SE of MC (binomial SE over the paths)."""
+    _, _, mc_stats = phoenix_mc[variant]
+    stats = v1_route(route, PhoenixQuadEngine).calculate_event_stats(phoenix_repro(variant), env())
+    for rows, mc_rows in ((_rows(stats), _rows(mc_stats)), (_coupon_rows(stats), _coupon_rows(mc_stats))):
+        assert len(rows) == len(mc_rows) == len(PHX_DATES)
+        for p, m in zip(rows, mc_rows):
+            se = math.sqrt(m * (1.0 - m) / MC_PATHS)
+            assert abs(p - m) <= 3.0 * se, (rows, mc_rows)
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("spot", [75.0, 90.0], ids=["both_missed", "both_paid"])
+def test_phoenix_valuation_instant_pair_without_knock_out_agrees_with_mc(spot):
+    """Valuation on 07-03, the step-down pair at t = 0 and no knock-out there: the coupons decided now are paid, and
+    the memory state the instant leaves counts the periods missed there after the last paid one (both missed: two
+    periods of arrears; before the change one: -19.485 against MC -19.139, z = -12.7)."""
+    e = env(JUL3, spot=spot)
+    product = phoenix_repro("stepdown")
+    mc = PhoenixMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7))
+    ref = mc.price(product, e)
+    se = mc.get_last_std_error()
+    value = phx().price(product, e)
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se)
+
+
+def _phoenix_variant(variant, pay, memory, ki):
+    from quantark.util.enum import ObservationType
+
+    p = phoenix_repro(variant)
+    p.coupon_config = replace(p.coupon_config, coupon_pay_type=pay, memory_coupon=memory)
+    if ki == "discrete":   # a discrete knock-in observed at the shared instant (07-03)
+        p.barrier_config = replace(
+            p.barrier_config, ki_observation_type=ObservationType.DISCRETE, ki_continuous=False,
+            ki_observation_schedule=ObservationSchedule(
+                records=[ObservationRecord(observation_date=d, barrier=70.0) for d in PHX_DATES if d != JUL4]))
+    p.validate()
+    return p
+
+
+@pytest.mark.parametrize("ki", ["continuous", "discrete"])
+@pytest.mark.parametrize("memory", [True, False], ids=["memory", "no_memory"])
+@pytest.mark.parametrize("pay", ["INSTANT", "EXPIRY"])
+@pytest.mark.parametrize("variant", ["duplicate", "stepdown"])
+def test_phoenix_forward_route_transposes_the_group(variant, pay, memory, ki):
+    """The forward route reads every record's coupon columns off the adjoint pass (``CouponGroupStep``: the group's
+    regions projected, the records' chain pointwise in each) -- the stacked columns to round-off (measured 2.2e-16),
+    without falling back to them."""
+    from quantark.util.enum import CouponPayType
+
+    product = _phoenix_variant(variant, getattr(CouponPayType, pay), memory, ki)
+    e = env()
+    forward_engine = v1_route("forward", PhoenixQuadEngine)
+    forward = forward_engine.calculate_event_stats(product, e)
+    assert forward_engine._last_v1_march.extension is not None       # the forward pass ran: no stacked fallback
+    stacked = v1_route("stacked", PhoenixQuadEngine).calculate_event_stats(product, e)
+    for name in ("observations.probability", "coupons.probability", "coupons.discounted_cash"):
+        table, field = name.split(".")
+        f, s = getattr(getattr(forward, table), field), getattr(getattr(stacked, table), field)
+        assert np.allclose(f, s, rtol=0.0, atol=1e-12), (name, f, s)
+    if variant == "duplicate":
+        # the dominated knock-out keeps its row at probability 0; its coupon still counts
+        assert forward.observations.probability[3] == 0.0 and forward.coupons.probability[3] > 0.1
