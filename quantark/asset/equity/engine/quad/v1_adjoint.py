@@ -447,17 +447,17 @@ def forward_pass(log: MarchLog) -> ForwardResult:
             alpha_out, alpha_in = beta_out, beta_in         # the readout row is already the dual of the slice
         else:
             tau, alpha, beta, prefactor, omega = step.diffusion
-            if ext is None:
-                stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau,
-                                            engine=engine)
-            else:
-                # the extension's rows ride the same diffusion, stacked with the main dual
+            stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau,
+                                        engine=engine)
+            if ext is not None:
+                # the extension's rows in their own call: the main dual stays the extension-free pass bit for bit
+                # (a BLAS matrix-vector product's summation order can depend on the row count, e.g. on x86)
                 r = x_out.shape[0]
-                stacked = diffuse_transpose(np.vstack([beta_out, beta_in, x_out, x_in]), mu, omega, prefactor, alpha,
-                                            beta, tau, engine=engine)
+                x_stacked = diffuse_transpose(np.vstack([x_out, x_in]), mu, omega, prefactor, alpha, beta, tau,
+                                              engine=engine)
                 x_beta_out = x_out
-                x_out = stacked[2:2 + r] if step.out_diffused else np.zeros_like(x_out)
-                x_in = stacked[2 + r:2 + 2 * r]
+                x_out = x_stacked[:r] if step.out_diffused else np.zeros_like(x_out)
+                x_in = x_stacked[r:2 * r]
             alpha_out = stacked[0] if step.out_diffused else zero
             alpha_in = stacked[1]
             if step.bridge is not None and step.out_diffused:
