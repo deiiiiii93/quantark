@@ -247,6 +247,46 @@ class ResolvedObservationRecord:
     settlement_date: Optional[datetime] = None
 
 
+def same_instant_ko_groups(
+    records: List["ResolvedObservationRecord"], is_reverse: bool
+) -> List[List["ResolvedObservationRecord"]]:
+    """The knock-out records each environment instant holds, as engines must test them (0.16.0 DCN/dated run D2).
+
+    Owner ruling: the records on one instant (``same_instant``, the contract clock's rule) are tested at the same spot
+    in contract order; the first whose barrier is breached knocks out and pays its own payoff. A later record whose
+    breach region lies inside the earlier records' (up: barrier >= the lowest earlier barrier; reverse: <= the
+    highest) can never trigger first and is dropped, so a group's remaining barriers are strictly monotone in contract
+    order. A record with no barrier (no knock-out test) stays in place and neither dominates nor is dominated.
+    Groups come in time order; ``records`` is taken in contract order (a stable sort keeps it inside an instant).
+    """
+    from quantark.util.numerical import same_instant
+
+    ordered = sorted(enumerate(records), key=lambda pair: (float(pair[1].observation_time), pair[0]))
+    groups: List[List["ResolvedObservationRecord"]] = []
+    anchor = None
+    for _, record in ordered:
+        t = float(record.observation_time)
+        if anchor is None or not same_instant(t, anchor):
+            groups.append([])
+            anchor = t
+        groups[-1].append(record)
+    effective: List[List["ResolvedObservationRecord"]] = []
+    for group in groups:
+        kept: List["ResolvedObservationRecord"] = []
+        bound = None          # up: lowest earlier barrier; reverse: highest
+        for record in group:
+            if record.barrier is None:
+                kept.append(record)
+                continue
+            level = float(record.barrier)
+            if bound is not None and (level <= bound if is_reverse else level >= bound):
+                continue
+            kept.append(record)
+            bound = level
+        effective.append(kept)
+    return effective
+
+
 def at_valuation_instant(observation_time: float) -> bool:
     """Whether a resolved observation sits AT the valuation instant: its time is exactly zero.
 
