@@ -165,8 +165,22 @@ env = PricingEnvironment(
   Year, and wrong from trading-day starts too for dates that follow a non-trading day). A date at or past the horizon raises. An `IntradayTimeMap` (the intraday route's own clock) is never
   moved by the environment.
 - Cash stresses and scenario moves are per calendar year: they shift the calendar-quoted curve inside a wrapper and
-  keep its trading clock (`quantark.priceenv.clock_validation.calendar_quoted_view`). Basis/dividend relationship
-  modes other than `INDEPENDENT` are refused on wrapped curves.
+  keep its trading clock (`quantark.priceenv.clock_validation.calendar_quoted_view`).
+- Basis/dividend relationship modes (0.16.0) work across wrappers. The tenor `T` (environment axis) is mapped once
+  to calendar time, `T_cal = to_inner_time(T)`, before the shift (`relationship_tenor`). Every read at the tenor
+  uses `T_cal`: the source curve's current value and the relationship's rate, dividend and basis. A curve derived
+  into an empty slot (`None` or exactly zero, undeclared) is wrapped on the sources' clock. Three cases are refused:
+  a non-zero native curve next to a wrapped one, a `TRADING_YEAR`-declared target slot, and wrappers mapping `T`
+  to different calendar times. `INDEPENDENT` on such a mixed environment keeps reading at `T`, including a wrapped
+  source (conservative).
+- A curve a bump creates from nothing (0.16.0) is a calendar quote. A dividend bump of `div_yield=None` on a
+  `BUSINESS_DAYS` environment declaring it `CALENDAR_YEAR` (dividend rho, the greek-conventions report, carry rho-q
+  buckets) is wrapped on the environment's map (`place_created_cash_curve`).
+- Bump curves composed over a wrapper (0.16.0) shift the calendar quote. Local-vol rho, Heston/SLV PDE rho and
+  the convertible DV01/convexity shift the wrapper's inner and re-wrap (`clock_parallel_shift_rate`). Carry rho-q
+  bucket windows are mapped onto the inner's calendar axis. A window edge past the clock's horizon is placed past
+  the last calendar knot; the wrapper refuses reads there, so the placement is exact. FX environments have no
+  trading clock and are unchanged.
 - Exactly zero (`FlatRateCurve(0.0)`, `ContinuousDividendYield(0.0)`, `NoDividend`, `FlatBasisYield(0.0)`,
   `ZeroBasis`, `None`) means the same on both clocks and needs no declaration.
 

@@ -99,6 +99,49 @@ books. Prices and greeks are unchanged, bit for bit.
 - A march the adjoint cannot transpose (an event map that is not local in the probe band) falls
   back to the stacked backward columns, which give 0.15.0's numbers.
 
+### Trading-clock follow-ups
+
+Four 0.15.0 open items around TradingClock-wrapped cash curves. Environments without a wrapper are unchanged,
+bit for bit (full suite).
+
+- **A dividend created from `None` by a bump follows the declaration.** On a `BUSINESS_DAYS` environment whose
+  `div_yield` is `None` and declared `CALENDAR_YEAR`, the dividend-rho bump, the greek-conventions report and the
+  carry rho-q bucket bumps used to assign a native curve read per trading year. It is now wrapped on the
+  environment's map (`place_created_cash_curve`). Moved: dividend rho on such environments, e.g. a 10-month ATM call
+  from 7.624984 to 7.619201 for +1% q. There is no general assignment hook, because a curve built over a wrapper
+  would be wrapped twice (0.15.0 D13).
+- **Basis/dividend relationship modes across wrappers.** `AUTO_ADJUST_BASIS`, `AUTO_ADJUST_DIVIDEND` and
+  `SYNCHRONIZED` were refused on wrapped environments. They now run on the calendar-quoted inners at the mapped
+  tenor (`relationship_tenor`), in `StressApplicator` and `DynamicScenarioEngine`. `INDEPENDENT` on a fully wrapped
+  environment now reads its source at the mapped tenor too, so a term-structure source gives a different flat value
+  than in 0.15.0. A derived curve in an empty slot is wrapped on the sources' clock. Partially wrapped environments,
+  a `TRADING_YEAR` target slot, and wrappers on different clocks stay refused.
+- **Rate and carry bumps over a wrapper shift the calendar quote.** These sites used to build the bumped curve on
+  top of the wrapper, a per-trading-year shift: local-vol rho, Heston and Heston-SLV PDE rho, the convertible
+  floor-bond and full DV01/convexity, and the carry rho-q buckets. They now shift the wrapper's inner and re-wrap
+  on the same map. Carry rho-q bucket windows are mapped onto the calendar axis. Building the created-dividend
+  buckets on the environment axis would have read every window at the wrong time and returned an all-zero table;
+  the checkpoint review caught this. Moved: these greeks on wrapped environments only.
+- **Taylor PnL explain on wrapped environments.** It used to be refused; parallel Taylor now runs. The greeks are
+  forced onto the numerical route, because the analytical formulas read the environment's axis. Gate:
+  - each greek equals an independent finite difference on the inner-shifted environment, at the calculator's bump
+    size, stencil and bump engine (BS on both axes, plain and holiday steps; snowball on PDE);
+  - halving the moves at least halves the residual;
+  - the pure-time Taylor row equals the waterfall TIME row.
+
+  Bucketed Taylor stays refused on wrapped environments.
+
+Pins moved: the 0.15.0 refusal tests for relationship modes and Taylor on wrapped environments now assert the new
+behaviour (`test_curve_quoting_shifts.py`, `test_pnlexplain_trading_clock.py::test_fail_closed_rules`).
+
+Open items:
+- Key-rate rho with a `None` dividend declared `CALENDAR_YEAR` next to a native `TRADING_YEAR` rate keeps a native
+  carry-invariant dividend. It is built from trading-year rate differences; a wrapped `CALENDAR_YEAR` rate refuses
+  key-rate first.
+- FX engines' rate bumps (no trading clock on `FxPricingEnvironment`).
+- `INDEPENDENT` on a mixed (partly wrapped) environment reads a wrapped source at `T`, not `T_cal`.
+- Bucketed Taylor on wrapped environments.
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a

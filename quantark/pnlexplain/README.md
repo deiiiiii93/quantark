@@ -206,11 +206,18 @@ seen from the new date), and a wrapper on one side only, two clocks, or a
 float-maturity product on a `BUSINESS_DAYS` environment is a
 `ValidationError`. Since 0.15.0 a `PricingEnvironment` re-anchors its wrappers
 at its own valuation date itself, so a wrapped field anchored elsewhere can
-only reach explain by bypassing the environment; it is still refused. The
-Taylor method is still rejected on a wrapped environment (it was refused
-because its theta bump did not re-anchor the map; 0.15.0 environments now do,
-and lifting the refusal is an open follow-up); pass
-`methods=(ExplainMethod.WATERFALL,)`.
+only reach explain by bypassing the environment; it is still refused.
+
+Since 0.16.0 the Taylor method runs on a wrapped environment too. Its greeks
+are forced onto the numerical route whatever `greeks_method` says: the
+analytical formulas read `env.get_vol` / `env.get_rate` on the environment's
+axis, while the factor moves are in the inners' units. Every numerical bump
+moves the wrapper's inner (`parallel_shifted`) and theta advances the date
+(the environment re-anchors). Each greek equals an independent finite
+difference on the inner-shifted environment at the calculator's bump size,
+stencil and bump engine. Bucketed Taylor (`bucketed=True`) is still refused
+on a wrapped environment: key-rate and bucket bumps need the curve's tenors
+and windows on its own axis, which a wrapper does not expose.
 
 A wrapped factor is SAMPLED on its inner's own axis, at the t1 coordinate
 mapped there by the t1 wrapper (`to_inner_time`). Reading through the
@@ -233,7 +240,8 @@ moves. So on a wrapped environment `vol_pts` is a move of the trading-quoted
   passes strictly inside a step is decided at t0's spot, and any difference
   from t1's own record shows in the `fixing_refill` row.
 - Engines are used as given (mutated in place by the backtests).
-- Taylor on clock-wrapped environments is rejected (waterfall only).
+- Bucketed Taylor on clock-wrapped environments is rejected (parallel
+  Taylor and the waterfall run).
 - Bucketed mode is experimental and never on the default path.
 - Funded (prepaid) positions are not modelled. An OTC trade booked with
   `capitalParticipation` and a `PRE_PAYMENT_INITIAL` cashflow carries a
