@@ -34,7 +34,11 @@ from quantark.asset.equity.engine.event_stats import (
 )
 from quantark.asset.equity.engine.knock_in_days import knock_in_day_axis, not_a_grid_time
 from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
-from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnavailable, ZERO_TO_ROUND_OFF
+from quantark.asset.equity.engine.pde.core.statistics.adjoint import (
+    ZERO_TO_ROUND_OFF,
+    AdjointUnavailable,
+    split_same_instant_rows,
+)
 from quantark.util.exceptions import PricingError
 from quantark.util.numerical import Tolerance, is_zero
 
@@ -128,6 +132,10 @@ def knock_in_table(product, env, log: MarchLog, *, horizon: float, continuous: b
             raise PricingError("the QUAD V1 forward pass found first knock-in mass off the product's KI schedule at "
                                f"t = {t[~on_schedule & (event_p != 0.0)].tolist()}")
         probability = np.array([0.0 if c is None else event_p[c] for c in columns], dtype=float)
+        # records sharing an env instant (0.16.0 zero-gap rule): the instant's mass on the first record breached
+        probability = split_same_instant_rows(
+            product, records, columns, probability, event_p,
+            lambda c: None if c not in result.knock_in_parts else result.knock_in_parts[c] / df[c])
         dated = tuple(r.observation_date for r in records)
         dates = dated if dated and all(d is not None for d in dated) else None
         interpolated = np.zeros(times.size, dtype=bool)

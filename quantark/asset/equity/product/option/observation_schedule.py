@@ -287,6 +287,21 @@ def same_instant_ko_groups(
     return effective
 
 
+def same_instant_ki_groups(
+    records: List["ResolvedObservationRecord"], is_reverse: bool
+) -> List[List["ResolvedObservationRecord"]]:
+    """The discrete knock-in records each environment instant holds, as engines test them (0.16.0 zero-gap rule).
+
+    The records of one instant are consecutive observations with zero elapsed time at one spot, in contract order: a
+    path knocks in where the spot breaches ANY of them (the widest level -- a knock-in is idempotent at one spot), and
+    the knock-in is the first record (contract order) whose level is breached. A knock-in breaches below its level
+    (above on a reverse note), the mirror of a knock-out: ``same_instant_ko_groups`` with the direction flipped. A
+    later record whose region an earlier one's contains never knocks in first and is dropped; the remaining levels
+    widen strictly in contract order (the last is the widest).
+    """
+    return same_instant_ko_groups(records, not is_reverse)
+
+
 def at_valuation_instant(observation_time: float) -> bool:
     """Whether a resolved observation sits AT the valuation instant: its time is exactly zero.
 

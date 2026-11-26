@@ -90,6 +90,9 @@ class EventStep:
     source_units: Dict = field(default_factory=dict)
     #: the march extension's data for this step (``None``: the extension maps its rows by the step's event map)
     extension: Optional[object] = None
+    #: a knock-in at the widest level of an env instant's records (0.16.0 zero-gap rule): the same event map at each
+    #: narrower effective level, contract order (all but the widest); their first knock-in masses are cumulative
+    ki_parts: Tuple = ()
 
 
 @dataclass(eq=False)
@@ -109,6 +112,8 @@ class FirstStepLog:
     values_in: Optional[np.ndarray] = None
     #: the march extension's data for the first event, on the nodes
     extension: Optional[object] = None
+    #: ``EventStep.ki_parts`` of the first event, on the nodes
+    ki_parts: Tuple = ()
 
 
 @dataclass(eq=False)
@@ -148,6 +153,15 @@ class ForwardResult:
     terminal: Dict[str, float]
     #: the march extension's result (``None``: no extension)
     extension: Optional[object] = None
+    #: per step holding a same-instant knock-in split (``EventStep.ki_parts``): the cumulative first knock-in mass at
+    #: each narrower effective level, contract order
+    knock_in_parts: Dict[int, np.ndarray] = field(default_factory=dict)
+
+
+def _part_masses(parts, n: int, time: float, alpha_out: np.ndarray) -> np.ndarray:
+    """The first knock-in mass of each ``ki_parts`` event map (the in -> out block on the ``out`` dual)."""
+    return np.array([float(np.sum(_BandedEvent(part, n, time).transpose("in", "out", alpha_out))) for part in parts],
+                    dtype=float)
 
 
 # --- the transposed operators ---------------------------------------------------------------------------------------
@@ -335,7 +349,7 @@ def _source_vectors(event: Callable, n: int, key) -> Tuple[np.ndarray, np.ndarra
 
 
 def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: int, k: int, first_ki, interval_ki,
-                        clean_ko, sources, starts, terminal, ext=None):
+                        clean_ko, sources, starts, terminal, ext=None, ki_parts=None):
     """The transpose of the exact first step: the readout's quadrature weights on the nodes, the touch of a
     continuous knock-in over the first interval, the event on the nodes (probed like any event map: pointwise, so
     diagonal), then the nodes' duals back onto the lattice (``lift_transpose``) -- or, for a state seeded at the
@@ -375,6 +389,8 @@ def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: 
             clean_ko[k] += out_mass / step.source_units[key]
         moved = banded.transpose("in", "out", alpha_out)
         first_ki[k] = float(np.sum(moved))
+        if first.ki_parts:
+            ki_parts[k] = _part_masses(first.ki_parts, n_y, step.time, alpha_out)
         y_out = banded.transpose("out", "out", alpha_out) + banded.transpose("out", "in", alpha_in)
         y_in = moved + banded.transpose("in", "in", alpha_in)
         if ext is not None:
@@ -425,6 +441,7 @@ def forward_pass(log: MarchLog) -> ForwardResult:
     sources: Dict[object, float] = {}
     starts: List[Optional[np.ndarray]] = [None] * K
     terminal: Dict[str, float] = {}
+    ki_parts: Dict[int, np.ndarray] = {}
 
     first = log.first_step
     ext = None if log.extension is None else log.extension.start()
@@ -441,7 +458,8 @@ def forward_pass(log: MarchLog) -> ForwardResult:
     for k, step in enumerate(steps):
         if k == 0 and first is not None:
             beta_out, beta_in, done_out, done_in, x_out, x_in = _first_step_forward(
-                first, step, log, n, k, first_ki, interval_ki, clean_ko, sources, starts, terminal, ext=ext)
+                first, step, log, n, k, first_ki, interval_ki, clean_ko, sources, starts, terminal, ext=ext,
+                ki_parts=ki_parts)
             continue
         if k == 0 and log.transition is not None:
             alpha_out, alpha_in = beta_out, beta_in         # the readout row is already the dual of the slice
@@ -485,6 +503,8 @@ def forward_pass(log: MarchLog) -> ForwardResult:
             # (in -> out), so its transpose moves the out dual onto the in state
             moved = banded.transpose("in", "out", alpha_out)
             first_ki[k] = float(np.sum(moved))
+            if step.ki_parts:
+                ki_parts[k] = _part_masses(step.ki_parts, n, step.time, alpha_out)
             beta_out = banded.transpose("out", "out", alpha_out) + banded.transpose("out", "in", alpha_in)
             beta_in = moved + banded.transpose("in", "in", alpha_in)
             if ext is not None:
@@ -508,4 +528,4 @@ def forward_pass(log: MarchLog) -> ForwardResult:
         raise PricingError("the QUAD V1 march log is not in strictly increasing time")
     return ForwardResult(times=times, first_knock_in=first_ki, interval_knock_in=interval_ki,
                          clean_knock_out=clean_ko, sources=sources, interval_start_dual=starts, terminal=terminal,
-                         extension=None if ext is None else ext.result())
+                         extension=None if ext is None else ext.result(), knock_in_parts=ki_parts)

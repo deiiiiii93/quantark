@@ -134,6 +134,9 @@ class Event:
     # One action per spot region per incoming state.
     rows: tuple[tuple[Action, ...], ...]
     boundary_rows: tuple[tuple[Action, ...], ...] = ()
+    #: the log levels of an instant's narrower effective knock-in records, contract order (0.16.0 zero-gap rule: the
+    #: event knocks in at the widest; a region's first knock-in belongs to the first record whose level it breaches)
+    ki_split: tuple[float, ...] = ()
 
     def apply(self, states):
         edges = (-np.inf,) + self.breaks + (np.inf,)

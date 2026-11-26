@@ -44,7 +44,7 @@ from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.accrual import leg_annualized
-from quantark.asset.equity.product.option.observation_schedule import same_instant_ko_groups
+from quantark.asset.equity.product.option.observation_schedule import same_instant_ki_groups, same_instant_ko_groups
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
@@ -371,6 +371,7 @@ class SnowballQuadEngine(BaseEngine):
 
         # instants holding several knock-out records (0.16.0 D6): empty unless a plain Snowball has one
         shared = self._shared_ko_instants(product, ko_records)
+        shared_ki = self._shared_ki_instants(product, ki_records) if ki_records else {}
         ko_record_0 = self._match_record(0.0, ko_records)
         if shared:
             ko_record_0 = self._deciding_ko_record_at_spot(product, spot, ko_record_0, shared)
@@ -589,6 +590,7 @@ class SnowballQuadEngine(BaseEngine):
                     ko_weight = self._group_union_weight(
                         grid, spot, smoothing_width, group_records, product.is_reverse)
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            ki_record, ki_narrower = self._instant_ki(ki_record, shared_ki)
             if step_index == 1 and first_exact:
                 first_ko = ko_record if ko_record is not None and ko_is_reachable else None
                 first_ko_value = ko_value if ko_record is not None else 0.0
@@ -604,6 +606,8 @@ class SnowballQuadEngine(BaseEngine):
                 if ko_group is not None:
                     # every effective barrier of the group is a breakpoint of the exact first step (D6)
                     first_levels += [float(rec.barrier) for _, rec, _ in ko_group[1:]]
+                # and every effective knock-in level of the instant (the statistics split the knock-in there)
+                first_levels += list(ki_narrower)
 
                 def first_event(y, out_y, in_y, _ko=first_ko, _value=first_ko_value, _ki=ki_record, _group=ko_group):
                     weight = None
@@ -1132,6 +1136,7 @@ class SnowballQuadEngine(BaseEngine):
 
         # instants holding several knock-out records (0.16.0 D6/D8): empty unless the product has one
         shared = self._shared_ko_instants(product, ko_records)
+        shared_ki = self._shared_ki_instants(product, ki_records) if ki_records else {}
         ko_record_0 = self._match_record(0.0, ko_records)
         if shared:
             ko_record_0 = self._valuation_ko_record(product, pricing_env, ko_records, ko_record_0, shared)
@@ -1337,6 +1342,7 @@ class SnowballQuadEngine(BaseEngine):
                     ko_w = self._group_union_weight(
                         grid, spot, smoothing_width, [rec for _, rec, _ in group], product.is_reverse)
             ki_record = self._match_record(obs_time, ki_records) if ki_records else None
+            ki_record, ki_narrower = self._instant_ki(ki_record, shared_ki)
             if step_index == 1 and first_exact:
                 # the exact first step (S3b): the same event on the quadrature nodes, the columns read at the spot
                 group_levels = [] if group is None else [
@@ -1351,7 +1357,7 @@ class SnowballQuadEngine(BaseEngine):
                         ko_record.barrier if ko_is_reachable else None,
                         ki_record.barrier if ki_record is not None else None,
                         ki_barrier_continuous if ki_continuous else None,
-                    ) if level is not None] + group_levels + extra_levels,
+                    ) if level is not None] + group_levels + extra_levels + list(ki_narrower),
                     touch=(log_ki_barrier, product.is_reverse) if ki_continuous else None, band=False,
                     terminal=product if len(times) == 1 else None, pricing_env=pricing_env,
                 )
@@ -1387,16 +1393,20 @@ class SnowballQuadEngine(BaseEngine):
                         coupon_index=ko_index, n_ko=ko_rows,
                         coupon_record=ko_record, observation_index=ko_index, ko_group=y_group,
                     )
-                first = FirstStepLog(
-                    quadrature=fs,
-                    event=self._pointwise_event(self._statistics_event(
+                def first_event_at(level_record):
+                    return self._pointwise_event(self._statistics_event(
                         product, y, spot * np.exp(y), spot, 0.0,
                         ko_record=ko_record if ko_is_reachable else None, ko_weight=y_ko_weight,
-                        ki_record=ki_record,
+                        ki_record=level_record,
                         ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
                         n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
                         discount=float(discount_delay), group=group,
-                    )),
+                    ))
+
+                first = FirstStepLog(
+                    quadrature=fs,
+                    event=first_event_at(ki_record),
+                    ki_parts=tuple(first_event_at(replace(ki_record, barrier=level)) for level in ki_narrower),
                     terminal_out=None if len(times) > 1 else {
                         "maturity_unit": np.ones(y.size), "maturity_cash": y_out_cash * terminal.delay_df},
                     terminal_in=None if len(times) > 1 else {
@@ -1433,15 +1443,21 @@ class SnowballQuadEngine(BaseEngine):
             # The adjoint log: this step's event map (the same call with every source zero, or one knock-out
             # source alone) and its diffusion back to the previous step.
             event = None
+            ki_parts = ()
             if ko_record is not None or ki_record is not None or ki_continuous:
-                event = self._statistics_event(
-                    product, grid, spot_grid, spot, smoothing_width,
-                    ko_record=ko_record if ko_is_reachable else None, ko_weight=ko_w,
-                    ki_record=ki_record,
-                    ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
-                    n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
-                    discount=float(discount_delay), group=group,
-                )
+                def event_at(level_record):
+                    return self._statistics_event(
+                        product, grid, spot_grid, spot, smoothing_width,
+                        ko_record=ko_record if ko_is_reachable else None, ko_weight=ko_w,
+                        ki_record=level_record,
+                        ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                        n_ko=n_ko, coupon_record=ko_record, observation_index=ko_index,
+                        discount=float(discount_delay), group=group,
+                    )
+                event = event_at(ki_record)
+                # a same-instant knock-in (0.16.0 zero-gap rule): the same event at each narrower effective level,
+                # whose first knock-in masses split the instant's per record (``v1_adjoint.EventStep.ki_parts``)
+                ki_parts = tuple(event_at(replace(ki_record, barrier=level)) for level in ki_narrower)
             if group is not None:
                 # each record of the group is its own knock-out source (D8)
                 sources = tuple(("ko", int(idx)) for idx, _, _ in group)
@@ -1459,6 +1475,7 @@ class SnowballQuadEngine(BaseEngine):
                 bridge=(log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
                 if ki_continuous else None,
                 extension=step_extension,
+                ki_parts=ki_parts,
             ))
 
             if step_index == 1 and transition_readout and first is None:
@@ -2695,6 +2712,30 @@ class SnowballQuadEngine(BaseEngine):
                 return rec
         return None
 
+    @classmethod
+    def _shared_ki_instants(cls, product, ki_records: Sequence) -> dict:
+        """``{id(record): effective records}`` for every discrete knock-in record on an env instant holding two or
+        more (0.16.0 zero-gap rule): the instant's records a path can first knock in on, contract order
+        (``same_instant_ki_groups``: a record inside an earlier one's region is inert; the last is the widest). Empty
+        when every instant holds one record."""
+        if len(ki_records) < 2:
+            return {}
+        reverse = bool(product.is_reverse)
+        return cls._instants_of(ki_records, lambda records: [
+            r for r in same_instant_ki_groups(records, reverse)[0] if r.barrier is not None])
+
+    @staticmethod
+    def _instant_ki(ki_record, shared_ki: dict):
+        """``(record, narrower levels)`` the recursion applies for ``ki_record``'s instant: one knock-in test at the
+        widest effective level (a knock-in is idempotent at one spot), and the narrower effective levels in contract
+        order (the statistics' per-record split; empty for an instant of one record or of duplicates)."""
+        if ki_record is None or not shared_ki:
+            return ki_record, ()
+        effective = shared_ki.get(id(ki_record))
+        if not effective:
+            return ki_record, ()
+        return effective[-1], tuple(float(r.barrier) for r in effective[:-1])
+
     def _shared_ko_instants(self, product, ko_records: Sequence) -> dict:
         """``{id(record): effective records}`` for every knock-out record on an env instant holding two or more
         records of a plain Snowball (0.16.0 DCN/dated D2/D6): the instant's records an engine tests, in contract order
@@ -2880,14 +2921,15 @@ class SnowballQuadEngine(BaseEngine):
 
         if not ki_records:
             ki_records = product.resolve_ki_observations(pricing_env)
-        ki_record_0 = self._match_record(0.0, ki_records)
-        if ki_record_0 is None:
+        # every record at the instant (0.16.0 zero-gap rule): the spot knocks in where it breaches any of them
+        at_zero = [rec for rec in ki_records if same_instant(0.0, rec.observation_time)]
+        if not at_zero:
             return False
-        if ki_record_0.barrier is None:
+        if any(rec.barrier is None for rec in at_zero):
             raise ValidationError("KI observation at valuation requires a barrier level.")
         if product.is_reverse:
-            return spot >= float(ki_record_0.barrier)
-        return spot <= float(ki_record_0.barrier)
+            return any(spot >= float(rec.barrier) for rec in at_zero)
+        return any(spot <= float(rec.barrier) for rec in at_zero)
 
     def _resolve_fft_padding_factor(self) -> int:
         factor = getattr(self.params, "fft_padding_factor", None)

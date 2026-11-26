@@ -280,6 +280,7 @@ class SnowballAdapter(FamilyAdapter):
             ki_profile = solver._get_cached_ki_profile(pricing_env, product)
             ki_times = ki_profile["observation_times"]
             ki_barriers = ki_profile.get("barriers") or []
+            shared_ki, staged_ki = solver._ki_shared_steps, set()
             for obs_idx, t_obs in enumerate(ki_times):
                 if t_obs is None or not (0.0 < t_obs < tau):
                     continue
@@ -292,6 +293,16 @@ class SnowballAdapter(FamilyAdapter):
                     barrier = solver._ki_barrier
                 step = layout.time.step_at(t_obs)
                 breach_up = is_reverse  # KI is a down barrier (up if reverse)
+                levels = None
+                if shared_ki and step in shared_ki:
+                    # an env instant holding several knock-in records (0.16.0 zero-gap rule): ONE knock-in at the
+                    # widest level (``_register_ki_instants``), staged once -- a duplicate is bitwise the product
+                    # without it; two or more effective levels emit one ``ki_group`` row for the statistics' split
+                    if step in staged_ki:
+                        continue
+                    staged_ki.add(step)
+                    barrier = solver._ki_barrier_by_tidx[step]
+                    levels = solver._ki_groups_at_step.get(step)
 
                 def _ki(states, breach=None, _b=float(barrier), _up=breach_up):   # a knock-in copies every column
                     if nodal:
@@ -307,7 +318,10 @@ class SnowballAdapter(FamilyAdapter):
                     }
 
                 interior[step] = _chain(interior.get(step), _ki)
-                ki_rows.append(("ki", int(step), float(t_obs), float(barrier), breach_up, treatment))
+                if levels is not None:
+                    ki_rows.append(("ki_group", int(step), float(t_obs), tuple(levels), breach_up, treatment))
+                else:
+                    ki_rows.append(("ki", int(step), float(t_obs), float(barrier), breach_up, treatment))
 
         if ko_last:
             for step, stage in ko_stages.items():

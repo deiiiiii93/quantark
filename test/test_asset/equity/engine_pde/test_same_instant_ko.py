@@ -442,16 +442,19 @@ def test_phoenix_and_ko_reset_with_a_same_instant_pair_are_pinned(name):
 
 @pytest.mark.parametrize("name", ["phoenix_pde", "ko_reset_pde"])
 def test_phoenix_and_ko_reset_knock_in_pair_statistics(name):
-    """These products also observe a discrete knock-in on both 07-03 and 07-04: the knock-in table still refuses the
-    repeated time (an open item, decided in T5); the knock-out (and coupon) rows are reported per record and reconcile."""
-    from quantark.cashleg.event_distribution import EventType
-
+    """These products also observe a discrete knock-in at 75 on both 07-03 and 07-04 (a duplicate). Before T5a the
+    knock-in table refused the repeated time; now (zero-gap rule, ``test_same_instant_ki.py``) it keeps one row per
+    record, the dominated 07-04 record at exactly 0; the knock-out (and coupon) rows are reported per record and the
+    statistics reconcile."""
     make, product, make_env, _ = AC7[name]
-    with pytest.raises(ValidationError, match="KnockInTable.times has duplicate rows"):
-        make().calculate_event_stats(product(), make_env())
-    stats = make().calculate_event_stats(product(), make_env(), streams=frozenset({EventType.KO, EventType.COUPON}))
+    stats = make().calculate_event_stats(product(), make_env())
     assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
     assert stats.observations.dates is not None and JUL4 in stats.observations.dates
+    dates = list(stats.ki_table.dates)
+    rows = list(stats.ki_table.probability)
+    assert dates.index(JUL4) == dates.index(JUL3) + 1
+    assert rows[dates.index(JUL4)] == 0.0 and rows[dates.index(JUL3)] > 0.0
+    assert stats.knock_in.probability == pytest.approx(sum(rows), rel=1e-12)
 
 
 # --- AC8: cash-leg folding ------------------------------------------------------------------------------------------

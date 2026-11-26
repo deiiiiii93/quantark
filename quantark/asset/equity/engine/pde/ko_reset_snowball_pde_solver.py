@@ -239,7 +239,21 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             decision = self._valuation_decision(product, pricing_env)
             if decision.knocked_out and decision.ko_regime == "pre":
                 return self._knocked_out_value(product, pricing_env, decision)
+        if self._shared_valuation_instant(product, pricing_env):
+            # several records of one schedule at the valuation instant (0.16.0 D14): the decision's record pays -- the
+            # first in contract order the spot breaches, not the instant's first record
+            decision = self._valuation_decision(product, pricing_env)
+            if decision.knocked_out:
+                return self._knocked_out_value(product, pricing_env, decision)
         return super()._get_immediate_ko_payoff(product, pricing_env)
+
+    def _shared_valuation_instant(self, product, pricing_env) -> bool:
+        """Whether a schedule holds two or more knock-out records at the valuation instant."""
+        return any(
+            sum(1 for rec in records if rec.observation_time is not None and same_instant(rec.observation_time, 0.0))
+            >= 2
+            for records in (self._get_cached_pre_ko_records(pricing_env, product),
+                            self._get_cached_post_ko_records(pricing_env, product)))
 
     def _knocked_out_value(self, product, pricing_env, decision) -> float:
         """The knock-out the decision fired, pre or post schedule: its contractual cash at its payment."""
@@ -256,6 +270,16 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         pre = self._filter_observations_by_tau(self._get_cached_pre_ko_records(pricing_env, product), tau)
         post = self._filter_observations_by_tau(self._get_cached_post_ko_records(pricing_env, product), tau)
         return [("pre", rec) for rec in pre] + [("post", rec) for rec in post]
+
+    def _fold_shared_instants(self, product, tagged):
+        """Each schedule's knock-out records sharing an env instant (0.16.0 D10/D14): a group of two or more effective
+        records is refused by the binder (each pays its own cash there), a duplicate binds its effective record."""
+        out = []
+        for schedule in ("pre", "post"):
+            records = [rec for tag, rec in tagged if tag == schedule]
+            if len(records) >= 2:
+                out.extend(SnowballPDESolver._instant_groups(product, records))
+        return tuple(out)
 
     def _fold_no_ki_timing(self, product, pricing_env):
         """The alive branch matures on the first schedule: determined at its maturity, paid on the explicit
@@ -290,9 +314,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     def _register_same_instant_groups(self, product, pricing_env, layout, tau) -> None:
         """The records of one env instant (0.16.0 D14): each schedule's knock-out records sharing an instant are one
         group in contract order (``same_instant_ko_groups``: a record whose region an earlier one's contains is inert),
-        the step's slot holding the group's first record; the discrete knock-in records sharing an instant knock in
-        where the spot breaches any of them -- the widest level (a knock-in is idempotent at one spot). Instants of
-        one record keep today's maps."""
+        the step's slot holding the group's first record (the discrete knock-in records sharing an instant are the
+        base solver's: ``_register_ki_instants``, one knock-in at the widest level). Instants of one record keep
+        today's maps."""
         self._pre_ko_groups, self._post_ko_groups = {}, {}
         self._pre_ko_terminal_group = self._post_ko_terminal_group = None
         step_of = layout.time.step_at
@@ -322,26 +346,6 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                     self._ko_observation_indices[step] = effective[0]
                 if group is not None:
                     groups[step] = group
-        if product.has_ki_barrier and not self._ki_continuous and self._ki_barrier_by_tidx:
-            profile = self._get_cached_ki_profile(pricing_env, product)
-            times, barriers = profile["observation_times"], profile.get("barriers") or []
-            by_step: Dict[int, List[float]] = {}
-            for i, obs_time in enumerate(times):
-                if obs_time is None:
-                    continue
-                barrier = barriers[i] if i < len(barriers) and barriers[i] is not None else self._ki_barrier
-                if is_close(obs_time, 0.0):
-                    idx = 0
-                elif same_instant(obs_time, tau):
-                    idx = layout.time.actual_steps
-                elif 0.0 < obs_time < tau:
-                    idx = step_of(obs_time)
-                else:
-                    continue
-                by_step.setdefault(idx, []).append(float(barrier))
-            for idx, levels in by_step.items():
-                if len(levels) >= 2 and idx in self._ki_barrier_by_tidx:
-                    self._ki_barrier_by_tidx[idx] = min(levels) if product.is_reverse else max(levels)
 
     def _register_post_ko_observations(
         self,

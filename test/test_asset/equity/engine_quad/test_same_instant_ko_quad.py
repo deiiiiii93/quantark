@@ -751,10 +751,11 @@ def ko_reset_mc():
 @pytest.mark.slow
 @pytest.mark.parametrize("case", list(KOR_CASES))
 def test_ko_reset_same_instant_records_agree_with_mc(ko_reset_mc, case):
-    """D14 on the KO-reset V1: the instant's records in contract order at one spot -- schedule-1 knock-out, then the
-    knock-in (the knock-out wins a same-date tie), then schedule-2 knock-out, date by date -- within 3 SE + 1e-3
-    relative of MC. Before: V1 kept the instant's first record of each kind (8.871475 on the schedule-1 and knock-in
-    cases)."""
+    """D14 on the KO-reset V1: the instant's records at one spot as one unit (CP2 ruling, T5a) -- every schedule-1
+    knock-out record in contract order, then the knock-in at the widest level (the knock-out wins the tie), then every
+    schedule-2 record -- within 3 SE + 1e-3 relative of MC. Before T3bc: V1 kept the instant's first record of each
+    kind (8.871475 on the schedule-1 and knock-in cases); overlapping levels, where the instant unit and a date-by-date
+    order differ: ``engine_pde/test_same_instant_phoenix_ko_reset.py``."""
     ref, se = ko_reset_mc[case]
     value = kor().price(ko_reset(**KOR_CASES[case]), env())
     assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se, (value - ref) / se)
@@ -779,7 +780,7 @@ def test_ko_reset_same_instant_records_as_the_first_observation_agree_with_mc(ca
 @pytest.mark.slow
 @pytest.mark.parametrize("case", ["ki_pair", "schedule1_and_ki_pair"])
 def test_ko_reset_same_instant_records_nodal_events_agree_with_mc(ko_reset_mc, case):
-    """Nodal events: the records' maps applied date by date in reverse contract order (no single projection)."""
+    """Nodal events: the instant unit's maps on the nodes (the knock-in at the widest level, blended as one record)."""
     ref, se = ko_reset_mc[case]
     value = kor(event_projection=EventProjectionMode.NODAL).price(ko_reset(**KOR_CASES[case]), env())
     assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se, (value - ref) / se)
@@ -850,20 +851,20 @@ def test_ko_reset_rebased_stays_refused_on_v1():
         kor().price(product, env())
 
 
-@pytest.mark.parametrize("grid_points,tol", [(GRID_POINTS, 2e-6), (GRID_EXACT, 2e-8)])
+@pytest.mark.parametrize("grid_points", [GRID_POINTS, GRID_EXACT])
 @pytest.mark.parametrize("reverse", [False, True], ids=["up", "reverse"])
-def test_ko_reset_knock_in_pair_is_the_wider_knock_in(reverse, grid_points, tol):
+def test_ko_reset_knock_in_pair_is_the_wider_knock_in(reverse, grid_points):
     """Exact equivalence (D14): with no knock-out on 07-04 and schedule 2 starting in September, a knock-in at 75 on
     07-03 then at 80 on 07-04 (zero gap, one spot) knocks in exactly where a single knock-in at 80 on 07-03 does
-    (reverse: 125 then 120 against 120). The pair's single piecewise projection prices it to the lattice's floor
-    (measured up rel 2.7e-7 / 3.4e-8 / 4.3e-9 at 1001 / 2001 / 4001 nodes)."""
+    (reverse: 125 then 120 against 120). The instant unit (T5a) applies ONE knock-in at the widest level -- bitwise
+    the single record (T3bc's piecewise projection over both levels was rel 2.7e-7 / 4.3e-9 at 1001 / 4001 nodes)."""
     first, second = (125.0, 120.0) if reverse else (75.0, 80.0)
     others = [(d, first) for d in KOR_PRE[:2]]
     pair = ko_reset(ki=others + [(JUL3, first), (JUL4, second)], reverse=reverse)
     single = ko_reset(ki=others + [(JUL3, second)], reverse=reverse)
     e = env()
     a, b = kor(grid_points).price(pair, e), kor(grid_points).price(single, e)
-    assert abs(a / b - 1.0) <= tol, (a, b, a / b - 1.0)
+    assert a == b, (a, b, a / b - 1.0)
 
 
 @pytest.mark.slow
@@ -891,9 +892,9 @@ def test_ko_reset_same_instant_statistics_agree_with_mc(route, case):
 @pytest.mark.slow
 @pytest.mark.parametrize("route", ROUTES)
 def test_ko_reset_knock_in_pair_statistics_agree_with_mc_on_the_wider_knock_in(route):
-    """The knock-in pair's knock-out rows (the knock-in stream not requested): MC cannot report the pair itself (its
-    knock-in table refuses the repeated time), so they are held to MC on the exactly equivalent single knock-in at
-    80 -- within 3 SE per record."""
+    """The knock-in pair's knock-out rows (the knock-in stream not requested), held to MC on the exactly equivalent
+    single knock-in at 80 -- within 3 SE per record (the pair's own knock-in rows against MC:
+    ``engine_pde/test_same_instant_ki.py``)."""
     from quantark.cashleg.event_distribution import EventType
 
     e = env()
@@ -920,13 +921,19 @@ def test_ko_reset_same_instant_statistics_routes_agree():
     assert abs(fwd.reconciliation_error) <= 1e-9 * abs(fwd.pv)
 
 
-def test_ko_reset_knock_in_pair_knock_in_stream_stays_refused():
-    """Open item (decided in T5): the knock-in table holds one row per knock-in record and refuses two on one time --
-    the KO-reset V1 refuses as MC does, never a silent number."""
-    from quantark.util.exceptions import ValidationError
-
-    with pytest.raises(ValidationError, match="KnockInTable.times has duplicate rows"):
-        kor().calculate_event_stats(ko_reset(**KOR_CASES["ki_pair"]), env())
+@pytest.mark.parametrize("route", ROUTES)
+def test_ko_reset_knock_in_pair_knock_in_stream_is_reported_per_record(route):
+    """T5a (zero-gap rule; before: ``KnockInTable.times has duplicate rows`` on V1 and MC alike): one knock-in row per
+    record -- 07-03 (75) takes the mass below 75, 07-04 (80) the 75-80 band; the two sum to the single knock-in at 80's
+    row, every other row is that product's (MC agreement: ``engine_pde/test_same_instant_ki.py``)."""
+    e = env()
+    pair = kor_route(route).calculate_event_stats(ko_reset(**KOR_CASES["ki_pair"]), e)
+    single = kor_route(route).calculate_event_stats(ko_reset(ki=_KI_75[:2] + [(JUL3, 80.0)]), e)
+    rows, ref = list(pair.ki_table.probability), list(single.ki_table.probability)
+    assert list(pair.ki_table.dates) == KOR_PRE + [JUL4]
+    assert rows[2] + rows[3] == pytest.approx(ref[2], rel=1e-12) and rows[3] > 0.01
+    assert rows[:2] == pytest.approx(ref[:2], rel=1e-12)
+    assert pair.knock_in.probability == pytest.approx(single.knock_in.probability, rel=1e-12)
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -1387,19 +1394,28 @@ def test_v2_user_tolerance_merging_distinct_instants_still_refuses():
                                                      ki=None), e)
 
 
-def test_v2_knock_in_records_sharing_an_instant_stay_refused():
-    """KI rows of one kind sharing a canonical time keep the refusal (open item)."""
+def test_v2_knock_in_records_sharing_an_instant_merge_into_one_knock_in():
+    """T5a (zero-gap rule; before: refused "share a canonical time"): knock-in rows sharing an instant are one knock-in
+    at the widest level -- a duplicate prices bitwise as the product without it (the pairs: ``engine_pde/
+    test_same_instant_ki.py``); a user ``event_time_tolerance`` merging knock-in records of distinct instants keeps
+    the refusal."""
     from quantark.util.enum import ObservationType
     from quantark.util.exceptions import ValidationError
 
-    p = repro(drop_jul4=True)
-    p.barrier_config = replace(
-        p.barrier_config, ki_observation_type=ObservationType.DISCRETE, ki_continuous=False,
-        ki_observation_schedule=ObservationSchedule(
-            records=[ObservationRecord(observation_date=d, barrier=75.0) for d in REPRO_DATES]))
-    p.validate()
+    def with_ki(dates):
+        p = repro(drop_jul4=True)
+        p.barrier_config = replace(
+            p.barrier_config, ki_observation_type=ObservationType.DISCRETE, ki_continuous=False,
+            ki_observation_schedule=ObservationSchedule(
+                records=[ObservationRecord(observation_date=d, barrier=75.0) for d in dates]))
+        p.validate()
+        return p
+
+    e = env()
+    assert v2().price(with_ki(REPRO_DATES), e) == v2().price(with_ki([d for d in REPRO_DATES if d != JUL4]), e)
+    jul7 = datetime(2025, 7, 7)
     with pytest.raises(ValidationError, match="share a canonical time"):
-        v2().price(p, env())
+        v2(event_time_tolerance=0.01).price(with_ki(sorted([d for d in REPRO_DATES if d != JUL4] + [jul7])), e)
 
 
 def test_v2_ko_reset_pair_stays_refused():

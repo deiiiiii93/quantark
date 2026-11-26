@@ -37,7 +37,7 @@ approximated.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import scipy.sparse as sp
@@ -69,6 +69,7 @@ __all__ = [
     "SurfaceMap",
     "forward_pass",
     "knock_in_from_forward_pass",
+    "split_same_instant_rows",
 ]
 
 #: the statistics block's surfaces, in the march's stacking order (``stats_v0``, ``stats_v1``)
@@ -148,6 +149,16 @@ class KnockIn:
     copy: _Transposed               # A^T
     take: _Transposed               # B^T
     fp: Optional[object] = None     # (g, k) on a 1D march; ColumnarFirstPassage on a 2D one
+    #: a knock-in at the widest level of an env instant's records (0.16.0 zero-gap rule): ``B_k^T`` of the same
+    #: knock-in at each narrower effective level, contract order (all but the widest). Their masses are cumulative --
+    #: the instant's first knock-in by record ``k`` is the mass at level ``k`` less the mass at level ``k - 1``
+    parts: Tuple[_Transposed, ...] = ()
+
+    def part_takes(self, p: np.ndarray) -> List[np.ndarray]:
+        """The duals ``parts`` move onto the knocked-in surface (a discrete knock-in: no first-passage term)."""
+        if self.fp is not None:   # pragma: no cover - a stage plan bug: the parts are a discrete knock-in's
+            raise PricingError("a same-instant knock-in split has no first-passage correction")
+        return [part(p[ALIVE]) for part in self.parts]
 
     def transpose(self, p: np.ndarray):
         """``(p_in, transfer_copy, transfer_fp)``: the duals on the stage's inputs and the duals moved onto the
@@ -295,6 +306,9 @@ class ForwardResult:
     #: the index on ``times`` of a KI observation time; ``None``: the march layout's own (the PDE 1D pass, whose
     #: ``times`` are the layout's; the ADI pass adds the terminal damping's half node)
     column_of: Optional[Callable[[float], int]] = None
+    #: per time index holding a same-instant knock-in split (``KnockIn.parts``): the discounted cumulative first
+    #: knock-in mass at each narrower effective level, contract order
+    ki_parts: Optional[Dict[int, np.ndarray]] = None
 
 
 def _builtin_crank_nicolson(stepper) -> bool:
@@ -381,6 +395,7 @@ class _Pass:
         self.ki_fp = np.zeros(self.N)
         self.clean_ko = np.zeros(self.N)
         self.ki_edge = np.zeros(self.N)
+        self.ki_parts: Dict[int, np.ndarray] = {}
         self.ki_edge_row = -1 if bool(statistics.product.is_reverse) else 0
         self.reconstruct = reconstruct
         self.recon = np.zeros(statistics.n_cols) if reconstruct else None
@@ -434,6 +449,7 @@ class _Pass:
             elif isinstance(stage, KnockIn):
                 for tracer in tracers:
                     tracer[1] = stage.transpose(tracer[1])[0]
+                parts = stage.part_takes(p) if stage.parts else ()
                 p, take, fp_transfer = stage.transpose(p)
                 moved = np.zeros_like(p)
                 moved[KI] = take
@@ -442,14 +458,21 @@ class _Pass:
                     moved = np.zeros_like(p)
                     moved[KI] = fp_transfer
                     tracers.append(["fp", moved])
+                for k, part in enumerate(parts):
+                    moved = np.zeros_like(p)
+                    moved[KI] = part
+                    tracers.append([(k, len(parts)), moved])
             else:   # pragma: no cover - a stage plan bug
                 raise PricingError(f"unknown adjoint stage {stage!r}")
         for kind, moved in tracers:
             mass = float(np.sum(moved[KI]))
             if kind == "copy":
                 self.ki_copy[j] += mass
-            else:
+            elif kind == "fp":
                 self.ki_fp[j] += mass
+            else:
+                k, n = kind
+                self.ki_parts.setdefault(j, np.zeros(n))[k] += mass
         return p
 
     def _affine(self, j: int, p: np.ndarray) -> None:
@@ -475,7 +498,7 @@ class _Pass:
             p = self.events(j + 1, p)
         return ForwardResult(times=self.times, ki_copy=self.ki_copy, ki_fp=self.ki_fp, clean_ko=self.clean_ko,
                              ki_edge=self.ki_edge,
-                             reconstructed=self.recon)
+                             reconstructed=self.recon, ki_parts=self.ki_parts)
 
 
 def forward_pass(statistics, states, captures, *, reconstruct: bool = False) -> ForwardResult:
@@ -517,6 +540,48 @@ def _survival(times: np.ndarray, probability: np.ndarray, ko_times: np.ndarray, 
     cumulative_ko = np.concatenate([[0.0], np.cumsum(ko_probability[order])])
     ko_by_row = cumulative_ko[np.searchsorted(ko_times[order], times + Tolerance.ZERO, side="right")]
     return 1.0 - np.cumsum(probability) - ko_by_row
+
+
+def split_same_instant_rows(product, records, columns, probability, mass, parts_at) -> np.ndarray:
+    """The knock-in rows of records sharing an env instant (0.16.0 zero-gap rule), one row per contract record: the
+    instant's first knock-in mass (``mass[column]``, the widest level's) sits on the first record in contract order
+    whose level the spot breaches -- ``same_instant_ki_groups``' effective records take the band their level adds
+    (``parts_at(column)``: the cumulative mass at each narrower effective level), a dominated record 0. Rows of a
+    record alone on its instant are returned unchanged.
+
+    Raises:
+        PricingError: two or more effective levels but no split recorded at their column (an invariant).
+    """
+    from quantark.asset.equity.product.option.observation_schedule import same_instant_ki_groups
+
+    if len(records) < 2:
+        return probability
+    timed = sorted(float(r.observation_time) for r in records)
+    if not any(same_instant(a, b) for a, b in zip(timed, timed[1:])):
+        return probability
+    row_of = {id(r): k for k, r in enumerate(records)}
+    probability = np.array(probability, dtype=float)
+    for effective in same_instant_ki_groups(list(records), bool(product.is_reverse)):
+        t = float(effective[0].observation_time)
+        rows = [k for k, r in enumerate(records) if same_instant(float(r.observation_time), t)]
+        if len(rows) < 2:
+            continue
+        column = columns[rows[0]]
+        total = 0.0 if column is None else float(mass[column])     # QUAD V1: an instant off its march has no mass
+        probability[rows] = 0.0
+        keep = [row_of[id(r)] for r in effective]
+        if len(keep) == 1:
+            probability[keep[0]] = total
+            continue
+        cumulative = parts_at(column)
+        if cumulative is None and total == 0.0:
+            continue        # no first knock-in mass at the instant (e.g. decided at valuation): every record's is 0
+        if cumulative is None or len(cumulative) != len(keep) - 1:
+            raise PricingError(f"the forward pass recorded no knock-in split for the {len(keep)} effective knock-in "
+                               f"records at t = {t!r}")
+        edges = np.concatenate([[0.0], np.asarray(cumulative, dtype=float), [total]])
+        probability[keep] = np.diff(edges)
+    return probability
 
 
 def knock_in_from_forward_pass(statistics, states, captures):
@@ -569,6 +634,9 @@ def knock_in_from_forward_pass(statistics, states, captures):
             raise PricingError("the forward pass found first knock-in mass off the product's KI schedule at "
                                f"t = {t[off_schedule & (mass != 0.0)].tolist()}")
         probability = np.array([mass[c] for c in columns], dtype=float)
+        probability = split_same_instant_rows(product, records, columns, probability, mass,
+                                              lambda c: None if not result.ki_parts or c not in result.ki_parts
+                                              else result.ki_parts[c] / df[c])
         # the knock-in edge over the step from t[j]: the price's row there knocks in only while a KI observation
         # remains at or after t[j] (``_knock_in_side_row``), so the knock-in is certain at the next one; mass the
         # price's rows knock in with no observation of the horizon left is refused (an invariant, never rebinned)

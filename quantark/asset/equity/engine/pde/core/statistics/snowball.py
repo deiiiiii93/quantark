@@ -15,6 +15,8 @@ statistics T12-T14).
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
@@ -414,11 +416,25 @@ class SnowballStatistics(RollingStatistics):
         fp = None
         if solver._ki_fp is not None and 0 < j < len(self.t) - 1:
             fp = adjoint.first_passage(solver, j, s, barrier)
-        if solver._event_uses_projection(j) and discrete:
-            fn = lambda alive, ki: solver._project_event_values(s, barrier, rev, False, alive, ki)  # noqa: E731
-            return ops.knock_in(("ki_columns", barrier, rev), fn, fp)
-        mask = solver._event_nodal_mask(s, barrier, rev, False, at_valuation=(j == 0 and discrete))
-        return ops.nodal_knock_in(mask, fp)
+        projected = solver._event_uses_projection(j) and discrete
+
+        def stage(level, fp=fp):
+            if projected:
+                fn = lambda alive, ki: solver._project_event_values(s, level, rev, False, alive, ki)  # noqa: E731
+                return ops.knock_in(("ki_columns", level, rev), fn, fp)
+            mask = solver._event_nodal_mask(s, level, rev, False, at_valuation=(j == 0 and discrete))
+            return ops.nodal_knock_in(mask, fp)
+
+        levels = solver._ki_groups_at_step.get(j) if solver._ki_groups_at_step and discrete else None
+        if levels is None:
+            return stage(barrier)
+        return self._split_knock_in(stage(barrier), [stage(level) for level in levels[:-1]])
+
+    @staticmethod
+    def _split_knock_in(widest, narrower):
+        """The knock-in at an instant's widest level carrying the same knock-in at each narrower effective level as
+        its split (``adjoint.KnockIn.parts``: the statistics' per-record rows, 0.16.0 zero-gap rule)."""
+        return replace(widest, parts=tuple(k.take for k in narrower))
 
     def _adjoint_ki_applies(self, j) -> bool:
         solver = self.solver
@@ -517,14 +533,21 @@ class SnowballStatistics(RollingStatistics):
                 projection = None if treatment == "nodal" else self._piecewise(barriers, rev, True)
                 stages += self._group_maps(surfaces, ops, ("schedule_ko_group", barriers, breach_up), projection,
                                            lambda b: solver._event_nodal_mask(spatial.s, b, rev, True), barriers)
-            elif row[0] == "ki" and row[1] == j:
+            elif row[0] in ("ki", "ki_group") and row[1] == j:
                 _, _, _, barrier, breach_up, treatment = row
-                if treatment == "nodal":
-                    stages.append(ops.nodal_knock_in(solver._event_nodal_mask(spatial.s, barrier, rev, False)))
-                else:
-                    def fn(alive, ki, _b=barrier, _up=breach_up):
+
+                def ki_stage(level, breach_up=breach_up, treatment=treatment):
+                    if treatment == "nodal":
+                        return ops.nodal_knock_in(solver._event_nodal_mask(spatial.s, level, rev, False))
+
+                    def fn(alive, ki, _b=level, _up=breach_up):
                         return project_between(spatial, _b, _up, ki, alive)
-                    stages.append(ops.knock_in(("schedule_ki", barrier, breach_up), fn))
+                    return ops.knock_in(("schedule_ki", level, breach_up), fn)
+
+                if row[0] == "ki":
+                    stages.append(ki_stage(barrier))
+                else:       # a same-instant knock-in (0.16.0 zero-gap rule): the widest level, split per record
+                    stages.append(self._split_knock_in(ki_stage(barrier[-1]), [ki_stage(b) for b in barrier[:-1]]))
         for row in rows:
             if row[0] == "continuous_ki":
                 _, barrier, reverse = row

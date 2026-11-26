@@ -636,6 +636,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         # records on one env instant (0.16.0 D14): each record's index -> the instant's record indices
         group_of_index = self._shared_ko_indices(product, ko_records)
+        # discrete knock-in records on one env instant: one knock-in at the widest effective level
+        shared_ki = self._shared_ki_instants(product, ki_records) if ki_records else {}
 
         def observe_group(indices, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out,
                           discrete_ki_record):
@@ -659,9 +661,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         def observe(obs_time, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out):
             """The observation at ``obs_time`` on every memory state (and the termination surfaces), on any points
             (the lattice, or the exact first step's quadrature nodes)."""
-            discrete_ki_record = (
-                self._match_record(obs_time, ki_records) if ki_records else None
-            )
+            discrete_ki_record = self._instant_ki(
+                self._match_record(obs_time, ki_records) if ki_records else None, shared_ki)[0]
             ki_applied_jointly = False
 
             # Identify if this time step is a KO/Coupon observation
@@ -898,7 +899,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     (idx for idx, rec in enumerate(ko_records) if same_instant(obs_time, rec.observation_time)), None
                 )
                 first_ko = None if first_ko_index is None else ko_records[first_ko_index]
-                first_ki = self._match_record(obs_time, ki_records) if ki_records else None
+                first_ki, first_ki_narrower = self._instant_ki(
+                    self._match_record(obs_time, ki_records) if ki_records else None, shared_ki)
                 first_levels = [
                     level for level in (
                         first_ko.barrier if first_ko is not None else None,
@@ -911,6 +913,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     # every record of the instant: its knock-out and coupon barriers are breakpoints (D6/D14)
                     first_levels += [level for level in (ko_records[j].barrier, coupon_barriers[j])
                                      if level is not None]
+                first_levels += list(first_ki_narrower)     # every effective knock-in level of the instant
             v_in_list, v_out_list, w_in, w_out = observe(
                 obs_time, grid, spot_grid, smoothing_width, v_in_list, v_out_list, w_in, w_out
             )

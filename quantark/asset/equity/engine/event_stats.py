@@ -407,7 +407,9 @@ class KnockInTable:
     Payment time = KI observation time (spec D8); cash legs add their own settlement offset.
 
     Attributes:
-        times, payment_times: KI observation times (strictly increasing); ``payment_times == times``.
+        times, payment_times: KI observation times (increasing; strictly unless dated: a dated table repeats a time
+            for knock-in records on one env instant, one row per record with its own date, the first record in
+            contract order whose level is breached taking the instant's probability); ``payment_times == times``.
         dates, payment_dates: the same as datetimes, or ``None`` (numeric clock).
         probability: P(first KI at this row, before any KO).
         survival: P(not knocked in and not knocked out after this row).
@@ -436,7 +438,9 @@ class KnockInTable:
         for name in ("dates", "payment_dates"):
             values[name] = _dates(owner, name, getattr(self, name), n)
         _check_not_before_valuation(owner, "times", times)
-        _check_ordered_rows(owner, "times", times)
+        # a dated table keeps one row per knock-in record: a product's discrete knock-in records on one env instant
+        # (0.16.0 DCN/dated, zero-gap rule) repeat their time with their own dates; a dateless table stays strict
+        _check_ordered_rows(owner, "times", times, values["dates"])
         if not np.array_equal(values["payment_times"], times) or values["payment_dates"] != values["dates"]:
             raise ValidationError(f"{owner}: payment time/date must equal the KI observation time/date (D8)")
         _check_probability(owner, "probability", values["probability"])

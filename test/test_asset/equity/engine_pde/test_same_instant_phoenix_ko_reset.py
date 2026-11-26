@@ -578,3 +578,130 @@ def test_ko_reset_valuation_instant_knock_out_pays_the_deciding_record(spot, dec
                                                         rel=1e-12)
     rows = _ko_rows(kor_pde().calculate_event_stats(product, e))
     assert sum(rows) == 1.0 and rows[deciding] == 1.0, rows
+
+
+# === KO-reset T5a: the instant unit, the Heston valuation instant, folding =========================================
+
+#: overlapping knock-in / knock-out levels at the 07-03 / 07-04 instant, where the instant unit (CP2 ruling: every
+#: schedule-1 knock-out record, then the knock-in, then every schedule-2 record) and a date-by-date order differ
+KOR_OVERLAP = {
+    # schedule-1 step-down at 90 on 07-04 under a 95 knock-in on 07-03: the 90-95 band knocks out on 07-04 (instant
+    # unit; date by date it knocked in on 07-03 first)
+    "pre_overlap": dict(pre=_PRE_103 + [(JUL4, 90.0, 0.10)], ki=[(d, 75.0) for d in KOR_PRE[:2]] + [(JUL3, 95.0)]),
+    # a schedule-2 record on 07-03 (95) and a knock-in on 07-04 (97): the 95-97 band knocks in and then out on the
+    # 07-03 schedule-2 record (instant unit; date by date that record had passed before the 07-04 knock-in)
+    "post_overlap": dict(ki=[(d, 75.0) for d in KOR_PRE] + [(JUL4, 97.0)],
+                         post=[(JUL3, 95.0)] + [(d, 95.0) for d in KOR_POST]),
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", list(KOR_OVERLAP))
+def test_ko_reset_overlapping_levels_follow_the_instant_unit(case):
+    """QUAD V1 orders the instant as one unit, as the PDE (T8) and MC do: each within 3 SE + 1e-3 relative of MC.
+    Before T5a V1 ordered date by date (pre_overlap 4.871569, post_overlap 4.194909 against MC 6.0317 / 4.3333,
+    SE 0.035 at 200k paths)."""
+    product, e = ko_reset(**KOR_OVERLAP[case]), env()
+    mc = SnowballMCEngine(params=MCParams(num_paths=MC_PATHS, seed=7))
+    ref = mc.price(product, e)
+    se = mc.get_last_std_error()
+    for engine in (kor_pde(), KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001)),
+                   KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001,
+                                                               event_projection=EventProjectionMode.NODAL))):
+        value = engine.price(product, e)
+        assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (type(engine).__name__, value, ref, se,
+                                                                (value - ref) / se)
+
+
+@pytest.mark.parametrize("case", list(KOR_OVERLAP))
+def test_ko_reset_overlapping_levels_v1_agrees_with_the_pde(case):
+    """The instant unit on QUAD V1 and the PDE: within the single record's own PDE-V1 gap (0.05); the statistics
+    reconcile on both."""
+    product, e = ko_reset(**KOR_OVERLAP[case]), env()
+    v1 = KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001))
+    assert abs(v1.price(product, e) - kor_pde().price(product, e)) <= 0.05
+    for engine in (v1, kor_pde()):
+        stats = engine.calculate_event_stats(product, e)
+        assert abs(stats.reconciliation_error) <= 1e-6 * max(1.0, abs(stats.pv))
+
+
+@pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
+def test_heston_ko_reset_valuation_instant_knock_out_pays_the_deciding_record(spot, deciding):
+    """The Heston (native ADI) KO-reset valued on 07-03: the knock-out decided at valuation pays the decision's record
+    (``_knocked_out_value(decision)``, as the 1D route) -- before T5a it paid the instant's first record (15.0 where
+    the step-down record decides, 10.0)."""
+    from quantark.asset.equity.engine.pde.ko_reset_vol_pde_solvers import HestonKOResetSnowballPDESolver
+
+    e = env(JUL3, spot=spot)
+    product = ko_reset(**KOR_PDE_CASES["schedule1_step_down"])
+    decision = product.decide_observations_at_valuation(spot, e)
+    assert decision.knocked_out and decision.ko_index == deciding
+    expected = kor_pde()._knocked_out_value(product, e, decision)
+    heston = HestonKOResetSnowballPDESolver(HESTON, n_x=96, n_v=16, n_t=64)
+    assert heston.price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    assert kor_pde().price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    rows = _ko_rows(heston.calculate_event_stats(product, e))
+    assert rows[deciding] == 1.0 and sum(rows) == 1.0, rows
+
+
+def _kor_overlay(product, e, pre_amounts, post_amounts):
+    """Per-unit cash on every knock-out slot (schedule 1, then schedule 2, contract order) and both maturity branches
+    (the folding module's own slots)."""
+    from quantark.cashleg.folding import FoldedEventCash, FoldOverlay, _event_structure
+
+    st = _event_structure(product, e)
+    slot = lambda s, x: FoldedEventCash(s.schedule, s.determination_time, s.payment_time, float(x))  # noqa: E731
+    pre = [s for s in st.ko if s.schedule == "pre"]
+    post = [s for s in st.ko if s.schedule == "post"]
+    assert len(pre) == len(pre_amounts) and len(post) == len(post_amounts)
+    return FoldOverlay(ko=tuple(slot(s, x) for s, x in zip(pre, pre_amounts))
+                       + tuple(slot(s, x) for s, x in zip(post, post_amounts)),
+                       maturity_no_ki=slot(st.no_ki, 0.25), maturity_ki=slot(st.ki, -0.5), constant_pv=0.0)
+
+
+def _kor_fold_engines():
+    from quantark.asset.equity.engine.pde.ko_reset_vol_pde_solvers import HestonKOResetSnowballPDESolver
+
+    return {"pde": kor_pde, "heston_pde": lambda: HestonKOResetSnowballPDESolver(HESTON, n_x=96, n_v=16, n_t=64),
+            "v1": lambda: KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001))}
+
+
+@pytest.mark.parametrize("engine", ["pde", "heston_pde", "v1"])
+@pytest.mark.parametrize("kind", ["schedule1", "schedule2"])
+def test_ko_reset_folding_onto_a_same_instant_pair_is_refused(engine, kind):
+    """D10 on the KO-reset: two effective knock-out records of one schedule on one instant each pay their own cash; the
+    binder is one to one by (schedule, time) -- refused, naming them (before T5a the PDE raised the binder's generic
+    "two knock-out records share ('pre', 0.5)")."""
+    make = _kor_fold_engines()[engine]
+    if kind == "schedule1":
+        product, amounts, named = (ko_reset(**KOR_PDE_CASES["schedule1_step_down"]), ([1, 2, 3, 4], [5, 6, 7]),
+                                   "2025-07-03, 2025-07-04")
+    else:
+        product, amounts, named = (ko_reset(**KOR_PDE_CASES["schedule2_step_down"]), ([1, 2, 3], [4, 5, 6, 7]),
+                                   "2025-11-26, 2025-11-27")
+    e = env()
+    with pytest.raises(ValidationError, match=f"cash-leg folding cannot bind the knock-out records {named}"):
+        make().price_folded(product, e, _kor_overlay(product, e, *amounts))
+
+
+@pytest.mark.parametrize("engine", ["pde", "heston_pde", "v1"])
+@pytest.mark.parametrize("kind", ["schedule1", "schedule2"])
+def test_ko_reset_folding_onto_a_duplicate_binds_the_effective_record(engine, kind):
+    """A same-level duplicate (another payoff) binds its effective record: the folded price is the deduplicated
+    product's bitwise, and the cash folded onto the dominated record is never paid (before T5a the PDE refused the
+    duplicate too)."""
+    make = _kor_fold_engines()[engine]
+    dup, base, row = _ko_reset_duplicate(kind, 0.40)
+    e = env()
+    pre_n = 4 if kind == "schedule1" else 3
+    base_pre, base_post = [1.0, 2.0, 3.0], [5.0, 6.0, 7.0]
+
+    def amounts(dominated):
+        cash = base_pre + base_post
+        cash.insert(row, dominated)
+        return cash[:pre_n], cash[pre_n:]
+
+    folded = make().price_folded(dup, e, _kor_overlay(dup, e, *amounts(9.0)))
+    assert folded == make().price_folded(dup, e, _kor_overlay(dup, e, *amounts(40.0)))
+    assert folded == make().price_folded(base, e, _kor_overlay(base, e, base_pre, base_post))
+    assert folded != make().price(base, e)

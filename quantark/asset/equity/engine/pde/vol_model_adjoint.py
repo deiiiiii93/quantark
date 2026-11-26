@@ -28,7 +28,7 @@ are refused with a reason (``AdjointUnavailable``), never approximated.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 import numpy as np
@@ -361,6 +361,7 @@ class _Masses:
     ki_fp: np.ndarray
     clean_ko: np.ndarray
     ki_edge: np.ndarray
+    ki_parts: dict = field(default_factory=dict)
 
 
 def _events_t(stages, P: np.ndarray, at: int, masses: _Masses) -> np.ndarray:
@@ -385,6 +386,9 @@ def _events_t(stages, P: np.ndarray, at: int, masses: _Masses) -> np.ndarray:
         elif isinstance(stage, KnockIn):
             for tracer in tracers:
                 tracer[1] = _knock_in_t(stage, tracer[1])[0]
+            if stage.parts and stage.fp is not None:   # pragma: no cover - a stage plan bug
+                raise PricingError("a same-instant knock-in split has no first-passage correction")
+            parts = [_apply(part, P[ALIVE]) for part in stage.parts]
             P, take, fp_transfer = _knock_in_t(stage, P)
             moved = np.zeros_like(P)
             moved[KI] = take
@@ -393,14 +397,21 @@ def _events_t(stages, P: np.ndarray, at: int, masses: _Masses) -> np.ndarray:
                 moved = np.zeros_like(P)
                 moved[KI] = fp_transfer
                 tracers.append(["fp", moved])
+            for k, part in enumerate(parts):    # the same-instant split (``KnockIn.parts``)
+                moved = np.zeros_like(P)
+                moved[KI] = part
+                tracers.append([(k, len(parts)), moved])
         else:   # pragma: no cover - a stage plan bug
             raise PricingError(f"unknown adjoint stage {stage!r}")
     for kind, moved in tracers:
         mass = float(np.sum(moved[KI]))
         if kind == "copy":
             masses.ki_copy[at] += mass
-        else:
+        elif kind == "fp":
             masses.ki_fp[at] += mass
+        else:
+            k, n = kind
+            masses.ki_parts.setdefault(at, np.zeros(n))[k] += mass
     return P
 
 
@@ -509,4 +520,5 @@ def adi_forward_pass(*, owner, family, prepared, core, statistics, log, fp_2d, c
         return int(layout.time.step_at(x))
 
     return ForwardResult(times=times, ki_copy=masses.ki_copy, ki_fp=masses.ki_fp, clean_ko=masses.clean_ko,
-                         ki_edge=masses.ki_edge, reconstructed=recon, column_of=column_of)
+                         ki_edge=masses.ki_edge, reconstructed=recon, column_of=column_of,
+                         ki_parts=masses.ki_parts)

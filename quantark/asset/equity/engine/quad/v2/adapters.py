@@ -21,7 +21,7 @@ from quantark.util.enum import (
     ProtectionType,
     PostKOScheduleMode,
 )
-from quantark.asset.equity.product.option.observation_schedule import same_instant_ko_groups
+from quantark.asset.equity.product.option.observation_schedule import same_instant_ki_groups, same_instant_ko_groups
 from quantark.util.exceptions import ValidationError, NumericalError
 from quantark.util.numerical import is_close
 from .contract import Action, Event, CompiledContract
@@ -204,6 +204,36 @@ def _ko_instants(records, mapping, is_reverse, phoenix):
         chain = tuple(positions) if phoenix else tuple(p for p in positions if id(records[p]) in kept)
         out[t] = (tuple(positions), chain, effective)
     return out
+
+
+def _ki_instants(records, mapping, is_reverse):
+    """The discrete knock-in rows keyed by canonical time (0.16.0 zero-gap rule): ``(rows, split)``. An instant holding
+    several knock-in records knocks in where the spot breaches ANY of them (a knock-in is idempotent at one spot): one
+    row at the widest effective level (``same_instant_ki_groups``); ``split[t]``: the narrower effective levels in
+    contract order (two or more effective records), the breaks whose regions the statistics put on each record.
+
+    Raises:
+        ValidationError: a canonical time holds records the contract clock keeps apart (a user
+            ``event_time_tolerance`` merging two instants keeps V2's refusal).
+    """
+    by_time = {}
+    for record in records:
+        by_time.setdefault(mapping[float(record.observation_time)], []).append(record)
+    rows, split = {}, {}
+    for t, members in by_time.items():
+        if len(members) == 1:
+            rows[t] = (float(members[0].observation_time), float(members[0].barrier))
+            continue
+        groups = same_instant_ki_groups(members, is_reverse)
+        if len(groups) != 1:
+            raise ValidationError(
+                f"{_SHARED_TIME}: event_time_tolerance merges knock-in records the contract clock keeps apart"
+            )
+        effective = groups[0]
+        rows[t] = (float(effective[-1].observation_time), float(effective[-1].barrier))
+        if len(effective) >= 2:
+            split[t] = tuple(float(r.barrier) for r in effective[:-1])
+    return rows, split
 
 
 def _refuse_fold_on_instants(records, instants):
@@ -425,15 +455,12 @@ def compile_contract(
         product.barrier_config.ki_continuous
         or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
     )
-    ki = (
+    ki_records = (
         []
         if continuous or not product.has_ki_barrier
-        else [
-            (float(r.observation_time), float(r.barrier))
-            for r in product.resolve_ki_observations(env)
-            if is_future(float(r.observation_time))
-        ]
+        else [r for r in product.resolve_ki_observations(env) if is_future(float(r.observation_time))]
     )
+    ki = [(float(r.observation_time), float(r.barrier)) for r in ki_records]
     if continuous and isinstance(product.barrier_config.ki_barrier, list):
         raise NotImplementedError("QUAD V2 continuous KI requires a constant barrier")
 
@@ -497,9 +524,16 @@ def compile_contract(
     }
     if instants:
         alone = [r for r in pre if mapping[r[0]] not in instants]
-        pre_by, post_by, ki_by = keyed(alone), keyed(alone), keyed(ki)
+        pre_by, post_by = keyed(alone), keyed(alone)
     else:
-        pre_by, post_by, ki_by = keyed(pre), keyed(post), keyed(ki)
+        pre_by, post_by = keyed(pre), keyed(post)
+    # knock-in records on one instant (0.16.0 zero-gap rule): one row at the widest level; ``ki_split`` the narrower
+    # levels of an instant whose records split its knock-in (empty for every schedule of one record per instant)
+    ki_split = {}
+    if len({mapping[r[0]] for r in ki}) == len(ki):
+        ki_by = keyed(ki)
+    else:
+        ki_by, ki_split = _ki_instants(ki_records, mapping, bool(product.is_reverse))
     maturity, pre_maturity = mapping[maturity], mapping[pre_maturity]
     statistics = components == "events"
     # the price components' aggregate channels (``price_components``); a statistics context reads every outcome from
@@ -675,6 +709,8 @@ def compile_contract(
                 levels.append(coupon_barriers[index])
         if t in (maturity, pre_maturity):
             levels += breaks_terminal
+        split = ki_split.get(t, ()) if kr is not None and not continuous else ()
+        levels += list(split)       # each narrower knock-in level bounds a region (the statistics' per-record split)
         if any(not np.isfinite(b) or b <= 0 for b in levels):
             raise ValidationError(
                 "QUAD V2 barriers and payoff breaks must be positive and finite"
@@ -907,7 +943,8 @@ def compile_contract(
                 boundary.append(chosen)
             rows.append(row)
             boundaries.append(tuple(boundary))
-        events.append(Event(t, breaks, tuple(rows), tuple(boundaries)))
+        events.append(Event(t, breaks, tuple(rows), tuple(boundaries),
+                            ki_split=tuple(float(np.log(level)) for level in split)))
     if not events:
         events = [
             Event(0.0, (), tuple((Action(cash=zeros, asset=zeros),) for _ in names))
@@ -940,7 +977,7 @@ def compile_contract(
             "ko_reset": reset,
             "ki_horizon": pre_maturity if reset else maturity,
             "ki_records": tuple(
-                (mapping[float(r.observation_time)], float(r.observation_time), r.observation_date)
+                (mapping[float(r.observation_time)], float(r.observation_time), r.observation_date, r.barrier)
                 for r in (product.resolve_ki_observations(env) if statistics and ki else ())
                 if is_future(float(r.observation_time))
             ),

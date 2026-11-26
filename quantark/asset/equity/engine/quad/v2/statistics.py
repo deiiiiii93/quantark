@@ -22,6 +22,7 @@ them at the spot into the one result type:
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Dict, Optional
 
 import numpy as np
@@ -40,7 +41,11 @@ from quantark.asset.equity.engine.event_stats import (
 )
 from quantark.asset.equity.engine.knock_in_days import knock_in_day_axis, not_a_grid_time
 from quantark.asset.equity.engine.pde.core.statistics import event_statistics as es
-from quantark.asset.equity.engine.pde.core.statistics.adjoint import AdjointUnavailable, ZERO_TO_ROUND_OFF
+from quantark.asset.equity.engine.pde.core.statistics.adjoint import (
+    ZERO_TO_ROUND_OFF,
+    AdjointUnavailable,
+    split_same_instant_rows,
+)
 from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
@@ -282,6 +287,13 @@ def knock_in_table(product, env, context, spot):
                                f"t = {t[off & (event_p != 0.0)].tolist()}")
         times = np.array([float(r[1]) for r in records], dtype=float)
         probability = np.array([event_p[c] for c in columns], dtype=float)
+        # records sharing an env instant (0.16.0 zero-gap rule): the instant's first knock-in on the first record
+        # (contract order) whose level is breached -- each band's own mass (``Event.ki_split``)
+        probability = split_same_instant_rows(
+            product, [SimpleNamespace(observation_time=float(r[1]), barrier=r[3]) for r in records], columns,
+            probability, event_p,
+            lambda c: None if c not in result.knock_in_parts
+            else np.cumsum(result.knock_in_parts[c] / df[c])[:-1])
         dated = tuple(r[2] for r in records)
         dates = dated if dated and all(d is not None for d in dated) else None
         interpolated = np.zeros(times.size, dtype=bool)

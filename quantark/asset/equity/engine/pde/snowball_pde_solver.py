@@ -14,7 +14,7 @@ For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 
 import copy
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -57,6 +57,7 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.accrual import leg_annualized
 from quantark.asset.equity.product.option.observation_schedule import (
     ResolvedObservationRecord,
+    same_instant_ki_groups,
     same_instant_ko_groups,
 )
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
@@ -408,6 +409,11 @@ class SnowballPDESolver(BasePDESolver):
         # KI observation tracking
         self._ki_observation_indices: Set[int] = set()
         self._ki_barrier_by_tidx: Dict[int, float] = {}
+        # discrete knock-in records sharing an env instant (0.16.0 zero-gap rule): the steps holding two or more
+        # records (one knock-in test there, at the widest level in ``_ki_barrier_by_tidx``), and per step the
+        # effective levels in contract order when two or more remain (the statistics split the instant's mass)
+        self._ki_shared_steps: Set[int] = set()
+        self._ki_groups_at_step: Dict[int, Tuple[float, ...]] = {}
         self._ki_continuous: bool = False
         self._ki_barrier: float = 0.0
         # FIRST_PASSAGE continuous-KI correction state, rebuilt per solve.
@@ -638,7 +644,7 @@ class SnowballPDESolver(BasePDESolver):
         tau = float(product.get_maturity(pricing_env))
         tagged = self._fold_ko_records(product, pricing_env, tau)
         dominated = set()
-        for records, effective in self._shared_ko_instants(product, [rec for _, rec in tagged]):
+        for records, effective in self._fold_shared_instants(product, tagged):
             if len(effective) >= 2:
                 # the binder is one to one by time; the records of one instant each pay their own cash (0.16.0 D10)
                 named = ", ".join(
@@ -671,6 +677,11 @@ class SnowballPDESolver(BasePDESolver):
             no_ki_df=float(no_ki_df),
             ki_df=float(self._terminal_delay_df(product, pricing_env)),
         )
+
+    def _fold_shared_instants(self, product, tagged):
+        """``(records, effective records)`` per env instant holding two or more of the fold's knock-out records
+        (``tagged``: ``(schedule, record)``) -- ``_shared_ko_instants``; the KO-reset groups each schedule."""
+        return self._shared_ko_instants(product, [rec for _, rec in tagged])
 
     def _fold_ko_cash(self, record, surfaces) -> float:
         """The folded cash of ``record`` fired on ``surfaces`` (the knocked-in surface alone fires the
@@ -1168,17 +1179,18 @@ class SnowballPDESolver(BasePDESolver):
             return self._is_already_knocked_in(product, spot)
 
         ki_records = product.resolve_ki_observations(pricing_env)
-        ki_record_0 = self._find_record_at_time(ki_records, 0.0)
-        if ki_record_0 is None:
+        # every record at the instant (0.16.0 zero-gap rule): the spot knocks in where it breaches any of them
+        at_zero = [rec for rec in ki_records if same_instant(rec.observation_time, 0.0)]
+        if not at_zero:
             return False
-        if ki_record_0.barrier is None:
+        if any(rec.barrier is None for rec in at_zero):
             raise ValidationError(
                 "KI observation at valuation requires a barrier level."
             )
 
         if product.is_reverse:
-            return spot >= ki_record_0.barrier
-        return spot <= ki_record_0.barrier
+            return any(spot >= rec.barrier for rec in at_zero)
+        return any(spot <= rec.barrier for rec in at_zero)
 
     def _valuation_decision(self, product, pricing_env: PricingEnvironment):
         """The family's own decision at the valuation instant (spec 3B decision 15): the observations
@@ -1539,6 +1551,8 @@ class SnowballPDESolver(BasePDESolver):
         self._ko_observation_indices.clear()
         self._ki_observation_indices.clear()
         self._ki_barrier_by_tidx.clear()
+        self._ki_shared_steps.clear()
+        self._ki_groups_at_step.clear()
         self._ko_terminal_record = None
         self._has_terminal_ko = False
         step_of = layout.time.step_at  # tolerance-aware lookup (bound method)
@@ -1603,6 +1617,39 @@ class SnowballPDESolver(BasePDESolver):
                     idx = step_of(obs_time)
                     self._ki_observation_indices.add(idx)
                     self._ki_barrier_by_tidx[idx] = float(barrier)
+            timed = sorted(float(x) for x in ki_times if x is not None)
+            if any(same_instant(a, b) for a, b in zip(timed, timed[1:])):
+                self._register_ki_instants(product, pricing_env, layout, tau)
+
+    def _register_ki_instants(self, product, pricing_env, layout, tau) -> None:
+        """Discrete knock-in records sharing an env instant (0.16.0 zero-gap rule): the records are consecutive
+        observations at one spot, so the path knocks in where the spot breaches ANY of them -- one knock-in test at the
+        widest level (``same_instant_ki_groups``: a record inside an earlier one's region is inert). The step is
+        marked shared; two or more effective levels are kept in contract order for the statistics, which put the
+        instant's knock-in mass on the first record whose level is breached. Instants of one record keep today's
+        maps (the map above)."""
+        records = [r for r in product.resolve_ki_observations(pricing_env) if r.observation_time is not None]
+        default = float(self._ki_barrier)
+        records = [r if r.barrier is not None else replace(r, barrier=default) for r in records]
+        step_of = layout.time.step_at
+        for group in same_instant_ki_groups(records, bool(product.is_reverse)):
+            t = float(group[0].observation_time)
+            raw = sum(1 for r in records if same_instant(float(r.observation_time), t))
+            if raw < 2:
+                continue
+            if is_close(t, 0.0):
+                idx = 0
+            elif same_instant(t, tau):
+                idx = layout.time.actual_steps
+            elif 0.0 < t < tau:
+                idx = step_of(t)
+            else:
+                continue
+            levels = tuple(float(r.barrier) for r in group)
+            self._ki_shared_steps.add(idx)
+            self._ki_barrier_by_tidx[idx] = levels[-1]
+            if len(levels) >= 2:
+                self._ki_groups_at_step[idx] = levels
 
     def _set_terminal_condition_v0(
         self,

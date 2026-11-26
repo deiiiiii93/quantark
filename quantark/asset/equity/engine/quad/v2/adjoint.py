@@ -124,6 +124,9 @@ class ForwardPass:
     interval_knock_in: np.ndarray
     interval_law: List[Optional[tuple]]
     clean_knock_out: np.ndarray
+    #: per event with a same-instant knock-in split (``Event.ki_split``): the discounted first knock-in mass of each
+    #: record's band, contract order (the narrower levels' bands, then the widest's)
+    knock_in_parts: Dict[int, np.ndarray] = field(default_factory=dict)
 
     def reconstruct(self, n_channels: int) -> np.ndarray:
         """``Σ m0 x cash + m1 x asset`` per channel: every backward column whose continuations are note terms."""
@@ -176,6 +179,7 @@ class _Pass:
         self.mesh, self.op, self.params = log.mesh, log.op, log.params
         self.n_note, self.n_memory = n_note, n_memory
         self.pairs = {a: h for a, h in self.contract.ki_pairs if a < n_note}
+        self.ki_parts: Dict[int, np.ndarray] = {}
         self._moments: Dict[tuple, Tuple[np.ndarray, np.ndarray]] = {}
         if self.mesh is not None:
             self.nodes = self.mesh.nodes
@@ -506,18 +510,21 @@ class _Pass:
         for i in range(n):
             event = events[i]
             grids: Dict[int, np.ndarray] = {}
+            band_of = self._ki_bands(event)
             for state, dual in sorted(duals.items()):
                 if state >= self.n_note:
                     continue
                 rows = event.rows[state]
                 for r, action in enumerate(rows):
-                    self._record(actions[i], state, action, dual.m0[r], dual.m1[r], first_ki, clean_ko, i)
+                    self._record(actions[i], state, action, dual.m0[r], dual.m1[r], first_ki, clean_ko, i,
+                                 band=None if band_of is None else band_of[0][r])
                     if r in dual.d:
                         for k, w in _note_targets(action, self.n_note):
                             grids[k] = grids.get(k, 0.0) + w * dual.d[r]
                 for j, (m0, m1, weights) in dual.boundary.items():
                     action = event.boundary_rows[state][j]
-                    self._record(actions[i], state, action, m0, m1, first_ki, clean_ko, i)
+                    self._record(actions[i], state, action, m0, m1, first_ki, clean_ko, i,
+                                 band=None if band_of is None else band_of[1][j])
                     if weights is not None:
                         for k, w in _note_targets(action, self.n_note):
                             grids[k] = grids.get(k, 0.0) + w * weights
@@ -548,9 +555,31 @@ class _Pass:
                 weights = np.sum([w for _, w in interval["laws"]], axis=0)
                 laws[i + 1] = ((x, weights), mean, variance)
         return ForwardPass(times=times, actions=actions, first_knock_in=first_ki, interval_knock_in=interval_ki,
-                           interval_law=laws, clean_knock_out=clean_ko)
+                           interval_law=laws, clean_knock_out=clean_ko, knock_in_parts=self.ki_parts)
 
-    def _record(self, rows, state, action, m0, m1, first_ki, clean_ko, i) -> None:
+    def _ki_bands(self, event):
+        """``(per region, per boundary)`` the band of an event's knock-in records each spot region / break point lies
+        in (0.16.0 zero-gap rule: the first record in contract order whose level it breaches; the widest's band last);
+        ``None`` without a split. The event's breaks include every split level, so a region lies in one band."""
+        split = tuple(getattr(event, "ki_split", ()) or ())
+        if not split:
+            return None
+        reverse = bool(self.contract.reverse)
+
+        def band(x):
+            for k, level in enumerate(split):
+                if (x >= level) if reverse else (x <= level):
+                    return k
+            return len(split)
+
+        edges = (-np.inf,) + tuple(event.breaks) + (np.inf,)
+        regions = []
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            x = hi - 1.0 if not np.isfinite(lo) else lo + 1.0 if not np.isfinite(hi) else 0.5 * (lo + hi)
+            regions.append(band(x))
+        return regions, [band(b) for b in event.breaks]
+
+    def _record(self, rows, state, action, m0, m1, first_ki, clean_ko, i, band=None) -> None:
         if m0 == 0.0 and m1 == 0.0:
             return
         rows.append((state, action, m0, m1))
@@ -560,6 +589,11 @@ class _Pass:
             clean_ko[i] += m0
         elif self._knocks_in(action):
             first_ki[i] += m0
+            if band is not None:
+                parts = self.ki_parts.get(i)
+                if parts is None:
+                    parts = self.ki_parts[i] = np.zeros(len(self.contract.events[i].ki_split) + 1)
+                parts[band] += m0
 
     def _knocks_out(self, action) -> bool:
         return any(action.cash[c] != 0.0 for c in self.ko_channels)
