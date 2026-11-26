@@ -210,3 +210,56 @@ def test_a_migrated_engine_shows_every_statistic(name):
         assert error_line.startswith("- PV standard error (MC, independent batch means): ")
     else:
         assert error_line == ""
+
+
+# --- the barrier watch at an instant holding several records (0.16.0 DCN/dated, T5b) --------------------------------
+#
+# A dated note on a US BUSINESS_DAYS env: the 07-04 holiday's record sits on 07-03's env instant. Valued on 07-02 the
+# next observation is that instant; its records are one observation at one spot (zero-gap rule D1/D14), so the next
+# knock-out level is the instant's most reachable one -- the step-down's 100, not the 07-03 record's 103 (before: the
+# instant's first record); a knock-in pair's is the widest level.
+
+def _dated_snapshot(product, valuation=datetime(2025, 7, 2)):
+    from test_asset.equity.engine_pde.test_same_instant_ko import env
+
+    return report.build_snowball_risk_snapshot(product=product, pricing_env=env(valuation),
+                                               engine=_StatsEngine(_stats()), label="t",
+                                               grid_spec=GridSpec(spot_nodes=5, q_nodes=5, vol_nodes=5))
+
+
+def test_barrier_watch_reads_the_whole_next_instant():
+    from test_asset.equity.engine_pde.test_same_instant_ko import pair, repro, snowball
+
+    step_down = _dated_snapshot(repro())["barrier_watch"]
+    assert step_down["ko_level"] == 100.0 and step_down["ko_time"] == pytest.approx(1.0 / 252.0)
+    assert _dated_snapshot(repro(103.0, 0.40))["barrier_watch"]["ko_level"] == 103.0      # a duplicate: 103
+    # a reverse note breaches at or below: the instant's highest level (97 then 100)
+    reverse = snowball(pair(97.0, 100.0), ki=None, reverse=True)
+    assert _dated_snapshot(reverse)["barrier_watch"]["ko_level"] == 100.0
+
+
+def test_barrier_watch_reads_the_widest_knock_in_of_the_next_instant():
+    from test_asset.equity.engine_pde.test_same_instant_ki import snow
+
+    for a, b in ((75.0, 80.0), (80.0, 75.0)):
+        watch = _dated_snapshot(snow(a, b))["barrier_watch"]
+        assert watch["ki_level"] == 80.0 and watch["ki_time"] == pytest.approx(1.0 / 252.0), (a, b, watch)
+    assert _dated_snapshot(snow(75.0))["barrier_watch"]["ki_level"] == 75.0
+
+
+def test_barrier_watch_without_a_shared_instant_is_unchanged():
+    """One record per instant: the first future record's level and time, as before (valued 2025-01-03: 03-03)."""
+    from test_asset.equity.engine_pde.test_same_instant_ko import env, repro
+
+    watch = _dated_snapshot(repro(), valuation=datetime(2025, 1, 3))["barrier_watch"]
+    first = repro().resolve_ko_observations(env())[0]
+    assert watch["ko_level"] == first.barrier == 103.0 and watch["ko_time"] == first.observation_time
+
+
+def test_report_barrier_watch_reads_the_whole_next_instant(tmp_path, monkeypatch):
+    from test_asset.equity.engine_pde.test_same_instant_ko import env, repro
+
+    monkeypatch.setattr(report, "_select_snowball_pricing_engine", lambda **kwargs: (_StatsEngine(_stats()), "stub"))
+    result = report.generate_snowball_risk_report(product=repro(), pricing_env=env(datetime(2025, 7, 2)),
+                                                  output_dir=tmp_path, grid_spec=GRID, engine_preference=["stub"])
+    assert "- Next KO: level=100.000000, T=0.004y" in result.report_path.read_text()

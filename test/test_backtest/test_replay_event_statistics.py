@@ -47,12 +47,15 @@ KI_TIMES = (1.0 / 365.0, 3.0 / 365.0)
 KI_P = (0.02, 0.03)
 
 
-def _stats(*, unavailable=(), ki_table=True) -> EventStatistics:
-    ko_p = np.asarray(KO_P)
+def _stats(*, unavailable=(), ki_table=True, ko=None) -> EventStatistics:
+    """``ko``: ``(times, payment times, dates, probabilities, cash)`` of the knock-out rows (default: two rows)."""
+    ko_times, ko_pay, ko_dates, ko_p, ko_cash = ko or (KO_TIMES, KO_PAY, None, KO_P, KO_CASH)
+    n = len(ko_times)
+    ko_p = np.asarray(ko_p)
     observations = ObservationTable(
-        times=KO_TIMES, payment_times=KO_PAY, is_ko_obs=[True, True], is_coupon_obs=[False, False],
-        probability=ko_p, survival=1.0 - np.cumsum(ko_p), discounted_cash=KO_CASH,
-        cash_to_pay=np.asarray(KO_CASH) * 1.001, payment_is_path_dependent=[False, False],
+        times=ko_times, payment_times=ko_pay, dates=ko_dates, payment_dates=ko_dates, is_ko_obs=[True] * n,
+        is_coupon_obs=[False] * n, probability=ko_p, survival=1.0 - np.cumsum(ko_p), discounted_cash=ko_cash,
+        cash_to_pay=np.asarray(ko_cash) * 1.001, payment_is_path_dependent=[False] * n,
     )
     maturity = OutcomeRow(time=6.0 / 365.0, payment_time=6.0 / 365.0, probability=0.76, discounted_cash=7600.0,
                           cash_to_pay=7601.0)
@@ -113,6 +116,40 @@ def test_daily_row_maps_the_statistics_per_d21():
     assert daily["survival_probability"] == stats.observations.survival[-1]
     assert daily["next_ko_date"] == DATE + pd.Timedelta(days=2)
     assert daily["pv"] == stats.pv
+
+
+#: a knock-out pair on ONE instant (two contract records, e.g. 07-03 and the 07-04 holiday on a business-day clock:
+#: one env time, their own dates and rows), then a third record
+PAIR_TIMES = (2.0 / 365.0, 2.0 / 365.0, 5.0 / 365.0)
+PAIR_DATES = tuple(pd.Timestamp(d).to_pydatetime() for d in ("2024-01-04", "2024-01-05", "2024-01-07"))
+PAIR_P = (0.05, 0.02, 0.15)
+PAIR = (PAIR_TIMES, PAIR_TIMES, PAIR_DATES, PAIR_P, (510.0, 180.0, 1490.0))
+
+
+def test_next_ko_probability_sums_every_record_of_the_first_instant():
+    """0.16.0 DCN/dated (T5b ruling): the next knock-out probability is P(knock out at the first knock-out instant) --
+    the sum over every record on that instant (each keeps its own row); before, the first row alone (r1's share).
+    The KO event rows stay one per record."""
+    stats = _stats(ko=PAIR)
+    daily, rows = _record(stats)
+    assert daily["next_ko_probability"] == PAIR_P[0] + PAIR_P[1]
+    assert daily["total_remaining_ko_probability"] == float(np.sum(PAIR_P))
+    assert daily["next_ko_date"] == DATE + pd.Timedelta(days=2)
+    assert [r["event_probability"] for r in rows if r["event_type"] == "KO"] == list(PAIR_P)
+
+
+def test_next_ko_probability_sums_a_real_engines_same_instant_pair():
+    """On a real engine's statistics (the dated AC2 pair alone: 07-03 at 103, the 07-04 holiday at 100, one env
+    instant, 1D PDE): the next knock-out probability is the two records' rows together."""
+    from test_asset.equity.engine_pde.test_same_instant_ko import env, pair, snowball
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.asset.equity.param import PDEParams
+
+    stats = SnowballPDESolver(PDEParams()).calculate_event_stats(snowball(pair(), ki=None), env())
+    p = list(stats.observations.probability)
+    assert stats.observations.times[0] == stats.observations.times[1] and len(p) == 2 and p[1] > 0.01
+    daily, _rows = _record(stats)
+    assert daily["next_ko_probability"] == p[0] + p[1]
 
 
 def test_ko_and_ki_rows_come_from_their_tables():

@@ -57,7 +57,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.priceenv.clock_validation import apply_declared_quoting, is_clock_wrapped
 from quantark.util.enum import EquityGreek
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import safe_divide, safe_log, safe_sqrt
+from quantark.util.numerical import safe_divide, safe_log, safe_sqrt, same_instant
 from quantark.asset.equity.report.term_structure import (
     ScaledVolSurface,
     ShiftedDividendYield,
@@ -602,10 +602,24 @@ def _next_barrier_snapshot(
     observation_times: Sequence[Optional[float]],
     fallback_barrier: Optional[float],
     fallback_time: float,
+    breached_above: Optional[bool] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
+    """``(level, time)`` of the next observation.
+
+    ``breached_above`` (the barrier is breached at or above its level -- an up note's knock-out, a reverse note's
+    knock-in -- or below it): when several records share the next env instant (e.g. a US BUSINESS_DAYS holiday
+    collapsed onto the day before; 0.16.0 DCN/dated D1/D14), they are one observation at one spot, so the instant's
+    breach region is the union of theirs and its level the most reachable one (the lowest for ``breached_above``,
+    else the highest) -- not the instant's first record's. A single record at the next instant is read as before.
+    """
     times = [float(t) for t in observation_times if t is not None and t > 0.0]
     barrier = next((float(b) for b in barriers if b is not None), fallback_barrier)
     if times:
+        if breached_above is not None and len(barriers) == len(observation_times):
+            instant = [float(b) for b, t in zip(barriers, observation_times)
+                       if b is not None and t is not None and t > 0.0 and same_instant(t, times[0])]
+            if len(instant) > 1:
+                barrier = min(instant) if breached_above else max(instant)
         return barrier, times[0]
     return barrier, fallback_time
 
@@ -1207,12 +1221,14 @@ def build_snowball_risk_snapshot(
         observation_times=ko_times,
         fallback_barrier=_first_barrier_value(product.barrier_config.ko_barrier),
         fallback_time=maturity,
+        breached_above=not product.is_reverse,
     )
     ki_level, ki_time = _next_barrier_snapshot(
         barriers=ki_barriers,
         observation_times=ki_times,
         fallback_barrier=_first_barrier_value(product.barrier_config.ki_barrier),
         fallback_time=maturity,
+        breached_above=bool(product.is_reverse),
     )
     _, ko_pct, ko_sigma = _barrier_distance_metrics(
         spot=base_spot,
@@ -1522,12 +1538,14 @@ def generate_snowball_risk_report(
         observation_times=ko_times,
         fallback_barrier=_first_barrier_value(product.barrier_config.ko_barrier),
         fallback_time=maturity,
+        breached_above=not product.is_reverse,
     )
     ki_barrier, ki_time = _next_barrier_snapshot(
         barriers=ki_barriers,
         observation_times=ki_times,
         fallback_barrier=_first_barrier_value(product.barrier_config.ki_barrier),
         fallback_time=maturity,
+        breached_above=bool(product.is_reverse),
     )
     ko_level, ko_pct, ko_sigma = _barrier_distance_metrics(
         spot=base_spot,

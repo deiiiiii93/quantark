@@ -35,7 +35,7 @@ from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.fixings import freeze_missing_fixings
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import is_close, is_zero, same_instant
 from quantark.util.run_fixings import participates, step_fixings, update_live
 
 from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
@@ -55,6 +55,19 @@ def _available(stats: EventStatistics, path: str) -> Any:
     if stats.flag(path) is not None:
         return None
     return stats.require(path)
+
+
+def _first_instant_probability(ko_times: np.ndarray, ko_probs: np.ndarray) -> float:
+    """P(knock out at the first knock-out instant): the sum over every knock-out row ON the first row's instant.
+
+    Records on one env instant (e.g. a US BUSINESS_DAYS holiday collapsed onto the day before) keep one statistics row
+    each (0.16.0 DCN/dated D8/D14); the instant's knock-out probability is their sum. A single row is read as is.
+    """
+    first = float(ko_times[0])
+    rows = [i for i, t in enumerate(ko_times) if same_instant(t, first)]
+    if len(rows) == 1:
+        return float(ko_probs[0])
+    return float(np.sum(ko_probs[rows]))
 
 
 def _env_with(
@@ -766,7 +779,8 @@ class ProductReplay:
                     self._date_from_time(date, float(ko_times[0])) if ko_times.size else pd.NaT
                 ),
                 "next_ko_probability": (
-                    np.nan if ko_unknown else float(ko_probs[0]) if ko_probs.size else 0.0
+                    np.nan if ko_unknown else _first_instant_probability(ko_times, ko_probs)
+                    if ko_probs.size else 0.0
                 ),
                 "total_remaining_ko_probability": (
                     np.nan if ko_unknown else float(np.sum(ko_probs))
