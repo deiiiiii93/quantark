@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from golden_compare import PINNED_MOVE_REL_TOL
 
 from quantark.asset.equity.engine.quad import SnowballQuadEngine, UnderResolvedStepError
 from quantark.asset.equity.engine.quad.local_step import (
@@ -145,11 +146,12 @@ class TestTwoEventLadder:
         its direction against a reference is not measurable; the evidence is single cause plus the exact step mass."""
         p = two_event(1e-3)
         e = SnowballQuadEngine(QuadParams())
-        assert e.price(p, env()) == 98.91842987745284
+        assert e.price(p, env()) == pytest.approx(98.91842987745284, rel=PINNED_MOVE_REL_TOL, abs=0.0)
         assert not getattr(e, "_last_local_steps", ())
         saved, SnowballQuadEngine._exact_lattice_mass = SnowballQuadEngine._exact_lattice_mass, False
         try:
-            assert SnowballQuadEngine(QuadParams()).price(p, env()) == 98.91842991352458
+            assert SnowballQuadEngine(QuadParams()).price(p, env()) == pytest.approx(
+                98.91842991352458, rel=PINNED_MOVE_REL_TOL, abs=0.0)
         finally:
             SnowballQuadEngine._exact_lattice_mass = saved
 

@@ -29,6 +29,11 @@ GOLDEN_REL_TOL = 1e-9
 # Absorbs cross-arch noise on values whose magnitude is ~0 (survival
 # probabilities, deep-OTM greeks), where a relative tolerance has no purchase.
 GOLDEN_ABS_TOL = 1e-12
+# For frozen pins whose purpose is to resolve a move SMALLER than
+# GOLDEN_REL_TOL (e.g. the 0.12.1 exact-mass re-pin, -3.6e-10 relative):
+# ~800x over the measured QUAD lattice drift (1.2e-14, x86_64 vs ARM64) and
+# still 36x below the smallest pinned move.
+PINNED_MOVE_REL_TOL = 1e-11
 
 
 def close(live, golden, *, rel_tol=GOLDEN_REL_TOL, abs_tol=GOLDEN_ABS_TOL) -> bool:

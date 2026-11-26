@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 import numpy as np
 import pytest
+from golden_compare import PINNED_MOVE_REL_TOL
 
 from quantark.asset.equity.engine.quad import SnowballQuadEngine
 from quantark.asset.equity.engine.quad.local_step import UnderResolvedStepError
@@ -191,7 +192,9 @@ def test_compounding_alias_is_gone(name, switch):
     price = SnowballQuadEngine(params or QuadParams()).price(build(), _env(vol))
     assert abs(price - reference) / 100.0 <= bound
     switch(False)
-    assert SnowballQuadEngine(params or QuadParams()).price(build(), _env(vol)) == old
+    # `old` is a frozen 0.12.0 literal (ARM64): cross-arch drift ~1e-14, so not `==` (golden_compare).
+    assert SnowballQuadEngine(params or QuadParams()).price(build(), _env(vol)) == pytest.approx(
+        old, rel=PINNED_MOVE_REL_TOL, abs=0.0)
 
 
 def test_resolved_contracts_are_bit_identical(switch):

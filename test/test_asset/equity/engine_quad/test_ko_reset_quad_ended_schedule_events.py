@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
+from golden_compare import GOLDEN_ABS_TOL
 
 from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
 from quantark.asset.equity.engine.quad.v2 import KOResetSnowballQuadEngineV2
@@ -75,7 +76,8 @@ def test_the_distribution_is_v2s(name):
 
 def test_a_knocked_in_note_past_its_first_schedule_cannot_mature_without_a_knock_in():
     v1, _ = _distributions("first ended, discrete knock-in")
-    assert v1.probabilities[EventType.MATURITY_NO_KO] == 0.0
+    # Zero up to roundoff: x86_64 leaves 1.1e-16 where ARM64 gives exactly 0.0.
+    assert abs(v1.probabilities[EventType.MATURITY_NO_KO]) <= GOLDEN_ABS_TOL
     assert float(np.sum(v1.probabilities[EventType.KO])) > 0.5
 
 
