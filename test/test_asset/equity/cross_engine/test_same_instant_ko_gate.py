@@ -58,6 +58,7 @@ from test_asset.equity.engine_quad.test_same_instant_ko_quad import (
 from quantark.asset.equity.engine.mc import (
     HestonPhoenixMCEngine,
     HestonSnowballMCEngine,
+    LocalVolSnowballMCEngine,
     PhoenixMCEngine,
     SnowballMCEngine,
 )
@@ -407,3 +408,27 @@ def test_matches_the_exact_reference(name, engine):
     for kind, exact in exact_rows.items():
         assert rows[kind] == pytest.approx(exact, abs=prob), (kind, rows[kind], exact)
     assert abs(stats.reconciliation_error) <= 1e-6 * max(1.0, abs(stats.pv))
+
+
+# --- AC4 on MC (final review): a pure duplicate KO record is bitwise the product without it -----------------------
+
+_MC_DUP = {
+    "bs": (lambda: SnowballMCEngine(params=MCParams(num_paths=20_000, seed=7)), lambda: env()),
+    "heston": (lambda: HestonSnowballMCEngine(HESTON, params=MCParams(num_paths=20_000, seed=7)), lambda: env()),
+    "local_vol": (lambda: LocalVolSnowballMCEngine(params=MCParams(num_paths=20_000, seed=7)), lambda: env(grid=True)),
+}
+
+
+@pytest.mark.parametrize("rate", [0.15, 0.40])
+@pytest.mark.parametrize("model", sorted(_MC_DUP))
+def test_mc_duplicate_is_bitwise_the_single_record(model, rate):
+    make, make_env = _MC_DUP[model]
+    e = make_env()
+    single = make().price(repro(drop_jul4=True), e)
+    assert make().price(repro(103.0, rate), e) == single
+    rows = list(make().calculate_event_stats(repro(103.0, rate), e).observations.probability)
+    single_rows = list(make().calculate_event_stats(repro(drop_jul4=True), e).observations.probability)
+    jul4 = REPRO_DATES.index(JUL4)
+    assert rows[jul4] == 0.0                      # the dominated 07-04 record never fires
+    assert rows[:jul4] + rows[jul4 + 1:] == single_rows
+

@@ -11,6 +11,12 @@ During 0.x the public API may still change between minor versions.
 
 Follow-up release built from the 0.11.0–0.15.0 open items. Sections are added as each part lands.
 
+Notes:
+- This release edits trees fingerprinted by the intraday certificates: `COMMON_TREES`
+  (`asset/equity/product/option`, `asset/equity/settlement.py`, `asset/equity/riskmeasures/greeks`, `priceenv`),
+  `PDE_TREES` (`engine/pde`), `QUAD_V2_TREES` (`engine/quad/v2`) and `MC_TREES` (`engine/mc`). Their next amendment
+  re-runs rather than carrying forward.
+
 ### DCN session parity
 
 Every DCN engine serves the `PricingSession` `EVENT_STATS` operation, and a lifecycle state sent
@@ -201,7 +207,7 @@ env time 0.5:
 | Phoenix, any pair | QUAD V2 | refused | priced (within 1.4 SE of MC) | |
 | KO-reset, schedule-1 step-down | PDE | 8.657 | 9.016354 | 8.995255 (z +1.23) |
 | KO-reset, knock-in pair 80 → 75 | PDE | 8.8717 | 7.732242 | 7.713325 (z +0.94) |
-| KO-reset, step-down | QUAD V1 | 8.871475 (step-down ignored) | within 1.2 SE of MC | 9.136 |
+| KO-reset, schedule-1 step-down | QUAD V1 | the single-record price (step-down ignored) | 9.015281 | 8.995255 (z +1.17) |
 | KO-reset, overlapping KI/KO levels at one instant | QUAD V1 | 4.87 / 4.19 | within 3 SE of MC | 6.03 / 4.33 |
 
 - **Snowball PDE equal-level knock-in duplicates** move to the product without the duplicate (1D
@@ -212,8 +218,8 @@ env time 0.5:
   memory state at the valuation instant is fixed; the both-missed case was -19.485 vs MC -19.139,
   z -12.7. The Heston KO-reset decision by record 2 now pays 10.0, not record 1's 15.0.
 
-Each engine is gated against MC (3 SE, plus 1e-3 relative on the PDE): 1D, local-vol and Heston
-PDE, QUAD V1, QUAD V2, for single, duplicate, step-down and knock-in-pair products
+Each engine is gated against MC (3 SE plus 1e-3 relative): 1D, local-vol and Heston PDE, QUAD V1,
+QUAD V2, for single, duplicate, step-down and knock-in-pair products
 (`test/test_asset/equity/cross_engine/test_same_instant_ko_gate.py`). Exact references: a two-record
 Snowball and Phoenix are priced in closed form over the bands of the instant's spot. QUAD V1/V2 are
 within 1e-6 relative, and the PDE within 1e-3 relative, converging under refinement.
