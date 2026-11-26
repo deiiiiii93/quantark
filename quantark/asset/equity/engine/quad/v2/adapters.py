@@ -21,9 +21,14 @@ from quantark.util.enum import (
     ProtectionType,
     PostKOScheduleMode,
 )
+from quantark.asset.equity.product.option.observation_schedule import same_instant_ko_groups
 from quantark.util.exceptions import ValidationError, NumericalError
 from quantark.util.numerical import is_close
 from .contract import Action, Event, CompiledContract
+
+#: the refusal of two observations of one kind on one canonical time the contract does not order (a knock-in pair, a
+#: KO-reset pair, or records a user ``event_time_tolerance`` merges although the contract clock keeps them apart)
+_SHARED_TIME = "multiple observations of one kind share a canonical time"
 
 
 def terminal_breaks(product, env):
@@ -171,6 +176,86 @@ def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity, no_ki_p
     return new_pre, new_post, branch_terminal
 
 
+def _ko_instants(records, mapping, is_reverse, phoenix):
+    """The canonical times holding two or more knock-out records of a Snowball / Phoenix (0.16.0 DCN/dated run, D2/D7/
+    D14): ``{canonical time: (positions, chain, effective)}``, indices into ``records`` (the future records, contract
+    order) -- ``positions`` every record of the instant, ``chain`` the records its event applies at the same spot in
+    contract order (Snowball: the effective records of ``same_instant_ko_groups``, a dominated record dropped; Phoenix:
+    every record, each its own coupon date), ``effective`` the records whose knock-out can fire first.
+
+    Raises:
+        ValidationError: a canonical time holds records the contract clock keeps apart (D2: the helper's group is the
+            unit; a user ``event_time_tolerance`` that merges two instants keeps V2's refusal).
+    """
+    by_time = {}
+    for pos, record in enumerate(records):
+        by_time.setdefault(mapping[float(record.observation_time)], []).append(pos)
+    out = {}
+    for t, positions in by_time.items():
+        if len(positions) < 2:
+            continue
+        groups = same_instant_ko_groups([records[p] for p in positions], is_reverse)
+        if len(groups) != 1:
+            raise ValidationError(
+                f"{_SHARED_TIME}: event_time_tolerance merges knock-out records the contract clock keeps apart"
+            )
+        kept = {id(r) for r in groups[0]}
+        effective = tuple(p for p in positions if id(records[p]) in kept and records[p].barrier is not None)
+        chain = tuple(positions) if phoenix else tuple(p for p in positions if id(records[p]) in kept)
+        out[t] = (tuple(positions), chain, effective)
+    return out
+
+
+def _refuse_fold_on_instants(records, instants):
+    """Cash-leg folding onto an instant holding two or more effective knock-out records (0.16.0 D10, as QUAD V1 and the
+    PDE refuse it): the binder is one to one by time while each record pays its own cash there. An instant whose later
+    records are dominated binds every record and pays only the effective one's (the others never knock out)."""
+    for _, _, effective in instants.values():
+        if len(effective) >= 2:
+            named = ", ".join(
+                records[p].observation_date.date().isoformat() if records[p].observation_date is not None
+                else f"t={float(records[p].observation_time)!r}" for p in effective)
+            raise ValidationError(
+                f"cash-leg folding cannot bind the knock-out records {named} sharing one env instant: each pays "
+                "its own cash at that instant (an open item); price the legs on the event route")
+
+
+def _zero_gap(step, state, count, k=0):
+    """The action of the ``count`` records of one instant from record ``k`` on ``state`` (D14 zero-gap rule): record
+    ``k``'s own action (``step(state, k)``) with each continuation it leads to replaced by the next record's action on
+    that state -- consecutive observations with zero elapsed time, so no discounting between them."""
+    action = step(state, k)
+    if k == count - 1:
+        return action
+    return _compose(action, lambda s: _zero_gap(step, s, count, k + 1))
+
+
+def _compose(action, rest):
+    """``action`` with every continuation state ``s`` replaced by ``rest(s)`` (an action at the same instant); a
+    channel-selected continuation keeps its selection on whatever it leads to."""
+    cash, asset = np.array(action.cash, dtype=float), np.array(action.asset, dtype=float)
+    terms, channel_terms = {}, []
+    for s, w in action.terms:
+        b = rest(s)
+        cash = cash + w * np.asarray(b.cash, dtype=float)
+        asset = asset + w * np.asarray(b.asset, dtype=float)
+        for s2, w2 in b.terms:
+            terms[s2] = terms.get(s2, 0.0) + w * w2
+        channel_terms.extend((s2, w * w2, sel) for s2, w2, sel in b.channel_terms)
+    for s, w, sel in action.channel_terms:
+        b = rest(s)
+        mask = np.zeros(len(cash))
+        mask[list(sel)] = 1.0
+        cash = cash + w * np.asarray(b.cash, dtype=float) * mask
+        asset = asset + w * np.asarray(b.asset, dtype=float) * mask
+        channel_terms.extend((s2, w * w2, sel) for s2, w2 in b.terms)
+        for s2, w2, sel2 in b.channel_terms:
+            both = tuple(c for c in sel if c in set(sel2))
+            if both:
+                channel_terms.append((s2, w * w2, both))
+    return Action(tuple(terms.items()), tuple(cash), tuple(asset), tuple(channel_terms))
+
+
 def _active_coupon_records(product, env, event_phase):
     """Source indices of the Phoenix KO/coupon records still to be observed (earlier ones expired)."""
     raw = product.barrier_config.ko_observation_schedule.records
@@ -258,6 +343,11 @@ def compile_contract(
     branch's end (the KO-reset pre-maturity) and ``"ki"`` at maturity, both with
     the terminal settlement delay. Any unbound entry or timing mismatch raises.
     ``None`` or an empty overlay compiles exactly the unfolded contract.
+
+    Knock-out records of a Snowball / Phoenix on one env instant (0.16.0 DCN/dated run, D7/D14) compile to ONE event
+    whose action is the zero-gap chain of the instant's records in contract order (``_ko_instants``, ``_zero_gap``);
+    a fold onto an instant with two or more effective knock-out records is refused (D10). Knock-in records, and
+    KO-reset records, of one kind sharing a canonical time keep the refusal.
     """
     if type(product) not in (
         SnowballOption,
@@ -328,6 +418,9 @@ def compile_contract(
 
     pre = [r for r in pre if is_future(r[0])]
     post = [r for r in post if is_future(r[0])]
+    # the Snowball / Phoenix knock-out records aligned with ``pre`` (contract order): same-instant records are
+    # identified by their position, never by time (0.16.0 D4)
+    ko_records = None if reset else [r for r in records if is_future(float(r.observation_time))]
     continuous = product.has_ki_barrier and (
         product.barrier_config.ki_continuous
         or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
@@ -371,12 +464,13 @@ def compile_contract(
         for r in rows:
             t = mapping[r[0]]
             if t in result:
-                raise ValidationError(
-                    "multiple observations of one kind share a canonical time"
-                )
+                raise ValidationError(_SHARED_TIME)
             result[t] = r
         return result
 
+    # canonical times holding two or more knock-out records of a Snowball / Phoenix: one zero-gap event each (D7/D14);
+    # empty for every schedule whose instants hold one record (the compile below is then exactly as before)
+    instants = {} if reset else _ko_instants(ko_records, mapping, bool(product.is_reverse), phoenix)
     terminal = resolve_terminal_timing(product, env)
     # a KO-reset note that ends with schedule 1 is paid on the explicit settlement date when booked (spec D33)
     first_schedule = first_schedule_settlement(product, env, terminal) if reset else None
@@ -387,10 +481,25 @@ def compile_contract(
     )
     fold_terminal = {}
     if fold is not None and not fold.is_empty:
+        if instants:
+            _refuse_fold_on_instants(ko_records, instants)
         pre, post, fold_terminal = _bind_fold(
             fold, reset, pre, post, terminal, maturity, pre_maturity, governed_payment
         )
-    pre_by, post_by, ki_by = keyed(pre), keyed(post), keyed(ki)
+    # a Snowball / Phoenix knock-out record's statistics key: ``pre:time`` (today's key), and per record of a shared
+    # instant its position there (``#j``) so that every record has its own channels (D4); KO-reset keys stay by time
+    row_keys = [] if reset else [
+        f"pre:{mapping[r[0]]!r}" + (f"#{instants[mapping[r[0]]][0].index(pos)}" if mapping[r[0]] in instants else "")
+        for pos, r in enumerate(pre)
+    ]
+    chains = {
+        t: tuple((pos, pre[pos], row_keys[pos]) for pos in chain) for t, (_, chain, _) in instants.items()
+    }
+    if instants:
+        alone = [r for r in pre if mapping[r[0]] not in instants]
+        pre_by, post_by, ki_by = keyed(alone), keyed(alone), keyed(ki)
+    else:
+        pre_by, post_by, ki_by = keyed(pre), keyed(post), keyed(ki)
     maturity, pre_maturity = mapping[maturity], mapping[pre_maturity]
     statistics = components == "events"
     # the price components' aggregate channels (``price_components``); a statistics context reads every outcome from
@@ -406,9 +515,13 @@ def compile_contract(
         for regime, rows in (
             (("pre", pre), ("post", post)) if reset else (("pre", pre),)
         ):
-            for r in rows:
-                key = f"{regime}:{mapping[r[0]]!r}"
-                dates = record_dates[regime].get(r[0], (None, None))
+            for pos, r in enumerate(rows):
+                if reset:
+                    key = f"{regime}:{mapping[r[0]]!r}"
+                    dates = record_dates[regime].get(r[0], (None, None))
+                else:   # by the record itself: two records of one instant have their own keys and dates (D4/D8)
+                    key = row_keys[pos]
+                    dates = (ko_records[pos].observation_date, ko_records[pos].settlement_date)
                 ko_metadata.append((key, mapping[r[0]], r[3], regime, r[0], dates[0], dates[1]))
                 channels += (f"ko_cash:{key}", f"ko_probability:{key}")
                 if phoenix:
@@ -540,11 +653,26 @@ def compile_contract(
         pr, po, kr = pre_by.get(t), post_by.get(t), ki_by.get(t)
         if continuous:
             kr = (t, float(product.barrier_config.ki_barrier))
-        levels = [r[1] for r in (pr, po, kr) if r is not None]
-        index = obs_index.get(t)
-        coupon_key = f"pre:{t!r}"
-        if phoenix and index is not None:
-            levels.append(coupon_barriers[index])
+        # an instant holding two or more knock-out records: per record of its chain ``(row, position, key, knock-in,
+        # last)`` -- the knock-in observed with the last record (the instant's knock-out wins the tie as one unit, as
+        # QUAD V1 and the PDE stage it), the maturity payoff after the last record
+        links = None
+        if t in chains:
+            entries = chains[t]
+            links = tuple(
+                (row, pos, key, kr if k == len(entries) - 1 else None, k == len(entries) - 1)
+                for k, (pos, row, key) in enumerate(entries)
+            )
+            levels = [row[1] for _, row, _ in entries] + ([kr[1]] if kr is not None else [])
+            if phoenix:
+                levels += [coupon_barriers[pos] for pos, _, _ in entries]
+            index, coupon_key = None, None
+        else:
+            levels = [r[1] for r in (pr, po, kr) if r is not None]
+            index = obs_index.get(t)
+            coupon_key = f"pre:{t!r}"
+            if phoenix and index is not None:
+                levels.append(coupon_barriers[index])
         if t in (maturity, pre_maturity):
             levels += breaks_terminal
         if any(not np.isfinite(b) or b <= 0 for b in levels):
@@ -567,7 +695,12 @@ def compile_contract(
             sample_logs = [np.log(product.initial_price)]
         point_spots = {float(np.log(level)): float(level) for level in levels}
 
-        def note_action(state, x, lo, hi, point=False):
+        def note_action(state, x, lo, hi, point=False, link=None, pr=pr, index=index, coupon_key=coupon_key, kr=kr):
+            # ``link``: one record of a shared instant's chain -- its row, position (coupon index), statistics key and
+            # the knock-in observed with it; only the chain's ``last`` record ends the note at maturity
+            last = True
+            if link is not None:
+                pr, index, coupon_key, kr, last = link
             is_w = state >= w_offset
             hit = bool(state - w_offset) if is_w else state >= n_memory
             mem = 0 if is_w else state % n_memory
@@ -596,7 +729,7 @@ def compile_contract(
                 else terminal.delay_df
             )
             if is_w:
-                if ko_hit or t == maturity:
+                if ko_hit or (last and t == maturity):
                     c = np.array(cash_vector(unit_df, "coupon"))
                     if statistics:
                         # Every origin shares the same termination discount.
@@ -655,7 +788,7 @@ def compile_contract(
                         and (hit or (ki_hit and record is po and record is not pr))
                         else "pre"
                     )
-                    key = f"{regime}:{mapping[record[0]]!r}"
+                    key = f"{regime}:{mapping[record[0]]!r}" if link is None else coupon_key
                     c[channels.index(f"ko_cash:{key}")] = record[2] * unit_df
                     c[channels.index(f"ko_probability:{key}")] = (
                         1 / env.get_discount_factor(t)
@@ -684,7 +817,7 @@ def compile_contract(
             end = maturity if new_hit else pre_maturity
             c, a, terms = np.zeros(n_channels), np.zeros(n_channels), []
             channel_terms = []
-            if t == end:
+            if last and t == end:
                 if point:
                     payoff = (
                         product.get_maturity_payoff_v1
@@ -716,7 +849,7 @@ def compile_contract(
                     c[channels.index(f"terminal_{suffix}_probability")] = (
                         1 / env.get_discount_factor(t)
                     )
-            elif t < end:
+            elif t < end or not last:
                 terms.append((int(new_hit) * n_memory + next_mem, 1.0))
             if statistics and coupon_hit:
                 c[channels.index(f"coupon_probability:{coupon_key}")] = (
@@ -725,7 +858,7 @@ def compile_contract(
             if earned_channels and earned:
                 c[channels.index(f"coupon_earned:{coupon_key}")] = earned / env.get_discount_factor(t)
             if earned:
-                if expiry and t < end:
+                if expiry and (t < end or not last):
                     if statistics:
                         selected = (
                             0,
@@ -751,7 +884,14 @@ def compile_contract(
                     c += coupon_cash(earned * coupon_df, payment_channel)
             return Action(tuple(terms), tuple(c), tuple(a), tuple(channel_terms))
 
-        action = note_action
+        if links is None:
+            action = note_action
+        else:
+            def action(state, x, lo, hi, point=False, links=links, note_action=note_action):
+                """The instant's records at one spot in contract order (D14 zero-gap rule)."""
+                return _zero_gap(
+                    lambda s, k: note_action(s, x, lo, hi, point, links[k]), state, len(links)
+                )
 
         rows, boundaries = [], []
         for state in range(len(names)):

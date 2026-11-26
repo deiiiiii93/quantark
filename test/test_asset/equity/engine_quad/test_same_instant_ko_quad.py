@@ -11,7 +11,8 @@ same spot in contract order, as consecutive observations with zero elapsed time.
 * Phoenix (D14): every record of the instant is its own coupon date (never dropped): record k, if the note is still
   alive, pays its coupon (memory: plus the arrears since the last paid coupon) and then tests its knock-out.
 
-The exact references, the products and the env are the PDE task's (``engine_pde/test_same_instant_ko.py``).
+The exact references, the products and the env are the PDE task's (``engine_pde/test_same_instant_ko.py``). The QUAD V2
+rows (T4, D7/D14) are at the end of the file.
 """
 from __future__ import annotations
 
@@ -974,3 +975,675 @@ def test_ko_reset_valuation_instant_pays_the_deciding_record(spot, deciding):
     for route in ROUTES:
         rows = _rows(kor_route(route).calculate_event_stats(product, e))
         assert rows[deciding] == 1.0 and sum(rows) == 1.0, (route, rows)
+
+
+# === QUAD V2 (T4: spec D2/D4/D7/D8/D10/D14) ===========================================================================
+#
+# QUAD V2 compiles the KO rows that share a canonical time into ONE event (the helper's same-instant group is the unit):
+# its action at each spot region is the zero-gap chain of the instant's records in contract order -- a Snowball's
+# effective records (``same_instant_ko_groups``; the first breached pays its own cash), a Phoenix's every record (its
+# coupon with memory, then its knock-out). Each record has its own statistics channels.
+
+from quantark.asset.equity.engine.quad.v2.engine import (  # noqa: E402
+    KOResetSnowballQuadEngineV2,
+    PhoenixQuadEngineV2,
+    SnowballQuadEngineV2,
+)
+from quantark.asset.equity.param import QuadV2Params  # noqa: E402
+
+#: the V2 parameters of every V2 test: the defaults (``QuadV2Params()``: order 8, 2 cells per SD, 11 SD domain)
+V2_PARAMS = dict()
+
+
+def v2(cls=SnowballQuadEngineV2, **kwargs):
+    return cls(QuadV2Params(**{**V2_PARAMS, **kwargs}))
+
+
+def v2p(**kwargs):
+    return v2(PhoenixQuadEngineV2, **kwargs)
+
+
+def phoenix_at_maturity(b1, b2):
+    """The AC7 pair as the maturity instant: exercise on the 07-04 holiday (env time of 07-03)."""
+    p = phoenix_pair(b1, b2)
+    p.exercise_date = JUL4
+    p.validate()
+    return p
+
+
+# --- AC2 / AC7: the exact references ---------------------------------------------------------------------------------
+# V2 integrates the Gaussian law of the env-time-0.5 spot across the instant's breaks exactly, so it meets the closed
+# forms to round-off (measured rel 2e-16 .. 3e-15; the knock-out and coupon probabilities 1e-15). The spec asks rel
+# 1e-6; the tests hold 1e-10 (abs 1e-10 on probabilities).
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["up", "reverse"])
+def test_v2_snowball_pair_matches_the_exact_reference(reverse):
+    """AC2 (QUAD V2, default params): the shared pair alone, no KI, fixed maturity redemption (measured rel +2.2e-16
+    up, -3.3e-16 reverse; before T4 V2 refused: "multiple observations of one kind share a canonical time")."""
+    product = snowball(pair(97.0, 100.0) if reverse else pair(), ki=None, reverse=reverse)
+    e = env()
+    ref, _ = _exact_pair_value(product, e, reverse)
+    value = v2().price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-10, (value, ref)
+
+
+def test_v2_snowball_pair_as_the_first_observation_matches_the_exact_reference():
+    product = snowball(pair(), ki=None)
+    e = env(datetime(2025, 7, 2))
+    ref, _ = _exact_pair_value(product, e)
+    value = v2().price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-10, (value, ref)
+
+
+def test_v2_snowball_pair_at_maturity_matches_the_exact_reference():
+    """AC5 maturity instant: the pair is the terminal knock-out (exercise on the 07-04 holiday)."""
+    product = snowball(pair(), ki=None, exercise=JUL4)
+    e = env()
+    ref, _ = _exact_pair_value(product, e)
+    value = v2().price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-10, (value, ref)
+
+
+@pytest.mark.parametrize("b1,b2", [(103.0, 100.0), (100.0, 103.0)], ids=["b2_below_b1", "b2_above_b1"])
+def test_v2_phoenix_pair_matches_the_exact_reference(b1, b2):
+    """AC7 (QUAD V2, default params): the pair alone, no KI, memory on; ``b2 > b1``: record 2's knock-out is inert but
+    its coupon counts (measured rel -2.7e-15 / +1.3e-15)."""
+    product = phoenix_pair(b1, b2)
+    e = env()
+    ref, _, _ = _exact_phoenix_pair(product, e)
+    value = v2p().price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-10, (value, ref)
+
+
+@pytest.mark.parametrize("b1,b2", [(103.0, 100.0), (100.0, 103.0)], ids=["b2_below_b1", "b2_above_b1"])
+def test_v2_phoenix_pair_at_maturity_matches_the_exact_reference(b1, b2):
+    """AC5 maturity instant on the Phoenix: the zero-gap chain, then the maturity redemption."""
+    product = phoenix_at_maturity(b1, b2)
+    e = env()
+    r1, r2 = product.resolve_ko_observations(e)
+    assert r1.observation_time == r2.observation_time == product.get_maturity(e)
+    ref, _, _ = _exact_phoenix_pair(product, e)
+    value = v2p().price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-10, (value, ref)
+
+
+def _zero_gap_expiry_cash(product, e, s, memory):
+    """EXPIRY pay: the zero-gap rule's coupons are paid at the note's end -- with the redemption at the settlement of
+    the record that knocks out, else at the maturity payment; the arrears (memory on) as ``_zero_gap_cash``."""
+    records = product.resolve_ko_observations(e)
+    fractions = product.get_coupon_period_year_fractions(e)
+    df = e.get_discount_factor
+    earned, arrears = 0.0, 0.0
+    for k, rec in enumerate(records):
+        c = product.get_coupon_payoff(k, year_fraction=fractions[k])
+        hit = s >= COUPON_BARRIER
+        if hit:
+            earned += c + arrears
+        if s >= rec.barrier:
+            return (earned + rec.payoff + (0.0 if hit else arrears)) * df(rec.settlement_time)
+        arrears = 0.0 if hit or not memory else arrears + c
+    m = product.get_maturity_payoff_v0(s, pricing_env=e)
+    return (earned + m) * df(resolve_terminal_timing(product, e).payment_time)
+
+
+@pytest.mark.parametrize("memory", [True, False], ids=["memory", "no_memory"])
+@pytest.mark.parametrize("b1,b2", [(103.0, 100.0), (100.0, 103.0)], ids=["b2_below_b1", "b2_above_b1"])
+def test_v2_phoenix_expiry_pair_matches_the_exact_reference(b1, b2, memory):
+    """D14 under EXPIRY pay (exact): record 1's coupon is deferred to the note's end, which a knock-out by record 2 at
+    the same instant makes record 2's settlement (07-15, record 1 settling 07-08) -- the deferred coupon goes through
+    the termination state of the chain. The ledger reconciles."""
+    from quantark.util.enum import CouponPayType
+
+    product = phoenix_settled_pair(b1, b2)
+    product.coupon_config = replace(product.coupon_config, coupon_pay_type=CouponPayType.EXPIRY,
+                                    memory_coupon=memory)
+    product.validate()
+    e = env()
+    r1, r2 = product.resolve_ko_observations(e)
+    t1 = r1.observation_time
+    assert t1 == r2.observation_time and r1.settlement_time < r2.settlement_time
+    levels = sorted({COUPON_BARRIER, b1, b2})
+    edges = [0.0] + levels + [math.inf]
+    above = lambda b: 0.0 if b == math.inf else (1.0 if b == 0.0 else _p_breach(b, t1))   # noqa: E731
+    ref = sum((above(lo) - above(hi)) * _zero_gap_expiry_cash(product, e, 0.5 * (lo + hi) if hi < math.inf
+                                                              else lo + 1.0, memory)
+              for lo, hi in zip(edges[:-1], edges[1:]))
+    value = v2p().price(product, e)
+    assert abs(value / ref - 1.0) <= 1e-10, (value, ref)
+    stats = v2p().calculate_event_stats(product, e)
+    assert stats.pv == value
+    assert abs(stats.reconciliation_error) <= 1e-9 * abs(stats.pv)
+
+
+# --- AC4: the duplicate invariant -------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dup_rate", [0.15, 0.40], ids=["same_payoff", "other_payoff"])
+def test_v2_snowball_duplicate_record_prices_as_the_product_without_it(dup_rate):
+    """AC4: a same-instant duplicate (same barrier, any payoff) is dominated and dropped: bitwise, price and
+    statistics (the dominated record keeps its row at exactly 0)."""
+    e = env()
+    dup, base = repro(103.0, dup_rate), repro(drop_jul4=True)
+    assert v2().price(dup, e) == v2().price(base, e)
+    s_dup, s_base = v2().calculate_event_stats(dup, e), v2().calculate_event_stats(base, e)
+    probs, base_probs = _rows(s_dup), _rows(s_base)
+    assert probs[3] == 0.0
+    assert probs[:3] + probs[4:] == base_probs
+    assert math.isclose(sum(probs), sum(base_probs), rel_tol=1e-12)
+    assert s_dup.pv == s_base.pv
+
+
+# --- AC5: the valuation instant --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
+def test_v2_snowball_valuation_instant_pays_the_deciding_record(spot, deciding):
+    e = env(JUL3, spot=spot)
+    product = repro()
+    records = [r for r in product.resolve_ko_observations(e) if r.observation_time == 0.0]
+    assert len(records) == 2
+    rec = records[deciding]
+    expected = rec.payoff * e.get_discount_factor(rec.settlement_time)
+    assert v2().price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    probs = _rows(v2().calculate_event_stats(product, e))
+    assert probs[deciding] == 1.0 and sum(probs) == 1.0, probs
+
+
+@pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
+def test_v2_snowball_valuation_and_maturity_instant_pays_the_deciding_record(spot, deciding):
+    e = env(JUL3, spot=spot)
+    product = snowball(pair(), ki=None, exercise=JUL4)
+    rec = product.resolve_ko_observations(e)[deciding]
+    expected = rec.payoff * e.get_discount_factor(rec.settlement_time)
+    assert v2().price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    probs = _rows(v2().calculate_event_stats(product, e))
+    assert probs[deciding] == 1.0 and sum(probs) == 1.0, probs
+
+
+def test_v2_snowball_valuation_instant_below_every_band_continues():
+    """Valuation on 07-03, spot below both records: no knock-out, both rows 0, the note continues (V1 agrees to its
+    lattice)."""
+    e = env(JUL3, spot=97.0)
+    product = repro()
+    stats = v2().calculate_event_stats(product, e)
+    assert _rows(stats)[:2] == [0.0, 0.0]
+    value = v2().price(product, e)
+    assert value == pytest.approx(v1().price(product, e), rel=2e-3)
+
+
+@pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
+def test_v2_phoenix_valuation_instant_pays_the_deciding_record(spot, deciding):
+    e = env(JUL3, spot=spot)
+    product = phoenix_repro("stepdown")
+    decision = product.decide_observations_at_valuation(spot, e)
+    records = [r for r in product.resolve_ko_observations(e) if r.observation_time == 0.0]
+    assert decision.knocked_out and decision.ko_record.observation_date == records[deciding].observation_date
+    expected = (decision.ko_record.payoff + decision.coupon) * e.get_discount_factor(decision.ko_record.settlement_time)
+    assert v2p().price(product, e) == pytest.approx(expected, rel=1e-14, abs=1e-14)
+    probs = _rows(v2p().calculate_event_stats(product, e))
+    assert probs[deciding] == 1.0 and sum(probs) == 1.0, probs
+
+
+@pytest.mark.parametrize("spot", [90.0, 101.0], ids=["both_paid", "paid_then_step_down_knock_out"])
+def test_v2_phoenix_valuation_instant_coupons_settle_on_their_own_dates(spot):
+    """The pair settling 07-08 / 07-15, valued on 07-03 in the both-pay band: each record's coupon discounted at its
+    OWN settlement (the step-down knock-out pays its redemption at record 2's), exact."""
+    e = env(JUL3, spot=spot)
+    product = phoenix_settled_pair()
+    legs, knocked_out, _ = _decided_legs(product, e, spot)
+    expected = legs
+    if knocked_out is None:
+        m = product.get_maturity_payoff_v0(spot, pricing_env=e)
+        expected += m * e.get_discount_factor(resolve_terminal_timing(product, e).payment_time)
+    assert v2p().price(product, e) == pytest.approx(expected, rel=1e-13, abs=1e-13)
+
+
+@pytest.mark.parametrize("spot", [90.0, 101.0], ids=["both_paid", "paid_then_step_down_knock_out"])
+def test_v2_phoenix_valuation_instant_coupons_are_attributed_per_record(spot):
+    later = (datetime(2025, 9, 3), datetime(2025, 11, 3))
+    e = env(JUL3, spot=spot)
+    product = phoenix_settled_pair(later=later)
+    _, knocked_out, rows = _decided_legs(product, e, spot)
+    stats = v2p().calculate_event_stats(product, e)
+    assert stats.pv == v2p().price(product, e)
+    for k, cash in rows.items():
+        assert stats.coupons.probability[k] == 1.0, (k, list(stats.coupons.probability))
+        assert stats.coupons.discounted_cash[k] == pytest.approx(cash, rel=1e-13), (
+            k, list(stats.coupons.discounted_cash))
+    if knocked_out is not None:
+        assert _rows(stats)[knocked_out] == 1.0 and sum(_rows(stats)) == 1.0
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+
+
+def test_v2_phoenix_valuation_instant_continuation_does_not_depend_on_where_the_pair_settles():
+    later = (datetime(2025, 9, 3), datetime(2025, 11, 3))
+    e = env(JUL3, spot=90.0)
+    a = phoenix_settled_pair(later=later)
+    b = phoenix([ObservationRecord(observation_date=JUL3, barrier=103.0, settlement_date=SETTLE_2),
+                 ObservationRecord(observation_date=JUL4, barrier=100.0, return_rate=0.10, settlement_date=SETTLE_2)]
+                + [ObservationRecord(observation_date=d, barrier=103.0) for d in later], ki=None)
+    cont_a = v2p().price(a, e) - _decided_legs(a, e, 90.0)[0]
+    cont_b = v2p().price(b, e) - _decided_legs(b, e, 90.0)[0]
+    assert cont_a == pytest.approx(cont_b, rel=1e-12, abs=1e-12)
+    assert cont_a > 0.1
+
+
+# --- AC6: event statistics -------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["up", "reverse"])
+def test_v2_snowball_pair_statistics_attribute_each_record_exactly(reverse):
+    product = snowball(pair(97.0, 100.0) if reverse else pair(), ki=None, reverse=reverse)
+    e = env()
+    _, (p1, p2) = _exact_pair_value(product, e, reverse)
+    stats = v2().calculate_event_stats(product, e)
+    probs = _rows(stats)
+    assert len(probs) == 2
+    assert probs[0] == pytest.approx(p1, abs=1e-10) and probs[1] == pytest.approx(p2, abs=1e-10), (probs, p1, p2)
+    assert list(stats.observations.dates) == [JUL3, JUL4]
+    assert abs(stats.reconciliation_error) <= 1e-9 * abs(stats.pv)
+
+
+def test_v2_snowball_pair_at_maturity_statistics_attribute_each_record_exactly():
+    product = snowball(pair(), ki=None, exercise=JUL4)
+    e = env()
+    _, (p1, p2) = _exact_pair_value(product, e)
+    probs = _rows(v2().calculate_event_stats(product, e))
+    assert probs[0] == pytest.approx(p1, abs=1e-10) and probs[1] == pytest.approx(p2, abs=1e-10), (probs, p1, p2)
+
+
+@pytest.mark.parametrize("b1,b2", [(103.0, 100.0), (100.0, 103.0)], ids=["b2_below_b1", "b2_above_b1"])
+def test_v2_phoenix_pair_statistics_attribute_each_record_exactly(b1, b2):
+    product = phoenix_pair(b1, b2)
+    e = env()
+    _, ko, coupon = _exact_phoenix_pair(product, e)
+    stats = v2p().calculate_event_stats(product, e)
+    assert _rows(stats) == pytest.approx(list(ko), abs=1e-10)
+    assert _coupon_rows(stats) == pytest.approx(list(coupon), abs=1e-10)
+    assert abs(stats.reconciliation_error) <= 1e-9 * abs(stats.pv)
+
+
+def test_v2_snowball_step_down_total_is_not_double_counted():
+    """Each record reads its own channel: the step-down's rows plus the maturity and knock-in settlement units sum
+    to one (before the per-record keys the instant's channel was read twice)."""
+    stats = v2().calculate_event_stats(repro(), env())
+    total = sum(_rows(stats)) + stats.maturity.probability + stats.ki_settlement.probability
+    assert total == pytest.approx(1.0, abs=1e-10)
+    assert _rows(stats)[3] > 0.01 and _rows(stats)[2] != _rows(stats)[3]
+
+
+@pytest.mark.slow
+def test_v2_snowball_step_down_agrees_with_mc_and_v1(snowball_mc):
+    """AC3: within 3 SE + 1e-3 relative of MC; V2 and V1 agree to V1's lattice error (measured V2 -0.264722, V1
+    -0.265338, MC -0.257029 SE 0.021928: z -0.35; V2 - V1 +6.2e-4, the single-record product's own gap 2.5e-3)."""
+    ref, se, _ = snowball_mc
+    value = v2().price(repro(), env())
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se)
+    assert abs(value - v1().price(repro(), env())) <= 2.5e-3, value
+
+
+@pytest.mark.slow
+def test_v2_snowball_step_down_statistics_agree_with_mc(snowball_mc):
+    _, _, mc_stats = snowball_mc
+    rows, mc_rows = _rows(v2().calculate_event_stats(repro(), env())), _rows(mc_stats)
+    assert len(rows) == len(mc_rows) == len(REPRO_DATES)
+    for p, m in zip(rows, mc_rows):
+        se = math.sqrt(m * (1.0 - m) / MC_PATHS)
+        assert abs(p - m) <= 3.0 * se, (rows, mc_rows)
+    assert rows[3] > 0.01
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("variant", ["single", "duplicate", "stepdown"])
+def test_v2_phoenix_repro_agrees_with_mc_and_v1(phoenix_mc, variant):
+    """AC7: measured z(V2) -1.09 / -1.16 / -1.32 (single / duplicate / step-down); V2 - V1 +1.45e-3 / +1.51e-3 /
+    +2.1e-4 -- the pair's gap is the single record's (V1's lattice)."""
+    ref, se, _ = phoenix_mc[variant]
+    value = v2p().price(phoenix_repro(variant), env())
+    assert abs(value - ref) <= 3.0 * se + 1e-3 * abs(ref), (value, ref, se)
+    assert abs(value - phx().price(phoenix_repro(variant), env())) <= 2.5e-3, value
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("variant", ["duplicate", "stepdown"])
+def test_v2_phoenix_repro_statistics_agree_with_mc(phoenix_mc, variant):
+    _, _, mc_stats = phoenix_mc[variant]
+    stats = v2p().calculate_event_stats(phoenix_repro(variant), env())
+    for rows, mc_rows in ((_rows(stats), _rows(mc_stats)), (_coupon_rows(stats), _coupon_rows(mc_stats))):
+        assert len(rows) == len(mc_rows) == len(PHX_DATES)
+        for p, m in zip(rows, mc_rows):
+            se = math.sqrt(m * (1.0 - m) / MC_PATHS)
+            assert abs(p - m) <= 3.0 * se, (rows, mc_rows)
+    if variant == "duplicate":
+        assert _rows(stats)[3] == 0.0 and _coupon_rows(stats)[3] > 0.1
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+
+
+@pytest.mark.parametrize("ki", ["continuous", "discrete"])
+@pytest.mark.parametrize("memory", [True, False], ids=["memory", "no_memory"])
+@pytest.mark.parametrize("pay", ["INSTANT", "EXPIRY"])
+@pytest.mark.parametrize("variant", ["duplicate", "stepdown"])
+def test_v2_phoenix_variants_agree_with_v1(variant, pay, memory, ki):
+    """Every coupon variant of the pair (pay INSTANT / EXPIRY, memory on / off, continuous / discrete KI): V2 and V1
+    agree to their discretisations, per-record knock-out and coupon probabilities too; the V2 ledger reconciles.
+    Measured: price gaps 2.1e-4 .. 1.9e-3 (the single-record variants' own gaps 1.5e-3 .. 1.8e-3), row gaps <= 1.7e-4,
+    V2 reconciliation <= 5e-15."""
+    from quantark.util.enum import CouponPayType
+
+    product = _phoenix_variant(variant, getattr(CouponPayType, pay), memory, ki)
+    e = env()
+    a, b = v2p().price(product, e), phx().price(product, e)
+    assert abs(a - b) <= 2.5e-3, (a, b)
+    s2, s1 = v2p().calculate_event_stats(product, e), v1_route("stacked", PhoenixQuadEngine).calculate_event_stats(
+        product, e)
+    assert np.allclose(_rows(s2), _rows(s1), atol=3e-4), (_rows(s2), _rows(s1))
+    assert np.allclose(_coupon_rows(s2), _coupon_rows(s1), atol=3e-4), (_coupon_rows(s2), _coupon_rows(s1))
+    assert abs(s2.reconciliation_error) <= 1e-9 * max(1.0, abs(s2.pv))
+
+
+# --- D10 / D2: folding, tolerances, refusals kept -------------------------------------------------------------------
+
+def test_v2_snowball_folding_onto_a_two_record_group_is_refused():
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+    from quantark.util.exceptions import ValidationError
+
+    product, e = repro(), env()
+    with pytest.raises(ValidationError, match="2025-07-03.*2025-07-04"):
+        v2().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+
+def test_v2_snowball_folding_onto_a_duplicate_only_group_binds_the_effective_record():
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+
+    e = env()
+    dup, dedup = repro(103.0, 0.40), repro(drop_jul4=True)
+    folded = v2().price_folded(dup, e, _overlay(dup, e, [1.0, 2.0, 3.0, 9.0, 5.0, 6.0]))
+    assert folded == v2().price_folded(dedup, e, _overlay(dedup, e, [1.0, 2.0, 3.0, 5.0, 6.0]))
+    assert folded != v2().price(dedup, e)
+
+
+def test_v2_phoenix_folding_onto_a_same_instant_pair_is_refused():
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+    from quantark.util.exceptions import ValidationError
+
+    product, e = phoenix_repro("stepdown"), env()
+    with pytest.raises(ValidationError, match="2025-07-03.*2025-07-04"):
+        v2p().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+
+def test_v2_user_tolerance_merging_distinct_instants_still_refuses():
+    """D2: the helper's group is the unit -- a user ``event_time_tolerance`` that merges two records the helper keeps
+    apart (07-03 and 07-07, one business day) keeps V2's refusal."""
+    from quantark.util.exceptions import ValidationError
+
+    jul7 = datetime(2025, 7, 7)
+    product = snowball([ObservationRecord(observation_date=JUL3, barrier=103.0),
+                        ObservationRecord(observation_date=jul7, barrier=100.0, return_rate=0.10)], ki=None)
+    e = env()
+    r1, r2 = product.resolve_ko_observations(e)
+    assert 0.0 < r2.observation_time - r1.observation_time < 0.01
+    with pytest.raises(ValidationError, match="share a canonical time"):
+        v2(event_time_tolerance=0.01).price(product, e)
+    with pytest.raises(ValidationError, match="share a canonical time"):
+        v2p(event_time_tolerance=0.01).price(phoenix([ObservationRecord(observation_date=JUL3, barrier=103.0),
+                                                      ObservationRecord(observation_date=jul7, barrier=100.0)],
+                                                     ki=None), e)
+
+
+def test_v2_knock_in_records_sharing_an_instant_stay_refused():
+    """KI rows of one kind sharing a canonical time keep the refusal (open item)."""
+    from quantark.util.enum import ObservationType
+    from quantark.util.exceptions import ValidationError
+
+    p = repro(drop_jul4=True)
+    p.barrier_config = replace(
+        p.barrier_config, ki_observation_type=ObservationType.DISCRETE, ki_continuous=False,
+        ki_observation_schedule=ObservationSchedule(
+            records=[ObservationRecord(observation_date=d, barrier=75.0) for d in REPRO_DATES]))
+    p.validate()
+    with pytest.raises(ValidationError, match="share a canonical time"):
+        v2().price(p, env())
+
+
+def test_v2_ko_reset_pair_stays_refused():
+    """KO-reset same-instant records are not supported by V2 (unchanged refusal)."""
+    from quantark.util.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match="share a canonical time"):
+        v2(KOResetSnowballQuadEngineV2).price(ko_reset(**KOR_CASES["schedule1_step_down"]), env())
+
+
+# --- products without a shared instant: bitwise against pins captured at d0ac7fb4, before T4 -----------------------
+
+def _v2_pinned():
+    from quantark.util.enum import CouponPayType
+
+    e = env()
+    single = [ObservationRecord(observation_date=JUL3, barrier=103.0)]
+    out = {
+        "snowball_repro_single": (SnowballQuadEngineV2, repro(drop_jul4=True), e),
+        "snowball_one_record_no_ki": (SnowballQuadEngineV2, snowball(single, ki=None), e),
+        "snowball_reverse_single": (SnowballQuadEngineV2, snowball(
+            [ObservationRecord(observation_date=JUL3, barrier=97.0)], ki=None, reverse=True), e),
+        "snowball_val_jul3_ko": (SnowballQuadEngineV2, repro(drop_jul4=True), env(JUL3, spot=105.0)),
+        "snowball_val_jul3_alive": (SnowballQuadEngineV2, repro(drop_jul4=True), env(JUL3, spot=101.0)),
+        "snowball_first_step": (SnowballQuadEngineV2, repro(drop_jul4=True), env(datetime(2025, 7, 2))),
+        "phoenix_single": (PhoenixQuadEngineV2, phoenix_repro("single"), e),
+        "phoenix_val_jul3": (PhoenixQuadEngineV2, phoenix_repro("single"), env(JUL3, spot=90.0)),
+        "phoenix_val_jul3_ko": (PhoenixQuadEngineV2, phoenix_repro("single"), env(JUL3, spot=105.0)),
+        "phoenix_one_record": (PhoenixQuadEngineV2, phoenix(single, ki=None), e),
+        "ko_reset_base": (KOResetSnowballQuadEngineV2, ko_reset(), e),
+    }
+    for pay in ("INSTANT", "EXPIRY"):
+        for memory in (True, False):
+            for ki in ("continuous", "discrete"):
+                out[f"phoenix_{pay}_{memory}_{ki}"] = (
+                    PhoenixQuadEngineV2, _phoenix_variant("single", getattr(CouponPayType, pay), memory, ki), e)
+    return out
+
+
+# Pinned BEFORE the T4 change (worktree d0ac7fb4): price, pv, KO rows and discounted cash, coupon rows and discounted
+# cash (None: no coupon table), maturity / knocked-in settlement / knock-in probabilities.
+V2_PINS = {
+    'ko_reset_base': dict(
+        price='0x1.1be5a6a674620p+3', pv='0x1.1be5a6a674620p+3',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f61998cb561p-3', '0x1.29640d787ce9dp-4', '0x1.bc6697ca056c6p-11',
+            '0x1.bcbb33e26a3d6p-10', '0x1.41cce6cbff2c9p-10'],
+        ko_cash=['0x1.670736d1b46cap+2', '0x1.10d38a23b978bp+1', '0x1.14079e3fd8ad3p+0', '0x1.48e2d461387b5p-9',
+                 '0x1.48090e4ccf7ebp-8', '0x1.d9f825c451c88p-9'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x1.64a75ac99f7c8p-2', ki_settlement='0x1.d40a63d8bac41p-5', ki='0x1.f2f03f0d56208p-5'),
+    'phoenix_EXPIRY_False_continuous': dict(
+        price='-0x1.86b9c0248fabap+0', pv='-0x1.86b9c0248fabap+0',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',
+            '0x1.0ff5c8d9205ddp-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2594p-1', '0x1.8592e8190b814p-2', '0x1.225938d8a2872p-2',
+                '0x1.c6e799a2b0bd6p-3'],
+        coupon_cash=['0x1.f481928abc9b2p-1', '0x1.1b64dff632acdp-1', '0x1.7f0791197d3b4p-2', '0x1.1d0a187af0d27p-2',
+                     '0x1.be264b73542d8p-3'],
+        maturity='0x1.8e200177e7d0bp-3', ki_settlement='0x1.14539380762d9p-3', ki='0x1.158a7b0b813ddp-3'),
+    'phoenix_EXPIRY_False_discrete': dict(
+        price='0x1.cf70403976140p-6', pv='0x1.cf70403976140p-6',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b6753fb69p-3', '0x1.297c9237995dcp-4', '0x1.7e337bafaf540p-5',
+            '0x1.0ff5c8d920a62p-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2545p-1', '0x1.8592e8190baeep-2', '0x1.225938d8a2983p-2',
+                '0x1.c6e799a2b0bedp-3'],
+        coupon_cash=['0x1.f481928abc9b3p-1', '0x1.1b64dff632a81p-1', '0x1.7f0791197d67dp-2', '0x1.1d0a187af0e38p-2',
+                     '0x1.be264b73542f0p-3'],
+        maturity='0x1.07147f7338b08p-2', ki_settlement='0x1.28952c23d90f8p-4', ki='0x1.28f3c52a4c115p-4'),
+    'phoenix_EXPIRY_True_continuous': dict(
+        price='-0x1.6d4c53a5a8236p+0', pv='-0x1.6d4c53a5a8236p+0',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',
+            '0x1.0ff5c8d9205ddp-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2594p-1', '0x1.8592e8190b814p-2', '0x1.225938d8a2872p-2',
+                '0x1.c6e799a2b0bd6p-3'],
+        coupon_cash=['0x1.f481928abc9b2p-1', '0x1.1dae56df6ef54p-1', '0x1.9318f1b3383bdp-2', '0x1.3e9e5fbb983b3p-2',
+                     '0x1.0a9042086d3edp-2'],
+        maturity='0x1.8e200177e7d0bp-3', ki_settlement='0x1.14539380762d9p-3', ki='0x1.158a7b0b813e0p-3'),
+    'phoenix_EXPIRY_True_discrete': dict(
+        price='0x1.05596bfe6b212p-3', pv='0x1.05596bfe6b212p-3',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b6753fb69p-3', '0x1.297c9237995dcp-4', '0x1.7e337bafaf540p-5',
+            '0x1.0ff5c8d920a62p-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2545p-1', '0x1.8592e8190baeep-2', '0x1.225938d8a2983p-2',
+                '0x1.c6e799a2b0bedp-3'],
+        coupon_cash=['0x1.f481928abc9b3p-1', '0x1.1dae56df6eeedp-1', '0x1.9318f1b3386c2p-2', '0x1.3e9e5fbb98526p-2',
+                     '0x1.0a9042086d45ap-2'],
+        maturity='0x1.07147f7338b08p-2', ki_settlement='0x1.28952c23d90f8p-4', ki='0x1.28f3c52a4c116p-4'),
+    'phoenix_INSTANT_False_continuous': dict(
+        price='-0x1.8292f0683a35ep+0', pv='-0x1.8292f0683a35ep+0',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',
+            '0x1.0ff5c8d9205ddp-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2594p-1', '0x1.8592e8190b814p-2', '0x1.225938d8a2872p-2',
+                '0x1.c6e799a2b0bd6p-3'],
+        coupon_cash=['0x1.f8327c6391e62p-1', '0x1.1da1a4e2d36d3p-1', '0x1.81b29149b3245p-2', '0x1.1e80be5867d65p-2',
+                     '0x1.bf62c224cdd2cp-3'],
+        maturity='0x1.8e200177e7d0bp-3', ki_settlement='0x1.14539380762d9p-3', ki='0x1.158a7b0b813ddp-3'),
+    'phoenix_INSTANT_False_discrete': dict(
+        price='0x1.6c9217a769bffp-5', pv='0x1.6c9217a769bffp-5',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b6753fb69p-3', '0x1.297c9237995dcp-4', '0x1.7e337bafaf540p-5',
+            '0x1.0ff5c8d920a62p-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2545p-1', '0x1.8592e8190baeep-2', '0x1.225938d8a2983p-2',
+                '0x1.c6e799a2b0bedp-3'],
+        coupon_cash=['0x1.f8327c6391e62p-1', '0x1.1da1a4e2d3683p-1', '0x1.81b29149b3512p-2', '0x1.1e80be5867e71p-2',
+                     '0x1.bf62c224cdd48p-3'],
+        maturity='0x1.07147f7338b08p-2', ki_settlement='0x1.28952c23d90f8p-4', ki='0x1.28f3c52a4c115p-4'),
+    'phoenix_INSTANT_True_continuous': dict(
+        price='-0x1.68ff567e9edfcp+0', pv='-0x1.68ff567e9edfcp+0',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',
+            '0x1.0ff5c8d9205ddp-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2594p-1', '0x1.8592e8190b814p-2', '0x1.225938d8a2872p-2',
+                '0x1.c6e799a2b0bd6p-3'],
+        coupon_cash=['0x1.f8327c6391e62p-1', '0x1.1ff20c2158441p-1', '0x1.95f3b4fa02734p-2', '0x1.404c03c4da227p-2',
+                     '0x1.0b52911f08fa0p-2'],
+        maturity='0x1.8e200177e7d0bp-3', ki_settlement='0x1.14539380762d9p-3', ki='0x1.158a7b0b813e0p-3'),
+    'phoenix_INSTANT_True_discrete': dict(
+        price='0x1.27c15536b53aep-3', pv='0x1.27c15536b53aep-3',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b6753fb69p-3', '0x1.297c9237995dcp-4', '0x1.7e337bafaf540p-5',
+            '0x1.0ff5c8d920a62p-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2545p-1', '0x1.8592e8190baeep-2', '0x1.225938d8a2983p-2',
+                '0x1.c6e799a2b0bedp-3'],
+        coupon_cash=['0x1.f8327c6391e62p-1', '0x1.1ff20c21583d8p-1', '0x1.95f3b4fa02a39p-2', '0x1.404c03c4da3a2p-2',
+                     '0x1.0b52911f0900ep-2'],
+        maturity='0x1.07147f7338b08p-2', ki_settlement='0x1.28952c23d90f8p-4', ki='0x1.28f3c52a4c116p-4'),
+    'phoenix_one_record': dict(
+        price='0x1.c38552e3d9ed7p-1', pv='0x1.c38552e3d9ed7p-1',
+        ko=['0x1.af3a05fa9a9f6p-2'],
+        ko_cash=['0x0.0p+0'],
+        coupon=['0x1.c80f040be46f2p-1'],
+        coupon_cash=['0x1.c38552e3d9ed7p-1'],
+        maturity='0x1.2862fd02b2b06p-1', ki_settlement='0x0.0p+0', ki='0x0.0p+0'),
+    'phoenix_single': dict(
+        price='-0x1.68ff567e9edfcp+0', pv='-0x1.68ff567e9edfcp+0',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',
+            '0x1.0ff5c8d9205ddp-5'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.f9c29f0040534p-1', '0x1.1f8ac010c2594p-1', '0x1.8592e8190b814p-2', '0x1.225938d8a2872p-2',
+                '0x1.c6e799a2b0bd6p-3'],
+        coupon_cash=['0x1.f8327c6391e62p-1', '0x1.1ff20c2158441p-1', '0x1.95f3b4fa02734p-2', '0x1.404c03c4da227p-2',
+                     '0x1.0b52911f08fa0p-2'],
+        maturity='0x1.8e200177e7d0bp-3', ki_settlement='0x1.14539380762d9p-3', ki='0x1.158a7b0b813e0p-3'),
+    'phoenix_val_jul3': dict(
+        price='-0x1.0f58ad2802ddcp+1', pv='-0x1.0f58ad2802ddcp+1',
+        ko=['0x0.0p+0', '0x1.70f079929e079p-4', '0x1.bf12991551d1bp-4'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.0000000000000p+0', '0x1.be705cf26220ap-1', '0x1.640f0f14e1848p-1'],
+        coupon_cash=['0x1.0000000000000p+0', '0x1.bcf4093d6f8ccp-1', '0x1.7689018128794p-1'],
+        maturity='0x1.47f958f576e75p-1', ki_settlement='0x1.481912d62c74cp-3', ki='0x1.481b9e6f0641ep-3'),
+    'phoenix_val_jul3_ko': dict(
+        price='0x1.0000000000000p+0', pv='0x1.0000000000000p+0',
+        ko=['0x1.0000000000000p+0', '0x0.0p+0', '0x0.0p+0'],
+        ko_cash=['0x0.0p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon=['0x1.0000000000000p+0', '0x0.0p+0', '0x0.0p+0'],
+        coupon_cash=['0x1.0000000000000p+0', '0x0.0p+0', '0x0.0p+0'],
+        maturity='0x0.0p+0', ki_settlement='0x0.0p+0', ki='0x0.0p+0'),
+    'snowball_first_step': dict(
+        price='0x1.0feddc8968eeap+3', pv='0x1.0feddc8968eeap+3',
+        ko=['0x1.ecac3f49fc36bp-6', '0x1.7579ba1a5f01ep-2', '0x1.0bfebdf00edaep-3'],
+        ko_cash=['0x1.ca0c53c56fb5cp-3', '0x1.d09dd65ec0bb9p+1', '0x1.9fb2f685817afp+0'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x1.7c572c55dd7d5p-2', ki_settlement='0x1.a593da8c713ccp-4', ki='0x1.a5a3c213be7acp-4'),
+    'snowball_one_record_no_ki': dict(
+        price='0x1.751d806c444b3p+3', pv='0x1.751d806c444b3p+3',
+        ko=['0x1.af3a05fa9a9f6p-2'],
+        ko_cash=['0x1.8cf66f80dc1d6p+1'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x1.2862fd02b2b06p-1', ki_settlement='0x0.0p+0', ki='0x0.0p+0'),
+    'snowball_repro_single': dict(
+        price='-0x1.3355224f29360p-3', pv='-0x1.3355224f29360p-3',
+        ko=['0x1.80268d2a30d98p-2', '0x1.24f6b6753fbccp-3', '0x1.297c923798b41p-4', '0x1.7e337bafaec5ep-5',
+            '0x1.0ff5c8d9207c2p-5'],
+        ko_cash=['0x1.d0470cacfcf45p-1', '0x1.6cc49e5d73896p-1', '0x1.11d964447039dp-1', '0x1.d6c721a2d331ap-2',
+                 '0x1.a1af5fb8d7d97p-2'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x1.015de9d98cb2ep-3', ki_settlement='0x1.a115ab1ed1b24p-3', ki='0x1.a9edf8ed21a3bp-3'),
+    'snowball_reverse_single': dict(
+        price='0x1.6fa63755af80dp+3', pv='0x1.6fa63755af80dp+3',
+        ko=['0x1.c6cc5f9052a3ap-2'],
+        ko_cash=['0x1.a2a950493ab12p+1'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x1.1c99d037d6ae2p-1', ki_settlement='0x0.0p+0', ki='0x0.0p+0'),
+    'snowball_val_jul3_alive': dict(
+        price='0x1.1d45eb3cb019bp+3', pv='0x1.1d45eb3cb019bp+3',
+        ko=['0x0.0p+0', '0x1.aaa3f038825b6p-2', '0x1.0f5bbda80d599p-3'],
+        ko_cash=['0x0.0p+0', '0x1.09661986d5612p+2', '0x1.a4f30c830fd56p+0'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x1.7011bf7be31a3p-2', ki_settlement='0x1.7671c5de4f7aep-4', ki='0x1.767c646ddcd9cp-4'),
+    'snowball_val_jul3_ko': dict(
+        price='0x1.dc0e070381c0ep+2', pv='0x1.dc0e070381c0ep+2',
+        ko=['0x1.0000000000000p+0', '0x0.0p+0', '0x0.0p+0'],
+        ko_cash=['0x1.dc0e070381c0ep+2', '0x0.0p+0', '0x0.0p+0'],
+        coupon=None,
+        coupon_cash=None,
+        maturity='0x0.0p+0', ki_settlement='0x0.0p+0', ki='0x0.0p+0'),
+}
+V2_FOLDED_PIN = '0x1.14b5db17456f1p+0'
+V2_COMPONENT_PINS = {
+    'coupon': '0x0.0p+0',
+    'ko': '0x1.82c813ff2d8f7p+1',
+    'pending': '0x0.0p+0',
+    'price': '-0x1.3355224f29360p-3',
+    'reconciliation_error': '0x1.0000000000000p-50',
+    'terminal': '-0x1.95fd66242022fp+1',
+}
+
+
+def _hex(values):
+    return None if values is None else [float(v).hex() for v in values]
+
+
+@pytest.mark.parametrize("name", sorted(V2_PINS))
+def test_v2_without_a_shared_instant_prices_and_reports_bitwise(name):
+    """Every product without a shared instant (Snowball, Phoenix in every coupon variant, KO-reset, the valuation
+    instant, the first step): price and statistics bitwise against the pins taken before T4."""
+    cls, product, e = _v2_pinned()[name]
+    pin = V2_PINS[name]
+    assert cls(QuadV2Params()).price(product, e).hex() == pin["price"]
+    stats = cls(QuadV2Params()).calculate_event_stats(product, e)
+    assert float(stats.pv).hex() == pin["pv"]
+    assert _hex(stats.observations.probability) == pin["ko"]
+    assert _hex(stats.observations.discounted_cash) == pin["ko_cash"]
+    assert _hex(None if stats.coupons is None else stats.coupons.probability) == pin["coupon"]
+    assert _hex(None if stats.coupons is None else stats.coupons.discounted_cash) == pin["coupon_cash"]
+    assert float(stats.maturity.probability).hex() == pin["maturity"]
+    assert float(stats.ki_settlement.probability).hex() == pin["ki_settlement"]
+    assert float(stats.knock_in.probability).hex() == pin["ki"]
+
+
+def test_v2_without_a_shared_instant_folds_and_splits_bitwise():
+    from test_asset.equity.engine_pde.test_same_instant_ko import _overlay
+
+    product, e = repro(drop_jul4=True), env()
+    folded = v2().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 5.0, 6.0]))
+    assert folded.hex() == V2_FOLDED_PIN
+    assert {k: float(v).hex() for k, v in v2().price_components(product, e).items()} == V2_COMPONENT_PINS
