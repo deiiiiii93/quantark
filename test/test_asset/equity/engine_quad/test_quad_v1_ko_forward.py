@@ -4,8 +4,8 @@ The default statistics read the knock-out units and the terminal maturity / knoc
 march's adjoint forward pass instead of marching one backward column per outcome (the 0.13.0 cost: one row per
 knock-out record). The stacked route stays for a march the adjoint cannot transpose, and as the reference here:
 
-* AC1: forward and stacked agree within the adjoint identity (knock-out probability per record 1e-12, terminal
-  probabilities 1e-11, cash 1e-9 on a 100 notional); the knock-in path fields and the coupon fields are bitwise.
+* AC1: forward and stacked agree within the adjoint identity (knock-out and terminal probabilities 1e-12, cash
+  1e-10 on a 100 notional); the knock-in path fields and the coupon fields are bitwise.
 * AC3: a refused transpose re-runs the stacked march and gives its numbers bitwise.
 * price() is untouched (the statistics' ``pv`` is ``price()`` on both routes).
 """
@@ -26,8 +26,8 @@ from test_asset.equity.engine_quad.test_quad_v1_exact_mass import CASES as EXACT
 from test_asset.equity.engine_quad.test_quad_v1_exact_mass import _env as exact_env
 
 PROBABILITY_TOL = 1e-12
-TERMINAL_TOL = 1e-11
-CASH_TOL = 1e-9
+TERMINAL_TOL = 1e-12
+CASH_TOL = 1e-10
 #: fields whose numbers come from the outcome columns (compared to tolerance); everything else is bitwise
 OUTCOME_PATHS = ("observations", "maturity", "ki_settlement", "ledger", "total_discounted_cash", "expected_lifetime",
                  "probability_residual", "reconciliation_error", "knock_in.expected_loss",
@@ -95,6 +95,32 @@ def test_forward_route_matches_the_stacked_route(name):
     stacked = _stats(type(engine)(engine.params), product, market, "stacked")
     assert forward.pv == stacked.pv == type(engine)(engine.params).price(product, market)
     compare(forward, stacked)
+
+
+@pytest.mark.parametrize("name", ["sb_transition_dki", "sb_dki", "sb_cki", "ph_mem_expiry_dki", "ph_nomem_instant_dki",
+                                  "kr_cki", "kr_dki", "carried", "ki_at_valuation_cki"])
+def test_forward_route_matches_on_the_lattice_readouts(name):
+    """The exact first step switched off: the transition and the interpolation readouts feed the pass (checkpoint)."""
+    engine, product, market = adjoint_case(name)
+    other = type(engine)(engine.params)
+    engine._FIRST_STEP_S_F = other._FIRST_STEP_S_F = 0.0
+    forward = _stats(engine, product, market, "forward")
+    stacked = _stats(other, product, market, "stacked")
+    assert engine._last_v1_march.first_step is None
+    compare(forward, stacked)
+
+
+def test_auto_converge_keeps_the_route():
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+    from quantark.asset.equity.param import QuadParams
+
+    _, product, market = adjoint_case("sb_dki")
+    engine = SnowballQuadEngine(QuadParams(grid_points=401, auto_converge=True))
+    engine._v1_statistics_route = "stacked"
+    engine.calculate_event_stats(product, market)
+    assert engine._last_v1_march.columns[("ko", 0)] != 0.0
+    forward = SnowballQuadEngine(QuadParams(grid_points=401, auto_converge=True))
+    compare(forward.calculate_event_stats(product, market), engine.calculate_event_stats(product, market))
 
 
 @pytest.mark.parametrize("name", ["daily_ko_1y_vol05", "quarter_hour_ki_8001"])

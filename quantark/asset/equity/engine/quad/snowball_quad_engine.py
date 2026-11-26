@@ -877,6 +877,7 @@ class SnowballQuadEngine(BaseEngine):
         # the accepted rung's ladder: rule (i) sizing and the local stencil follow the same switch as the price
         candidate._local_steps_allowed = self._last_convergence_info.get("local_steps_allowed", True)
         candidate._exact_lattice_mass = self._exact_lattice_mass
+        candidate._v1_statistics_route = self._v1_statistics_route
         stats = candidate._compute_event_stats(product, pricing_env, streams=streams, pv=pv)
         self._last_v1_march = getattr(candidate, "_last_v1_march", None)
         return stats
