@@ -64,6 +64,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._post_ko_terminal_record: Optional[ResolvedObservationRecord] = None
         self._has_pre_terminal_ko: bool = False
         self._has_post_terminal_ko: bool = False
+        # same-instant knock-out groups of >= 2 effective records per schedule (0.16.0 D14): step -> the group in
+        # contract order (the step's slot holds its first record); the maturity instant's group
+        self._pre_ko_groups: Dict[int, Tuple[ResolvedObservationRecord, ...]] = {}
+        self._post_ko_groups: Dict[int, Tuple[ResolvedObservationRecord, ...]] = {}
+        self._pre_ko_terminal_group: Optional[Tuple[ResolvedObservationRecord, ...]] = None
+        self._post_ko_terminal_group: Optional[Tuple[ResolvedObservationRecord, ...]] = None
 
     def _constructor_kwargs(self) -> dict:
         return {"params": self.params}   # no enable_profiling argument
@@ -131,6 +137,8 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                     barrier=rec.barrier,
                     payoff=payoff,
                     settlement_time=settlement_time,
+                    # contract order and the statistics' per-record keys of a same-instant pair (0.16.0 D14)
+                    observation_date=rec.observation_date,
                 )
             )
         return ko_records
@@ -277,6 +285,63 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._register_post_ko_observations(
             product, pricing_env, tau, step_of=layout.time.step_at
         )
+        self._register_same_instant_groups(product, pricing_env, layout, tau)
+
+    def _register_same_instant_groups(self, product, pricing_env, layout, tau) -> None:
+        """The records of one env instant (0.16.0 D14): each schedule's knock-out records sharing an instant are one
+        group in contract order (``same_instant_ko_groups``: a record whose region an earlier one's contains is inert),
+        the step's slot holding the group's first record; the discrete knock-in records sharing an instant knock in
+        where the spot breaches any of them -- the widest level (a knock-in is idempotent at one spot). Instants of
+        one record keep today's maps."""
+        self._pre_ko_groups, self._post_ko_groups = {}, {}
+        self._pre_ko_terminal_group = self._post_ko_terminal_group = None
+        step_of = layout.time.step_at
+        for records, slots, groups, schedule in (
+                (self._get_cached_pre_ko_records(pricing_env, product), self._pre_ko_observation_indices,
+                 self._pre_ko_groups, "pre"),
+                (self._get_cached_post_ko_records(pricing_env, product), self._post_ko_observation_indices,
+                 self._post_ko_groups, "post")):
+            records = self._filter_observations_by_tau(records, tau)
+            if len(records) < 2:
+                continue
+            for _, effective in SnowballPDESolver._instant_groups(product, records):
+                if not effective:
+                    continue
+                group = tuple(effective) if len(effective) >= 2 else None
+                t = float(effective[0].observation_time)
+                if same_instant(t, tau):
+                    if schedule == "pre":
+                        self._pre_ko_terminal_record, self._pre_ko_terminal_group = effective[0], group
+                        self._ko_terminal_record = effective[0]
+                    else:
+                        self._post_ko_terminal_record, self._post_ko_terminal_group = effective[0], group
+                    continue
+                step = 0 if is_close(t, 0.0) else step_of(t)
+                slots[step] = effective[0]
+                if schedule == "pre":       # the base map the boundary rows read names the same record
+                    self._ko_observation_indices[step] = effective[0]
+                if group is not None:
+                    groups[step] = group
+        if product.has_ki_barrier and not self._ki_continuous and self._ki_barrier_by_tidx:
+            profile = self._get_cached_ki_profile(pricing_env, product)
+            times, barriers = profile["observation_times"], profile.get("barriers") or []
+            by_step: Dict[int, List[float]] = {}
+            for i, obs_time in enumerate(times):
+                if obs_time is None:
+                    continue
+                barrier = barriers[i] if i < len(barriers) and barriers[i] is not None else self._ki_barrier
+                if is_close(obs_time, 0.0):
+                    idx = 0
+                elif same_instant(obs_time, tau):
+                    idx = layout.time.actual_steps
+                elif 0.0 < obs_time < tau:
+                    idx = step_of(obs_time)
+                else:
+                    continue
+                by_step.setdefault(idx, []).append(float(barrier))
+            for idx, levels in by_step.items():
+                if len(levels) >= 2 and idx in self._ki_barrier_by_tidx:
+                    self._ki_barrier_by_tidx[idx] = min(levels) if product.is_reverse else max(levels)
 
     def _register_post_ko_observations(
         self,
@@ -414,17 +479,31 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         pre_record = self._pre_ko_observation_indices.get(t_idx)
         # the first-schedule knock-out wins a tie with a discrete knock-in (see _pre_ko_goes_last)
         pre_ko_last = pre_record is not None and self._pre_ko_goes_last()
+        pre_group = self._pre_ko_groups.get(t_idx) if self._pre_ko_groups else None
+
+        def pre_knock_out():
+            if pre_group is not None:   # a same-instant group: one stage (0.16.0 D14)
+                self._ko_group_columns([v0], s_vec, t_idx, pre_group, product, pricing_env, current_time,
+                                       breach=breach, surfaces=("alive",))
+            else:
+                self._ko_columns([v0], s_vec, t_idx, pre_record, product, pricing_env, current_time,
+                                 breach=breach, surfaces=("alive",))
+
         if pre_record is not None and not pre_ko_last:
-            self._ko_columns([v0], s_vec, t_idx, pre_record, product, pricing_env, current_time,
-                             breach=breach, surfaces=("alive",))
+            pre_knock_out()
 
         post_record = self._post_ko_observation_indices.get(t_idx)
         if (
             post_record is not None
             and not product.barrier_config.disable_ko_after_ki
         ):
-            self._ko_columns([v1], s_vec, t_idx, post_record, product, pricing_env, current_time,
-                             breach=breach, surfaces=("ki",))
+            post_group = self._post_ko_groups.get(t_idx) if self._post_ko_groups else None
+            if post_group is not None:
+                self._ko_group_columns([v1], s_vec, t_idx, post_group, product, pricing_env, current_time,
+                                       breach=breach, surfaces=("ki",))
+            else:
+                self._ko_columns([v1], s_vec, t_idx, post_record, product, pricing_env, current_time,
+                                 breach=breach, surfaces=("ki",))
 
         v0_live = self._v0_seed_idx is None or t_idx <= self._v0_seed_idx
         if product.has_ki_barrier and v0_live:
@@ -435,8 +514,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 self._ki_columns(v0, v1, s_vec, t_idx, num_t, product)
 
         if pre_ko_last:
-            self._ko_columns([v0], s_vec, t_idx, pre_record, product, pricing_env, current_time,
-                             breach=breach, surfaces=("alive",))
+            pre_knock_out()
 
     def _pre_ko_goes_last(self) -> bool:
         """Whether a first-schedule knock-out is applied after the knock-in sharing its observation.
@@ -473,8 +551,18 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         surface: str = "alive",
     ) -> None:
         """One surface's terminal knock-out: ``"alive"`` for the pre schedule, ``"ki"`` for the post."""
-        self._terminal_ko_columns([grid[:, -1]], s_vec, ko_record, product, pricing_env,
-                                  surfaces=(surface,))
+        self._terminal_ko_single_columns([grid[:, -1]], s_vec, product, pricing_env, ko_record, surface)
+
+    def _terminal_ko_single_columns(self, cols, s_vec, product, pricing_env, ko_record, surface, breach=None):
+        """``_terminal_ko_columns`` of one schedule's maturity knock-out on ``cols``: its same-instant group when the
+        maturity instant holds one (0.16.0 D14), else its record."""
+        group = self._pre_ko_terminal_group if surface == "alive" else self._post_ko_terminal_group
+        if group is not None:
+            self._terminal_ko_group_columns(cols, s_vec, group, product, pricing_env, breach=breach,
+                                            surfaces=(surface,))
+        else:
+            self._terminal_ko_columns(cols, s_vec, ko_record, product, pricing_env, breach=breach,
+                                      surfaces=(surface,))
 
     def __repr__(self) -> str:
         return "KOResetSnowballPDESolver()"

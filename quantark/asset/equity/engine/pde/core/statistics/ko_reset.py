@@ -68,10 +68,35 @@ class KOResetStatistics(SnowballStatistics):
     def _breach(self):
         return KOResetBreach(self)
 
+    def _shared_instants(self):
+        """``{(surface, time): [(record, column), ...]}`` of every instant holding two or more records of one schedule
+        (0.16.0 D14): a record of such an instant resolves by itself (contract index), not by its time."""
+        shared = self.__dict__.get("_kor_shared")
+        if shared is None:
+            shared = self._kor_shared = {}
+            for surface, records, cols in (("alive", self.ko_records, self.layout.ko),
+                                           ("ki", self.post_records, self.layout.post_ko)):
+                for k, rec in enumerate(records):
+                    members = [(r, int(cols[i])) for i, r in enumerate(records)
+                               if same_instant(r.observation_time, rec.observation_time)]
+                    if len(members) > 1:
+                        shared[(surface, float(rec.observation_time))] = members
+        return shared
+
     def column_of_record(self, record_or_time, surface="alive"):
         t = float(getattr(record_or_time, "observation_time", record_or_time))
         records, cols = ((self.ko_records, self.layout.ko) if surface == "alive"
                          else (self.post_records, self.layout.post_ko))
+        shared = self._shared_instants()
+        if shared and not isinstance(record_or_time, (int, float)):
+            members = shared.get((surface, t))
+            if members is not None:
+                for rec, col in members:
+                    if rec is record_or_time:
+                        return col
+                for rec, col in members:
+                    if rec == record_or_time:
+                        return col
         for k, rec in enumerate(records):
             if same_instant(rec.observation_time, t):
                 return int(cols[k])
@@ -103,18 +128,18 @@ class KOResetStatistics(SnowballStatistics):
         pre_terminal_ko = solver._has_pre_terminal_ko and solver._pre_ko_terminal_record is not None
         pre_ko_last = pre_terminal_ko and solver._pre_ko_goes_last()
         if pre_terminal_ko and not pre_ko_last:
-            solver._terminal_ko_columns([v0], self.s, solver._pre_ko_terminal_record, product, env,
-                                        breach=self.breach, surfaces=("alive",))
+            solver._terminal_ko_single_columns([v0], self.s, product, env, solver._pre_ko_terminal_record, "alive",
+                                               breach=self.breach)
         if (solver._has_post_terminal_ko and solver._post_ko_terminal_record is not None
                 and not product.barrier_config.disable_ko_after_ki):
-            solver._terminal_ko_columns([v1], self.s, solver._post_ko_terminal_record, product, env,
-                                        breach=self.breach, surfaces=("ki",))
+            solver._terminal_ko_single_columns([v1], self.s, product, env, solver._post_ko_terminal_record, "ki",
+                                               breach=self.breach)
         if product.has_ki_barrier and not staged and (
                 solver._ki_continuous or (num_t - 1) in solver._ki_observation_indices):
             solver._ki_columns(v0, v1, self.s, num_t - 1, num_t, product)
         if pre_ko_last:
-            solver._terminal_ko_columns([v0], self.s, solver._pre_ko_terminal_record, product, env,
-                                        breach=self.breach, surfaces=("alive",))
+            solver._terminal_ko_single_columns([v0], self.s, product, env, solver._pre_ko_terminal_record, "alive",
+                                               breach=self.breach)
 
     def step_events(self, states, captures, j):
         # no event table: every step takes the inline stages, the seed included; no t=0 capture
@@ -145,15 +170,24 @@ class KOResetStatistics(SnowballStatistics):
             stages.append(adjoint.Seed(adjoint.ALIVE))
         pre = solver._pre_ko_observation_indices.get(j)
         pre_last = pre is not None and solver._pre_ko_goes_last()
+        pre_group = solver._pre_ko_groups.get(j) if solver._pre_ko_groups else None
+        post_group = solver._post_ko_groups.get(j) if solver._post_ko_groups else None
+
+        def pre_ko():
+            if pre_group is not None:   # a same-instant group: the march's one stage (0.16.0 D14)
+                return self._adjoint_ko_group(j, pre_group, [adjoint.ALIVE], ops)
+            return self._adjoint_ko_columns(j, pre, [adjoint.ALIVE], ops)
+
         if pre is not None and not pre_last:
-            stages += self._adjoint_ko_columns(j, pre, [adjoint.ALIVE], ops)
+            stages += pre_ko()
         post = solver._post_ko_observation_indices.get(j)
         if post is not None and not product.barrier_config.disable_ko_after_ki:
-            stages += self._adjoint_ko_columns(j, post, [adjoint.KI], ops)
+            stages += (self._adjoint_ko_group(j, post_group, [adjoint.KI], ops) if post_group is not None
+                       else self._adjoint_ko_columns(j, post, [adjoint.KI], ops))
         if (seed is None or j <= seed) and self._adjoint_ki_applies(j):
             stages.append(self._adjoint_ki_columns(j, ops))
         if pre_last:
-            stages += self._adjoint_ko_columns(j, pre, [adjoint.ALIVE], ops)
+            stages += pre_ko()
         return stages
 
     def _adjoint_terminal(self, ops):
@@ -164,15 +198,21 @@ class KOResetStatistics(SnowballStatistics):
         pre_terminal = solver._has_pre_terminal_ko and solver._pre_ko_terminal_record is not None
         pre_last = pre_terminal and solver._pre_ko_goes_last()
         stages = []
+
+        def terminal_ko(record, group, surface):
+            if group is not None:       # the maturity instant's group (0.16.0 D14)
+                return self._adjoint_terminal_ko_group(group, [surface], ops)
+            return self._adjoint_terminal_ko(record, [surface], ops)
+
         if pre_terminal and not pre_last:
-            stages += self._adjoint_terminal_ko(solver._pre_ko_terminal_record, [adjoint.ALIVE], ops)
+            stages += terminal_ko(solver._pre_ko_terminal_record, solver._pre_ko_terminal_group, adjoint.ALIVE)
         if (solver._has_post_terminal_ko and solver._post_ko_terminal_record is not None
                 and not product.barrier_config.disable_ko_after_ki):
-            stages += self._adjoint_terminal_ko(solver._post_ko_terminal_record, [adjoint.KI], ops)
+            stages += terminal_ko(solver._post_ko_terminal_record, solver._post_ko_terminal_group, adjoint.KI)
         if not staged and self._adjoint_ki_applies(num_t - 1):
             stages.append(self._adjoint_ki_columns(num_t - 1, ops))
         if pre_last:
-            stages += self._adjoint_terminal_ko(solver._pre_ko_terminal_record, [adjoint.ALIVE], ops)
+            stages += terminal_ko(solver._pre_ko_terminal_record, solver._pre_ko_terminal_group, adjoint.ALIVE)
         return stages
 
     def _probability_rows(self, j, current, rows, edges):

@@ -1,0 +1,749 @@
+{
+ "ko_reset_absolute": {
+  "price": "0x1.1be4ac90399aep+3",
+  "stats": {
+   "ki": "0x1.f2f17b5136b91p-5",
+   "ki_settlement": "0x1.d40cc57847e07p-5",
+   "ko": [
+    "0x1.8026c941eaa5bp-2",
+    "0x1.24f38ea6265ddp-3",
+    "0x1.2962d575486abp-4",
+    "0x1.bc6bbabb4f13dp-11",
+    "0x1.bca5a413667dbp-10",
+    "0x1.41bb3a1ea74fbp-10"
+   ],
+   "ko_cash": [
+    "0x1.67076efb605dfp+2",
+    "0x1.10d12bee4c3fep+1",
+    "0x1.14067ca5f0a31p+0",
+    "0x1.48e6a186469d0p-9",
+    "0x1.47f926de8e830p-8",
+    "0x1.d9de1d846b8acp-9"
+   ],
+   "lifetime": "0x1.813a160e5f7efp-2",
+   "maturity": "0x1.64a88aa70bd6dp-2",
+   "pv": "0x1.1be4ac90399aep+3",
+   "recon": "-0x1.0000000000000p-49"
+  }
+ },
+ "phoenix_EXPIRY_False_continuous": {
+  "price": "-0x1.872e65d55ed28p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95daa2p-1",
+    "0x1.1f8b4c5a79f30p-1",
+    "0x1.85951156243b7p-2",
+    "0x1.225b769db2819p-2",
+    "0x1.c6eb9bbba58a8p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f4800a240d5cfp-1",
+    "0x1.1b6569b92c3d6p-1",
+    "0x1.7f09b0095b30ap-2",
+    "0x1.1d0c4b4389f20p-2",
+    "0x1.be2a398746d76p-3"
+   ],
+   "ki": "0x1.15d19849d6df6p-3",
+   "ki_settlement": "0x1.1498273bec716p-3",
+   "ko": [
+    "0x1.8024b2cd6d51dp-2",
+    "0x1.24f69cbe79f30p-3",
+    "0x1.297d0ca198d3bp-4",
+    "0x1.7e34be4ca8bd2p-5",
+    "0x1.0ff6d4888798dp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245eedap-1",
+   "maturity": "0x1.8dde6b8dca7c4p-3",
+   "pv": "-0x1.872e65d55ed28p+0",
+   "recon": "-0x1.4000000000000p-49"
+  }
+ },
+ "phoenix_EXPIRY_False_discrete": {
+  "price": "0x1.cee27757095bdp-6",
+  "stats": {
+   "coupon": [
+    "0x1.f9c13a7989322p-1",
+    "0x1.1f8ae48705e75p-1",
+    "0x1.8594678acb45ep-2",
+    "0x1.225ae8b76919cp-2",
+    "0x1.c6eab3ae187fdp-3"
+   ],
+   "coupon_cash": [
+    "0x1.f48031fee49a4p-1",
+    "0x1.1b65035ebee34p-1",
+    "0x1.7f090948e483bp-2",
+    "0x1.1d0bc00f3ced7p-2",
+    "0x1.be2955ff44b0ep-3"
+   ],
+   "ki": "0x1.28f4c7ebe2fb0p-4",
+   "ki_settlement": "0x1.28961cbb708dep-4",
+   "ko": [
+    "0x1.80255a2873d3bp-2",
+    "0x1.24f62036994b2p-3",
+    "0x1.297cba7d5614bp-4",
+    "0x1.7e345b671cffcp-5",
+    "0x1.0ff6926c15a3cp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4a32657071p-1",
+   "maturity": "0x1.071582391159cp-2",
+   "pv": "0x1.cee27757095bdp-6",
+   "recon": "-0x1.a600000000000p-51"
+  }
+ },
+ "phoenix_EXPIRY_True_continuous": {
+  "price": "-0x1.6dc0c8ab1a174p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95daa2p-1",
+    "0x1.1f8b4c5a79f30p-1",
+    "0x1.85951156243b7p-2",
+    "0x1.225b769db2819p-2",
+    "0x1.c6eb9bbba58a8p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f4800a240d5cfp-1",
+    "0x1.1daf5455292fcp-1",
+    "0x1.931b4a425e4f2p-2",
+    "0x1.3ea0748a11ca0p-2",
+    "0x1.0a91f8b5317fcp-2"
+   ],
+   "ki": "0x1.15d19849d6df6p-3",
+   "ki_settlement": "0x1.1498273bec716p-3",
+   "ko": [
+    "0x1.8024b2cd6d51dp-2",
+    "0x1.24f69cbe79f30p-3",
+    "0x1.297d0ca198d3bp-4",
+    "0x1.7e34be4ca8bd2p-5",
+    "0x1.0ff6d4888798dp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245eedap-1",
+   "maturity": "0x1.8dde6b8dca7c4p-3",
+   "pv": "-0x1.6dc0c8ab1a174p+0",
+   "recon": "-0x1.3000000000000p-48"
+  }
+ },
+ "phoenix_EXPIRY_True_discrete": {
+  "price": "0x1.0549dbd6967c3p-3",
+  "stats": {
+   "coupon": [
+    "0x1.f9c13a7989322p-1",
+    "0x1.1f8ae48705e75p-1",
+    "0x1.8594678acb45ep-2",
+    "0x1.225ae8b76919cp-2",
+    "0x1.c6eab3ae187fdp-3"
+   ],
+   "coupon_cash": [
+    "0x1.f48031fee49a4p-1",
+    "0x1.1daee5d3e329cp-1",
+    "0x1.931abbafa8421p-2",
+    "0x1.3ea00e3bfe2f8p-2",
+    "0x1.0a91abf7af75cp-2"
+   ],
+   "ki": "0x1.28f4c7ebe2fb0p-4",
+   "ki_settlement": "0x1.28961cbb708dep-4",
+   "ko": [
+    "0x1.80255a2873d3bp-2",
+    "0x1.24f62036994b2p-3",
+    "0x1.297cba7d5614bp-4",
+    "0x1.7e345b671cffcp-5",
+    "0x1.0ff6926c15a3cp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4a32657071p-1",
+   "maturity": "0x1.071582391159cp-2",
+   "pv": "0x1.0549dbd6967c3p-3",
+   "recon": "-0x1.9c00000000000p-49"
+  }
+ },
+ "phoenix_INSTANT_False_continuous": {
+  "price": "-0x1.8307943aa3c35p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95daa3p-1",
+    "0x1.1f8b4c5a79f34p-1",
+    "0x1.85951156243c1p-2",
+    "0x1.225b769db2817p-2",
+    "0x1.c6eb9bbba589fp-3"
+   ],
+   "coupon_cash": [
+    "0x1.f830f14640335p-1",
+    "0x1.1da2303dea23dp-1",
+    "0x1.81b4b5059035bp-2",
+    "0x1.1e82f483ffc7cp-2",
+    "0x1.bf66b34806a35p-3"
+   ],
+   "ki": "0x1.15d19849d6df6p-3",
+   "ki_settlement": "0x1.1498273bec716p-3",
+   "ko": [
+    "0x1.8024b2cd6d51dp-2",
+    "0x1.24f69cbe79f30p-3",
+    "0x1.297d0ca198d3bp-4",
+    "0x1.7e34be4ca8bd2p-5",
+    "0x1.0ff6d4888798dp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245eedap-1",
+   "maturity": "0x1.8dde6b8dca7c4p-3",
+   "pv": "-0x1.8307943aa3c35p+0",
+   "recon": "0x0.0p+0"
+  }
+ },
+ "phoenix_INSTANT_False_discrete": {
+  "price": "0x1.6c4b4bc10dcbep-5",
+  "stats": {
+   "coupon": [
+    "0x1.f9c13a7989325p-1",
+    "0x1.1f8ae48705e77p-1",
+    "0x1.8594678acb451p-2",
+    "0x1.225ae8b769191p-2",
+    "0x1.c6eab3ae187f4p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f83118f6ec22fp-1",
+    "0x1.1da1c91b117d1p-1",
+    "0x1.81b40ceab91f5p-2",
+    "0x1.1e82687ed9228p-2",
+    "0x1.bf65cf105cc4cp-3"
+   ],
+   "ki": "0x1.28f4c7ebe2fb0p-4",
+   "ki_settlement": "0x1.28961cbb708dep-4",
+   "ko": [
+    "0x1.80255a2873d3bp-2",
+    "0x1.24f62036994b2p-3",
+    "0x1.297cba7d5614bp-4",
+    "0x1.7e345b671cffcp-5",
+    "0x1.0ff6926c15a3cp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4a32657071p-1",
+   "maturity": "0x1.071582391159cp-2",
+   "pv": "0x1.6c4b4bc10dcbep-5",
+   "recon": "0x1.a600000000000p-49"
+  }
+ },
+ "phoenix_INSTANT_True_continuous": {
+  "price": "-0x1.6973c8f9e9245p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95daa3p-1",
+    "0x1.1f8b4c5a79f34p-1",
+    "0x1.85951156243c1p-2",
+    "0x1.225b769db2817p-2",
+    "0x1.c6eb9bbba589fp-3"
+   ],
+   "coupon_cash": [
+    "0x1.f830f14640335p-1",
+    "0x1.1ff30c90c07aep-1",
+    "0x1.95f612d50c824p-2",
+    "0x1.404e1bab98647p-2",
+    "0x1.0b54490a2c3c6p-2"
+   ],
+   "ki": "0x1.15d19849d6df6p-3",
+   "ki_settlement": "0x1.1498273bec716p-3",
+   "ko": [
+    "0x1.8024b2cd6d51dp-2",
+    "0x1.24f69cbe79f30p-3",
+    "0x1.297d0ca198d3bp-4",
+    "0x1.7e34be4ca8bd2p-5",
+    "0x1.0ff6d4888798dp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245eedap-1",
+   "maturity": "0x1.8dde6b8dca7c4p-3",
+   "pv": "-0x1.6973c8f9e9245p+0",
+   "recon": "-0x1.9000000000000p-48"
+  }
+ },
+ "phoenix_INSTANT_True_discrete": {
+  "price": "0x1.27b1d16f0490ap-3",
+  "stats": {
+   "coupon": [
+    "0x1.f9c13a7989325p-1",
+    "0x1.1f8ae48705e77p-1",
+    "0x1.8594678acb451p-2",
+    "0x1.225ae8b769191p-2",
+    "0x1.c6eab3ae187f4p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f83118f6ec22fp-1",
+    "0x1.1ff29d2ddee8ap-1",
+    "0x1.95f58324abe2fp-2",
+    "0x1.404db4cf4e127p-2",
+    "0x1.0b53fc178c6bdp-2"
+   ],
+   "ki": "0x1.28f4c7ebe2fb0p-4",
+   "ki_settlement": "0x1.28961cbb708dep-4",
+   "ko": [
+    "0x1.80255a2873d3bp-2",
+    "0x1.24f62036994b2p-3",
+    "0x1.297cba7d5614bp-4",
+    "0x1.7e345b671cffcp-5",
+    "0x1.0ff6926c15a3cp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4a32657071p-1",
+   "maturity": "0x1.071582391159cp-2",
+   "pv": "0x1.27b1d16f0490ap-3",
+   "recon": "-0x1.0000000000000p-49"
+  }
+ },
+ "phoenix_annualized": {
+  "price": "-0x1.2f7144655ef5dp-1",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95daa3p-1",
+    "0x1.1f8b4c5a79f34p-1",
+    "0x1.85951156243c1p-2",
+    "0x1.225b769db2817p-2",
+    "0x1.c6eb9bbba589fp-3"
+   ],
+   "coupon_cash": [
+    "0x1.45ff61c9d3f16p+0",
+    "0x1.8d6760ed8074fp-1",
+    "0x1.074d7e578b547p-1",
+    "0x1.b1c00b9e3d075p-2",
+    "0x1.65a5bd0614bc3p-2"
+   ],
+   "ki": "0x1.15d19849d6df6p-3",
+   "ki_settlement": "0x1.1498273bec716p-3",
+   "ko": [
+    "0x1.8024b2cd6d51dp-2",
+    "0x1.24f69cbe79f30p-3",
+    "0x1.297d0ca198d3bp-4",
+    "0x1.7e34be4ca8bd2p-5",
+    "0x1.0ff6d4888798dp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245eedap-1",
+   "maturity": "0x1.8dde6b8dca7c4p-3",
+   "pv": "-0x1.2f7144655ef5dp-1",
+   "recon": "0x1.9000000000000p-49"
+  }
+ },
+ "phoenix_first_step": {
+  "price": "0x1.2c67c11861945p+0",
+  "stats": {
+   "coupon": [
+    "0x1.00000001b0d7ep+0",
+    "0x1.e7f71e769e77ep-1",
+    "0x1.152b69a1f9a6ep-1"
+   ],
+   "coupon_cash": [
+    "0x1.fff5991197da8p-1",
+    "0x1.e64d88c9a5962p-1",
+    "0x1.163a74d9e2410p-1"
+   ],
+   "ki": "0x1.6e5c811c93b36p-5",
+   "ki_settlement": "0x1.6e5c2bd4d20dfp-5",
+   "ko": [
+    "0x1.fc38bf3112da2p-6",
+    "0x1.74d4e299af17bp-2",
+    "0x1.0bcd5bbf5d081p-3"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.5fa9322bb3558p-2",
+   "maturity": "0x1.b7b55e2bf840ap-2",
+   "pv": "0x1.2c67c11861945p+0",
+   "recon": "-0x1.8000000000000p-51"
+  }
+ },
+ "phoenix_heston": {
+  "price": "-0x1.d9a799af04288p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f58766b2c3d07p-1",
+    "0x1.13b2a63ea050ep-1",
+    "0x1.6eb7f469fc2c1p-2",
+    "0x1.117636cd877c4p-2",
+    "0x1.b08f855dd9b29p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f3fa9d1505b2fp-1",
+    "0x1.159e74fbf0a2bp-1",
+    "0x1.821b27b9c25ffp-2",
+    "0x1.3016bfe9fb170p-2",
+    "0x1.fbc33bbf7ad27p-3"
+   ],
+   "ki": "0x1.2e496d434c203p-3",
+   "ki_settlement": "0x1.286e5f3d99a70p-3",
+   "ko": [
+    "0x1.8f00d325bb551p-2",
+    "0x1.319659433c988p-3",
+    "0x1.2ce8cdcd84876p-4",
+    "0x1.7a4a54ea56c30p-5",
+    "0x1.0893b55370a67p-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.065ecd0f1507ap-1",
+   "maturity": "0x1.50cdb7bd7f39ep-3",
+   "pv": "-0x1.d9a799af04288p+0",
+   "recon": "0x1.4000000000000p-49"
+  }
+ },
+ "phoenix_lv": {
+  "price": "-0x1.6973c8f9e9655p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95db47p-1",
+    "0x1.1f8b4c5a79ff8p-1",
+    "0x1.859511562454cp-2",
+    "0x1.225b769db2960p-2",
+    "0x1.c6eb9bbba5aebp-3"
+   ],
+   "coupon_cash": [
+    "0x1.f830f146403d8p-1",
+    "0x1.1ff30c90c0878p-1",
+    "0x1.95f612d50c9b6p-2",
+    "0x1.404e1bab987a1p-2",
+    "0x1.0b54490a2c506p-2"
+   ],
+   "ki": "0x1.15d19849d6ef7p-3",
+   "ki_settlement": "0x1.1498273bec8adp-3",
+   "ko": [
+    "0x1.8024b2cd6d596p-2",
+    "0x1.24f69cbe79fe8p-3",
+    "0x1.297d0ca198eb4p-4",
+    "0x1.7e34be4ca8e26p-5",
+    "0x1.0ff6d48887b04p-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245f034p-1",
+   "maturity": "0x1.8dde6b8dcaa26p-3",
+   "pv": "-0x1.6973c8f9e9655p+0",
+   "recon": "-0x1.0000000000000p-50"
+  }
+ },
+ "phoenix_maturity_record": {
+  "price": "-0x1.a8f3dcc195af0p+1",
+  "stats": {
+   "coupon": [
+    "0x1.c80ed47ffff16p-1",
+    "0x1.924809169943fp-2"
+   ],
+   "coupon_cash": [
+    "0x1.c385237455c9ep-1",
+    "0x1.ad6d502af798ep-2"
+   ],
+   "ki": "0x1.466f168280cc0p-3",
+   "ki_settlement": "0x1.437c1c2ae99c1p-3",
+   "ko": [
+    "0x1.af3aa2f9497e9p-2",
+    "0x1.098a3e9e529dap-3"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.9304403b556bcp-1",
+   "maturity": "0x1.2a422faaccfa7p-2",
+   "pv": "-0x1.a8f3dcc195af0p+1",
+   "recon": "-0x1.2000000000000p-48"
+  }
+ },
+ "phoenix_nodal": {
+  "price": "-0x1.6887f15837563p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9f7af8d30192p-1",
+    "0x1.1f9787eda9cb6p-1",
+    "0x1.85eb06d28ec73p-2",
+    "0x1.22c40efe587ddp-2",
+    "0x1.c7bdbf3fdbfb4p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f86762f502516p-1",
+    "0x1.1feb72c3f46aap-1",
+    "0x1.95f13e402cdbdp-2",
+    "0x1.4047314147d7bp-2",
+    "0x1.0b48ae6f122dap-2"
+   ],
+   "ki": "0x1.1595b42195acdp-3",
+   "ki_settlement": "0x1.145b0aca95877p-3",
+   "ko": [
+    "0x1.812c1ec07d15fp-2",
+    "0x1.24ca339728ef8p-3",
+    "0x1.291c551c93eb1p-4",
+    "0x1.7d9cc2ad79e37p-5",
+    "0x1.0f7fa205900a8p-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0e67b13660666p-1",
+   "maturity": "0x1.8cad408b5193dp-3",
+   "pv": "-0x1.6887f15837563p+0",
+   "recon": "-0x1.9000000000000p-48"
+  }
+ },
+ "phoenix_nodal_expiry": {
+  "price": "0x1.e90ddff49086ap-4",
+  "stats": {
+   "coupon": [
+    "0x1.f9f7d787d8301p-1",
+    "0x1.1f97217d97b07p-1",
+    "0x1.85ea5e47fb8f8p-2",
+    "0x1.22c380f5f7834p-2",
+    "0x1.c7bcd54a63c20p-3"
+   ],
+   "coupon_cash": [
+    "0x1.f4b79e7843a4bp-1",
+    "0x1.1da711a3b1650p-1",
+    "0x1.93157a96bcaa4p-2",
+    "0x1.3e98f53a56443p-2",
+    "0x1.0a860aa62e46ep-2"
+   ],
+   "ki": "0x1.2a613b60e5c88p-4",
+   "ki_settlement": "0x1.2a001abbc9bc2p-4",
+   "ko": [
+    "0x1.812cc4d9cfd43p-2",
+    "0x1.24c9b787c542ep-3",
+    "0x1.291c03a7fc86ap-4",
+    "0x1.7d9c6064632c6p-5",
+    "0x1.0f7f5fbbf0199p-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0e67879e0f1abp-1",
+   "maturity": "0x1.0603dfcab98f6p-2",
+   "pv": "0x1.e90ddff49086ap-4",
+   "recon": "-0x1.0000000000000p-55"
+  }
+ },
+ "phoenix_one_record": {
+  "price": "0x1.c384afb098393p-1",
+  "stats": {
+   "coupon": [
+    "0x1.c80e5f8ec7536p-1"
+   ],
+   "coupon_cash": [
+    "0x1.c384afb098393p-1"
+   ],
+   "ki": "0x0.0p+0",
+   "ki_settlement": "0x0.0p+0",
+   "ko": [
+    "0x1.af3ad5ff715a0p-2"
+   ],
+   "ko_cash": [
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.9304339091c33p-1",
+   "maturity": "0x1.2862950179f8ep-1",
+   "pv": "0x1.c384afb098393p-1",
+   "recon": "0x0.0p+0"
+  }
+ },
+ "phoenix_single": {
+  "price": "-0x1.6973c8f9e9245p+0",
+  "stats": {
+   "coupon": [
+    "0x1.f9c112a95daa3p-1",
+    "0x1.1f8b4c5a79f34p-1",
+    "0x1.85951156243c1p-2",
+    "0x1.225b769db2817p-2",
+    "0x1.c6eb9bbba589fp-3"
+   ],
+   "coupon_cash": [
+    "0x1.f830f14640335p-1",
+    "0x1.1ff30c90c07aep-1",
+    "0x1.95f612d50c824p-2",
+    "0x1.404e1bab98647p-2",
+    "0x1.0b54490a2c3c6p-2"
+   ],
+   "ki": "0x1.15d19849d6df6p-3",
+   "ki_settlement": "0x1.1498273bec716p-3",
+   "ko": [
+    "0x1.8024b2cd6d51dp-2",
+    "0x1.24f69cbe79f30p-3",
+    "0x1.297d0ca198d3bp-4",
+    "0x1.7e34be4ca8bd2p-5",
+    "0x1.0ff6d4888798dp-5"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.0ec4cd245eedap-1",
+   "maturity": "0x1.8dde6b8dca7c4p-3",
+   "pv": "-0x1.6973c8f9e9245p+0",
+   "recon": "-0x1.9000000000000p-48"
+  }
+ },
+ "phoenix_val_jul3": {
+  "price": "-0x1.0ef3abc73e77cp+1",
+  "stats": {
+   "coupon": [
+    "0x1.0000000000000p+0",
+    "0x1.be6fde5af82f9p-1",
+    "0x1.640f3b82aaee4p-1"
+   ],
+   "coupon_cash": [
+    "0x1.0000000000000p+0",
+    "0x1.bcf38b11dde41p-1",
+    "0x1.768898c53f140p-1"
+   ],
+   "ki": "0x1.4812686abb0cap-3",
+   "ki_settlement": "0x1.480fcba1c721ap-3",
+   "ko": [
+    "0x1.c3365e1d702e3p-283",
+    "0x1.70f02d2ee3d7dp-4",
+    "0x1.bf0912d0ebfbcp-4"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.cb5feb095b014p-2",
+   "maturity": "0x1.47fce51f63160p-1",
+   "pv": "-0x1.0ef3abc73e77cp+1",
+   "recon": "-0x1.0000000000000p-50"
+  }
+ },
+ "phoenix_val_jul3_ko": {
+  "price": "0x1.0000000000000p+0",
+  "stats": {
+   "coupon": [
+    "0x1.0000000000000p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "coupon_cash": [
+    "0x1.0000000000000p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "ki": "0x0.0p+0",
+   "ki_settlement": "0x0.0p+0",
+   "ko": [
+    "0x1.0000000000000p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x0.0p+0",
+   "maturity": "0x0.0p+0",
+   "pv": "0x1.0000000000000p+0",
+   "recon": "0x0.0p+0"
+  }
+ },
+ "phoenix_val_jul3_miss": {
+  "price": "-0x1.37d05c7771af0p+4",
+  "stats": {
+   "coupon": [
+    "0x0.0p+0",
+    "0x1.07ce46dd8db1ap-2",
+    "0x1.44cb7b1f2ddecp-2"
+   ],
+   "coupon_cash": [
+    "0x0.0p+0",
+    "0x1.06ed898ed9affp-1",
+    "0x1.2e63f0707dff3p-1"
+   ],
+   "ki": "0x1.688231aa2cf40p-1",
+   "ki_settlement": "0x1.681de6cc71df2p-1",
+   "ko": [
+    "0x1.ea8e624b5dbe1p-344",
+    "0x1.d171554f7d029p-11",
+    "0x1.9b7215295c454p-7"
+   ],
+   "ko_cash": [
+    "0x0.0p+0",
+    "0x0.0p+0",
+    "0x0.0p+0"
+   ],
+   "lifetime": "0x1.f98b903ec3934p-2",
+   "maturity": "0x1.21ffe92402824p-2",
+   "pv": "-0x1.37d05c7771af0p+4",
+   "recon": "0x1.4000000000000p-46"
+  }
+ }
+}

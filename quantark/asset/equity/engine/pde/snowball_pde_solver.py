@@ -1058,9 +1058,17 @@ class SnowballPDESolver(BasePDESolver):
         Snowball (0.16.0 DCN/dated D2): the instant's records in contract order, and the ones an engine tests
         (``same_instant_ko_groups``: a record whose breach region an earlier one's contains is dropped) that carry a
         barrier. Empty for every other product, and for a schedule whose instants all hold one record -- the
-        engines then run exactly as before. Phoenix and KO-reset are out of scope (their records stay time-keyed)."""
+        engines then run exactly as before. The Phoenix solver extends the rule to the Phoenix
+        (``PhoenixPDESolver._shared_ko_instants``, D14); the KO-reset groups each of its schedules itself
+        (``KOResetSnowballPDESolver._register_same_instant_groups``)."""
         if type(product) is not SnowballOption or len(records) < 2:
             return ()
+        return SnowballPDESolver._instant_groups(product, records)
+
+    @staticmethod
+    def _instant_groups(product, records) -> Tuple[Tuple[list, list], ...]:
+        """``_shared_ko_instants`` without its product gate: ``(records, effective records with a barrier)`` per env
+        instant holding two or more of ``records``."""
         timed = sorted((r for r in records if r.observation_time is not None),
                        key=lambda r: float(r.observation_time))
         raw: List[list] = []

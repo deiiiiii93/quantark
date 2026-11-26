@@ -6,7 +6,8 @@ same spot in contract order; the first whose barrier is breached knocks out and 
 (1D, local-vol and Heston/Heston-SLV, all through ``SnowballAdapter._event_schedule``) stages such a group as ONE
 piecewise event (D3), identifies records by contract index (D4), replays the group in the forward adjoint from a
 ``"ko_group"`` evidence row (D5), attributes each knock-out to the record that fired it (D8) and refuses to fold cash
-onto a group of two or more effective records (D10). Phoenix and KO-reset are out of scope and stay as before (AC7).
+onto a group of two or more effective records (D10). Phoenix and KO-reset (T8) are covered in
+``test_same_instant_phoenix_ko_reset.py``; their AC7 rows here are pinned after T8.
 """
 from __future__ import annotations
 
@@ -359,7 +360,7 @@ def test_valuation_instant_statistics_put_probability_one_on_the_deciding_record
     assert sum(probs) == 1.0
 
 
-# --- AC7: Phoenix and KO-reset are unchanged ------------------------------------------------------------------------
+# --- AC7: Phoenix and KO-reset (moved by T8) -------------------------------------------------------------------------
 
 def _phoenix():
     from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
@@ -414,15 +415,17 @@ def _ac7_routes():
     from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import HestonPhoenixPDESolver, LocalVolPhoenixPDESolver
 
     return {
-        # name: (solver, product, env, pinned price BEFORE the T2 change, worktree 6ad50f8d)
-        "phoenix_pde": (lambda: PhoenixPDESolver(PDEParams()), _phoenix, env, "0x1.91bfe86d1fac6p+6"),
+        # name: (solver, product, env, pinned price AFTER T8 (D14 zero-gap on the Phoenix/KO-reset PDE); before T8, at
+        # 6ad50f8d..9fc56f6c: 0x1.91bfe86d1fac6p+6 / 0x1.91bfe86d1fbccp+6 / 0x1.901d7efae0b82p+6 / -0x1.042eb5ce01d20p-3 /
+        # -0x1.b0b937aeea858p-2 (one record of each pair dropped))
+        "phoenix_pde": (lambda: PhoenixPDESolver(PDEParams()), _phoenix, env, "0x1.938203ff9713ep+6"),
         "phoenix_lv_pde": (lambda: LocalVolPhoenixPDESolver(PDEParams()), _phoenix, lambda: env(grid=True),
-                           "0x1.91bfe86d1fbccp+6"),
+                           "0x1.938203ff97246p+6"),
         "phoenix_heston_pde": (lambda: HestonPhoenixPDESolver(HESTON, n_x=48, n_v=12, n_t=48), _phoenix, env,
-                               "0x1.901d7efae0b82p+6"),
-        "ko_reset_pde": (lambda: KOResetSnowballPDESolver(PDEParams()), _ko_reset, env, "-0x1.042eb5ce01d20p-3"),
+                               "0x1.91a5800c84806p+6"),
+        "ko_reset_pde": (lambda: KOResetSnowballPDESolver(PDEParams()), _ko_reset, env, "0x1.932c2d753031ap-5"),
         "ko_reset_heston_pde": (lambda: HestonKOResetSnowballPDESolver(HESTON, n_x=96, n_v=16, n_t=64), _ko_reset,
-                                env, "-0x1.b0b937aeea858p-2"),
+                                env, "-0x1.f6cbcbce1d934p-3"),
     }
 
 
@@ -430,18 +433,25 @@ AC7 = _ac7_routes()
 
 
 @pytest.mark.parametrize("name", list(AC7))
-def test_phoenix_and_ko_reset_with_a_same_instant_pair_price_as_before(name):
-    """AC7: grouping is gated to the plain Snowball; Phoenix and KO-reset price bitwise as before."""
+def test_phoenix_and_ko_reset_with_a_same_instant_pair_are_pinned(name):
+    """AC7: T2 left Phoenix and KO-reset untouched; T8 (D14 zero-gap rule, ``test_same_instant_phoenix_ko_reset.py``)
+    moved them -- pinned after T8 so a later silent move fails here."""
     make, product, make_env, pin = AC7[name]
     assert make().price(product(), make_env()) == float.fromhex(pin)
 
 
 @pytest.mark.parametrize("name", ["phoenix_pde", "ko_reset_pde"])
-def test_phoenix_and_ko_reset_statistics_still_refuse_a_same_instant_pair(name):
-    """AC7: their event statistics keep today's refusal (one observation row per time)."""
+def test_phoenix_and_ko_reset_knock_in_pair_statistics(name):
+    """These products also observe a discrete knock-in on both 07-03 and 07-04: the knock-in table still refuses the
+    repeated time (an open item, decided in T5); the knock-out (and coupon) rows are reported per record and reconcile."""
+    from quantark.cashleg.event_distribution import EventType
+
     make, product, make_env, _ = AC7[name]
-    with pytest.raises(ValidationError, match="duplicate rows"):
+    with pytest.raises(ValidationError, match="KnockInTable.times has duplicate rows"):
         make().calculate_event_stats(product(), make_env())
+    stats = make().calculate_event_stats(product(), make_env(), streams=frozenset({EventType.KO, EventType.COUPON}))
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+    assert stats.observations.dates is not None and JUL4 in stats.observations.dates
 
 
 # --- AC8: cash-leg folding ------------------------------------------------------------------------------------------

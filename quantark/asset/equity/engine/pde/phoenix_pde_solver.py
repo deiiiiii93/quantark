@@ -18,7 +18,7 @@ from quantark.asset.equity.engine.pde.core.statistics.rows import EdgeRow, RowTe
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
-from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord, at_valuation_instant
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
@@ -57,6 +57,9 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._term_next_ko_time: Optional[np.ndarray] = None
         self._term_next_ko_obs: Optional[np.ndarray] = None
         self._term_is_reverse: bool = False
+        # same-instant records (0.16.0 D14 zero-gap rule): step -> the instant's records in contract order, each
+        # ``(coupon observation index, record, knock-out test live)``; empty when every instant holds one record
+        self._phx_groups: Dict[int, tuple] = {}
 
     def _constructor_kwargs(self) -> dict:
         return {"params": self.params}   # no enable_profiling argument
@@ -106,6 +109,12 @@ class PhoenixPDESolver(SnowballPDESolver):
             raise ValidationError(
                 "Immediate KO payoff requested but no KO observation exists at valuation date."
             )
+        decision = self._valuation_decision(product, pricing_env)
+        legs = self._decided_coupon_legs(product, pricing_env, decision)
+        if legs is not None and decision.knocked_out:
+            # several records at the valuation instant (0.16.0 D14): the deciding record's redemption at its
+            # settlement, each decided coupon at its own payment time
+            return self._decided_legs_value(pricing_env, decision.ko_record, legs)
 
         payoff = float(ko_record_0.payoff or 0.0) + float(self._immediate_ko_coupon(product, pricing_env))
         settlement_time = ko_record_0.settlement_time
@@ -143,8 +152,11 @@ class PhoenixPDESolver(SnowballPDESolver):
                 return float(cash) * float(pricing_env.get_discount_factor(payment_time))
             return float(cash)
 
+        legs = self._decided_coupon_legs(product, pricing_env, decision)
         if decision.knocked_out:
             record = decision.ko_record
+            if legs is not None:
+                return self._decided_legs_value(pricing_env, record, legs)
             return discounted(float(record.payoff or 0.0) + decision.coupon, record.settlement_time)
         redemption = product.get_payoff(
             spot,
@@ -153,11 +165,47 @@ class PhoenixPDESolver(SnowballPDESolver):
             pricing_env=pricing_env,
         )
         value = discounted(redemption, self._terminal_payment_time(product, pricing_env))
+        if legs is not None:
+            return value + self._decided_legs_value(pricing_env, None, legs)
         if decision.coupon:
             value += discounted(
                 decision.coupon,
                 self._coupon_payment_time(product, pricing_env, decision.coupon_index),
             )
+        return value
+
+    def _decided_coupon_legs(self, product: PhoenixOption, pricing_env: PricingEnvironment, decision):
+        """The coupons decided at the valuation instant when several records sit on it (0.16.0 D14), per paying
+        record ``(index, cash, triggered, payment time)`` (QUAD V1's ``_decided_coupon_legs``): INSTANT pays each at
+        its own record's settlement, EXPIRY with the note's end (the knock-out decided now, else the terminal
+        payment). ``None`` when at most one record sits on the instant (the decision's single coupon, as before)."""
+        records = product.resolve_ko_observations(pricing_env)
+        if sum(1 for record in records if at_valuation_instant(record.observation_time)) < 2:
+            return None
+        if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
+            def when(index):
+                return records[index].settlement_time
+        else:
+            end = (decision.ko_record.settlement_time if decision.knocked_out
+                   else self._terminal_payment_time(product, pricing_env))
+
+            def when(index):
+                return end
+        return [(int(index), float(amount), bool(triggered), when(index))
+                for index, amount, triggered in decision.paid]
+
+    @staticmethod
+    def _decided_legs_value(pricing_env: PricingEnvironment, ko_record, legs) -> float:
+        """The decided legs' value from the valuation instant: the knock-out redemption (``ko_record``, ``None``
+        when none) at its settlement plus each coupon leg at its payment time."""
+        def discounted(cash: float, payment_time) -> float:
+            if payment_time is not None and payment_time > 0.0:
+                return float(cash) * float(pricing_env.get_discount_factor(payment_time))
+            return float(cash)
+
+        value = 0.0 if ko_record is None else discounted(float(ko_record.payoff or 0.0), ko_record.settlement_time)
+        for _, amount, _, payment_time in legs:
+            value += discounted(amount, payment_time)
         return value
 
     def _set_terminal_condition_vector(
@@ -305,6 +353,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._register_coupon_observations(
             product, pricing_env, layout.time.t, tau, step_of=layout.time.step_at
         )
+        self._register_phoenix_groups(product, pricing_env, layout, tau)
 
     def _state_arrears(self, obs_idx: int, state: int) -> float:
         """Arrears a memory state carries into the coupon observation ``obs_idx``: ``A0(m) + state``.
@@ -332,6 +381,12 @@ class PhoenixPDESolver(SnowballPDESolver):
         pricing_env: PricingEnvironment,
     ) -> None:
         current_time = self._total_tau - tau
+        group = self._phx_groups.get(t_idx) if self._phx_groups else None
+        if group is not None:
+            # several records on this env instant: one zero-gap stage (0.16.0 D14)
+            self._apply_phoenix_group_step(grid_v0_list, grid_v1_list, s_vec, t_idx, current_time, product,
+                                           pricing_env, group)
+            return
 
         # 1. Coupon Jump (Fan-In). When a KO observation shares the date and
         # events project, the KO site applies the coupon fan-in and the KO
@@ -1042,3 +1097,257 @@ class PhoenixPDESolver(SnowballPDESolver):
                         s_vec, barrier, product.is_reverse, t_idx,
                         grid_v1_list[k][:, t_idx], total_payoff, ko_mask=ko_mask,
                     )
+
+    # ------------------------------------------------------------------
+    # Same-instant records (0.16.0 DCN/dated D14, zero-gap rule)
+    # ------------------------------------------------------------------
+    #
+    # Records on one env instant are consecutive observations with zero elapsed time: at one spot, in contract
+    # order, record k (alive after records 1..k-1) pays its coupon (memory: plus the arrears since the last paid
+    # coupon) and then tests its knock-out (the release rule: a knock-out pays the arrears carried into it, and its
+    # coupon where its barrier is met); a knock-out ends the note. No record is dropped: a knock-out region inside an
+    # earlier record's is inert (``same_instant_ko_groups``), its coupon still counts. The instant is ONE stage on
+    # every memory state and regime -- the knock-in first (the knock-out wins a same-instant tie), then the chain:
+    # one piecewise cell average whose region branches are the chain on each region's indicators, or the chain on
+    # each node's own indicators (nodal). Every stage stays linear in the arrears, so the two-state fan carries it.
+
+    @staticmethod
+    def _shared_ko_instants(product, records):
+        """``SnowballPDESolver._shared_ko_instants`` extended to the Phoenix (D14): the records of every env instant
+        holding two or more, and the ones whose knock-out test is live."""
+        if type(product) is PhoenixOption and len(records) >= 2:
+            return SnowballPDESolver._instant_groups(product, records)
+        return SnowballPDESolver._shared_ko_instants(product, records)
+
+    def _register_phoenix_groups(self, product, pricing_env, layout, tau) -> None:
+        """``_phx_groups``: per step, the records of an env instant holding two or more, in contract order. The
+        step's coupon slot names the instant's first record (the knock-out slot its first live record, set by
+        ``SnowballPDESolver._populate_observation_maps``)."""
+        self._phx_groups = {}
+        records = self._get_cached_ko_records(pricing_env, product)
+        shared = self._shared_ko_instants(product, records)
+        if not shared:
+            return
+        index = {id(rec): i for i, rec in enumerate(records)}
+        last = len(layout.time.t) - 1
+        for members, effective in shared:
+            live = {id(rec) for rec in effective}
+            group = tuple(sorted(((index[id(rec)], rec, id(rec) in live) for rec in members), key=lambda g: g[0]))
+            t = float(group[0][1].observation_time)
+            if is_close(t, 0.0):
+                step = 0
+            elif same_instant(t, tau):
+                step = last
+            elif 0.0 < t < tau:
+                step = layout.time.step_at(t)
+            else:
+                continue
+            self._phx_groups[step] = group
+            self._coupon_observation_indices[step] = group[0][0]
+
+    def _zero_gap_outcome(self, group, pays, kos, ko_here: bool, arrears: float, memory: bool):
+        """The chain on one set of indicators: ``(coupons, knock_out, arrears_after)``. ``coupons``: the records that
+        pay a coupon and go on, ``(position, earned)``; ``knock_out``: ``(position, coupon cash paid with it)`` (the
+        release rule) or ``None``; ``arrears_after``: the arrears a survivor carries out of the instant. ``arrears``
+        is the arrears carried into the instant's first record."""
+        coupons = []
+        for pos, (obs_idx, _rec, live) in enumerate(group):
+            amount = float(self._coupon_amounts[obs_idx])
+            if ko_here and live and kos[pos]:
+                return coupons, (pos, amount + arrears if pays[pos] else arrears), 0.0
+            if pays[pos]:
+                coupons.append((pos, amount + arrears))
+                arrears = 0.0
+            elif memory:
+                arrears = arrears + amount
+        return coupons, None, arrears
+
+    def _group_patterns(self, s_vec, t_idx, group, product, projection: bool):
+        """``(combine, patterns)`` of the instant at ``t_idx``: ``patterns`` the distinct ``(pays, kos)`` indicator
+        tuples (per region between the sorted log levels when ``projection``, else per distinct node pattern of the
+        nodal masks) and ``combine(branches)`` the post-event column from one branch array per pattern (one pass of
+        ``project_piecewise_event``, or each node's own pattern's branch)."""
+        reverse = bool(product.is_reverse)
+        coupon_levels = [float(self._coupon_barriers[obs_idx]) for obs_idx, _, _ in group]
+        ko_levels = [float(rec.barrier) if (live and rec.barrier is not None) else None for _, rec, live in group]
+        s_arr = np.asarray(s_vec, dtype=float)
+        if projection:
+            def log_of(level):
+                return float(np.log(level)) if level > 0.0 else -np.inf
+
+            breaks = sorted({log_of(b) for b in coupon_levels + [b for b in ko_levels if b is not None] if b > 0.0})
+            lows, his = [-np.inf] + breaks, breaks + [np.inf]
+
+            def hit(level, j):
+                bx = log_of(level)
+                return bool(his[j] <= bx) if reverse else bool(bx <= lows[j])
+
+            patterns = [(tuple(hit(b, j) for b in coupon_levels),
+                         tuple(b is not None and hit(b, j) for b in ko_levels)) for j in range(len(lows))]
+            x_vec = np.log(s_arr)
+
+            def combine(branches):
+                if not breaks:
+                    return np.array(branches[0], dtype=float, copy=True)
+                return project_piecewise_event(x_vec, breaks, branches)
+
+            return combine, patterns
+        at_val = t_idx == 0
+        masks = [self._event_nodal_mask(s_arr, b, reverse, True, at_valuation=at_val) for b in coupon_levels]
+        masks += [self._event_nodal_mask(s_arr, b, reverse, True, at_valuation=at_val) if b is not None
+                  else np.zeros(s_arr.shape, dtype=bool) for b in ko_levels]
+        bits = np.stack([np.asarray(m, dtype=bool) for m in masks], axis=1)
+        unique, inverse = np.unique(bits, axis=0, return_inverse=True)
+        inverse = np.asarray(inverse).reshape(-1)
+        m = len(group)
+        patterns = [(tuple(bool(v) for v in row[:m]), tuple(bool(v) for v in row[m:])) for row in unique]
+        n = s_arr.shape[0]
+
+        def combine(branches):
+            arrs = np.stack([np.array(a, dtype=float) for a in np.broadcast_arrays(*branches)])
+            return np.array(arrs[inverse, np.arange(n)], dtype=float)
+
+        return combine, patterns
+
+    def _group_cash(self, group, pricing_env, t_idx, current_time, product):
+        """Per record of the instant ``(redemption with its folded cash, knock-out discount, INSTANT coupon
+        discount)``: ``_apply_ko_jump_vector``'s ``base_payoff`` and ``df``, ``_coupon_discount_scalar``."""
+        out = []
+        for obs_idx, rec, _ in group:
+            base = float(rec.payoff or 0.0)
+            if self._fold is not None:
+                base = base + self._fold_ko_cash(rec, ("alive", "ki"))
+            df = 1.0
+            if rec.settlement_time is not None and rec.settlement_time > current_time:
+                df = self._df_between_times(pricing_env, current_time, rec.settlement_time)
+            out.append((base, df, self._coupon_discount_scalar(t_idx, current_time, product, pricing_env, obs_idx)))
+        return out
+
+    @staticmethod
+    def _group_value(outcome, cash, d, u, w, expiry: bool, memory: bool, n: int):
+        """The chain's value on one pattern: a knock-out's cash, else the continuation with the arrears carried out
+        of the instant; the coupons paid before at their discount (EXPIRY: the termination value ``w``, or the
+        knock-out's settlement when a later record of the instant knocks out)."""
+        coupons, knock_out, after = outcome
+        if knock_out is None:
+            value = d + after * u if memory else np.array(d, dtype=float, copy=True)
+            if expiry:
+                earned = sum(e for _, e in coupons)
+                if coupons:
+                    value = value + earned * w
+            else:
+                for pos, earned in coupons:
+                    value = value + earned * cash[pos][2]
+            return value
+        pos, paid = knock_out
+        base, df, _ = cash[pos]
+        total = (base + paid) * df
+        for cpos, earned in coupons:
+            total += earned * (df if expiry else cash[cpos][2])
+        return np.full(n, total)
+
+    def _group_termination(self, t_idx, current_time, product, pricing_env, first):
+        """The termination values the chain's EXPIRY coupons take per regime: W's columns, or (at maturity, before W
+        exists) the discount to the terminal payment."""
+        if product.coupon_config.coupon_pay_type != CouponPayType.EXPIRY:
+            return None, None
+        if self._term_w0 is not None:
+            return self._term_w0[:, t_idx].copy(), self._term_w1[:, t_idx].copy()
+        scalar = self._coupon_discount_scalar(t_idx, current_time, product, pricing_env, first)
+        return scalar, scalar
+
+    def _apply_phoenix_group_step(self, grid_v0_list, grid_v1_list, s_vec, t_idx, current_time, product,
+                                  pricing_env, group) -> None:
+        """The instant's stage at ``t_idx``: the valuation-date readout (decided at the spot), the knock-in on every
+        state and on W, then the zero-gap chain on the value and on W."""
+        if t_idx == 0 and self._use_cell_average_events():
+            self._capture_t0_group_readout(grid_v0_list, grid_v1_list, s_vec, product, pricing_env, group)
+        if product.has_ki_barrier and (self._ki_continuous or t_idx in self._ki_observation_indices):
+            for k in range(len(grid_v0_list)):
+                self._apply_ki_jump(grid_v0_list[k], grid_v1_list[k], s_vec, t_idx, product)
+            if self._term_w0 is not None:
+                self._apply_ki_jump(self._term_w0, self._term_w1, s_vec, t_idx, product)
+        self._apply_phoenix_group(grid_v0_list, grid_v1_list, s_vec, t_idx, current_time, product, pricing_env,
+                                  group)
+
+    def _apply_phoenix_group(self, grid_v0_list, grid_v1_list, s_vec, t_idx, current_time, product, pricing_env,
+                             group) -> None:
+        """The zero-gap chain on every memory state of both regimes, then the termination surfaces W, in place."""
+        combine, patterns = self._group_patterns(s_vec, t_idx, group, product, self._event_uses_projection(t_idx))
+        memory = bool(product.has_memory_coupon)
+        expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+        cash = self._group_cash(group, pricing_env, t_idx, current_time, product)
+        first = group[0][0]
+        n = len(s_vec)
+        survives = self._ko_survives_ki(product)
+        w_cols = self._group_termination(t_idx, current_time, product, pricing_env, first)
+        states = range(len(grid_v0_list)) if memory else range(1)
+        for grids, ko_here, w in ((grid_v0_list, True, w_cols[0]), (grid_v1_list, survives, w_cols[1])):
+            d = grids[0][:, t_idx].copy()
+            u = grids[1][:, t_idx] - d if memory else None
+            for k in states:
+                arrears = self._state_arrears(first, k) if memory else 0.0
+                branches = [self._group_value(self._zero_gap_outcome(group, pays, kos, ko_here, arrears, memory),
+                                              cash, d, u, w, expiry, memory, n) for pays, kos in patterns]
+                grids[k][:, t_idx] = combine(branches)
+        if self._term_w0 is not None:
+            # a knock-out ends the note: W takes the unit at the settlement of the record that fires
+            for grid, ko_here in ((self._term_w0, True), (self._term_w1, survives)):
+                if not ko_here:
+                    continue
+                cont = grid[:, t_idx].copy()
+                branches = []
+                for pays, kos in patterns:
+                    knock_out = self._zero_gap_outcome(group, pays, kos, True, 0.0, False)[1]
+                    branches.append(cont if knock_out is None else np.full(n, self._cashflow_value_at_time(
+                        pricing_env=pricing_env, cashflow=1.0, current_time=current_time,
+                        settlement_time=group[knock_out[0]][1].settlement_time)))
+                grid[:, t_idx] = combine(branches)
+
+    def _spot_indicators(self, group, product, spot: float):
+        """``(pays, kos)`` of the instant's records at the valuation spot (the inclusive valuation-date masks)."""
+        reverse = bool(product.is_reverse)
+        sv = np.asarray([float(spot)], dtype=float)
+        pays = tuple(bool(self._event_nodal_mask(sv, float(self._coupon_barriers[obs_idx]), reverse, True,
+                                                 at_valuation=True)[0]) for obs_idx, _, _ in group)
+        kos = tuple(bool(live and rec.barrier is not None
+                         and self._event_nodal_mask(sv, float(rec.barrier), reverse, True, at_valuation=True)[0])
+                    for _, rec, live in group)
+        return pays, kos
+
+    def _capture_t0_group_readout(self, grid_v0_list, grid_v1_list, s_vec, product, pricing_env, group) -> None:
+        """``_capture_t0_coupon_readout`` for an instant of several records at valuation: the chain decided at the
+        spot (a knock-out the valuation selects is decided before the march), the survivors' continuation columns
+        ``v[0] + A·u`` (``A`` the arrears the instant leaves) and the decided coupons at their discounts."""
+        pays, kos = self._spot_indicators(group, product, pricing_env.spot)
+        memory = bool(product.has_memory_coupon)
+        expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+        cash = self._group_cash(group, pricing_env, 0, 0.0, product)
+        first = group[0][0]
+        arrears = self._state_arrears(first, 0) if memory else 0.0
+        x_vec = np.log(np.asarray(s_vec, dtype=float))
+        spot_log = float(np.log(float(pricing_env.spot)))
+        survives = self._ko_survives_ki(product)
+        w_cols = self._group_termination(0, 0.0, product, pricing_env, first)
+        cols, values = [], []
+        for grids, ko_here, w in ((grid_v0_list, True, w_cols[0]), (grid_v1_list, survives, w_cols[1])):
+            outcome = self._zero_gap_outcome(group, pays, kos, ko_here, arrears, memory)
+            coupons, knock_out, after = outcome
+            d = grids[0][:, 0].copy()
+            col = d + after * (grids[1][:, 0] - d) if memory else d
+            if knock_out is not None:
+                # the regime the valuation does not select (a carried knock-in under disable_ko_after_ki): its value
+                # at the spot is the knock-out's cash
+                cols.append(col)
+                values.append(float(self._group_value(outcome, cash, d, None, None, expiry, memory, 1)[0]))
+                continue
+            value = float(np.interp(spot_log, x_vec, col))
+            if expiry:
+                w_spot = float(np.interp(spot_log, x_vec, w)) if isinstance(w, np.ndarray) else float(w)
+                value += sum(e for _, e in coupons) * w_spot
+            else:
+                value += sum(e * cash[pos][2] for pos, e in coupons)
+            cols.append(col)
+            values.append(value)
+        self._t0_readout_cols = tuple(cols)
+        self._t0_readout_values = tuple(values)

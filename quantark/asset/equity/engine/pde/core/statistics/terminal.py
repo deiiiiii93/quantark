@@ -61,7 +61,7 @@ def knocked_out_event_statistics(solver, product, env, request, decision, pv=Non
     else:
         tau = float(product.get_maturity(env))
         records = solver._filter_observations_by_tau(product.resolve_ko_observations(env), tau)
-        pos = _position(records, decision.ko_record, by_record=type(product) is SnowballOption)
+        pos = _position(records, decision.ko_record, by_record=type(product) in (SnowballOption, PhoenixOption))
         rec0 = records[pos]
         # paid from the valuation instant (t = 0 on every layout)
         df_delay0 = solver._cashflow_value_at_time(pricing_env=env, cashflow=1.0, current_time=0.0,
@@ -100,14 +100,29 @@ def _knocked_out_coupon_table(solver, product, env, records, pos, df_delay0, obs
     from quantark.asset.equity.engine.event_stats import CashLedger, CouponTable
 
     n = len(records)
-    coupon = float(solver._immediate_ko_coupon(product, env))
+    decision = solver._valuation_decision(product, env)
+    legs = solver._decided_coupon_legs(product, env, decision)
     cash = np.zeros(n, dtype=float)
-    cash[pos] = coupon * df_delay0
     to_pay = np.zeros(n, dtype=float)
-    to_pay[pos] = coupon
     probability = np.zeros(n, dtype=float)
-    # the decision's trigger: the knocked-out period's own coupon barrier (decision 13, F10)
-    probability[pos] = 1.0 if solver._valuation_decision(product, env).coupon_index is not None else 0.0
+    if legs is not None:
+        # several records at the valuation instant (0.16.0 D14): each decided coupon on its own record's row, paid at
+        # its own payment time (EXPIRY: with the knock-out), triggered where its own coupon level is met
+        full = product.resolve_ko_observations(env)
+        for index, amount, triggered, payment_time in legs:
+            row = next(i for i, rec in enumerate(records) if rec is full[index] or rec == full[index])
+            df = (float(env.get_discount_factor(payment_time))
+                  if payment_time is not None and payment_time > 0.0 else 1.0)
+            cash[row] += amount * df
+            to_pay[row] += amount
+            if triggered:
+                probability[row] = 1.0
+    else:
+        coupon = float(solver._immediate_ko_coupon(product, env))
+        cash[pos] = coupon * df_delay0
+        to_pay[pos] = coupon
+        # the decision's trigger: the knocked-out period's own coupon barrier (decision 13, F10)
+        probability[pos] = 1.0 if decision.coupon_index is not None else 0.0
     if not es.want_coupon_probability(request.streams):
         unavailable["coupons.probability"] = es.NOT_REQUESTED
     survival = np.concatenate([[1.0], observations.survival[:-1]]) if n else np.zeros(0)
@@ -130,9 +145,14 @@ def _knocked_out_coupon_table(solver, product, env, records, pos, df_delay0, obs
                            else observations.dates + (terminal.determination_date,))
     payment_dates = (None if observations.payment_dates is None or terminal.payment_date is None
                      else observations.payment_dates + (terminal.payment_date,))
+    bucket_cash, bucket_to_pay = np.append(cash, 0.0), np.append(to_pay, 0.0)
+    if legs is not None:
+        # every coupon decided now is paid when the note ends: the knock-out's bucket
+        bucket_cash, bucket_to_pay = np.zeros(n + 1), np.zeros(n + 1)
+        bucket_cash[pos], bucket_to_pay[pos] = float(cash.sum()), float(to_pay.sum())
     ledger = CashLedger(determination_times=determination, payment_times=payment,
                         determination_dates=determination_dates, payment_dates=payment_dates,
-                        discounted_cash=np.append(cash, 0.0), cash_to_pay=np.append(to_pay, 0.0))
+                        discounted_cash=bucket_cash, cash_to_pay=bucket_to_pay)
     return coupons, ledger
 
 
@@ -144,7 +164,14 @@ def _ko_reset_knocked_out_rows(solver, product, env, decision, terminal):
     pre = solver._filter_observations_by_tau(solver._get_cached_pre_ko_records(env, product), tau)
     post = solver._filter_observations_by_tau(solver._get_cached_post_ko_records(env, product), tau)
     fired = pre if decision.ko_regime == "pre" else post
-    pos = _position(fired, decision.ko_record) + (0 if decision.ko_regime == "pre" else len(pre))
+    pos = _position(fired, decision.ko_record)
+    date = getattr(decision.ko_record, "observation_date", None)
+    if date is not None:
+        # several records of the schedule at the valuation instant (0.16.0 D14): the deciding record by its date
+        t = float(decision.ko_record.observation_time)
+        pos = next((k for k, rec in enumerate(fired) if same_instant(rec.observation_time, t)
+                    and rec.observation_date == date), pos)
+    pos += 0 if decision.ko_regime == "pre" else len(pre)
     records = list(pre) + list(post)
     settle = records[pos].settlement_time
     df = float(env.get_discount_factor(settle)) if settle is not None and settle > 0.0 else 1.0

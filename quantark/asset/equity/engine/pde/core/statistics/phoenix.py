@@ -32,7 +32,7 @@ from quantark.asset.equity.engine.event_stats import CashLedger, CouponTable
 from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.enum import CouponPayType
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import same_instant
 
 from . import adjoint
@@ -81,9 +81,18 @@ class PhoenixStatistics(SnowballStatistics):
         solver, L = self.solver, self.layout
         # coupon observation index (the solver's, over every resolved record) <-> statistics column k
         self._k_of_obs, self._obs_of_k = {}, {}
+        rank = {}         # an env instant's first column -> its records mapped so far (0.16.0 D14: by contract index)
         for obs_idx, rec in enumerate(solver._get_cached_ko_records(self.env, self.product)):
             for k, own in enumerate(self.ko_records):
                 if same_instant(own.observation_time, rec.observation_time):
+                    if self._shared_cols:
+                        # the instant's j-th record is its j-th row (both lists keep contract order inside it)
+                        j = rank.get(k, 0)
+                        rank[k] = j + 1
+                        if k + j >= len(self.ko_records) or not same_instant(
+                                self.ko_records[k + j].observation_time, rec.observation_time):
+                            break
+                        k = k + j
                     self._k_of_obs[obs_idx], self._obs_of_k[k] = k, obs_idx
                     break
         self._S = [np.r_[L.cash[:, m], L.bucket[:, m], L.cash_u[:, m]].astype(int) for m in range(self.n_states)]
@@ -144,13 +153,20 @@ class PhoenixStatistics(SnowballStatistics):
         v1[:, L.maturity[1]] = tmp1[:, -1]
         v1[:, L.kis] = 1.0
         terminal = num_t - 1
-        obs_idx = solver._coupon_observation_indices.get(terminal)
-        if obs_idx is not None:
-            self._coupon_stage((v0, v1), terminal, self.tau, obs_idx)
-        if product.has_ki_barrier and (solver._ki_continuous or terminal in solver._ki_observation_indices):
-            solver._ki_columns(v0, v1, self.s, terminal, num_t, product)
-        if solver._has_terminal_ko and solver._ko_terminal_record is not None:
-            self._ko_stage((v0, v1), terminal, self.tau, solver._ko_terminal_record, terminal=True)
+        group = solver._phx_groups.get(terminal) if solver._phx_groups else None
+        if group is not None:
+            # several records on the maturity instant (0.16.0 D14): the knock-in, then the zero-gap stage
+            if product.has_ki_barrier and (solver._ki_continuous or terminal in solver._ki_observation_indices):
+                solver._ki_columns(v0, v1, self.s, terminal, num_t, product)
+            self._group_stage((v0, v1), terminal, self.tau, group, terminal=True)
+        else:
+            obs_idx = solver._coupon_observation_indices.get(terminal)
+            if obs_idx is not None:
+                self._coupon_stage((v0, v1), terminal, self.tau, obs_idx)
+            if product.has_ki_barrier and (solver._ki_continuous or terminal in solver._ki_observation_indices):
+                solver._ki_columns(v0, v1, self.s, terminal, num_t, product)
+            if solver._has_terminal_ko and solver._ko_terminal_record is not None:
+                self._ko_stage((v0, v1), terminal, self.tau, solver._ko_terminal_record, terminal=True)
         if L.expiry:
             # the value creates W after its terminal events: T_j = 0, U = the maturity-to-payment discount
             for X in (v0, v1):
@@ -168,6 +184,13 @@ class PhoenixStatistics(SnowballStatistics):
         if j == 0 and solver._t0_has_events(product):
             captures["stats_t0_pre"] = (v0.copy(), v1.copy())
         current = solver._total_tau - (self.tau - self.t[j])
+        group = solver._phx_groups.get(j) if solver._phx_groups else None
+        if group is not None:
+            # several records on this env instant (0.16.0 D14): the knock-in, then the zero-gap stage
+            if product.has_ki_barrier and (solver._ki_continuous or j in solver._ki_observation_indices):
+                solver._ki_columns(v0, v1, self.s, j, len(self.t), product)
+            self._group_stage((v0, v1), j, current, group)
+            return
         obs_idx = solver._coupon_observation_indices.get(j)
         if obs_idx is not None and not solver._joint_coupon_ko_projection_active(j):
             self._coupon_stage((v0, v1), j, current, obs_idx)
@@ -350,6 +373,86 @@ class PhoenixStatistics(SnowballStatistics):
                 X[:, S[m]] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
                     lows, his, b_c_x, b_ko_x, trig_up, ko_here, s_ko_value, pay, self._missed(X0, earned)))
 
+    def _group_stage(self, blocks, j, current_time, group, terminal=False):
+        """``PhoenixPDESolver._apply_phoenix_group`` on statistics blocks, in place (0.16.0 D14): the zero-gap chain
+        per pattern, split by the column that pays each cash -- the deciding record's knock-out unit and trigger, the
+        trigger of every record that paid before it, each coupon on its own record's cash column (INSTANT at its
+        record's discount; EXPIRY at the termination units, or with a knock-out of the instant at its settlement,
+        bucket and all), the termination units knocked out by the record that fires (not at maturity: no W yet)."""
+        solver, product, L, s = self.solver, self.product, self.layout, self.s
+        combine, patterns = solver._group_patterns(s, j, group, product, solver._event_uses_projection(j))
+        memory, expiry = bool(product.has_memory_coupon), bool(L.expiry)
+        at_terminal = j == len(self.t) - 1
+        self.breach.current_time = current_time
+        first = group[0][0]
+        S, F, n, u_off = self._S, self._F, L.n_ko, self._u_off
+        undiscounted = bool(L.cash_u.size)
+        ks = [self._k(obs_idx) for obs_idx, _, _ in group]
+        p_pos = [self._pos_F[int(L.trigger_cols[k])] for k in ks]
+        df_pay = [self._trigger_unit(j, obs_idx) for obs_idx, _, _ in group]
+        disc = [solver._coupon_discount_scalar(j, current_time, product, self.env, obs_idx) for obs_idx, _, _ in group]
+        df_ko = [self.breach.unit(rec) for _, rec, _ in group]
+        for X, name in zip(blocks, ("alive", "ki")):
+            ko_here = name == "alive" or solver._ko_survives_ki(product)
+            X0 = X.copy()
+            f0 = X0[:, F]
+            f_branches = []
+            for pays, kos in patterns:
+                coupons, knock_out, _ = solver._zero_gap_outcome(group, pays, kos, ko_here, 0.0, memory)
+                if knock_out is None:
+                    v = f0.copy()
+                else:
+                    pos = knock_out[0]
+                    v = self.breach.ko(group[pos][1], X0, name)[:, F]
+                    v[:, p_pos[pos]] = df_pay[pos] if pays[pos] else 0.0
+                for cpos, _ in coupons:
+                    v[:, p_pos[cpos]] = df_pay[cpos]
+                f_branches.append(v)
+            X[:, F] = combine(f_branches)
+            s0 = X0[:, S[0]]
+            s1 = X0[:, S[1]] if memory else None
+            for m in range(self.n_states):
+                arrears = solver._state_arrears(first, m) if memory else 0.0
+                branches = []
+                for pays, kos in patterns:
+                    coupons, knock_out, after = solver._zero_gap_outcome(group, pays, kos, ko_here, arrears, memory)
+                    if knock_out is None:
+                        v = s0 + after * (s1 - s0) if memory else s0.copy()
+                        for cpos, earned in coupons:
+                            self._credit(v, X0, ks[cpos], earned, disc[cpos], at_terminal)
+                    else:
+                        pos, paid = knock_out
+                        kk = ks[pos]
+                        v = np.zeros((len(s), len(S[m])))
+                        v[:, kk] = paid * df_ko[pos]          # the release rule (decision 4)
+                        if expiry:                            # paid with the knock-out, at its settlement: bucket kk
+                            v[:, n + kk] = v[:, kk]
+                        if undiscounted:
+                            v[:, u_off + kk] = paid
+                        for cpos, earned in coupons:
+                            kc = ks[cpos]
+                            if expiry:                        # deferred to the note's end: this knock-out
+                                v[:, kc] += earned * df_ko[pos]
+                                v[:, n + kk] += earned * df_ko[pos]
+                            else:
+                                v[:, kc] += earned * disc[cpos]
+                            if undiscounted:
+                                v[:, u_off + kc] += earned
+                    branches.append(v)
+                X[:, S[m]] = combine(branches)
+            if expiry and not terminal and ko_here:
+                tu0 = X0[:, self._TU]
+                tu_branches = []
+                self.breach.termination = True
+                try:
+                    for pays, kos in patterns:
+                        knock_out = solver._zero_gap_outcome(group, pays, kos, True, 0.0, False)[1]
+                        tu_branches.append(tu0.copy() if knock_out is None
+                                           else self.breach.ko(group[knock_out[0]][1], tu0, name))
+                finally:
+                    self.breach.termination = False
+                X[:, self._TU] = combine(tu_branches)
+
     # --- the forward adjoint pass's stage plans (unified event statistics T13) ----------------------------------
     #
     # The probability columns sit in ``F`` (not the trigger): the coupon stage projects them against themselves,
@@ -359,6 +462,11 @@ class PhoenixStatistics(SnowballStatistics):
         """``step_events`` at ``j`` (``terminal`` at maturity): coupon, knock-in, knock-out."""
         solver = self.solver
         num_t = len(self.t)
+        group = solver._phx_groups.get(j) if solver._phx_groups else None
+        if group is not None:
+            # the march's order at a same-instant group (0.16.0 D14): the knock-in, then the zero-gap stage
+            stages = [self._adjoint_ki_columns(j, ops)] if self._adjoint_ki_applies(j) else []
+            return stages + self._adjoint_group(j, group, ops)
         obs_idx = solver._coupon_observation_indices.get(j)
         stages = []
         if j == num_t - 1:
@@ -434,6 +542,33 @@ class PhoenixStatistics(SnowballStatistics):
                                     breach if ko_here else None))
         return stages
 
+    def _adjoint_group(self, j, group, ops):
+        """``_group_stage`` on a probability column (0.16.0 D14): every coupon branch is the column itself, the
+        regions (nodes) where a record of the instant knocks out take its target -- one piecewise cell average, or
+        the nodal knock-out on the union of the live masks."""
+        solver, product, s, n = self.solver, self.product, self.s, len(self.s)
+        projection = solver._event_uses_projection(j)
+        combine, patterns = solver._group_patterns(s, j, group, product, projection)
+        stages = []
+        for surface, ko_here in ((adjoint.ALIVE, True), (adjoint.KI, solver._ko_survives_ki(product))):
+            fires = tuple(solver._zero_gap_outcome(group, pays, kos, ko_here, 0.0, False)[1] is not None
+                          for pays, kos in patterns)
+            if not projection:
+                if any(fires):
+                    stages.append(ops.nodal_ko(surface, combine([np.ones(n) if f else np.zeros(n) for f in fires])
+                                               > 0.5))
+                continue
+
+            def linear(_f=fires):
+                eye = np.eye(n)
+                return combine([np.zeros((n, n)) if f else eye for f in _f])
+
+            def breach(_f=fires):
+                return combine([np.ones(n) if f else np.zeros(n) for f in _f])
+
+            stages.append(ops.joint(surface, ("phoenix_group", j, fires), linear, breach if any(fires) else None))
+        return stages
+
     def _column_of_term(self, term, surface, ki_edge=False):
         if term.column == "U":
             return int(self.layout.unit)
@@ -485,6 +620,9 @@ class PhoenixStatistics(SnowballStatistics):
         def at(col):
             return float(prepared.readout.price(grid[:, col], env.spot, prepared.layout))
 
+        group = solver._phx_groups.get(0) if solver._phx_groups else None
+        if group is not None and solver._use_cell_average_events():
+            return self._spot_columns_group(grid, at, group)
         t0 = self._t0_coupon()
         owed = None
         if t0 is not None and not t0[0] and product.has_memory_coupon:
@@ -531,6 +669,54 @@ class PhoenixStatistics(SnowballStatistics):
                 trigger[k0] = 0.0
                 if cash_u is not None:
                     cash_u[k0] = 0.0
+        return at, ed_unit, cash, trigger, buckets, cash_u
+
+    def _spot_columns_group(self, grid, at, group):
+        """``_spot_columns`` when several records sit on the valuation instant (0.16.0 D14): the chain decided at the
+        spot as the value decides it (``_capture_t0_group_readout``) -- each paid record's coupon on its own row,
+        the survivors' columns read in the state the instant leaves (``S(0) + A·(S(1) - S(0))``)."""
+        solver, product, env, L, prepared = self.solver, self.product, self.env, self.layout, self.prepared
+        memory = bool(product.has_memory_coupon)
+        ko_here = (not self.knocked_in_at_valuation) or solver._ko_survives_ki(product)
+        pays, kos = solver._spot_indicators(group, product, env.spot)
+        arrears = solver._state_arrears(group[0][0], 0) if memory else 0.0
+        coupons, knock_out, after = solver._zero_gap_outcome(group, pays, kos, ko_here, arrears, memory)
+        if knock_out is not None:
+            raise PricingError("a knock-out decided at the valuation instant reached the march")
+        owed = after if (memory and after != 0.0) else None
+
+        def at_state(table, i):
+            if owed is None:
+                return at(table[i, 0])
+            s0, s1 = grid[:, table[i, 0]], grid[:, table[i, 1]]
+            return float(prepared.readout.price(s0 + owed * (s1 - s0), env.spot, prepared.layout))
+
+        n_ko = L.n_ko
+        ed_unit = np.array([at(c) for c in L.ko])
+        cash = np.array([at_state(L.cash, k) for k in range(n_ko)], dtype=float)
+        trigger = np.array([at(c) for c in L.trigger_cols], dtype=float)
+        buckets = (np.array([at_state(L.bucket, i) for i in range(n_ko + 1)], dtype=float) if L.expiry else None)
+        cash_u = (np.array([at_state(L.cash_u, k) for k in range(n_ko)], dtype=float) if L.cash_u.size else None)
+        paid = dict(coupons)
+        current0 = solver._total_tau - (self.tau - self.t[0])
+        units = (np.array([at(c) for c in range(self._TU.start, self._TU.stop)], dtype=float) if L.expiry else None)
+        for pos, (obs_idx, _rec, _live) in enumerate(group):
+            k = self._k(obs_idx)
+            earned = paid.get(pos)
+            if earned is None:
+                cash[k] = 0.0
+                trigger[k] = 0.0
+                if cash_u is not None:
+                    cash_u[k] = 0.0
+                continue
+            if L.expiry:
+                cash[k] = cash[k] + earned * float(units.sum())
+                buckets = buckets + earned * units
+            else:
+                cash[k] = cash[k] + earned * solver._coupon_discount_scalar(0, current0, product, env, obs_idx)
+            if cash_u is not None:
+                cash_u[k] = cash_u[k] + earned
+            trigger[k] = self._trigger_unit(0, obs_idx)
         return at, ed_unit, cash, trigger, buckets, cash_u
 
     def _coupon_probability(self, trigger):

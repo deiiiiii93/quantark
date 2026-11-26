@@ -92,6 +92,23 @@ class PhoenixAdapter(SnowballAdapter):
         solver._set_terminal_condition_vector(grid_v0_list, grid_v1_list, x_vec, s_vec, product, env)
 
         terminal_tidx = len(t_vec) - 1
+        group = solver._phx_groups.get(terminal_tidx) if solver._phx_groups else None
+        if group is not None:
+            # several records on the maturity instant: the knock-in, then one zero-gap stage (0.16.0 D14)
+            solver._apply_phoenix_group_step(grid_v0_list, grid_v1_list, s_vec, terminal_tidx, tau, product, env,
+                                             group)
+        else:
+            self._terminal_events(prepared, grid_v0_list, grid_v1_list, s_vec, terminal_tidx)
+
+        # the vector-surface march's preamble, in its order
+        solver._prepare_continuous_ki_correction(product, env, t_vec)
+        term = solver._prepare_termination_surfaces(product, env, t_vec, len(x_vec))
+        if term is not None:
+            states["w0"], states["w1"] = term
+
+    def _terminal_events(self, prepared, grid_v0_list, grid_v1_list, s_vec, terminal_tidx) -> None:
+        """The terminal coupon, the knock-in on every memory state, the maturity knock-out."""
+        solver, product, env, tau = self.solver, prepared.product, prepared.env, prepared.tau
         coupon_obs_idx = solver._coupon_observation_indices.get(terminal_tidx)
         if coupon_obs_idx is not None:
             solver._apply_coupon_jump_vector(
@@ -112,12 +129,6 @@ class PhoenixAdapter(SnowballAdapter):
                 grid_v0_list, grid_v1_list, s_vec, terminal_tidx, current_time=tau,
                 product=product, pricing_env=env, ko_record=solver._ko_terminal_record,
             )
-
-        # the vector-surface march's preamble, in its order
-        solver._prepare_continuous_ki_correction(product, env, t_vec)
-        term = solver._prepare_termination_surfaces(product, env, t_vec, len(x_vec))
-        if term is not None:
-            states["w0"], states["w1"] = term
 
     def boundaries(self, prepared, group, states, j) -> None:
         if len(group.surfaces) > 1:
