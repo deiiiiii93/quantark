@@ -193,9 +193,12 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.pde.one_touch_pde_solver.OneTouchPDESolver",
         "quantark.asset.equity.engine.pde.double_one_touch_pde_solver."
         "DoubleOneTouchPDESolver",
-        "quantark.asset.equity.engine.pde.dcn_pde_solver.DCNPDEEngine",
     ):
         registry.register(pde_1d, _equity_pde_1d_adapter, exact=True)
+    registry.register(
+        "quantark.asset.equity.engine.pde.dcn_pde_solver.DCNPDEEngine",
+        _equity_pde_dcn_adapter, exact=True,
+    )
     for pde_autocall in (
         "quantark.asset.equity.engine.pde.snowball_pde_solver.SnowballPDESolver",
         "quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver."
@@ -207,9 +210,12 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.pde.local_vol_pde_solver.LocalVolPDESolver",
         "quantark.asset.equity.engine.pde.barrier_vol_pde_solvers."
         "LocalVolBarrierPDESolver",
-        "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
     ):
         registry.register(pde_lv, _equity_pde_lv_adapter, exact=True)
+    registry.register(
+        "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
+        _equity_pde_lv_dcn_adapter, exact=True,
+    )
     for pde_lv_autocall in (
         "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
         "LocalVolSnowballPDESolver",
@@ -299,6 +305,22 @@ def _equity_pde_1d_adapter():
     )
 
     return EquityPDE1DSessionAdapter()
+
+
+def _equity_pde_dcn_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityDCNPDESessionAdapter,
+    )
+
+    return EquityDCNPDESessionAdapter()
+
+
+def _equity_pde_lv_dcn_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityLVDCNPDESessionAdapter,
+    )
+
+    return EquityLVDCNPDESessionAdapter()
 
 
 def _equity_pde_autocall_adapter():

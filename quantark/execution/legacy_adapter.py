@@ -15,6 +15,8 @@ budget claims; later phases route it through budgeted plans. A session
 therefore never alters, rejects, or silently disables an engine's own
 configured execution.
 """
+import inspect
+
 from quantark.execution.contracts import (
     EngineCapabilities,
     NormalizedPricingRequest,
@@ -159,12 +161,52 @@ class LegacyPriceAdapter:
             raise CapabilityError(
                 f"{type(engine).__qualname__} has no calculate_event_stats"
             )
-        stats = method(request.product, request.pricing_env)
+        state = request.lifecycle_state
+        if state is None:
+            stats = method(request.product, request.pricing_env)
+        else:
+            # A lifecycle state is honoured or refused, never dropped: the
+            # same capability check stateful ``price()`` runs (CapabilityError
+            # for an engine without lifecycle support, e.g. the Snowball /
+            # Phoenix MC, PDE and QUAD V1 engines), then the engine's own
+            # keyword.
+            _validate_state_capability(engine, request.product, state)
+            if not _declares_lifecycle_keyword(method):
+                raise CapabilityError(
+                    f"{type(engine).__qualname__}.calculate_event_stats does "
+                    "not accept lifecycle_state"
+                )
+            stats = method(
+                request.product, request.pricing_env, lifecycle_state=state
+            )
         if stats is None:
             raise CapabilityError(
                 f"{type(engine).__qualname__} does not support event stats"
             )
         return stats
+
+
+def _validate_state_capability(engine, product, state) -> None:
+    """Refuse a lifecycle state the engine cannot price (``supports_lifecycle_state``), as stateful ``price()`` does."""
+    if not getattr(engine, "supports_lifecycle_state", False):
+        raise CapabilityError(
+            f"{type(engine).__name__} does not support lifecycle_state"
+        )
+    if type(engine).__module__.startswith("quantark.asset.equity.engine."):
+        from quantark.asset.equity.engine.settlement_support import (
+            validate_settlement_capability,
+        )
+
+        validate_settlement_capability(engine, product, state)
+
+
+def _declares_lifecycle_keyword(method) -> bool:
+    """True when ``method`` names a ``lifecycle_state`` parameter itself (``**kwargs`` alone does not count)."""
+    try:
+        parameters = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+    return "lifecycle_state" in parameters
 
 
 def _extract_pv(value):

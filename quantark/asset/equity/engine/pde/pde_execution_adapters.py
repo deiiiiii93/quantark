@@ -51,6 +51,8 @@ __all__ = [
     "EquityPDEAutocallableSessionAdapter",
     "EquityLVPDESessionAdapter",
     "EquityLVAutocallableSessionAdapter",
+    "EquityDCNPDESessionAdapter",
+    "EquityLVDCNPDESessionAdapter",
     "Heston2DAutocallableSessionAdapter",
 ]
 
@@ -103,7 +105,12 @@ def _estimate_surface_bytes(vol_surface) -> int:
 
 class _EquityPDESessionBase(LegacyPriceAdapter):
     _GRID_CAPABLE = True
+    #: PRICE requests may carry the EVENT_STATS output (one value solve through ``_session_outputs``); implies the
+    #: EVENT_STATS operation
     _EVENTS_CAPABLE = False
+    #: the EVENT_STATS operation alone (the engine's ``calculate_event_stats`` on the prepared clone), for engines
+    #: whose ``_session_outputs`` has no event group (DCN)
+    _EVENT_OPERATION_CAPABLE = False
 
     def __init__(self):
         super().__init__(call_shape="product_env")
@@ -119,7 +126,7 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
 
     def _operations(self) -> frozenset:
         ops = {PricingOperation.PRICE}
-        if self._EVENTS_CAPABLE:
+        if self._EVENTS_CAPABLE or self._EVENT_OPERATION_CAPABLE:
             ops.add(PricingOperation.EVENT_STATS)
         return frozenset(ops)
 
@@ -412,6 +419,20 @@ class EquityLVAutocallableSessionAdapter(EquityLVPDESessionAdapter):
     """LocalVolSnowball/LocalVolPhoenix: adds one-solve event outputs."""
 
     _EVENTS_CAPABLE = True
+
+
+class EquityDCNPDESessionAdapter(EquityPDE1DSessionAdapter):
+    """DCNPDEEngine: the 1D prepared clone plus the EVENT_STATS operation (its ``calculate_event_stats`` reads the
+    clone's session artefacts as ``price()`` does). A PRICE request with the EVENT_STATS output stays refused: the
+    DCN statistics are the operation's own forward pass, not a column of the value solve."""
+
+    _EVENT_OPERATION_CAPABLE = True
+
+
+class EquityLVDCNPDESessionAdapter(EquityLVPDESessionAdapter):
+    """LocalVolDCNPDEEngine: the cached Dupire surface and 1D artefacts plus the EVENT_STATS operation."""
+
+    _EVENT_OPERATION_CAPABLE = True
 
 
 class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):
