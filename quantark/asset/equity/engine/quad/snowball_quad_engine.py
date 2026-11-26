@@ -1006,9 +1006,20 @@ class SnowballQuadEngine(BaseEngine):
         return []
 
     def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn, *,
-                        ko_rows: int) -> Optional[dict]:
-        """The coupon fields read from the extra rows at the spot (``None``: no coupons, Snowball); the extra rows
-        start at ``ko_rows`` (0 on the forward route, ``n_ko`` on the stacked one)."""
+                        forward=None) -> Optional[dict]:
+        """The coupon fields (``None``: no coupons, Snowball): read from the extra rows at the spot, or from the
+        forward pass's extension masses (``forward``) on the forward route."""
+        return None
+
+    def _statistics_march_extension(self):
+        """The forward pass's extension (``v1_adjoint``: extra dual rows riding the one forward march; ``None``: none,
+        Snowball)."""
+        return None
+
+    def _statistics_step_extension(self, product, grid, spot_grid, spot, width, *, ko_record, ko_weight, ki_record,
+                                   ki_barrier_continuous, coupon_record, observation_index, pre, pointwise=False):
+        """The extension's data for one step (``EventStep.extension`` / ``FirstStepLog.extension``), built from the
+        columns before its event (``pre``); ``None``: the extension maps its rows by the step's event map."""
         return None
 
     #: the statistics route (run 2026-11-26): "forward" reads every outcome column (knock-out units and the terminal
@@ -1202,7 +1213,8 @@ class SnowballQuadEngine(BaseEngine):
         # extra rows (Phoenix coupon columns) that ride the same diffusion/jumps; then the maturity unit and cash
         # (never knocked in) and the knocked-in settlement unit and cash. Forward route: no knock-out rows -- every
         # outcome is read off the adjoint forward pass of this march (the backward loop still builds its log; the
-        # coupon rows and the terminal rows still march, the latter only as the readout's shape).
+        # terminal rows still march, only as the readout's shape, and so does a Phoenix EXPIRY note's termination row
+        # ``W``); the Phoenix coupon columns ride the pass as its extension (``_statistics_march_extension``).
         n_ko = len(ko_records)
         ko_rows = 0 if route == "forward" else n_ko
         n_main = ko_rows + self._n_extra_quad_rows(n_ko)
@@ -1238,7 +1250,8 @@ class SnowballQuadEngine(BaseEngine):
         final_transition: Optional[dict] = None
         log = MarchLog(engine=self, math_utils=math_utils, readout_in=bool(knocked_in_at_valuation),
                        terminal_out={"maturity_unit": np.ones(grid.size), "maturity_cash": terminal_out_cash},
-                       terminal_in={"ki_settlement_unit": np.ones(grid.size), "ki_settlement_cash": terminal_in_cash})
+                       terminal_in={"ki_settlement_unit": np.ones(grid.size), "ki_settlement_cash": terminal_in_cash},
+                       extension=self._statistics_march_extension() if route == "forward" else None)
         log_ki_barrier = (safe_log(ki_barrier_continuous / spot) if ki_continuous else None)
 
         for step_index in range(len(times), 0, -1):
@@ -1290,6 +1303,12 @@ class SnowballQuadEngine(BaseEngine):
                     pre_y = terminal_stack(y_out_cash * terminal.delay_df, y_in_cash * terminal.delay_df)
                 else:
                     pre_y = (fs.lift(v_out), fs.lift(v_in))
+                first_extension = None if log.extension is None else self._statistics_step_extension(
+                    product, y, spot * np.exp(y), spot, 0.0,
+                    ko_record=ko_record if ko_is_reachable else None, ko_weight=y_ko_weight, ki_record=ki_record,
+                    ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                    coupon_record=ko_record, observation_index=ko_index, pre=pre_y, pointwise=True,
+                )
                 with self._pointwise():
                     post_y = self._apply_observation(
                         product, y, spot * np.exp(y), spot, 0.0, pre_y[0], pre_y[1],
@@ -1316,7 +1335,14 @@ class SnowballQuadEngine(BaseEngine):
                         "ki_settlement_unit": np.ones(y.size), "ki_settlement_cash": y_in_cash * terminal.delay_df},
                     values_out=fs.expect_bridged(post_y[0], post_y[1])[..., 0],
                     values_in=fs.expect(post_y[1])[..., 0],
+                    extension=first_extension,
                 )
+            step_extension = None if log.extension is None else self._statistics_step_extension(
+                product, grid, spot_grid, spot, smoothing_width,
+                ko_record=ko_record if ko_is_reachable else None, ko_weight=ko_w, ki_record=ki_record,
+                ki_barrier_continuous=ki_barrier_continuous if ki_continuous else None,
+                coupon_record=ko_record, observation_index=ko_index, pre=(v_out, v_in),
+            )
             v_out, v_in = self._apply_observation(
                 product, grid, spot_grid, spot, smoothing_width, v_out, v_in,
                 ko_record=ko_record if ko_is_reachable else None,
@@ -1355,6 +1381,7 @@ class SnowballQuadEngine(BaseEngine):
                 diffusion=(tau_step, alpha, beta, prefactor, omega_array),
                 bridge=(log_ki_barrier, vol_step, float(dt[step_index]), bool(product.is_reverse))
                 if ki_continuous else None,
+                extension=step_extension,
             ))
 
             if step_index == 1 and transition_readout and first is None:
@@ -1463,7 +1490,7 @@ class SnowballQuadEngine(BaseEngine):
                                        probability=terminal_columns["ki_settlement_unit"] / df_maturity,
                                        discounted=terminal_columns["ki_settlement_cash"], **timing)
         coupon_fields = self._coupon_columns(values_at_spot, n_ko, ko_records, product, pricing_env, df_local,
-                                             ko_rows=ko_rows)
+                                             forward=forward)
         observations = es.observation_table(
             pricing_env, ko_records, ed_unit,
             is_coupon_obs=None if coupon_fields is None else np.ones(n_ko, dtype=bool),

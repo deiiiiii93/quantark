@@ -21,6 +21,7 @@ from quantark.asset.equity.engine.quad.quad_adapters import (
 )
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.engine.quad.v1_coupons_forward import ForwardCouponRows
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -56,6 +57,9 @@ class _CouponCashRows:
     ``carried_arrears`` are the arrears carried into the first future observation (the contract's
     initial arrears, or the state the valuation instant leaves); ``decided_coupon`` is a coupon paid
     by an observation decided at the valuation instant without a knock-out.
+
+    This is the stacked statistics route's layout (the ``n_ko`` knock-out rows come first); the forward
+    route reads these columns off the adjoint forward pass (``v1_coupons_forward.ForwardCouponRows``).
     """
 
     n_ko: int
@@ -67,33 +71,26 @@ class _CouponCashRows:
     carried_arrears: float
     decided_index: Optional[int]
     decided_coupon: float
-    #: rows before the coupon-indicator rows: the ``n_ko`` knock-out rows on the stacked statistics route, none on the
-    #: forward route (the knock-out units are read off the adjoint forward pass)
-    ko_rows: int = -1
-
-    def __post_init__(self):
-        if self.ko_rows < 0:
-            object.__setattr__(self, "ko_rows", self.n_ko)
 
     @property
     def indicator_row(self) -> int:
-        """First coupon-trigger indicator row (after the KO rows, if any)."""
-        return self.ko_rows
+        """First coupon-trigger indicator row (after the ``n_ko`` KO rows)."""
+        return self.n_ko
 
     @property
     def cash_row(self) -> int:
         """First ``U`` row (after the KO and coupon-indicator rows)."""
-        return self.ko_rows + self.n_ko
+        return 2 * self.n_ko
 
     @property
     def release_row(self) -> int:
         """First ``N`` row (memory only)."""
-        return self.ko_rows + 2 * self.n_ko
+        return 3 * self.n_ko
 
     @property
     def termination_row(self) -> int:
         """The ``W`` row (EXPIRY only)."""
-        return self.ko_rows + (3 if self.memory else 2) * self.n_ko
+        return (4 if self.memory else 3) * self.n_ko
 
     @property
     def n_buckets(self) -> int:
@@ -151,9 +148,12 @@ class _CouponCashRows:
 
         ``pay_*`` continue after a paid coupon, ``miss_*`` after a missed one, ``breach_*`` are the
         knock-out values with and without the coupon. Every branch array starts as the columns before
-        the observation.
+        the observation. The indicator row is one on the paid branch, continuing or knocked out.
         """
         n = self.n_ko
+        row = self.indicator_row + j
+        pay_out[row] = pay_in[row] = 1.0
+        breach_pay[row] = 1.0
         c = float(self.amounts[j])
         ko_df = float(self.delay_dfs[j])
         u = self.cash_row + j
@@ -1147,8 +1147,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             # restore the caller's layout (a nested statistics call must not clear an outer one's)
             self._coupon_cash_rows = previous
 
-    def _resolve_coupon_cash_rows(self, product, pricing_env, *, route: str = "stacked") -> Optional[_CouponCashRows]:
-        """The coupon-cash column layout, or ``None`` when the recursion does not run (expired note)."""
+    def _resolve_coupon_cash_rows(self, product, pricing_env, *, route: str = "stacked"):
+        """The coupon-cash column layout of the route (stacked: ``_CouponCashRows``; forward: ``ForwardCouponRows``),
+        or ``None`` when the recursion does not run (expired note)."""
         maturity = product.get_maturity(pricing_env)
         if maturity <= 0.0:
             return None
@@ -1171,7 +1172,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
         )
         decided_index = None if decision.knocked_out else decision.coupon_index
-        return _CouponCashRows(
+        layout = ForwardCouponRows if route == "forward" else _CouponCashRows
+        return layout(
             n_ko=n_ko,
             memory=memory,
             expiry=product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY,
@@ -1181,7 +1183,6 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             carried_arrears=float(decision.arrears) if memory else 0.0,
             decided_index=decided_index,
             decided_coupon=float(decision.coupon) if decided_index is not None else 0.0,
-            ko_rows=0 if route == "forward" else n_ko,
         )
 
     def _event_stats_product_type(self) -> type:
@@ -1240,21 +1241,31 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 ki_record=ki_record, ki_barrier_continuous=ki_barrier_continuous,
             )
         index = observation_index
-        barrier = self._coupon_barrier_for_obs(product, index)
         pay_out, pay_in = v_out.copy(), v_in.copy()
         miss_out, miss_in = v_out, v_in
         breach_miss = np.zeros_like(v_out) + ko_value
         breach_pay = breach_miss.copy()
-        if coupon_index is not None:
-            row = n_ko + coupon_index
-            pay_out[row] = pay_in[row] = 1.0
-            breach_pay[row] = 1.0
-            cash_rows = getattr(self, "_coupon_cash_rows", None)
-            if cash_rows is not None:
-                miss_out, miss_in = v_out.copy(), v_in.copy()
-                cash_rows.write_observation(
-                    index, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss
-                )
+        cash_rows = self._coupon_cash_rows
+        if coupon_index is not None and cash_rows is not None:
+            # the call's coupon layout writes its rows' branches (stacked: indicator and cash columns; forward: W)
+            miss_out, miss_in = v_out.copy(), v_in.copy()
+            cash_rows.write_observation(
+                index, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss
+            )
+        return self._project_observation_branches(
+            product, grid, spot_grid, spot, width, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss,
+            ko_record=ko_record, ko_weight=ko_weight, ki_record=ki_record,
+            ki_barrier_continuous=ki_barrier_continuous, record=record, index=index,
+        )
+
+    def _project_observation_branches(
+        self, product, grid, spot_grid, spot, width, pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss, *,
+        ko_record, ko_weight, ki_record, ki_barrier_continuous, record, index,
+    ):
+        """Observation ``index`` on its branch values (stacked rows x points): the continuation after a paid
+        (``pay_*``) and a missed (``miss_*``) coupon, the knock-out values with (``breach_pay``) and without
+        (``breach_miss``) it -- the price's joint coupon/KO/KI projection (or the nodal blend), then the knock-in."""
+        barrier = self._coupon_barrier_for_obs(product, index)
         if self._use_cell_average_events():
             v_out, v_in = self._project_joint_phoenix_event(
                 grid=grid, spot=spot, is_reverse=product.is_reverse,
@@ -1290,17 +1301,40 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             ki_record=ki_record, ki_barrier_continuous=ki_barrier_continuous,
         )
 
+    #: the coupon layout of the statistics call in progress (``_compute_event_stats``)
+    _coupon_cash_rows = None
+
     def _n_extra_quad_rows(self, n_ko: int) -> int:
-        # One coupon-trigger indicator row per observation, then the coupon-cash columns.
-        cash_rows = getattr(self, "_coupon_cash_rows", None)
-        if cash_rows is None:
-            return n_ko
-        return cash_rows.n_extra_rows
+        # stacked: one coupon-trigger indicator row per observation, then the coupon-cash columns; forward: W (EXPIRY)
+        cash_rows = self._coupon_cash_rows
+        return 0 if cash_rows is None else cash_rows.n_extra_rows
 
     def _initialize_extra_quad_rows(self, v_out, v_in, n_ko: int) -> None:
-        cash_rows = getattr(self, "_coupon_cash_rows", None)
+        cash_rows = self._coupon_cash_rows
         if cash_rows is not None:
             cash_rows.initialize(v_out, v_in)
+
+    def _statistics_march_extension(self):
+        """Forward route: the coupon columns ride the adjoint forward pass (spec D7)."""
+        cash_rows = self._coupon_cash_rows
+        return cash_rows if isinstance(cash_rows, ForwardCouponRows) else None
+
+    def _statistics_step_extension(self, product, grid, spot_grid, spot, width, *, ko_record, ko_weight, ki_record,
+                                   ki_barrier_continuous, coupon_record, observation_index, pre, pointwise=False):
+        """Forward route, a coupon observation: its branch-resolved event map and the ``W`` row before it."""
+        cash_rows = self._coupon_cash_rows
+        if not isinstance(cash_rows, ForwardCouponRows) or coupon_record is None:
+            return None
+
+        def branches(pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss):
+            arrays = [np.array(a, dtype=float) for a in (pay_out, pay_in, miss_out, miss_in, breach_pay, breach_miss)]
+            return self._project_observation_branches(
+                product, grid, spot_grid, spot, width, *arrays,
+                ko_record=ko_record, ko_weight=ko_weight, ki_record=ki_record,
+                ki_barrier_continuous=ki_barrier_continuous, record=coupon_record, index=observation_index,
+            )
+
+        return cash_rows.step(observation_index, self._pointwise_event(branches) if pointwise else branches, pre)
 
     def _observation_levels(self, product, ko_records, ki_records) -> list:
         return super()._observation_levels(product, ko_records, ki_records) + [
@@ -1317,16 +1351,19 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         return float(cb)
 
     def _coupon_columns(self, values_at_spot, n_ko, ko_records, product, pricing_env, df_fn, *,
-                        ko_rows: int) -> dict:
-        """The coupon fields from the coupon columns read at the spot (``coupon_table``'s keywords)."""
+                        forward=None) -> dict:
+        """The coupon fields (``coupon_table``'s keywords): from the forward pass's masses on the forward route, else
+        from the coupon columns read at the spot."""
+        cash_rows = self._coupon_cash_rows
+        if isinstance(cash_rows, ForwardCouponRows):
+            return cash_rows.coupon_fields(forward.extension, values_at_spot, ko_records, df_fn)
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
             # Coupon row was set to 1.0 (undiscounted indicator) at the observation,
             # so ed_coup = E[DF(0->obs) * 1{coupon, alive}].
             df_obs = float(df_fn(float(rec.observation_time)))
             if df_obs > 0.0:
-                coupon_probability[i] = float(values_at_spot[ko_rows + i] / df_obs)
-        cash_rows = self._coupon_cash_rows
+                coupon_probability[i] = float(values_at_spot[cash_rows.indicator_row + i] / df_obs)
         termination_at_spot = (
             float(values_at_spot[cash_rows.termination_row]) if cash_rows.expiry else None
         )

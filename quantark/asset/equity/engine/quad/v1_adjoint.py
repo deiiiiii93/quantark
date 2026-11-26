@@ -24,6 +24,14 @@ Masses (all discounted to the valuation; a probability divides by ``DF(t)``):
   knocked out at the same instant is in the knock-out source, never in the continuation, so the knock-out wins a
   tie exactly as the backward event decides it; under continuous knock-in also the bridge mass of each interval;
 * terminal: ``dual . terminal`` on each state (the maturity and knocked-in settlement columns, unit and cash).
+
+Extension hook (Phoenix coupon columns, spec D7): ``MarchLog.extension`` may carry extra dual rows through the same
+march -- diffused (stacked with the main dual) and bridged exactly as the main dual, mapped at each event by the
+extension itself (``EventStep.extension`` / ``FirstStepLog.extension``: its per-step data) -- so the extra masses ride
+the ONE forward march. ``extension.start()`` returns a run with ``readout(beta_out, beta_in) -> (x_out, x_in)`` (rows x
+nodes per state), ``event(data, banded, n, time, alpha_out, alpha_in, x_out, x_in) -> (x_out, x_in)`` (``banded``: the
+step's linear event map, ``alpha_*``: the main dual before it), ``finish(beta_out, beta_in, x_out, x_in)`` at the end
+(on the exact first step's nodes when it reads the terminal there) and ``result()`` (``ForwardResult.extension``).
 """
 from __future__ import annotations
 
@@ -45,6 +53,8 @@ __all__ = [
     "ForwardResult",
     "MarchLog",
     "forward_pass",
+    "probe_event",
+    "transpose_pair",
 ]
 
 #: probe half band of the event maps: a dual-cell projection couples a node to its neighbours (one cell); the joint
@@ -78,6 +88,8 @@ class EventStep:
     out_diffused: bool = True
     seed_out: bool = False
     source_units: Dict = field(default_factory=dict)
+    #: the march extension's data for this step (``None``: the extension maps its rows by the step's event map)
+    extension: Optional[object] = None
 
 
 @dataclass(eq=False)
@@ -95,6 +107,8 @@ class FirstStepLog:
     terminal_in: Optional[Dict[str, np.ndarray]] = None
     values_out: Optional[np.ndarray] = None
     values_in: Optional[np.ndarray] = None
+    #: the march extension's data for the first event, on the nodes
+    extension: Optional[object] = None
 
 
 @dataclass(eq=False)
@@ -113,6 +127,8 @@ class MarchLog:
     terminal_in: Dict[str, np.ndarray] = field(default_factory=dict)
     #: the exact first step, replacing the readout, the first diffusion and the first event (``None``: the lattice's)
     first_step: Optional[FirstStepLog] = None
+    #: extra dual rows riding the pass (module docstring; ``None``: none)
+    extension: Optional[object] = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +146,8 @@ class ForwardResult:
     sources: Dict[object, float]
     interval_start_dual: List[Optional[np.ndarray]]
     terminal: Dict[str, float]
+    #: the march extension's result (``None``: no extension)
+    extension: Optional[object] = None
 
 
 # --- the transposed operators ---------------------------------------------------------------------------------------
@@ -285,6 +303,31 @@ class _BandedEvent:
         return out
 
 
+def probe_event(event: Callable, n: int, time: float) -> _BandedEvent:
+    """The linear map ``event(v_out, v_in, None)`` on ``n`` nodes, read off by the coloured probes and band-checked.
+
+    Raises:
+        AdjointUnavailable: the map is not local in the probe band (reason given).
+    """
+    return _BandedEvent(event, n, time)
+
+
+def transpose_pair(banded: _BandedEvent, dual_out: np.ndarray, dual_in: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """``A^T`` of an event map on the two note states: the duals on its inputs from the duals on its outputs."""
+    return (banded.transpose("out", "out", dual_out) + banded.transpose("out", "in", dual_in),
+            banded.transpose("in", "out", dual_out) + banded.transpose("in", "in", dual_in))
+
+
+def _bridge_rows(rows: np.ndarray, engine, math_utils, prefactor, alpha, tau, bridge, beta) -> np.ndarray:
+    """``B^T`` on each extension row of the ``out`` state (``bridge_transpose`` takes one dual)."""
+    log_barrier, vol, dt, reverse = bridge
+    moved = np.zeros_like(rows)
+    for r in range(rows.shape[0]):
+        moved[r] = bridge_transpose(rows[r], engine, math_utils, prefactor, alpha, tau, log_barrier, vol, dt, reverse,
+                                    beta=beta)
+    return moved
+
+
 def _source_vectors(event: Callable, n: int, key) -> Tuple[np.ndarray, np.ndarray]:
     zero = np.zeros((1, n), dtype=float)
     w_out, w_in = event(zero.copy(), zero.copy(), key)
@@ -292,11 +335,12 @@ def _source_vectors(event: Callable, n: int, key) -> Tuple[np.ndarray, np.ndarra
 
 
 def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: int, k: int, first_ki, interval_ki,
-                        clean_ko, sources, starts, terminal):
+                        clean_ko, sources, starts, terminal, ext=None):
     """The transpose of the exact first step: the readout's quadrature weights on the nodes, the touch of a
     continuous knock-in over the first interval, the event on the nodes (probed like any event map: pointwise, so
     diagonal), then the nodes' duals back onto the lattice (``lift_transpose``) -- or, for a state seeded at the
-    first event, its terminal masses read on the nodes. Returns ``(beta_out, beta_in, done_out, done_in)``."""
+    first event, its terminal masses read on the nodes. The extension's rows (``ext``) ride every operator.
+    Returns ``(beta_out, beta_in, done_out, done_in, x_out, x_in)``."""
     fs = first.quadrature
     n_y = fs.y.size
     d = fs.readout_dual()
@@ -304,13 +348,22 @@ def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: 
     beta_out, beta_in = (zero_y, d) if log.readout_in else (d, zero_y)
     alpha_out = beta_out if step.out_diffused else zero_y
     alpha_in = beta_in
+    x_out = x_in = None
+    if ext is not None:
+        x_out, x_in = ext.readout(beta_out, beta_in)
+        if not step.out_diffused:
+            x_out = np.zeros_like(x_out)
     if step.bridge is not None and step.out_diffused:
         # the interval starts at the spot: a point mass there is its first-passage law
         starts[k] = (np.array([0.0]), np.array([float(np.sum(beta_out))]))
-        moved = beta_out * (fs.P[0] if fs.P is not None else 0.0)
+        touch = fs.P[0] if fs.P is not None else 0.0
+        moved = beta_out * touch
         alpha_out = alpha_out - moved
         alpha_in = alpha_in + moved
         interval_ki[k] = float(np.sum(moved))
+        if ext is not None:
+            x_moved = x_out * touch
+            x_out, x_in = x_out - x_moved, x_in + x_moved
     if step.event is None:
         y_out, y_in = alpha_out, alpha_in
     else:
@@ -324,8 +377,18 @@ def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: 
         first_ki[k] = float(np.sum(moved))
         y_out = banded.transpose("out", "out", alpha_out) + banded.transpose("out", "in", alpha_in)
         y_in = moved + banded.transpose("in", "in", alpha_in)
+        if ext is not None:
+            x_out, x_in = ext.event(first.extension, banded, n_y, step.time, alpha_out, alpha_in, x_out, x_in)
     done_out = done_in = False
     zero = np.zeros(n, dtype=float)
+    if ext is not None:
+        if (first.terminal_out is None) != (first.terminal_in is None):
+            raise PricingError("the QUAD V1 march extension reads its terminal on both note states at once")
+        if first.terminal_out is not None:
+            ext.finish(y_out, y_in, x_out, x_in)
+            x_out, x_in = np.zeros((x_out.shape[0], n)), np.zeros((x_in.shape[0], n))
+        else:
+            x_out, x_in = fs.lift_transpose(x_out), fs.lift_transpose(x_in)
     if first.terminal_out is not None:
         for name, value in first.terminal_out.items():
             terminal[name] = float(y_out @ value)
@@ -338,7 +401,7 @@ def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: 
         beta_in, done_in = zero, True
     else:
         beta_in = fs.lift_transpose(y_in)
-    return beta_out, beta_in, done_out, done_in
+    return beta_out, beta_in, done_out, done_in, x_out, x_in
 
 
 # --- the pass -------------------------------------------------------------------------------------------------------
@@ -364,6 +427,8 @@ def forward_pass(log: MarchLog) -> ForwardResult:
     terminal: Dict[str, float] = {}
 
     first = log.first_step
+    ext = None if log.extension is None else log.extension.start()
+    x_out = x_in = None
     done_out = done_in = False
     if log.transition is not None:
         prefactor, alpha, beta, tau = log.transition
@@ -371,17 +436,28 @@ def forward_pass(log: MarchLog) -> ForwardResult:
     else:
         row = interpolation_weights(mu)
     beta_out, beta_in = (zero, row) if log.readout_in else (row, zero)
+    if ext is not None and first is None:
+        x_out, x_in = ext.readout(beta_out, beta_in)
     for k, step in enumerate(steps):
         if k == 0 and first is not None:
-            beta_out, beta_in, done_out, done_in = _first_step_forward(
-                first, step, log, n, k, first_ki, interval_ki, clean_ko, sources, starts, terminal)
+            beta_out, beta_in, done_out, done_in, x_out, x_in = _first_step_forward(
+                first, step, log, n, k, first_ki, interval_ki, clean_ko, sources, starts, terminal, ext=ext)
             continue
         if k == 0 and log.transition is not None:
             alpha_out, alpha_in = beta_out, beta_in         # the readout row is already the dual of the slice
         else:
             tau, alpha, beta, prefactor, omega = step.diffusion
-            stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau,
-                                        engine=engine)
+            if ext is None:
+                stacked = diffuse_transpose(np.vstack([beta_out, beta_in]), mu, omega, prefactor, alpha, beta, tau,
+                                            engine=engine)
+            else:
+                # the extension's rows ride the same diffusion, stacked with the main dual
+                r = x_out.shape[0]
+                stacked = diffuse_transpose(np.vstack([beta_out, beta_in, x_out, x_in]), mu, omega, prefactor, alpha,
+                                            beta, tau, engine=engine)
+                x_beta_out = x_out
+                x_out = stacked[2:2 + r] if step.out_diffused else np.zeros_like(x_out)
+                x_in = stacked[2 + r:2 + 2 * r]
             alpha_out = stacked[0] if step.out_diffused else zero
             alpha_in = stacked[1]
             if step.bridge is not None and step.out_diffused:
@@ -392,6 +468,9 @@ def forward_pass(log: MarchLog) -> ForwardResult:
                 alpha_out = alpha_out - moved
                 alpha_in = alpha_in + moved
                 interval_ki[k] = float(np.sum(moved))
+                if ext is not None:
+                    x_moved = _bridge_rows(x_beta_out, engine, mu, prefactor, alpha, tau, step.bridge, beta)
+                    x_out, x_in = x_out - x_moved, x_in + x_moved
         if step.event is None:
             beta_out, beta_in = alpha_out, alpha_in
         else:
@@ -408,10 +487,16 @@ def forward_pass(log: MarchLog) -> ForwardResult:
             first_ki[k] = float(np.sum(moved))
             beta_out = banded.transpose("out", "out", alpha_out) + banded.transpose("out", "in", alpha_in)
             beta_in = moved + banded.transpose("in", "in", alpha_in)
+            if ext is not None:
+                x_out, x_in = ext.event(step.extension, banded, n, step.time, alpha_out, alpha_in, x_out, x_in)
         if step.seed_out:
+            if ext is not None:
+                raise PricingError("the QUAD V1 march extension has no seeded note state")
             for name, value in log.terminal_out.items():
                 terminal[name] = float(beta_out @ value)
             beta_out = zero
+    if ext is not None and not (done_out and done_in):
+        ext.finish(beta_out, beta_in, x_out, x_in)
     if not done_out and not any(step.seed_out for step in steps):
         for name, value in log.terminal_out.items():
             terminal[name] = float(beta_out @ value)
@@ -422,4 +507,5 @@ def forward_pass(log: MarchLog) -> ForwardResult:
     if np.any(np.diff(times) <= 0.0):
         raise PricingError("the QUAD V1 march log is not in strictly increasing time")
     return ForwardResult(times=times, first_knock_in=first_ki, interval_knock_in=interval_ki,
-                         clean_knock_out=clean_ko, sources=sources, interval_start_dual=starts, terminal=terminal)
+                         clean_knock_out=clean_ko, sources=sources, interval_start_dual=starts, terminal=terminal,
+                         extension=None if ext is None else ext.result())
