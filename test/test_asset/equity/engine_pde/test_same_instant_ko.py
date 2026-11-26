@@ -315,6 +315,37 @@ def test_forward_adjoint_reconstructs_every_column_through_the_group(projection)
         assert math.isclose(forward.reconstructed[int(c)], at(int(c)), rel_tol=1e-12, abs_tol=1e-12), (c,)
 
 
+@pytest.mark.parametrize("reverse", [False, True], ids=["up", "reverse"])
+def test_maturity_instant_pair_statistics_attribute_each_record_exactly(reverse):
+    """CP1 follow-up (AC6 at the maturity instant): the pair is the terminal knock-out; each record's knock-out
+    probability is its band's BS probability (the terminal group's statistics stage)."""
+    records = pair(b1=97.0, b2=100.0) if reverse else pair()
+    product = snowball(records, ki=None, exercise=JUL4, reverse=reverse)
+    e = env()
+    _, (p1, p2) = _exact_pair_value(product, e, reverse=reverse)
+    stats = SnowballPDESolver(PDEParams()).calculate_event_stats(product, e)
+    probs = _observation_rows(stats)
+    assert len(probs) == 2
+    assert probs[0] == pytest.approx(p1, abs=1e-5) and probs[1] == pytest.approx(p2, abs=1e-5)
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))
+
+
+@pytest.mark.parametrize("projection", [None, EventProjectionMode.NODAL], ids=["cell_average", "nodal"])
+def test_forward_adjoint_reconstructs_through_a_terminal_group_with_knock_in(projection):
+    """CP1 follow-up (D5 at the maturity instant): the forward pass replays the terminal group with a knock-in."""
+    solver = SnowballPDESolver(PDEParams(event_projection=projection))
+    e = env()
+    product = snowball(pair(), ki=75.0, exercise=JUL4)
+    p = prepare(solver, product, e, OutputRequest(Operation.EVENT_STATS, event_stats=True))
+    with market_scope(p.solver, p.env, p.market_fps), p.adapter.scope(p.product, p.env):
+        result = march(p)
+        forward = adjoint.forward_pass(p.statistics, result.states, result.captures, reconstruct=True)
+        at = p.statistics._reader(result.states, result.captures)
+    L = p.statistics.layout
+    for c in [*L.ko, *L.maturity_unit, L.kis]:
+        assert abs(forward.reconstructed[int(c)] - at(int(c))) <= 1e-10, (c,)
+
+
 @pytest.mark.parametrize("name", list(SOLVERS))
 @pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
 def test_valuation_instant_statistics_put_probability_one_on_the_deciding_record(name, spot, deciding):

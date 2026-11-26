@@ -177,7 +177,7 @@ def test_portfolio_ledger_times_dcn_receivables_as_the_price(adjust):
     env = us_env(JUL3, adjust=adjust)
     portfolio = SimpleNamespace(pricing_environments={"SPX": env})
     # the non-DCN flow keeps the settlement resolver's business-day counting, which puts 07-04 at the valuation
-    # instant: 0.14.0 refused it (the whole book raised); since 0.16.0 (DCN/dated run D7) it is timed at 0, DF(0) = 1
+    # instant: 0.14.0 refused it (the whole book raised); since 0.16.0 (DCN/dated run D11) it is timed at 0, DF(0) = 1
     manager._revalue_ledger(portfolio, pd.Timestamp(JUL3))
     dcn_pv = 10_000.0 * env.get_discount_factor(env_time(env, JUL4))
     assert manager.pending_receivable_pv == dcn_pv + 10_000.0

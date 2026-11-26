@@ -1,4 +1,4 @@
-"""A pending flow paid on an environment holiday right after the run date (0.16.0, DCN/dated run D7).
+"""A pending flow paid on an environment holiday right after the run date (0.16.0, DCN/dated run D11).
 
 Under ``BUSINESS_DAYS`` business-day counting, a payment on the US holiday 2025-07-04 after a 2025-07-03 run date is
 zero trading days away: the resolver used to refuse it ("payment must be strictly after valuation"), so the run

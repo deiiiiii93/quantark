@@ -397,7 +397,7 @@ class SettlementResolver:
             ):
                 # still owed (paid after the valuation date), but the environment's clock puts the payment at the
                 # valuation instant -- an env holiday right after the run date under business-day counting: timed at
-                # 0 (DF(0)), as DCN flows are (0.16.0 DCN/dated run D7)
+                # 0 (DF(0)), as DCN flows are (0.16.0 DCN/dated run D11)
                 resolved_payment_time = 0.0
             determination_date = point_date
         else:
