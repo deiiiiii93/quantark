@@ -101,6 +101,14 @@ _PREPARED_PDE = (
     "routes the session builds them through prepare(session=None) and executes "
     "through prepare(session=artefacts), storing the bound Layout (pde-prep/v2)"
 )
+_PREPARED_PDE_DCN = (
+    "grids, term-structure step coefficients, and factorization packs (and "
+    "the Dupire surface where the model has one) behind PreparedArtifactCache "
+    "descriptors, built through prepare(session=None) and executed through "
+    "prepare(session=artefacts) (pde-prep/v2); the EVENT_STATS operation runs "
+    "the statistics' exact forward pass on the same prepared clone (no event "
+    "output on PRICE)"
+)
 _PREPARED_PDE_2D = (
     "one-value-solve session rich outputs (PV + event stats) through a "
     "prepared clone; time-dependent ADI operators are rebuilt (spec 9.2 "
@@ -419,8 +427,14 @@ ENGINE_INVENTORY = (
     _eq_pde("LocalVolKOResetSnowballPDESolver", "lv", "ko_reset_snowball"),
     _eq_pde("HestonKOResetSnowballPDESolver", "heston", "ko_reset_snowball"),
     _eq_pde("HestonSLVKOResetSnowballPDESolver", "slv", "ko_reset_snowball"),
-    _eq_pde_prepared("DCNPDEEngine", "bsm", "dcn"),
-    _eq_pde_prepared("LocalVolDCNPDEEngine", "lv", "dcn"),
+    _eq_pde("DCNPDEEngine", "bsm", "dcn", adoption_state="supported",
+            prepared_state="prepared_capable",
+            prepared_rationale=_PREPARED_PDE_DCN,
+            validation_profile=_PROFILE_BITWISE),
+    _eq_pde("LocalVolDCNPDEEngine", "lv", "dcn", adoption_state="supported",
+            prepared_state="prepared_capable",
+            prepared_rationale=_PREPARED_PDE_DCN,
+            validation_profile=_PROFILE_BITWISE),
     _eq_pde("HestonDCNPDESolver", "heston", "dcn",
             prepared_rationale=_PREPARED_ADI),
     # --- Equity facade ---

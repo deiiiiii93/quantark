@@ -268,6 +268,12 @@ knock-in state:
   probability is 0 and `probability_residual` is 0. **Terminated and fully settled:** `None`.
   `price_with_events` returns `EventDistribution.ended()`, which every event-dependent leg refuses
   (`ensure_live`): a leg riding an ended note settles with it.
+- **A lifecycle state through `PricingSession` (0.16.0):** an `EVENT_STATS` request carrying a
+  `lifecycle_state` is honoured by the engines accepting one (QUAD V2, the DCN engines) and
+  refused with `CapabilityError` by every other engine, exactly as their stateful `price()` is.
+  Before 0.16.0 the Snowball / Phoenix / KO-reset MC and PDE engines dropped the state and returned
+  the statistics of a fresh trade. On those engines a trade's history rides on the product (aged
+  schedule, `knocked_in_at_valuation`). A fully settled note (`None`) is refused too.
 
 ## Unavailable values and `require`
 
@@ -397,8 +403,11 @@ opt-in `("quad_v1_forward_density", "quad_v1")` route was removed in 0.13.0.) Th
   accepted and nothing is pruned.
 - `probability_residual` on default grids is below 1e-7 (Heston below 1e-6), shrinking under time
   refinement.
-- A `PricingSession` `EVENT_STATS` request is still refused for `DCNPDEEngine` and
-  `LocalVolDCNPDEEngine` (the adapter does not advertise it); call `calculate_event_stats` directly.
+- Since 0.16.0 every DCN engine (the five MC engines and the three PDE engines) serves a
+  `PricingSession` `EVENT_STATS` request: the value is the engine's own `calculate_event_stats`
+  object, bit for bit, with or without a `DCNLifecycleState`. A PRICE request with the
+  `EVENT_STATS` output is still refused on the DCN PDE adapters (the statistics are their own
+  forward pass, not a column of the value solve).
 
 ### DCN time axis (all DCN engines)
 

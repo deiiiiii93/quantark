@@ -7,6 +7,46 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.16.0] - unreleased
+
+Follow-up release built from the 0.11.0–0.15.0 open items. Sections are added as each part lands.
+
+### DCN session parity
+
+Every DCN engine serves the `PricingSession` `EVENT_STATS` operation, and a lifecycle state sent
+with an `EVENT_STATS` request is honoured or refused, never dropped. Stateless numbers are
+unchanged, bit for bit.
+
+#### Added
+
+- **`EVENT_STATS` on all eight DCN engines.** `DCNMCEngine`, `LocalVolDCNMCEngine`,
+  `HestonDCNMCEngine`, `QEDCNMCEngine`, `CoupledCoarseHestonDCNMCEngine`, `DCNPDEEngine`,
+  `LocalVolDCNPDEEngine` and `HestonDCNPDESolver` return their own `calculate_event_stats` object
+  through a session. The value matches the direct call bit for bit, with or without a
+  `DCNLifecycleState`, on the final observation day and for terminated notes. On the MC engines
+  this also holds with several batches on the serial and threads backends. The MC adapters run the
+  same batch plan as `PRICE_DETAILED`. The two 1D PDE engines have new session adapters,
+  `EquityDCNPDESessionAdapter` and `EquityLVDCNPDESessionAdapter`, which advertise the operation.
+  The `EVENT_STATS` operation accepts only the `PV` output, as on every other adapter. A PRICE
+  request with the `EVENT_STATS` output is still refused on the DCN PDE adapters.
+
+#### Fixed
+
+- **A lifecycle state on a session `EVENT_STATS` request is no longer dropped.** Before, the
+  legacy statistics call ignored the request's `lifecycle_state`. The Snowball / Phoenix /
+  KO-reset MC and PDE engines then returned the statistics of a fresh trade for a mid-life
+  request, with no warning (21 inventoried engines). Those engines do not support lifecycle
+  states (`supports_lifecycle_state=False`, and their stateful `price()` already raises), so they
+  now refuse with `CapabilityError`. On these engines, put the trade's history on the product
+  (aged schedule, `knocked_in_at_valuation`). Engines that do accept a state (`HestonDCNPDESolver`
+  on the legacy route) now receive it. A fully settled note is refused as before.
+
+#### Changed
+
+- `docs/execution/capability-matrix.md`: the DCN PDE rows give an accurate prepared rationale
+  (their statistics are the `EVENT_STATS` operation's forward pass, not an output of the value
+  solve).
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a

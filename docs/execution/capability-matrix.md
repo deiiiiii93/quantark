@@ -86,23 +86,23 @@ Exported engines inventoried: **77**
 | `LocalVolKOResetSnowballPDESolver` | lv | ko_reset_snowball | fixed | engine | `temporary_legacy` | `not_applicable` (9) | `not_applicable` (4) | `temporary_legacy` (13) | — |
 | `HestonKOResetSnowballPDESolver` | heston | ko_reset_snowball | fixed | engine | `temporary_legacy` | `not_applicable` (9) | `not_applicable` (4) | `temporary_legacy` (13) | — |
 | `HestonSLVKOResetSnowballPDESolver` | slv | ko_reset_snowball | fixed | engine | `temporary_legacy` | `not_applicable` (9) | `not_applicable` (4) | `temporary_legacy` (13) | — |
-| `DCNPDEEngine` | bsm | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (10) | `bitwise-vs-direct/v1` |
-| `LocalVolDCNPDEEngine` | lv | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (10) | `bitwise-vs-direct/v1` |
+| `DCNPDEEngine` | bsm | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (14) | `bitwise-vs-direct/v1` |
+| `LocalVolDCNPDEEngine` | lv | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (14) | `bitwise-vs-direct/v1` |
 | `HestonDCNPDESolver` | heston | dcn | fixed | engine | `temporary_legacy` | `not_applicable` (9) | `not_applicable` (4) | `temporary_legacy` (11) | — |
-| `PDEEngine` | dispatch | any | fixed | facade | `temporary_legacy` | `not_applicable` (14) | `not_applicable` (4) | `temporary_legacy` (15) | — |
+| `PDEEngine` | dispatch | any | fixed | facade | `temporary_legacy` | `not_applicable` (15) | `not_applicable` (4) | `temporary_legacy` (16) | — |
 
 ## FX Monte Carlo (8 engines)
 
 | Engine | Model | Products | Planning | Role | Adoption | Batch | Adaptive | Prepared | Validation profile |
 |---|---|---|---|---|---|---|---|---|---|
-| `FxLocalVolMCEngine` | lv | vanilla | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxHestonMCEngine` | heston | vanilla | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxHestonSLVMCEngine` | slv | vanilla | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxRangeAccrualMCEngine` | bsm | range_accrual | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxBarrierMCEngine` | bsm | barrier | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxSharkfinMCEngine` | bsm | sharkfin | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxTarnForwardMCEngine` | bsm | tarn | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
-| `FxTargetRedemptionNoteMCEngine` | bsm | tarn | fixed | engine | `temporary_legacy` | `temporary_legacy` (16) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxLocalVolMCEngine` | lv | vanilla | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxHestonMCEngine` | heston | vanilla | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxHestonSLVMCEngine` | slv | vanilla | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxRangeAccrualMCEngine` | bsm | range_accrual | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxBarrierMCEngine` | bsm | barrier | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxSharkfinMCEngine` | bsm | sharkfin | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxTarnForwardMCEngine` | bsm | tarn | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
+| `FxTargetRedemptionNoteMCEngine` | bsm | tarn | fixed | engine | `temporary_legacy` | `temporary_legacy` (17) | `not_applicable` (4) | `not_applicable` (3) | — |
 
 ## FX PDE (3 engines)
 
@@ -122,9 +122,9 @@ Exported engines inventoried: **77**
 
 | Engine | Model | Products | Planning | Role | Adoption | Batch | Adaptive | Prepared | Validation profile |
 |---|---|---|---|---|---|---|---|---|---|
-| `ConvertibleBondJumpDiffusionEngine` | jump_diffusion | convertible | fixed | engine | `temporary_legacy` | `not_applicable` (14) | `not_applicable` (4) | `temporary_legacy` (17) | — |
-| `ConvertibleBondTFEngine` | bsm | convertible | fixed | engine | `temporary_legacy` | `not_applicable` (14) | `not_applicable` (4) | `temporary_legacy` (17) | — |
-| `ConvertibleBondEngine` | dispatch | convertible | fixed | facade | `temporary_legacy` | `not_applicable` (14) | `not_applicable` (4) | `temporary_legacy` (15) | — |
+| `ConvertibleBondJumpDiffusionEngine` | jump_diffusion | convertible | fixed | engine | `temporary_legacy` | `not_applicable` (15) | `not_applicable` (4) | `temporary_legacy` (18) | — |
+| `ConvertibleBondTFEngine` | bsm | convertible | fixed | engine | `temporary_legacy` | `not_applicable` (15) | `not_applicable` (4) | `temporary_legacy` (18) | — |
+| `ConvertibleBondEngine` | dispatch | convertible | fixed | facade | `temporary_legacy` | `not_applicable` (15) | `not_applicable` (4) | `temporary_legacy` (16) | — |
 
 ## Rationale notes
 
@@ -141,10 +141,11 @@ Exported engines inventoried: **77**
 11. frozen construction-owned model inputs; time-dependent ADI/kernel operators cannot prove factorization reuse safe and are rebuilt (spec 9.2 legality); no session artifacts
 12. one-value-solve session rich outputs (PV + event stats) through a prepared clone; time-dependent ADI operators are rebuilt (spec 9.2 legality), so no factorization artifacts
 13. engine-internal kernel discretization; preparation cost negligible; no session artifacts
-14. not an MC engine; batch capability does not apply
-15. facade dispatches per product type; prepared adapters bind at the solver level
-16. FX MC engines are single-solve on the shared montecarlo layer; batch decomposition re-scoped on Phase 2 benchmark evidence
-17. environment-bound engine builds internal grids per solve; no shareable artifacts (spec 9.2: rebuilt)
+14. grids, term-structure step coefficients, and factorization packs (and the Dupire surface where the model has one) behind PreparedArtifactCache descriptors, built through prepare(session=None) and executed through prepare(session=artefacts) (pde-prep/v2); the EVENT_STATS operation runs the statistics' exact forward pass on the same prepared clone (no event output on PRICE)
+15. not an MC engine; batch capability does not apply
+16. facade dispatches per product type; prepared adapters bind at the solver level
+17. FX MC engines are single-solve on the shared montecarlo layer; batch decomposition re-scoped on Phase 2 benchmark evidence
+18. environment-bound engine builds internal grids per solve; no shareable artifacts (spec 9.2: rebuilt)
 
 ## Session-level capabilities
 
