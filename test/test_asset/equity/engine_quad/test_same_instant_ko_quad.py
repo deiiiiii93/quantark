@@ -572,3 +572,88 @@ def test_phoenix_folding_onto_a_same_instant_pair_is_refused():
     product, e = phoenix_repro("stepdown"), env()
     with pytest.raises(ValidationError, match="2025-07-03.*2025-07-04"):
         phx().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+
+# --- T3bc (b): coupons decided at the valuation instant by several records settle on their own dates ---------------
+
+SETTLE_1, SETTLE_2 = datetime(2025, 7, 8), datetime(2025, 7, 15)
+
+
+def phoenix_settled_pair(b1=103.0, b2=100.0, later=()):
+    """The AC7 pair (07-03 at ``b1``; 07-04 at ``b2`` paying 10%) settling on DIFFERENT dates (07-08 / 07-15), then
+    the ``later`` records at 103; no KI, memory on."""
+    return phoenix([ObservationRecord(observation_date=JUL3, barrier=b1, settlement_date=SETTLE_1),
+                    ObservationRecord(observation_date=JUL4, barrier=b2, return_rate=0.10, settlement_date=SETTLE_2)]
+                   + [ObservationRecord(observation_date=d, barrier=103.0) for d in later], ki=None)
+
+
+def _decided_legs(product, e, spot):
+    """The zero-gap legs decided on ``spot`` at the valuation instant, by hand: per record of the instant (alive) its
+    coupon (``spot`` above the coupon barrier; memory arrears zero here: no period is missed before it) discounted at
+    ITS OWN settlement, then its knock-out redemption there; ``(legs, knocked_out, coupon rows)``."""
+    records = [r for r in product.resolve_ko_observations(e) if r.observation_time == 0.0]
+    fractions = product.get_coupon_period_year_fractions(e)
+    df = e.get_discount_factor
+    legs, rows = 0.0, {}
+    for k, rec in enumerate(records):
+        assert spot >= COUPON_BARRIER
+        c = product.get_coupon_payoff(k, year_fraction=fractions[k])
+        legs += c * df(rec.settlement_time)
+        rows[k] = c * df(rec.settlement_time)
+        if spot >= rec.barrier:
+            return legs + rec.payoff * df(rec.settlement_time), k, rows
+    return legs, None, rows
+
+
+@pytest.mark.parametrize("spot", [90.0, 101.0], ids=["both_paid", "paid_then_step_down_knock_out"])
+def test_phoenix_valuation_instant_coupons_settle_on_their_own_dates(spot):
+    """T3bc (b), exact: valued ON 07-03 (07-03 and 07-04 at env time 0), the pair settling 07-08 / 07-15, the spot in
+    the both-pay band: each record's coupon is discounted at its OWN settlement (and the step-down knock-out pays its
+    redemption at record 2's). With no further record the rest is the closed form: the fixed maturity redemption
+    (zero here) when not knocked out. Before the fix the whole decided coupon was discounted at the last paid
+    record's settlement: -3.97e-4 on both bands."""
+    e = env(JUL3, spot=spot)
+    product = phoenix_settled_pair()
+    r1, r2 = product.resolve_ko_observations(e)
+    assert r1.observation_time == r2.observation_time == 0.0 and r1.settlement_time < r2.settlement_time
+    legs, knocked_out, _ = _decided_legs(product, e, spot)
+    expected = legs
+    if knocked_out is None:
+        m = product.get_maturity_payoff_v0(spot, pricing_env=e)
+        expected += m * e.get_discount_factor(resolve_terminal_timing(product, e).payment_time)
+    assert phx().price(product, e) == pytest.approx(expected, rel=1e-13, abs=1e-13)
+
+
+def test_phoenix_valuation_instant_coupons_settle_on_their_own_dates_with_a_continuation():
+    """T3bc (b), exact: with records after the pair, the price is the decided legs (each at its own settlement) plus
+    the continuation, which does not depend on where the pair settles -- the same continuation on two settlement
+    layouts of the pair."""
+    later = (datetime(2025, 9, 3), datetime(2025, 11, 3))
+    e = env(JUL3, spot=90.0)
+    a = phoenix_settled_pair(later=later)
+    b = phoenix([ObservationRecord(observation_date=JUL3, barrier=103.0, settlement_date=SETTLE_2),
+                 ObservationRecord(observation_date=JUL4, barrier=100.0, return_rate=0.10, settlement_date=SETTLE_2)]
+                + [ObservationRecord(observation_date=d, barrier=103.0) for d in later], ki=None)
+    cont_a = phx().price(a, e) - _decided_legs(a, e, 90.0)[0]
+    cont_b = phx().price(b, e) - _decided_legs(b, e, 90.0)[0]
+    assert cont_a == pytest.approx(cont_b, rel=1e-12, abs=1e-12)
+    assert cont_a > 0.1
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("spot", [90.0, 101.0], ids=["both_paid", "paid_then_step_down_knock_out"])
+def test_phoenix_valuation_instant_coupons_are_attributed_per_record(route, spot):
+    """T3bc (b): the statistics put each decided coupon on its own record's coupon row (probability 1, cash discounted
+    at its own settlement), the knock-out on the deciding record; the ledger reconciles with the price."""
+    later = (datetime(2025, 9, 3), datetime(2025, 11, 3))
+    e = env(JUL3, spot=spot)
+    product = phoenix_settled_pair(later=later)
+    _, knocked_out, rows = _decided_legs(product, e, spot)
+    stats = v1_route(route, PhoenixQuadEngine).calculate_event_stats(product, e)
+    assert stats.pv == phx().price(product, e)
+    for k, cash in rows.items():
+        assert stats.coupons.probability[k] == 1.0, (k, list(stats.coupons.probability))
+        assert stats.coupons.discounted_cash[k] == pytest.approx(cash, rel=1e-13), (k, list(stats.coupons.discounted_cash))
+    if knocked_out is not None:
+        assert _rows(stats)[knocked_out] == 1.0 and sum(_rows(stats)) == 1.0
+    assert abs(stats.reconciliation_error) <= 1e-9 * max(1.0, abs(stats.pv))

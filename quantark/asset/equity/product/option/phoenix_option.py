@@ -9,7 +9,7 @@ observation where the coupon barrier condition is met.
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from quantark.asset.equity.product.option.base_equity_option import BaseEquityOption
 from quantark.asset.equity.settlement import (
@@ -58,11 +58,16 @@ class PhoenixObservationsAtValuation(ObservationsAtValuation):
         coupon_index: the observation that paid it, position in ``resolve_ko_observations``.
         arrears: the memory arrears carried out of this instant when it does not knock out (theta carries them
             into the bumped product, spec 2026-10-07 theta boundary R4).
+        paid: per record of this instant that pays coupon cash, in contract order, ``(index, cash, triggered)``:
+            its own coupon plus the arrears it releases (``triggered``: its coupon level met), or the arrears a
+            knock-out releases where its coupon level is missed. Several records on one env instant (0.16.0 D14)
+            each pay at their own settlement; ``coupon`` is their total.
     """
 
     coupon: float = 0.0
     coupon_index: Optional[int] = None
     arrears: float = 0.0
+    paid: Tuple[Tuple[int, float, bool], ...] = ()
 
 
 @dataclass
@@ -781,12 +786,14 @@ class PhoenixOption(BaseEquityOption):
             knocked_in and config.disable_ko_after_ki
         )
         coupon, coupon_index = 0.0, None
+        legs = []          # (index, cash, triggered) per record paying cash at this instant
         for index, record in enumerate(records):
             if not at_valuation_instant(record.observation_time):
                 continue
             own = float(self.get_coupon_payoff(index, year_fraction=fractions[index]))
             triggered = self.is_coupon_triggered(spot, active[index])      # the period's own barrier (F10)
             if triggered:
+                legs.append((index, own + arrears, True))
                 coupon, coupon_index, arrears = coupon + own + arrears, index, 0.0
             if ko_allowed and record.barrier is not None:
                 breached = spot <= record.barrier if self.is_reverse else spot >= record.barrier
@@ -794,15 +801,17 @@ class PhoenixOption(BaseEquityOption):
                     # the release rule (spec 3B decision 4): a knock-out pays the arrears carried into
                     # this period whatever the spot; the period's own coupon only where it is triggered
                     paid = coupon if triggered else coupon + arrears
+                    if not triggered and arrears != 0.0:
+                        legs.append((index, arrears, False))
                     return PhoenixObservationsAtValuation(
-                        True, knocked_in, record, index, paid, coupon_index
+                        True, knocked_in, record, index, paid, coupon_index, paid=tuple(legs)
                     )
             if not triggered and self.has_memory_coupon:
                 arrears += own
         if not knocked_in and self.has_ki_barrier:
             knocked_in = knock_in_decided_at_valuation(self, spot, pricing_env)
         return PhoenixObservationsAtValuation(
-            False, knocked_in, coupon=coupon, coupon_index=coupon_index, arrears=arrears
+            False, knocked_in, coupon=coupon, coupon_index=coupon_index, arrears=arrears, paid=tuple(legs)
         )
 
     def get_ko_observation_profile(self, pricing_env) -> Dict[str, List[Optional[float]]]:

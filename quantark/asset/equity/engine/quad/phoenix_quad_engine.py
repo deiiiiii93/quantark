@@ -71,6 +71,10 @@ class _CouponCashRows:
     carried_arrears: float
     decided_index: Optional[int]
     decided_coupon: float
+    #: coupons decided at the valuation instant by several records of one env instant (0.16.0 D14), per record
+    #: ``(index, cash, triggered)`` (``PhoenixObservationsAtValuation.paid``): each on its own row, at its own
+    #: settlement; ``decided_index`` is then ``None``
+    decided_legs: tuple = ()
 
     @property
     def indicator_row(self) -> int:
@@ -234,6 +238,9 @@ class _CouponCashRows:
                 termination_at_spot if self.expiry else float(self.delay_dfs[self.decided_index])
             )
             cash[self.decided_index] += self.decided_coupon * float(discount)
+        for index, amount, _ in self.decided_legs:
+            discount = termination_at_spot if self.expiry else float(self.delay_dfs[index])
+            cash[index] += float(amount) * float(discount)
         return cash
 
     def readout_buckets(self, values_at_spot: np.ndarray) -> np.ndarray:
@@ -247,6 +254,8 @@ class _CouponCashRows:
             )
         if self.decided_index is not None:
             cash += self.decided_coupon * units
+        for _, amount, _ in self.decided_legs:
+            cash += float(amount) * units
         return cash
 
     def readout_earned(self, values_at_spot: np.ndarray) -> np.ndarray:
@@ -258,6 +267,8 @@ class _CouponCashRows:
         )
         if self.decided_index is not None:
             earned[self.decided_index] += self.decided_coupon
+        for index, amount, _ in self.decided_legs:
+            earned[index] += float(amount)
         return earned
 
 
@@ -1038,11 +1049,16 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     coupon_discount = math_utils.interpolate(
                         w_in if knocked_in_now else w_out, x=0.0
                     )
+                value += float(decision.coupon) * float(coupon_discount)
+            elif len(now) >= 2:
+                # several records decided now (D14): each record's coupon at its own settlement
+                for index, amount, _ in decision.paid:
+                    value += float(amount) * float(event_delay_by_record[id(ko_records[index])])
             else:
                 coupon_discount = event_delay_by_record[
                     id(ko_records[decision.coupon_index])
                 ]
-            value += float(decision.coupon) * float(coupon_discount)
+                value += float(decision.coupon) * float(coupon_discount)
         return value
 
     def _shared_ko_instants(self, product, ko_records) -> dict:
@@ -1238,14 +1254,27 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             pricing_env,
             knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
         )
+        legs = self._decided_coupon_legs(product, pricing_env, decision)
         if decision.knocked_out:
             record = decision.ko_record
+            if legs is not None:
+                # several records decided now (D14): the redemption at the knock-out's settlement, each coupon at
+                # its own record's
+                cash = float(record.payoff or 0.0) + (float(extra_cash) if extra_cash is not None else 0.0)
+                value = discounted(cash, record.settlement_time)
+                for _, amount, _, payment_time in legs:
+                    value += discounted(amount, payment_time)
+                return value
             cash = float(record.payoff or 0.0) + decision.coupon
             if extra_cash is not None:
                 cash += float(extra_cash)
             return discounted(cash, record.settlement_time)
         redemption = product.get_payoff(spot, knocked_in=decision.knocked_in, pricing_env=pricing_env)
         value = discounted(redemption, resolve_terminal_timing(product, pricing_env).payment_time)
+        if legs is not None:
+            for _, amount, _, payment_time in legs:
+                value += discounted(amount, payment_time)
+            return value
         if decision.coupon:
             if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
                 records = product.resolve_ko_observations(pricing_env)
@@ -1254,6 +1283,29 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 payment_time = resolve_terminal_timing(product, pricing_env).payment_time
             value += discounted(decision.coupon, payment_time)
         return value
+
+    @staticmethod
+    def _decided_coupon_legs(product, pricing_env, decision):
+        """The coupons decided at the valuation instant when several records sit on it (0.16.0 D14), per paying
+        record ``(index, cash, triggered, payment time)``: INSTANT pays each at its own record's settlement, EXPIRY
+        with the note's end (the knock-out decided now, else the terminal payment). ``None`` when at most one record
+        sits on the instant (the decision's single coupon, as before)."""
+        from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+
+        records = product.resolve_ko_observations(pricing_env)
+        if sum(1 for record in records if at_valuation_instant(record.observation_time)) < 2:
+            return None
+        if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
+            def when(index):
+                return records[index].settlement_time
+        else:
+            end = (decision.ko_record.settlement_time if decision.knocked_out
+                   else resolve_terminal_timing(product, pricing_env).payment_time)
+
+            def when(index):
+                return end
+        return [(int(index), float(amount), bool(triggered), when(index))
+                for index, amount, triggered in decision.paid]
 
     def _decided_ko_statistics(self, product, pricing_env, ko_records, ko_record_0, *, streams=None):
         """A knock-out decided at valuation, with the coupon decided at the same instant (DESIGN §4.5).
@@ -1281,9 +1333,19 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                                             is_coupon_obs=np.ones(len(ko_records), dtype=bool))
         index = int(np.flatnonzero(unit)[0])
         coupon_cash = np.zeros(len(ko_records), dtype=float)
-        coupon_cash[index] = pv - float(observations.discounted_cash[index])
         coupon_probability = np.zeros(len(ko_records), dtype=float)
-        coupon_probability[index] = 1.0 if decision.coupon_index is not None else 0.0
+        legs = self._decided_coupon_legs(product, pricing_env, decision)
+        if legs is not None:
+            # several records decided now (D14): each coupon on its own record's row, at its own settlement
+            for leg_index, amount, triggered, payment_time in legs:
+                df = (float(pricing_env.get_discount_factor(payment_time))
+                      if payment_time is not None and payment_time > 0.0 else 1.0)
+                coupon_cash[leg_index] += amount * df
+                if triggered:
+                    coupon_probability[leg_index] = 1.0
+        else:
+            coupon_cash[index] = pv - float(observations.discounted_cash[index])
+            coupon_probability[index] = 1.0 if decision.coupon_index is not None else 0.0
         payment = observations.payment_times
         unavailable = {} if es.want_coupon_probability(streams) else {"coupons.probability": es.NOT_REQUESTED}
         coupons = CouponTable(
@@ -1342,6 +1404,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
         )
         decided_index = None if decision.knocked_out else decision.coupon_index
+        decided_legs = ()
+        if decided_index is not None and self._decided_coupon_legs(product, pricing_env, decision) is not None:
+            # several records decided now (D14): each coupon on its own row, at its own settlement
+            decided_index, decided_legs = None, tuple(decision.paid)
         layout = ForwardCouponRows if route == "forward" else _CouponCashRows
         return layout(
             n_ko=n_ko,
@@ -1353,6 +1419,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             carried_arrears=float(decision.arrears) if memory else 0.0,
             decided_index=decided_index,
             decided_coupon=float(decision.coupon) if decided_index is not None else 0.0,
+            decided_legs=decided_legs,
         )
 
     def _event_stats_product_type(self) -> type:
@@ -1721,6 +1788,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         if cash_rows.decided_index is not None:
             # the coupon decided at the valuation instant is paid with certainty
             coupon_probability[cash_rows.decided_index] = 1.0
+        for index, _, triggered in cash_rows.decided_legs:
+            if triggered:
+                coupon_probability[index] = 1.0
         # Each row's coupon paid as the price pays it: memory arrears (released by a coupon or by a
         # knock-out) included, EXPIRY coupons discounted at the note's own end.
         cash = cash_rows.readout(values_at_spot, termination_at_spot)

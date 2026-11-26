@@ -95,6 +95,9 @@ class ForwardCouponRows:
     carried_arrears: float
     decided_index: Optional[int]
     decided_coupon: float
+    #: per record ``(index, cash, triggered)``: coupons decided at the valuation instant by several records of one env
+    #: instant (0.16.0 D14), each on its own row at its own settlement (``decided_index`` is then ``None``)
+    decided_legs: tuple = ()
 
     termination_row = 0
 
@@ -146,15 +149,25 @@ class ForwardCouponRows:
             discount = (float(values_at_spot[self.termination_row]) if self.expiry
                         else float(self.delay_dfs[self.decided_index]))
             cash[self.decided_index] += self.decided_coupon * discount
+        for index, amount, triggered in self.decided_legs:
+            if triggered:
+                coupon_probability[index] = 1.0
+            discount = (float(values_at_spot[self.termination_row]) if self.expiry
+                        else float(self.delay_dfs[index]))
+            cash[index] += float(amount) * discount
         earned = buckets = None
         if self.expiry:
             buckets = np.array(masses.buckets, dtype=float)
             if self.decided_index is not None:
                 buckets += self.decided_coupon * masses.units
+            for _, amount, _ in self.decided_legs:
+                buckets += float(amount) * masses.units
             if self.memory:
                 earned = np.array(masses.earned, dtype=float)
                 if self.decided_index is not None:
                     earned[self.decided_index] += self.decided_coupon
+                for index, amount, _ in self.decided_legs:
+                    earned[index] += float(amount)
                 earned = earned / np.array([float(df_fn(float(r.observation_time))) for r in ko_records], dtype=float)
             else:
                 # without memory a row pays exactly its own coupon when its barrier is met
