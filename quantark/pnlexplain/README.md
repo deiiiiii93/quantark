@@ -213,9 +213,12 @@ are forced onto the numerical route whatever `greeks_method` says: the
 analytical formulas read `env.get_vol` / `env.get_rate` on the environment's
 axis, while the factor moves are in the inners' units. Every numerical bump
 moves the wrapper's inner (`parallel_shifted`) and theta advances the date
-(the environment re-anchors). Each greek equals an independent finite
-difference on the inner-shifted environment at the calculator's bump size,
-stencil and bump engine. Bucketed Taylor (`bucketed=True`) is still refused
+(the environment re-anchors). Delta, vega, rho and rho-q each equal an
+independent finite difference on the inner-shifted environment at the
+calculator's bump size, stencil and bump engine. The carry split of theta
+(`r_theta` / `q_theta`) is repriced: `theta_decomposition_mode="exact"` is
+forced, because the estimate split reads r, q and T on the environment's axis.
+Bucketed Taylor (`bucketed=True`) is still refused
 on a wrapped environment: key-rate and bucket bumps need the curve's tenors
 and windows on its own axis, which a wrapper does not expose.
 

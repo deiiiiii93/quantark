@@ -170,6 +170,10 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
             "the curve's tenors and windows on its own axis, which a wrapper does not expose; use bucketed=False "
             "(parallel Taylor runs on wrapped environments) or methods=(ExplainMethod.WATERFALL,)"
         )
+    if wrapped_env and config.theta_decomposition_mode != "exact":
+        # the "estimate" split (-r/T * rho, -q/T * rho_q) reads r, q and T on the environment's axis while rho is
+        # measured on the inner: exact mode reprices the carry legs instead (final review, 0.16.0)
+        config = dataclasses.replace(config, theta_decomposition_mode="exact")
     q, days, S0 = snap0.quantity, moves.calendar_days, moves.spot_t0
     terms, subrows = resolve_stencil(config), resolved_subrows(config)
     alive_move = cache.all_market().total - cache.value_for(()).total

@@ -120,3 +120,27 @@ def test_convertible_floor_and_full_dv01_bump_the_calendar_quote(monkeypatch):
     assert len(seen) == 4
     for curve, sign in zip(seen, (1, -1, 1, -1)):
         assert_shifted_inner(curve, env.rate_curve, sign * 0.0001)
+
+
+def test_convertible_full_dv01_and_convexity_bump_the_calendar_quote(monkeypatch):
+    from quantark.asset.bond.engine.convertible.convertible_bond_engine import ConvertibleBondEngine
+    from quantark.asset.bond.product.convertible import ConvertibleBond
+
+    env = wrapped_env()
+    bond = ConvertibleBond(issue_date=datetime(2025, 1, 1), maturity_date=datetime(2027, 1, 1), face_value=100.0,
+                           coupon_rate=0.025, conversion_ratio=10.0)
+    engine = ConvertibleBondEngine.__new__(ConvertibleBondEngine)
+    engine.pricing_env = env
+    seen = []
+
+    class _Priced:
+        def price(self, b):
+            return 1.0
+
+    monkeypatch.setattr(engine, "_create_bumped_engine", lambda e: seen.append(e.rate_curve) or _Priced())
+    monkeypatch.setattr(engine, "price", lambda b: 1.0)
+    engine.dv01(bond)
+    engine.convexity(bond)
+    assert len(seen) == 4
+    for curve, sign in zip(seen, (1, -1, 1, -1)):
+        assert_shifted_inner(curve, env.rate_curve, sign * 0.0001)

@@ -101,8 +101,8 @@ books. Prices and greeks are unchanged, bit for bit.
 
 ### Trading-clock follow-ups
 
-Four 0.15.0 open items around TradingClock-wrapped cash curves. Environments without a wrapper are unchanged,
-bit for bit (full suite).
+Four 0.15.0 open items around TradingClock-wrapped cash curves. Environments with no wrapper and no
+`CALENDAR_YEAR` declaration are unchanged, bit for bit (full suite).
 
 - **A dividend created from `None` by a bump follows the declaration.** On a `BUSINESS_DAYS` environment whose
   `div_yield` is `None` and declared `CALENDAR_YEAR`, the dividend-rho bump, the greek-conventions report and the
@@ -124,12 +124,18 @@ bit for bit (full suite).
   the checkpoint review caught this. Moved: these greeks on wrapped environments only.
 - **Taylor PnL explain on wrapped environments.** It used to be refused; parallel Taylor now runs. The greeks are
   forced onto the numerical route, because the analytical formulas read the environment's axis. Gate:
-  - each greek equals an independent finite difference on the inner-shifted environment, at the calculator's bump
-    size, stencil and bump engine (BS on both axes, plain and holiday steps; snowball on PDE);
-  - halving the moves at least halves the residual;
-  - the pure-time Taylor row equals the waterfall TIME row.
+  - delta, vega, rho and rho-q each equal an independent finite difference on the inner-shifted environment, at the
+    calculator's bump size, stencil and bump engine (BS on calendar-axis, hand-wrapped and declared environments,
+    plain and holiday steps; snowball on PDE);
+  - every factor move is the inner quote's move;
+  - the per-step theta equals an independent one-step date advance, and the pure-time Taylor row equals the
+    waterfall TIME row;
+  - halving the moves shrinks the residual at least 3x on a plain step (2x across a holiday, where the cross
+    terms with the fixed time step dominate on any environment).
 
-  Bucketed Taylor stays refused on wrapped environments.
+  The informational `r_theta` / `q_theta` rows are repriced (`theta_decomposition_mode="exact"` is forced on
+  wrapped environments): the estimate split reads r, q and T on the environment's axis against an inner-unit rho,
+  and was off by (T_cal/T_td)^2. Bucketed Taylor stays refused on wrapped environments.
 
 Pins moved: the 0.15.0 refusal tests for relationship modes and Taylor on wrapped environments now assert the new
 behaviour (`test_curve_quoting_shifts.py`, `test_pnlexplain_trading_clock.py::test_fail_closed_rules`).
@@ -141,6 +147,11 @@ Open items:
 - FX engines' rate bumps (no trading clock on `FxPricingEnvironment`).
 - `INDEPENDENT` on a mixed (partly wrapped) environment reads a wrapped source at `T`, not `T_cal`.
 - Bucketed Taylor on wrapped environments.
+- `carry_curve_buckets` derives a dividend curve from a possibly wrapped rate (`to_dividend_yield`), like the
+  futures-implied dividend curve: consistent on the trading axis, not moved onto the calendar quote.
+- `clock_parallel_shift_rate` composes `ParallelShiftRateCurve` on the inner; for a `ZeroCurve` inner the
+  wrapper's own `parallel_shifted` would keep the anchor (`AnchoredParallelShiftRateCurve`). The numbers agree up
+  to rounding.
 
 ## [0.15.0] - 2026-11-25
 

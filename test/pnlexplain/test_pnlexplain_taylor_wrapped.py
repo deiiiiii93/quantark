@@ -23,7 +23,22 @@ from quantark.asset.equity.param import EngineParams  # noqa: E402
 from quantark.pnlexplain import ExplainMethod, Factor, PnLExplainConfig, ValuationSnapshot, explain  # noqa: E402
 from quantark.util.exceptions import ValidationError  # noqa: E402
 
-AXES = {"calendar_axis": _cal_env, "business_days": _td_env}
+def _declared_env(date, spot=100.0, sigma_td=0.20, r=0.02, q=0.01):
+    """A BUSINESS_DAYS environment that DECLARES its cash curves CALENDAR_YEAR (the environment wraps them)."""
+    from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+    from quantark.param.div import ContinuousDividendYield
+    from quantark.priceenv import CurveQuotingBasis, PricingEnvironment
+    from quantark.util.calendar import DayCountConvention
+    from test_pnlexplain_trading_clock import CAL, D, HORIZON
+
+    cq = CurveQuotingBasis.CALENDAR_YEAR
+    return PricingEnvironment(rate_curve=FlatRateCurve(r), valuation_date=date, spot_quote=SpotQuote(spot),
+                              vol_surface=FlatVolSurface(sigma_td), div_yield=ContinuousDividendYield(q),
+                              day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=D, calendar=CAL,
+                              rate_curve_quoting=cq, div_yield_quoting=cq, trading_clock_horizon=HORIZON)
+
+
+AXES = {"calendar_axis": _cal_env, "business_days": _td_env, "declared": _declared_env}
 STEPS = {"plain": (datetime(2026, 3, 10), datetime(2026, 3, 11)),
          "holiday": (datetime(2026, 9, 30), datetime(2026, 10, 9))}
 BASE = dict(spot=100.0, sigma_td=0.20, r=0.02, q=0.01)
@@ -90,7 +105,54 @@ def test_halving_the_moves_shrinks_the_residual(axis, step):
     and the cross terms with the fixed time step are first order in the move on ANY environment (an unwrapped env
     measured 3.49x on the plain step, 2.05x across the holiday); gate (i) carries the greeks."""
     mk, (t0, t1) = AXES[axis], STEPS[step]
-    assert _shrink(mk, t0, t1) >= 2.0
+    # plain step: >= 3x (an unwrapped env measures 3.49x); across the holiday the time cross terms dominate (2.05x)
+    assert _shrink(mk, t0, t1) >= (3.0 if step == "plain" else 2.0)
+
+
+@pytest.mark.parametrize("axis", AXES)
+@pytest.mark.parametrize("step", STEPS)
+def test_moves_are_the_inner_moves(axis, step):
+    """Each Taylor row multiplies its greek by the move of the INNER quote (final review: the shrink gate alone cannot
+    see a move read on the wrong axis, e.g. scaled by sqrt(365/244))."""
+    mk, (t0, t1) = AXES[axis], STEPS[step]
+    r = _explain(mk, t0, t1)
+    assert _taylor(r, Factor.SPOT).moves["spot_return"] == pytest.approx(MOVE["spot"] / BASE["spot"], abs=1e-14)
+    assert _taylor(r, Factor.VOL).moves["vol_pts"] == pytest.approx(100.0 * MOVE["sigma_td"], abs=1e-12)
+    assert _taylor(r, Factor.RATE).moves["rate_pct"] == pytest.approx(100.0 * MOVE["r"], abs=1e-12)
+    assert _taylor(r, Factor.DIVIDEND).moves["div_pct"] == pytest.approx(100.0 * MOVE["q"], abs=1e-12)
+
+
+@pytest.mark.parametrize("axis", AXES)
+def test_per_step_theta_is_one_clock_step_of_the_date_advance(axis):
+    """time_term='per_step': the Taylor theta is the calculator's one-step date-rolled theta (1 calendar day on the
+    calendar axis, 1 trading day on BUSINESS_DAYS), checked against an independent reprice at the next date."""
+    from test_pnlexplain_trading_clock import CAL
+
+    mk, (t0, t1) = AXES[axis], STEPS["holiday"]
+    r = explain(ValuationSnapshot(CALL, ENG, mk(t0, **BASE), date=t0),
+                ValuationSnapshot(CALL, ENG, mk(t1, **_moved(1.0)), date=t1),
+                config=PnLExplainConfig(time_term="per_step"))
+    nxt = CAL.add_business_days(t0, 1) if axis != "calendar_axis" else datetime(2026, 10, 1)
+    expected = ENG.price(CALL, mk(nxt, **BASE)) - ENG.price(CALL, mk(t0, **BASE))
+    assert _taylor(r, Factor.TIME).greek == pytest.approx(expected, rel=1e-9)
+
+
+def test_carry_theta_rows_are_axis_free():
+    """The informational r_theta / q_theta rows reprice the carry legs on a wrapped env (exact mode forced): the
+    'estimate' split read r, q and T on the env axis against an inner-unit rho (final review). Over the same
+    exact gap both axes carry the same r, q over the same calendar time."""
+    t0, t1 = STEPS["holiday"]
+
+    def info(mk):
+        r = explain(ValuationSnapshot(CALL, ENG, mk(t0, **BASE), date=t0),
+                    ValuationSnapshot(CALL, ENG, mk(t1, **_moved(1.0)), date=t1),
+                    config=PnLExplainConfig(time_term="exact_gap"))
+        return {x.term: x.pnl for x in r.rows if x.method is ExplainMethod.TAYLOR and x.term in ("r_theta", "q_theta")}
+
+    a, b, c = info(_cal_env), info(_td_env), info(_declared_env)
+    assert a.keys() == {"r_theta", "q_theta"}
+    for k in a:
+        assert b[k] == pytest.approx(a[k], abs=1e-10) and c[k] == pytest.approx(a[k], abs=1e-10)
 
 
 @pytest.mark.parametrize("axis", AXES)
