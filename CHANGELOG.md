@@ -135,7 +135,7 @@ Four 0.15.0 open items around TradingClock-wrapped cash curves. Environments wit
 
   The informational `r_theta` / `q_theta` rows are repriced (`theta_decomposition_mode="exact"` is forced on
   wrapped environments): the estimate split reads r, q and T on the environment's axis against an inner-unit rho,
-  and was off by (T_cal/T_td)^2. Bucketed Taylor stays refused on wrapped environments.
+  and was off by (T_cal/T_td)^2 at the product's maturity (7.5% on a 2026-12 call across National Day). Bucketed Taylor stays refused on wrapped environments.
 
 Pins moved: the 0.15.0 refusal tests for relationship modes and Taylor on wrapped environments now assert the new
 behaviour (`test_curve_quoting_shifts.py`, `test_pnlexplain_trading_clock.py::test_fail_closed_rules`).
