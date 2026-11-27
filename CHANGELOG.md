@@ -455,7 +455,8 @@ passed with the product (owner choice, option A).
 
 A replay backtest can now price every day on a `BUSINESS_DAYS` trading clock. It is enabled by one opt-in object,
 `AutocallableEngineConfig(trading_clock=TradingClockConfig(calendar=..., bus_days_in_year=...))`, and works for a single
-product or a book on every BSM engine. Without it (the default) the replay is the calendar-day replay, unchanged: the
+product or a book. It was verified on Snowball and KO-reset (QUAD V1, PDE, MC) and on DCN (MC); the other BSM
+engines run on the library's `BUSINESS_DAYS` support without a replay-clock test of their own. Without it (the default) the replay is the calendar-day replay, unchanged: the
 replay goldens, env types and checksums are identical, and timing is within noise.
 
 #### Added
@@ -509,12 +510,13 @@ The MC event-statistics fallback lets a `ValidationError` through instead of tur
 
 #### Notes
 
-- **Theta units.** On the clock path theta is per trading day.
-- **PDE grid.** The PDE's default grid counts `bus_days_in_year` steps-per-day days per env year.
+- **Greek units.** On the clock path theta is per trading day; vega stays per unit calendar vol (with
+  `vol_quoting=CALENDAR_YEAR` the bump moves the calendar quote).
+- **PDE grid.** The PDE's default grid has `steps_per_day × bus_days_in_year` steps per env year.
 - **Cash-curve lag.** On a Monday or after a holiday, the 0.15.0 cash wrappers read the calendar curve at the day after
   the previous trading day (DF to a Monday = DF_cal(Saturday)). The run measured this on a European call, strike 103 at
-  3%: -0.83% of premium on a Monday expiry and -1.73% after Spring Festival. This release fixes it in "Business-day cash
-  curves read the actual date" below (owner ruling).
+  3%: -0.83% of premium on a Monday expiry and -1.73% after Spring Festival. The owner ruled it
+  fixed in this release, in a follow-up change to the cash wrappers (run 8 of the 0.16.0 queue).
 - **Fingerprinted trees.** This change edits `quantark/param` and `engine/quad/v2` (intraday certificate trees).
 
 #### Open items

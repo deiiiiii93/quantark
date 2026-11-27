@@ -234,7 +234,8 @@ it when the inner is deterministic (flat or term structure).
 
 ## Replay on a business-day clock (0.16.0)
 
-A replay backtest (single product or book, every BSM engine) can price each day on
+A replay backtest (single product or book; verified on Snowball and KO-reset with QUAD V1, PDE and MC, and on
+DCN with MC) can price each day on
 a `BUSINESS_DAYS` clock:
 
 ```python
@@ -263,8 +264,10 @@ engine_config = AutocallableEngineConfig(
 - **Report dates and settlement.** Event dates in the reports map engine times back
   through business-day counts. Pending receivables are discounted at the
   settlement date's env time.
-- **Theta and the PDE grid.** Theta is per trading day (see the unit table). The
-  PDE's default grid counts `bus_days_in_year` steps-per-day days per env year.
+- **Greek units and the PDE grid.** Theta is per trading day (see the unit table). Vega
+  stays per unit CALENDAR vol: with `vol_quoting=CALENDAR_YEAR` the bump moves the calendar
+  quote, not σ_td. The PDE's default grid has `steps_per_day × bus_days_in_year` steps per
+  env year.
 - **Refused** (each would mix clocks silently):
   - vol models other than `bsm`;
   - `trade_value`;
