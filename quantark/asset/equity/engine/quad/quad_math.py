@@ -153,6 +153,7 @@ class QuadratureMath:
         align_log: Optional[float] = None,
         barrier_logs: Optional[Sequence[float]] = None,
         cell_stretch: Optional[float] = None,
+        cell_width: Optional[float] = None,
         integration_rule: str = "simpson",
         fft_padding_factor: int = 1,
         fft_filter_alpha: float = 0.0,
@@ -170,6 +171,9 @@ class QuadratureMath:
         self.cell_stretch = (
             float(cell_stretch) if cell_stretch is not None else None
         )
+        # A frozen lattice's cell (a V1 bump context, 0.16.0 D2): the base solve's final h, which replaces the snap
+        # so a bumped leg keeps the base cell (and its stretch) whatever its own barriers would choose.
+        self.cell_width = float(cell_width) if cell_width is not None else None
         self.integration_rule = str(integration_rule).lower()
         self.fft_padding_factor = int(fft_padding_factor)
         self.fft_filter_alpha = float(fft_filter_alpha)
@@ -209,6 +213,12 @@ class QuadratureMath:
             raise ValidationError(
                 f"fft_filter_power must be >= 1, got {self.fft_filter_power}."
             )
+        if self.cell_width is not None and not (
+            math.isfinite(self.cell_width) and self.cell_width > 0.0
+        ):
+            raise ValidationError(
+                f"cell_width must be positive and finite, got {self.cell_width}."
+            )
         if self.cell_stretch is not None and not 0.0 < self.cell_stretch <= 1.0:
             raise ValidationError(
                 "cell_stretch must be in (0, 1], got "
@@ -220,8 +230,12 @@ class QuadratureMath:
         self.h = 2.0 * log_c / (self.grid_x - 1)
         half_width = log_c
         self.cell_snap_ratio = 1.0
-        if self.cell_stretch is not None:
-            snapped = snap_cell_width(self.h, self.barrier_logs, self.cell_stretch)
+        if self.cell_width is not None or self.cell_stretch is not None:
+            snapped = (
+                self.cell_width
+                if self.cell_width is not None
+                else snap_cell_width(self.h, self.barrier_logs, self.cell_stretch)
+            )
             if snapped > self.h:
                 # grid_x is deliberately untouched: the cell only ever
                 # widens, so the node count is fixed and the domain grows

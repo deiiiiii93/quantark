@@ -26,7 +26,6 @@ from quantark.asset.equity.engine.quad.quad_adapters import (
 )
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.priceenv.term_sampling import make_df_fn
-from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
@@ -110,6 +109,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     def _folded_solve(self, product, pricing_env, fold) -> float:
         """``price`` never auto-converges on this engine, so neither does the folded solve."""
         return self._price_once(product, pricing_env, fold=fold)
+
+    def _auto_converges(self) -> bool:
+        """``price`` never runs the ``auto_converge`` ladder here, whatever the params say."""
+        return False
 
     def _bind_ko_reset_fold(self, fold, product, pricing_env, maturity: float):
         """Both schedules' in-life records bound to the overlay: ``({id: amount}, pre, post)``."""
@@ -297,25 +300,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             [record.barrier for record in ki_records],
             product.barrier_config.ki_barrier,
         )
-        fft_padding_factor = self._resolve_fft_padding_factor()
-        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
-        grid_points = self._resolve_grid_points(
-            maturity, vol, [rec.observation_time for rec in ki_records]
-        )
-        math_utils = QuadratureMath(
-            grid_x=grid_points,
-            spot=spot,
-            maturity=maturity,
-            vol_max=vol,
-            num_std_devs=self.params.num_std_devs,
-            align_log=align_log,
-            barrier_logs=barrier_logs,
-            cell_stretch=self._resolve_align_cell_stretch(),
-            integration_rule=self.params.integration_rule,
-            fft_padding_factor=fft_padding_factor,
-            fft_filter_alpha=fft_filter_alpha,
-            fft_filter_power=fft_filter_power,
-        )
+        sizing = self._size(product, maturity, vol, [rec.observation_time for rec in ki_records])
+        math_utils = self._lattice(sizing, spot=spot, align_log=align_log, barrier_logs=barrier_logs)
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         dt = self._build_dt(times)
@@ -955,25 +941,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             [record.barrier for record in ki_records],
             product.barrier_config.ki_barrier,
         )
-        fft_padding_factor = self._resolve_fft_padding_factor()
-        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
-        grid_points = self._resolve_grid_points(
-            maturity, vol, [rec.observation_time for rec in ki_records]
-        )
-        math_utils = QuadratureMath(
-            grid_x=grid_points,
-            spot=spot,
-            maturity=maturity,
-            vol_max=vol,
-            num_std_devs=self.params.num_std_devs,
-            align_log=align_log,
-            barrier_logs=barrier_logs,
-            cell_stretch=self._resolve_align_cell_stretch(),
-            integration_rule=self.params.integration_rule,
-            fft_padding_factor=fft_padding_factor,
-            fft_filter_alpha=fft_filter_alpha,
-            fft_filter_power=fft_filter_power,
-        )
+        sizing = self._size(product, maturity, vol, [rec.observation_time for rec in ki_records])
+        math_utils = self._lattice(sizing, spot=spot, align_log=align_log, barrier_logs=barrier_logs)
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         dt = self._build_dt(times)

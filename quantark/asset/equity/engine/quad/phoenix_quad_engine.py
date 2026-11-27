@@ -292,9 +292,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
-        if self.params.auto_converge:
-            return self._price_with_convergence(product, pricing_env)
-        return self._price_once(product, pricing_env)
+        return self._converging(
+            lambda: self._price_once(product, pricing_env),
+            lambda: self._price_with_convergence(product, pricing_env),
+        )
 
     def _price_once(
         self,
@@ -455,25 +456,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             [record.barrier for record in ki_records],
             product.barrier_config.ki_barrier,
         )
-        fft_padding_factor = self._resolve_fft_padding_factor()
-        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
-        grid_points = self._resolve_grid_points(
-            maturity, vol_max_val, [rec.observation_time for rec in ki_records]
-        )
-        math_utils = QuadratureMath(
-            grid_x=grid_points,
-            spot=spot,
-            maturity=maturity,
-            vol_max=vol_max_val,
-            num_std_devs=self.params.num_std_devs,
-            align_log=align_log,
-            barrier_logs=barrier_logs,
-            cell_stretch=self._resolve_align_cell_stretch(),
-            integration_rule=self.params.integration_rule,
-            fft_padding_factor=fft_padding_factor,
-            fft_filter_alpha=fft_filter_alpha,
-            fft_filter_power=fft_filter_power,
-        )
+        sizing = self._size(product, maturity, vol_max_val, [rec.observation_time for rec in ki_records])
+        math_utils = self._lattice(sizing, spot=spot, align_log=align_log, barrier_logs=barrier_logs)
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         tau = 0.5 * vol_vec * vol_vec * dt

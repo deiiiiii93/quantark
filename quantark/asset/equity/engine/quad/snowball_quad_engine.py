@@ -6,9 +6,10 @@ Implements a direct two-state (knocked-in / not-knocked-in) quadrature recursion
 
 from __future__ import annotations
 
+import copy
 import math
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple
 
 import numpy as np
@@ -53,7 +54,7 @@ from quantark.util.enum.engine_enums import (
     EventProjectionMode,
     KnockInMonitoringMode,
 )
-from quantark.util.exceptions import NumericalError, PricingError, ValidationError
+from quantark.util.exceptions import NumericalError, PricingError, QuantArkException, ValidationError
 
 from quantark.util.numerical import (
     Tolerance,
@@ -97,6 +98,37 @@ _BGK_MAX_EDGE_GAP_RATIO = 3.0
 _BGK_MAX_VOL_DISPERSION = 0.25
 
 
+@dataclass(frozen=True)
+class V1Sizing:
+    """The spatial lattice one V1 solve sizes from its inputs (0.16.0 D2, "freeze sizing at base").
+
+    ``grid_points`` is ``_resolve_grid_points``'s node count (the knock-in spacing rule, the 5001-node cap and rule
+    (i)); ``maturity`` and ``vol`` are the inputs of the domain half-width (``QuadratureMath``), so with the node count
+    they fix the cell h; ``cell_width`` is the solve's final cell (after the opt-in ``align_cell_stretch``), set once
+    the lattice is built. Nothing time-dependent is in it: the exact first step, the local-step mask and the kernel
+    guard are decided per solve on the cell (``_require_resolved_kernels``).
+    """
+
+    grid_points: int
+    maturity: float
+    vol: float
+    cell_width: Optional[float] = None
+
+
+class _SizingCaptured(Exception):
+    """Raised by a sizing probe (``create_bump_context``) once the base solve has built its lattice: the record is
+    all the probe wants, so nothing is marched."""
+
+    def __init__(self, sizing: V1Sizing):
+        super().__init__("V1 sizing captured")
+        self.sizing = sizing
+
+
+class _OutsideFrozenSizing(Exception):
+    """A bump context on an ``auto_converge`` engine was asked to solve a contract its record was not sized for: the
+    caller runs the ladder for it instead (the contract sizes itself, as before 0.16.0)."""
+
+
 class SnowballQuadEngine(BaseEngine):
     """
     Quadrature pricing engine for Snowball (autocallable) options.
@@ -117,6 +149,7 @@ class SnowballQuadEngine(BaseEngine):
         "_backward_grids",
         "_last_ignored_ko_observation_indices",
         "_last_convergence_info",
+        "_last_sizing",
     )
 
     def fold_drilldown_refusal(self, product, pricing_env) -> Optional[str]:
@@ -168,9 +201,144 @@ class SnowballQuadEngine(BaseEngine):
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
-        if self.params.auto_converge:
-            return self._price_with_convergence(product, pricing_env)
-        return self._price_once(product, pricing_env)
+        return self._converging(
+            lambda: self._price_once(product, pricing_env),
+            lambda: self._price_with_convergence(product, pricing_env),
+        )
+
+    # --- bumped legs on the base lattice (0.16.0 D2, owner ruling "freeze sizing at base") -----------------------
+
+    #: a bump context's base sizing record (``create_bump_context``); ``None`` on an engine that sizes every solve
+    _frozen_sizing: Optional[V1Sizing] = None
+    #: the contract the record was sized for: the base product object and its key (``_contract_key``)
+    _frozen_product = None
+    _frozen_key = None
+    #: True on a bump context (its own ``create_bump_context`` returns itself)
+    _frozen_clone = False
+    #: the sizing record of the last solve, with its final cell (a diagnostic)
+    _last_sizing: Optional[V1Sizing] = None
+
+    def _auto_converges(self) -> bool:
+        """Whether ``price`` refines through the ``auto_converge`` ladder (KO-reset never does)."""
+        return bool(self.params.auto_converge)
+
+    def _converging(self, once, ladder):
+        """``once()``, or the ``auto_converge`` ladder -- unless a bump context's record sizes this contract: its base
+        ladder already chose the rung, so a bumped leg is one solve on it."""
+        if not self._auto_converges():
+            return once()
+        if self._frozen_sizing is None:
+            return ladder()
+        try:
+            return once()
+        except _OutsideFrozenSizing:
+            return ladder()
+
+    def create_bump_context(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> "SnowballQuadEngine":
+        """A clone of this engine holding the BASE sizing record (owner ruling 2026-11-26, "freeze sizing at base").
+
+        Every leg the clone prices for the same contract -- a bumped market, an advanced date (theta), any cross --
+        uses the base node count, domain (so the cell h) and cell stretch; the time-dependent routing (the exact first
+        step, local steps, the kernel guard and its refusals) is decided per leg on that cell, as the PDE engines keep
+        their spatial layout and rebind time (``BasePDESolver.create_bump_context``). A leg that re-sizes mixes the
+        lattice's own O(h^2) change into the greek: a 1 h theta across the 5001-node cap read -7.9/y against a
+        reference of 0, a plain 1y monthly-KO / daily-KI 1-day theta was 2.7% off.
+
+        Under ``auto_converge`` the base ladder runs once, here, and the record holds its accepted rung. A contract the
+        record was not sized for (``_frozen_covers``) sizes itself. A base solve that sizes nothing (expired, decided
+        at the valuation instant) freezes nothing; one that raises is left to raise from the base price.
+        """
+        if self._frozen_clone:
+            return self
+        try:
+            record = self._base_sizing(product, pricing_env)
+        except QuantArkException:
+            return self                           # the base price raises the same error on this engine
+        clone = copy.copy(self)
+        clone.__dict__.update(
+            _frozen_clone=True,
+            _frozen_sizing=record,
+            _frozen_product=product,
+            _frozen_key=self._contract_key(product),
+            _bridge_kernel_cache={},
+            _backward_grids={},
+        )
+        return clone
+
+    def _base_sizing(self, product, pricing_env) -> Optional[V1Sizing]:
+        """The sizing record of the base solve, read without marching (a probe stops at the lattice)."""
+        probe = copy.copy(self)
+        probe._bridge_kernel_cache = {}
+        if self._auto_converges():
+            probe._price_with_convergence(product, pricing_env)
+            info = probe._last_convergence_info
+            probe = copy.copy(self)
+            probe._bridge_kernel_cache = {}
+            probe.params = replace(self.params, auto_converge=False, grid_points=int(info["grid_points"]))
+            probe._local_steps_allowed = bool(info.get("local_steps_allowed", True))
+        probe._capture_sizing = True
+        try:
+            probe._price_once(product, pricing_env)
+        except _SizingCaptured as captured:
+            return captured.sizing
+        return None
+
+    @staticmethod
+    def _contract_key(product) -> tuple:
+        """What a time-aged copy of a contract keeps: its type, strike, initial level and knock-in level."""
+        ki = getattr(getattr(product, "barrier_config", None), "ki_barrier", None)
+        return (
+            type(product),
+            getattr(product, "strike", None),
+            getattr(product, "initial_price", None),
+            tuple(ki) if isinstance(ki, (list, tuple)) else ki,
+        )
+
+    def _frozen_covers(self, product, maturity: float) -> bool:
+        """Whether the record sizes ``product``: the base object, or a copy of the same contract (the theta product, a
+        pnl-explain state aged to its date) whose life fits the frozen domain. ``shift_for_theta`` deep-copies the
+        product, so object identity alone would leave every theta leg re-sizing."""
+        if product is self._frozen_product:
+            return True
+        return self._contract_key(product) == self._frozen_key and not float(maturity) > float(
+            self._frozen_sizing.maturity
+        )
+
+    def _size(self, product, maturity: float, vol: float, ki_times: Sequence[float]) -> V1Sizing:
+        """One solve's sizing record (side-effect free, no solve): a bump context's base record for the contract it was
+        sized for, else the node count from the knock-in spacing and the domain from ``maturity`` and ``vol``."""
+        record = self._frozen_sizing
+        if record is not None:
+            if self._frozen_covers(product, maturity):
+                return record
+            if self._auto_converges():
+                raise _OutsideFrozenSizing()
+        return V1Sizing(grid_points=self._resolve_grid_points(maturity, vol, ki_times), maturity=maturity, vol=vol)
+
+    def _lattice(self, sizing: V1Sizing, *, spot: float, align_log, barrier_logs) -> QuadratureMath:
+        """The solve's ``QuadratureMath`` on ``sizing``; the alignment follows the solve's own spot and barriers."""
+        fft_padding_factor = self._resolve_fft_padding_factor()
+        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        math_utils = QuadratureMath(
+            grid_x=sizing.grid_points,
+            spot=spot,
+            maturity=sizing.maturity,
+            vol_max=sizing.vol,
+            num_std_devs=self.params.num_std_devs,
+            align_log=align_log,
+            barrier_logs=barrier_logs,
+            cell_stretch=self._resolve_align_cell_stretch(),
+            cell_width=sizing.cell_width,
+            integration_rule=self.params.integration_rule,
+            fft_padding_factor=fft_padding_factor,
+            fft_filter_alpha=fft_filter_alpha,
+            fft_filter_power=fft_filter_power,
+        )
+        built = sizing if sizing.cell_width is not None else replace(sizing, cell_width=math_utils.h)
+        if self.__dict__.get("_capture_sizing"):
+            raise _SizingCaptured(built)
+        self._last_sizing = built
+        return math_utils
 
     def __getstate__(self):
         """Pickle without the last statistics march's adjoint log (``_last_v1_march``): a per-solve artefact whose
@@ -213,9 +381,10 @@ class SnowballQuadEngine(BaseEngine):
 
     def _folded_solve(self, product, pricing_env, fold: "FoldOverlay") -> float:
         """The solve ``price`` runs, with ``fold`` threaded through."""
-        if self.params.auto_converge:
-            return self._price_with_convergence(product, pricing_env, fold=fold)
-        return self._price_once(product, pricing_env, fold=fold)
+        return self._converging(
+            lambda: self._price_once(product, pricing_env, fold=fold),
+            lambda: self._price_with_convergence(product, pricing_env, fold=fold),
+        )
 
     @staticmethod
     def _refuse_expired_fold(fold) -> None:
@@ -464,25 +633,8 @@ class SnowballQuadEngine(BaseEngine):
             if ki_barrier_continuous is not None
             else [record.barrier for record in ki_records],
         )
-        fft_padding_factor = self._resolve_fft_padding_factor()
-        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
-        grid_points = self._resolve_grid_points(
-            maturity, vol_max_val, [rec.observation_time for rec in ki_records]
-        )
-        math_utils = QuadratureMath(
-            grid_x=grid_points,
-            spot=spot,
-            maturity=maturity,
-            vol_max=vol_max_val,
-            num_std_devs=self.params.num_std_devs,
-            align_log=align_log,
-            barrier_logs=barrier_logs,
-            cell_stretch=self._resolve_align_cell_stretch(),
-            integration_rule=self.params.integration_rule,
-            fft_padding_factor=fft_padding_factor,
-            fft_filter_alpha=fft_filter_alpha,
-            fft_filter_power=fft_filter_power,
-        )
+        sizing = self._size(product, maturity, vol_max_val, [rec.observation_time for rec in ki_records])
+        math_utils = self._lattice(sizing, spot=spot, align_log=align_log, barrier_logs=barrier_logs)
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         tau = 0.5 * vol_vec * vol_vec * dt
@@ -891,9 +1043,10 @@ class SnowballQuadEngine(BaseEngine):
             return None
         if pricing_env is None:
             raise PricingError("PricingEnvironment is required for SnowballQuadEngine.")
-        if self.params.auto_converge:
-            return self._event_stats_on_converged_grid(product, pricing_env, streams=streams)
-        return self._compute_event_stats(product, pricing_env, streams=streams)
+        return self._converging(
+            lambda: self._compute_event_stats(product, pricing_env, streams=streams),
+            lambda: self._event_stats_on_converged_grid(product, pricing_env, streams=streams),
+        )
 
     def _event_stats_on_converged_grid(self, product, pricing_env, *, streams=None):
         """Use the accepted price grid for every statistical column; ``pv`` is the converged price itself."""
@@ -1209,25 +1362,8 @@ class SnowballQuadEngine(BaseEngine):
         barrier_logs = self._event_stats_barrier_logs(
             spot, product, ko_records, ki_records, ki_barrier_continuous
         )
-        fft_padding_factor = self._resolve_fft_padding_factor()
-        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
-        grid_points = self._resolve_grid_points(
-            maturity, vol_max_val, [rec.observation_time for rec in ki_records]
-        )
-        math_utils = QuadratureMath(
-            grid_x=grid_points,
-            spot=spot,
-            maturity=maturity,
-            vol_max=vol_max_val,
-            num_std_devs=self.params.num_std_devs,
-            align_log=align_log,
-            barrier_logs=barrier_logs,
-            cell_stretch=self._resolve_align_cell_stretch(),
-            integration_rule=self.params.integration_rule,
-            fft_padding_factor=fft_padding_factor,
-            fft_filter_alpha=fft_filter_alpha,
-            fft_filter_power=fft_filter_power,
-        )
+        sizing = self._size(product, maturity, vol_max_val, [rec.observation_time for rec in ki_records])
+        math_utils = self._lattice(sizing, spot=spot, align_log=align_log, barrier_logs=barrier_logs)
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
