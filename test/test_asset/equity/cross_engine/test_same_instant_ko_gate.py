@@ -6,7 +6,9 @@ observations with zero elapsed time, at one spot, in contract order (a Snowball'
 Phoenix record is its own coupon date; a KO-reset instant is every schedule-1 knock-out, then the knock-in, then every
 schedule-2 knock-out). Desk ruling: a knock-out beats a same-instant discrete knock-in everywhere -- under
 ``disable_ko_after_ki`` the knock-in at the instant does NOT disable a knock-out at that instant (the flag reads the
-state carried INTO the observation).
+state carried INTO the observation). KO-reset, owner ruling 2026-11-27 (run 5 T6): that knock-out is the FIRST
+schedule's; a SCHEDULE-2 record on the knock-in instant is disabled by that knock-in (schedule 2 comes into force with
+the knock-in, and the flag disables all of it) -- on a single date and on a same-instant pair.
 
 One matrix, product x engine, every engine that supports the product:
 
@@ -49,6 +51,8 @@ from test_asset.equity.engine_quad.test_same_instant_ko_quad import (
     GRID_EXACT,
     GRID_PHX_EXACT,
     KOR_CASES,
+    KOR_POST,
+    KOR_PRE,
     _exact_phoenix_pair,
     ko_reset,
     phoenix,
@@ -148,6 +152,29 @@ def tie_ko_reset(layout, disable=True, level=90.0):
 
 
 TIE_LAYOUTS = ("ki_then_ko", "ko_then_ki", "same_date", "ko_pair_ki")
+
+
+def ko_reset_disable_schedule_2_on_ki(layout, drop_record=False):
+    """Owner ruling 2026-11-27 (run 5 T6): under ``disable_ko_after_ki`` a SCHEDULE-2 knock-out record on the knock-in
+    instant is disabled by that knock-in (MC, PDE and QUAD V1 read it so; QUAD V2 let it knock out: +11 SE). The 97
+    discrete knock-in on 07-03 with a 95 schedule-2 record at the same instant -- on the same date (``same_date``) or
+    on the 07-03 / 07-04 instant pair (``instant_pair``: the knock-in raised to 97 on 07-04, the schedule-2 record on
+    07-03). Every other date: knock-out 103, knock-in 75, schedule 2 from September (``scratchpad/t5b``,
+    ``probe_kor_post2.py``). ``drop_record``: the same note without the 07-03 schedule-2 record."""
+    if layout == "same_date":
+        spec = dict(ki=[(d, 75.0) for d in KOR_PRE[:2]] + [(JUL3, 97.0)],
+                    post=[(JUL3, 95.0)] + [(d, 95.0) for d in KOR_POST])
+    else:
+        spec = dict(ki=[(d, 75.0) for d in KOR_PRE] + [(JUL4, 97.0)],
+                    post=[(JUL3, 95.0)] + [(d, 95.0) for d in KOR_POST])
+    if drop_record:
+        spec["post"] = spec["post"][1:]
+    p = ko_reset(**spec)
+    p.barrier_config = replace(p.barrier_config, disable_ko_after_ki=True)
+    p.validate()
+    return p
+
+
 #: name: (family, product)
 PRODUCTS = {
     "snowball_step_down": ("snowball", lambda: repro()),
@@ -159,6 +186,9 @@ PRODUCTS = {
     **{f"{family}_disable_{layout}": (family, (lambda m=make, x=layout: m(x)))
        for family, make in (("snowball", tie_snowball), ("phoenix", tie_phoenix), ("ko_reset", tie_ko_reset))
        for layout in TIE_LAYOUTS},
+    "ko_reset_disable_schedule2_on_ki_same_date": ("ko_reset", lambda: ko_reset_disable_schedule_2_on_ki("same_date")),
+    "ko_reset_disable_schedule2_on_ki_instant_pair": ("ko_reset",
+                                                      lambda: ko_reset_disable_schedule_2_on_ki("instant_pair")),
 }
 
 
@@ -331,6 +361,21 @@ def test_the_tie_band_tells_the_two_readings_apart(mc_reference, family):
     assert abs(alternative - ruling) > 20.0 * se, (ruling, alternative, se)
     assert mc_reference(f"{family}_disable_ko_then_ki", "bs")[0] == mc_reference(f"{family}_disable_same_date",
                                                                                  "bs")[0]
+
+
+# --- KO-reset: a schedule-2 record on the knock-in instant under disable_ko_after_ki (run 5 T6) -------------------
+
+@pytest.mark.parametrize("layout", ["same_date", "instant_pair"])
+@pytest.mark.parametrize("engine", ["pde", "v1", "v2"])
+def test_ko_reset_disable_schedule_2_record_on_the_knock_in_instant_is_inert(engine, layout):
+    """Owner ruling 2026-11-27: under ``disable_ko_after_ki`` the knock-in disables the schedule-2 record on its own
+    instant. Before the knock-in schedule 1 is in force (the record does not apply); after it the flag disables
+    schedule 2. So the record is inert: the note prices as the same note without it (QUAD V2 to 1e-10; the PDE and
+    QUAD V1 already did, to their grid's round-off). Before T6 QUAD V2 let it knock out (+11 SE of MC)."""
+    price_engine = ENGINES["ko_reset"][engine][0]
+    a = price_engine().price(ko_reset_disable_schedule_2_on_ki(layout), env())
+    b = price_engine().price(ko_reset_disable_schedule_2_on_ki(layout, drop_record=True), env())
+    assert abs(a - b) <= 1e-10 * abs(b), (a, b, a - b)
 
 
 # --- exact references -----------------------------------------------------------------------------------------------

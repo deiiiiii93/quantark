@@ -769,7 +769,11 @@ def compile_contract(
             # this observation: a knock-out wins a tie with a knock-in observed at the same instant,
             # on every product (the Phoenix used to let the knock-in win under the flag).
             ko_hit = ko_hit and not (hit and disable)
-            if reset and not hit and ki_hit and not ko_hit:
+            # KO-reset: a knock-in at this observation brings schedule 2 into force here, so its record at this
+            # instant applies -- unless ``disable`` is set: owner ruling 2026-11-27 (run 5 T6), that knock-in
+            # disables schedule 2 at once, its record on the knock-in instant included (as MC, the PDE and V1 read it;
+            # the schedule-1 knock-out above still wins its tie with the knock-in)
+            if reset and not hit and ki_hit and not ko_hit and not disable:
                 record = po
                 ko_hit = record is not None and (
                     x <= np.log(record[1])
