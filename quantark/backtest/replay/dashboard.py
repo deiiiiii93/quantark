@@ -25,6 +25,7 @@ from quantark.asset.equity.report.surfaces import GridSpec
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.option_enums import PostKOScheduleMode
+from quantark.util.exceptions import ValidationError
 
 from .engine_factory import create_surface_engine
 from .market import ImpliedBasisYield, SignedDividendYield
@@ -115,6 +116,16 @@ class AutocallableBacktestDashboard:
     def _build_risk_snapshots(
         self, states: pd.DataFrame
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        engine_config = getattr(self.results.config, "engine_config", None)
+        if getattr(engine_config, "trading_clock", None) is not None:
+            # TODO(run 7 D7): snapshot repricing on the business-day clock -- the snapshot env and product aging
+            # below are on the ACT/365 elapsed axis (a listed non-goal); refused rather than silently repriced on the
+            # calendar clock.
+            raise ValidationError(
+                "the dashboard's risk snapshots reprice on the calendar-day clock, but these results were produced "
+                "on a trading clock (engine_config.trading_clock); set full_surface_snapshots=False to render the "
+                "dashboard without them"
+            )
         product = getattr(self.results.config, "product", None)
         if not isinstance(product, SnowballOption):
             return [], [

@@ -10,6 +10,8 @@ import pandas as pd
 
 from quantark.util.exceptions import ValidationError
 
+from quantark.param.basis.basis_yield import BasisYield
+from quantark.param.div.dividend_yield import DividendYield
 from quantark.param.vol.surface_history import VolSurfaceHistory
 
 
@@ -45,6 +47,53 @@ class ImpliedBasisYield:
 
     def get_basis_yield(self, time_to_maturity: float) -> float:
         return float(self.basis_yield)
+
+
+@dataclass(frozen=True)
+class ClockSignedDividendYield(DividendYield):
+    """The replay's flat signed dividend/carry yield as a library ``DividendYield`` (run 7 D3).
+
+    Used on the business-day clock path (``AutocallableEngineConfig.trading_clock``) wherever replay builds a flat
+    dividend for an environment: being a ``DividendYield``, the environment can wrap it onto its trading clock under
+    the ``CALENDAR_YEAR`` declaration (``SignedDividendYield`` cannot be wrapped). Finiteness is the only check -- no
+    library sanity bound, since the implied carry grows near the hedge contract's expiry. The calendar-day path keeps
+    ``SignedDividendYield`` (bitwise).
+    """
+
+    div_yield: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(float(self.div_yield)):
+            raise ValidationError(f"div_yield must be finite, got {self.div_yield}")
+
+    def get_yield(self, time_to_maturity: float) -> float:
+        return float(self.div_yield)
+
+    def parallel_shifted(self, shift: float) -> "ClockSignedDividendYield":
+        return ClockSignedDividendYield(float(self.div_yield) + float(shift))
+
+    def is_identically_zero(self) -> bool:
+        return float(self.div_yield) == 0.0
+
+
+@dataclass(frozen=True)
+class ClockImpliedBasisYield(BasisYield):
+    """The replay's flat futures basis yield as a library ``BasisYield`` (run 7 D3); see ``ClockSignedDividendYield``.
+
+    The calendar-day path keeps ``ImpliedBasisYield`` (bitwise).
+    """
+
+    basis_yield: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(float(self.basis_yield)):
+            raise ValidationError(f"basis_yield must be finite, got {self.basis_yield}")
+
+    def get_basis_yield(self, time_to_maturity: float) -> float:
+        return float(self.basis_yield)
+
+    def is_identically_zero(self) -> bool:
+        return float(self.basis_yield) == 0.0
 
 
 def calculate_basis_yield(

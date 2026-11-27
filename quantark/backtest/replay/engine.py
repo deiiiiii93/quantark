@@ -38,7 +38,8 @@ from .engine_factory import (
     create_vol_model_engine,
 )
 from quantark.volcalibration.calibrate import VolModelCalibrator
-from .product_replay import ProductReplay, _env_with
+from .product_replay import ProductReplay, _env_with, trading_clock_horizon
+from quantark.priceenv.clock_validation import apply_declared_quoting
 from .results import BookBacktestResults
 
 
@@ -227,6 +228,14 @@ class ReplayBacktestEngine:
             )
             self._replays.append(replay)
             self._quantities.append(float(bp.quantity))
+        # Business-day clock (run 7 D4): ONE horizon per run, covering every product of the book -- the day env is
+        # built through the first replay and shared by all of them.
+        self._trading_clock = getattr(config.engine_config, "trading_clock", None)
+        if self._trading_clock is not None:
+            horizon = trading_clock_horizon(config.market_data, [bp.product for bp in config.products],
+                                            self._trading_clock.calendar)
+            for replay in self._replays:
+                replay.trading_clock_horizon = horizon
 
         # Trade mode (spec 2026-10-23 portfolio-trade-value D9): a product with cash legs is marked at its trade
         # value and its leg cash is booked by one LegCashBook (built on the run's first day). Leg cash is part of
@@ -392,8 +401,12 @@ class ReplayBacktestEngine:
                 )
                 basis_yield = 0.0
                 if not self._replays[0].uses_term_dividend_source():
-                    env.div_yield = SignedDividendYield(implied_q)
-                env.basis_yield = ImpliedBasisYield(0.0)
+                    env.div_yield = self._replays[0].flat_dividend(implied_q)
+                    # a field assigned after construction follows the env's declaration (business-day clock: wrapped
+                    # onto its trading clock; calendar-day env: left as assigned)
+                    apply_declared_quoting(env, "div_yield")
+                env.basis_yield = self._replays[0].flat_basis(0.0)
+                apply_declared_quoting(env, "basis_yield")
             pricing_q = self._replays[0].recorded_pricing_q(
                 env, date, market, implied_q
             )
@@ -703,12 +716,30 @@ class ReplayBacktestEngine:
             reason = "maturity"
         else:
             reason = "data_end"
-        return {
+        info = {
             "termination_reason": reason,
             "days_replayed": int(self._days_replayed),
             "days_in_contract": int(self._days_in_contract),
             "all_settled": bool(all_settled),
             "outstanding_receivable": self._outstanding_receivable(),
+        }
+        if self._trading_clock is not None:
+            info["trading_clock"] = self._trading_clock_info()
+        return info
+
+    def _trading_clock_info(self) -> dict[str, Any]:
+        """The run's business-day clock, recorded with the results (run 7 D5): every engine time of the run is on
+        this clock, in trading years of ``bus_days_in_year`` business days."""
+        clock = self._trading_clock
+        horizon = self._replays[0].trading_clock_horizon
+        return {
+            "day_count_convention": "BUSINESS_DAYS",
+            "calendar": getattr(clock.calendar, "name", str(clock.calendar)),
+            "bus_days_in_year": int(clock.bus_days_in_year),
+            "holiday_time_adjustment": clock.holiday_time_adjustment.name,
+            "vol_quoting": clock.vol_quoting.name,
+            "cash_curve_quoting": "CALENDAR_YEAR",
+            "trading_clock_horizon": horizon.date().isoformat(),
         }
 
     def _all_settled(self) -> bool:

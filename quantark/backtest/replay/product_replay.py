@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import logging
 
+import dataclasses
 from copy import deepcopy
-from datetime import timedelta
-from typing import Any, Dict, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -32,7 +33,9 @@ from quantark.asset.equity.lifecycle import DCNLifecycleState, ValuationPoint, t
 from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div.forward_carry_curve import ForwardCarryCurve
-from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import CurveQuotingBasis, PricingEnvironment
+from quantark.priceenv.clock_validation import is_clock_wrapped
+from quantark.util.calendar import BusinessDayConvention, DayCountConvention
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close, is_zero, same_instant
@@ -42,6 +45,8 @@ from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
 from .dividend_source import term_dividend_yield
 from .engine_factory import create_mc_event_stats_engine
 from .market import (
+    ClockImpliedBasisYield,
+    ClockSignedDividendYield,
     ImpliedBasisYield,
     SignedDividendYield,
     derive_implied_dividend_yield,
@@ -79,19 +84,92 @@ def _env_with(
 ) -> PricingEnvironment:
     """Shallow env variant: shares the (immutable-by-convention) vol surface,
     rate curve, and basis yield; replaces only spot/dividend. Replaces the
-    deepcopy-per-node pattern, which cloned entire smile-grid surfaces."""
-    return PricingEnvironment(
+    deepcopy-per-node pattern, which cloned entire smile-grid surfaces.
+
+    ``dataclasses.replace`` keeps every other field -- the whole clock included (run 7 D4): on a business-day env the
+    shared wrappers stay as they are (same anchor and horizon) and a native replacement dividend is wrapped under the
+    env's ``CALENDAR_YEAR`` declaration. On a calendar-day env it is the same objects as before.
+    """
+    return dataclasses.replace(
+        env,
         spot_quote=(
             SpotQuote(spot=float(spot), asset_name=underlying)
             if spot is not None
             else env.spot_quote
         ),
-        vol_surface=env.vol_surface,
-        rate_curve=env.rate_curve,
         div_yield=div_yield if div_yield is not None else env.div_yield,
-        basis_yield=env.basis_yield,
-        valuation_date=env.valuation_date,
     )
+
+
+class _EnvClock(NamedTuple):
+    """The clock keywords every replay day env is built with (run 7 D4): passed one by one, never splatted."""
+
+    day_count_convention: DayCountConvention
+    bus_days_in_year: int
+    calendar: Any
+    holiday_time_adjustment: BusinessDayConvention
+    rate_curve_quoting: Optional[CurveQuotingBasis]
+    div_yield_quoting: Optional[CurveQuotingBasis]
+    basis_yield_quoting: Optional[CurveQuotingBasis]
+    trading_clock_horizon: Optional[datetime]
+
+
+#: ``trading_clock=None``: exactly ``PricingEnvironment``'s own defaults, so the day env is today's calendar-day env.
+_CALENDAR_DAY_CLOCK = _EnvClock(**{
+    f.name: f.default for f in dataclasses.fields(PricingEnvironment) if f.name in _EnvClock._fields
+})
+
+
+def _naive_day(value) -> Optional[datetime]:
+    if value is None or not hasattr(value, "year"):
+        return None
+    return datetime(value.year, value.month, value.day)
+
+
+def _product_contract_dates(product: Any, calendar: Any = None) -> list:
+    """Every contract date of ``product`` the replay's engines may resolve: exercise / maturity / settlement dates and
+    every schedule record's dates (both barrier configs, a plain observation schedule); a DCN's schedule and payment
+    dates; and the payment date the product's day-based settlement convention (T+n) derives from the latest of them
+    (on the convention's calendar, else ``calendar``)."""
+    dates = [getattr(product, name, None) for name in ("exercise_date", "maturity_date", "settlement_date")]
+    schedules = []
+    for config_name in ("barrier_config", "post_barrier_config"):
+        config = getattr(product, config_name, None)
+        for schedule_name in ("ko_observation_schedule", "ki_observation_schedule"):
+            schedules.append(getattr(config, schedule_name, None))
+    schedules.append(getattr(product, "observation_schedule", None))
+    records = [r for sch in schedules for r in (getattr(sch, "records", None) or ())]
+    records += list(getattr(product, "observation_records", None) or ())
+    for record in records:
+        dates += [getattr(record, name, None)
+                  for name in ("observation_date", "settlement_date", "maturity_date")]
+    schedule = getattr(product, "schedule", None)
+    if schedule is not None and callable(getattr(product, "payment_dates", None)):
+        # a DCN: its monthly rows, daily knock-in dates and every payment date
+        dates += [m.observation_date for m in schedule.monthly] + list(schedule.daily_ki_dates)
+        paid = product.payment_dates()
+        dates += list(paid.coupon_payment_dates) + list(paid.ko_payment_dates) + [paid.loss_payment_date]
+    out = [d for d in (_naive_day(x) for x in dates) if d is not None]
+    convention = getattr(product, "settlement_convention", None)
+    if out and convention is not None and float(convention.lag) > 0.0:
+        from quantark.asset.equity.settlement import SettlementLagUnit, payment_date_by_convention
+
+        if convention.lag_unit in (SettlementLagUnit.BUSINESS_DAYS, SettlementLagUnit.CALENDAR_DAYS):
+            # the latest determination pays last: a day-based lag rolls forward monotonically
+            out.append(_naive_day(payment_date_by_convention(convention, max(out), convention.calendar or calendar)))
+    return out
+
+
+def trading_clock_horizon(market_data: Any, products, calendar: Any = None) -> datetime:
+    """The replay's ``trading_clock_horizon`` (run 7 D4, revised): max(the last market date, the latest contract date
+    of every product) + 366 calendar days -- strictly after every date an engine resolves (settlement lags, holiday
+    rolls, pending receivables). A date past it still raises in the env's clock machinery, never silently."""
+    candidates = [_naive_day(pd.Timestamp(d)) for d in market_data.dates]
+    for product in products:
+        candidates += _product_contract_dates(product, calendar)
+    if not candidates:
+        raise ValidationError("trading_clock_horizon needs at least one market date")
+    return max(candidates) + timedelta(days=366)
 
 
 def surface_tail_carry_yield(
@@ -168,6 +246,20 @@ class ProductReplay:
                 f"ProductReplay cannot replay {type(product).__name__}: it holds run state (FX TARN / TARF) that "
                 "run_fixings.settle_history banks and pays, which ProductReplay does not call; run it in the FX "
                 "backtest or FX dynamic scenario")
+        clock = getattr(engine_config, "trading_clock", None)
+        if clock is not None:
+            from quantark.asset.clock import ProductClock, product_clock
+            from quantark.asset.equity.product.option.dcn_option import DCNOption
+
+            # a DCN is date-only by its own clock rule (it carries no exercise_date for product_clock to read)
+            if not isinstance(product, DCNOption) and product_clock(product) is ProductClock.NUMERIC:
+                # TODO(run 7 D7): a numeric (float-time) schedule on the business-day clock -- its times ignore the
+                # env clock, so the day would mix ACT/365 product times with trading-time curves.
+                raise ValidationError(
+                    f"{type(product).__name__} has a numeric (float-time) schedule; engine_config.trading_clock "
+                    "prices on a business-day clock that a float schedule ignores (mixed semantics). Book the "
+                    "contract on dates, or replay it with trading_clock=None"
+                )
         self.product = product
         self.product_quantity = product_quantity
         self.has_lifecycle = has_lifecycle
@@ -222,6 +314,11 @@ class ProductReplay:
         self._last: Optional[tuple] = None  # (date, spot) of the last date product_for_date first saw
         self._previous: Optional[tuple] = None  # (date, spot) of the run instant before ``_last`` (W6 gap rule)
         self._live: Dict[int, tuple] = {}  # index -> (date, spot) first live (Ruling 4)
+        # Business-day clock (run 7 D4): the horizon every day env of the run shares. This product's own; a book
+        # engine replaces it with the book-wide one (one horizon per run).
+        self.trading_clock_horizon: Optional[datetime] = (
+            trading_clock_horizon(market_data, [product], clock.calendar) if clock is not None else None
+        )
 
     @property
     def start_date(self) -> Optional[pd.Timestamp]:
@@ -276,6 +373,73 @@ class ProductReplay:
             product = product.with_fixings_recorded(self._run_fills)
         return product
 
+    # ------------------------------------------------------------------
+    # Business-day clock (run 7, .ship/2026-11-26-replay-business-day-clock)
+    # ------------------------------------------------------------------
+
+    def _trading_clock(self):
+        """The run's ``TradingClockConfig``, or ``None`` for the calendar-day replay."""
+        return getattr(self.engine_config, "trading_clock", None)
+
+    def _env_clock(self, *, on_calendar: bool = False) -> _EnvClock:
+        """The clock keywords of a day env: the run's business-day clock, or (no clock, or ``on_calendar`` for a
+        calendar-tenor probe) ``PricingEnvironment``'s calendar-day defaults."""
+        clock = self._trading_clock()
+        if clock is None or on_calendar:
+            return _CALENDAR_DAY_CLOCK
+        quoted = CurveQuotingBasis.CALENDAR_YEAR  # replay's cash market data is calendar-quoted (D1)
+        return _EnvClock(
+            day_count_convention=DayCountConvention.BUSINESS_DAYS,
+            bus_days_in_year=clock.bus_days_in_year,
+            calendar=clock.calendar,
+            holiday_time_adjustment=clock.holiday_time_adjustment,
+            rate_curve_quoting=quoted,
+            div_yield_quoting=quoted,
+            basis_yield_quoting=quoted,
+            trading_clock_horizon=self.trading_clock_horizon,
+        )
+
+    def flat_dividend(self, q: float, *, on_calendar: bool = False):
+        """A flat signed dividend for a day env: ``SignedDividendYield`` on the calendar-day path (bitwise),
+        ``ClockSignedDividendYield`` (a wrappable ``DividendYield``) on the business-day clock (D3)."""
+        if self._trading_clock() is None or on_calendar:
+            return SignedDividendYield(q)
+        return ClockSignedDividendYield(q)
+
+    def flat_basis(self, b: float, *, on_calendar: bool = False):
+        """A flat basis for a day env (see ``flat_dividend``)."""
+        if self._trading_clock() is None or on_calendar:
+            return ImpliedBasisYield(b)
+        return ClockImpliedBasisYield(b)
+
+    def _clock_vol(self, vol_surface: Any, date: pd.Timestamp) -> Any:
+        """The day's vol on the env clock (D2): a calendar-quoted vol is presented on the trading axis through a
+        business-date knot map; ``vol_quoting=TRADING_YEAR`` (or no clock) keeps it as is."""
+        clock = self._trading_clock()
+        if clock is None or clock.vol_quoting is CurveQuotingBasis.TRADING_YEAR:
+            return vol_surface
+        from quantark.param.vol import CalendarQuotedVolSurface, DateKnotTimeMap
+        from quantark.util.calendar.trading_clock import TradingClock
+
+        time_map = DateKnotTimeMap(
+            TradingClock(clock.calendar, clock.bus_days_in_year),
+            pd.Timestamp(date).normalize().to_pydatetime(),
+            self.trading_clock_horizon,
+            clock.holiday_time_adjustment,
+        )
+        return CalendarQuotedVolSurface(vol_surface, time_map)
+
+    def _require_clock_business_day(self, date: pd.Timestamp) -> None:
+        clock = self._trading_clock()
+        if clock is not None and not clock.calendar.is_business_day(pd.Timestamp(date).to_pydatetime()):
+            # TODO(run 7): a replay day that is a holiday of the clock's calendar has no trading time of its own;
+            # refused rather than guessed (a FOLLOWING anchor cannot even carry the calendar-quoted vol).
+            raise ValidationError(
+                f"replay day {pd.Timestamp(date).date()} is not a business day of the trading clock's calendar "
+                f"{getattr(clock.calendar, 'name', clock.calendar)!r}; drop it from the market data or use a "
+                "calendar on which it trades"
+            )
+
     def build_env(
         self,
         date: pd.Timestamp,
@@ -296,6 +460,7 @@ class ProductReplay:
         # Yesterday's carry source must not survive into a day that has no
         # eligible chain or a different dividend source.
         self.last_carry_context = None
+        self._require_clock_business_day(date)
         expiry = pd.Timestamp(selected["expiry_date"]).normalize()
         futures_ttm = (expiry - date).days / 365.0
         basis_yield, hedge_implied_q = derive_implied_dividend_yield(
@@ -327,13 +492,22 @@ class ProductReplay:
                 if not allow_flat_carry_fallback:
                     raise
                 self.last_carry_context = None
+        clock = self._env_clock()
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
-            vol_surface=vol_surface,
+            vol_surface=self._clock_vol(vol_surface, date),
             rate_curve=rate_curve,
             div_yield=div_yield,
-            basis_yield=ImpliedBasisYield(basis_yield),
+            basis_yield=self.flat_basis(basis_yield),
             valuation_date=date.to_pydatetime(),
+            day_count_convention=clock.day_count_convention,
+            bus_days_in_year=clock.bus_days_in_year,
+            calendar=clock.calendar,
+            holiday_time_adjustment=clock.holiday_time_adjustment,
+            rate_curve_quoting=clock.rate_curve_quoting,
+            div_yield_quoting=clock.div_yield_quoting,
+            basis_yield_quoting=clock.basis_yield_quoting,
+            trading_clock_horizon=clock.trading_clock_horizon,
         )
         return env, basis_yield, implied_q, futures_ttm
 
@@ -457,6 +631,13 @@ class ProductReplay:
         """
         if not self.uses_term_dividend_source():
             return self.pricing_dividend_yield(implied_q)
+        if self._trading_clock() is not None:
+            # D5: the column keeps its calendar meaning -- the calendar-quoted curve (the env wrapper's inner) read
+            # at the CALENDAR tenor to the product's maturity, the same number the calendar-day replay records
+            remaining = self._remaining_maturity_years(date, market, on_calendar=True)
+            div = env.div_yield
+            quoted = div.inner if is_clock_wrapped(div) else div
+            return float(quoted.get_yield(remaining))
         remaining = self._remaining_maturity_years(date, market)
         return float(env.div_yield.get_yield(remaining))
 
@@ -498,7 +679,7 @@ class ProductReplay:
         vol_source = self._vol_source()
         if vol_source == "scalar":
             self.last_surface_provenance = None
-            return FlatVolSurface(volatility=market["volatility"]), SignedDividendYield(
+            return FlatVolSurface(volatility=market["volatility"]), self.flat_dividend(
                 pricing_q
             )
         if vol_source != "surface":
@@ -518,7 +699,11 @@ class ProductReplay:
             vol_surface = artifact.grid_vol_surface()
         elif mode == "flat_atm_remaining":
             atm_term_structure = artifact.term_structure_vol_surface()
-            remaining = self._remaining_maturity_years(date, market)
+            # D6: the ATM lookup is on the artifact's own (calendar) axis; on the business-day clock that tenor is
+            # a separate calendar computation (the flat calendar vol is then wrapped onto the env clock)
+            remaining = self._remaining_maturity_years(
+                date, market, on_calendar=self._trading_clock() is not None
+            )
             vol_surface = FlatVolSurface(
                 volatility=float(atm_term_structure.get_vol(0.0, remaining, 0.0))
             )
@@ -536,7 +721,7 @@ class ProductReplay:
         return vol_surface, div_yield
 
     def _remaining_maturity_years(
-        self, date: pd.Timestamp, market: dict[str, float]
+        self, date: pd.Timestamp, market: dict[str, float], *, on_calendar: bool = False
     ) -> float:
         """
         Product remaining maturity (valuation date -> final maturity) in years.
@@ -546,14 +731,27 @@ class ProductReplay:
         for this date.  A throwaway probe env carries the valuation date and
         day-count convention; its vol/dividend contents are irrelevant to the
         maturity calculation.
+
+        The probe is on the day env's clock (``build_env``'s clock keywords). ``on_calendar`` measures on the
+        calendar-day clock instead: the ACT/365 tenor a calendar quote (an IV-surface ATM pillar, a calendar-quoted
+        dividend curve) is read at on the business-day clock (run 7 D5 / D6).
         """
+        clock = self._env_clock(on_calendar=on_calendar)
         probe_env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
             vol_surface=FlatVolSurface(volatility=market["volatility"]),
             rate_curve=FlatRateCurve(rate=market["rate"]),
-            div_yield=SignedDividendYield(0.0),
-            basis_yield=ImpliedBasisYield(0.0),
+            div_yield=self.flat_dividend(0.0, on_calendar=on_calendar),
+            basis_yield=self.flat_basis(0.0, on_calendar=on_calendar),
             valuation_date=date.to_pydatetime(),
+            day_count_convention=clock.day_count_convention,
+            bus_days_in_year=clock.bus_days_in_year,
+            calendar=clock.calendar,
+            holiday_time_adjustment=clock.holiday_time_adjustment,
+            rate_curve_quoting=clock.rate_curve_quoting,
+            div_yield_quoting=clock.div_yield_quoting,
+            basis_yield_quoting=clock.basis_yield_quoting,
+            trading_clock_horizon=clock.trading_clock_horizon,
         )
         remaining_of = getattr(self._tracker, "remaining_maturity", None)
         if remaining_of is not None:
@@ -705,7 +903,7 @@ class ProductReplay:
                 surf_env = _env_with(
                     env,
                     spot=float(s),
-                    div_yield=SignedDividendYield(float(q)),
+                    div_yield=self.flat_dividend(float(q)),
                     underlying=self.underlying,
                 )
                 try:
@@ -776,7 +974,7 @@ class ProductReplay:
             {
                 "date": date,
                 "next_ko_date": (
-                    self._date_from_time(date, float(ko_times[0])) if ko_times.size else pd.NaT
+                    self._event_date(date, float(ko_times[0]), env) if ko_times.size else pd.NaT
                 ),
                 "next_ko_probability": (
                     np.nan if ko_unknown else _first_instant_probability(ko_times, ko_probs)
@@ -807,7 +1005,7 @@ class ProductReplay:
             self.event_prob_sink.append(
                 {
                     "date": date,
-                    "event_date": self._date_from_time(date, float(ko_times[i])),
+                    "event_date": self._event_date(date, float(ko_times[i]), env),
                     "event_type": "KO",
                     "event_probability": float(probability),
                     "conditional_probability": float(conditional),
@@ -825,7 +1023,7 @@ class ProductReplay:
             self.event_prob_sink.append(
                 {
                     "date": date,
-                    "event_date": self._date_from_time(date, float(ki_table.times[i])),
+                    "event_date": self._event_date(date, float(ki_table.times[i]), env),
                     "event_type": "KI",
                     "event_probability": float(probability),
                     "conditional_probability": np.nan,
@@ -854,6 +1052,10 @@ class ProductReplay:
             raise
         except Exception as exc:
             if mode != "mc":
+                raise
+            if self._trading_clock() is not None and isinstance(exc, ValidationError):
+                # run 7 D7: on the business-day clock a refusal is a clock decision (an unsupported surface, a
+                # date past the horizon, ...): the MC fallback would silently swap the model, so it never masks one
                 raise
             primary_failure = exc
         if stats is not None:
@@ -913,6 +1115,13 @@ class ProductReplay:
         if point is None or point.date is not None:
             pending = float(lifecycle.pending_settlement_cashflow)
             if pending != 0.0 and lifecycle.settlement_date is not None:
+                if self._trading_clock() is not None:
+                    # D5: the settlement time from the env's own resolver (business-day clock)
+                    from quantark.priceenv.date_axis import env_time
+
+                    settle = pd.Timestamp(lifecycle.settlement_date).normalize().to_pydatetime()
+                    tau = max(env_time(env, settle), 0.0)
+                    return pending * float(env.get_discount_factor(tau))
                 tau_settle = max(
                     (
                         pd.Timestamp(lifecycle.settlement_date).normalize()
@@ -1042,6 +1251,35 @@ class ProductReplay:
         if len(eligible) == 0:
             return pd.Timestamp(date).normalize()
         return pd.Timestamp(eligible[0]).normalize()
+
+    def _event_date(self, date: pd.Timestamp, time_years: float, env: PricingEnvironment) -> pd.Timestamp:
+        """The date of an engine event time: ``_date_from_time`` (ACT/365) on the calendar-day replay; on the
+        business-day clock the business date whose env time is that instant (D5)."""
+        if self._trading_clock() is None:
+            return self._date_from_time(date, time_years)
+        return self._business_date_from_time(env, time_years)
+
+    @staticmethod
+    def _business_date_from_time(env: PricingEnvironment, time_years: float) -> pd.Timestamp:
+        """The business date d of ``env.calendar`` with ``env_time(env, d)`` the same instant as ``time_years``: the
+        n-th business day after the (rolled) valuation date, n = the integer business-day count the engines' axis
+        is built from. A time that matches no business date is refused."""
+        from quantark.priceenv.date_axis import env_time
+
+        cal = env.calendar
+        t = float(time_years)
+        n = int(round(t * env.bus_days_in_year))
+        v = env.valuation_date
+        anchor = datetime(v.year, v.month, v.day)
+        if not cal.is_business_day(anchor):
+            anchor = cal.adjust_date(anchor, env.holiday_time_adjustment)
+        day = cal.add_business_days(anchor, n) if n > 0 else anchor
+        if n < 0 or not same_instant(env_time(env, day), t):
+            raise ValidationError(
+                f"event time {t!r} on the business-day clock (D={env.bus_days_in_year}) is no business date of "
+                f"{getattr(cal, 'name', cal)!r} after {anchor.date()}"
+            )
+        return pd.Timestamp(day)
 
     @staticmethod
     def _date_from_time(date: pd.Timestamp, time_years: float) -> pd.Timestamp:
