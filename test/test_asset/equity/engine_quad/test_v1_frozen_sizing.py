@@ -170,9 +170,12 @@ SPOT_INDEPENDENT = {
     "phoenix": (PhoenixQuadEngine, QuadParams(), dated_phoenix, env, {
         "price": "0x1.90aa68aaee231p+6", "delta": "0x1.32e3e27e50800p-3", "gamma": "-0x1.2672b6ec89000p-5",
         "rho": "-0x1.e28b7099bf800p-3", "dividend_rho": "-0x1.85a0ef8c40800p-3"}),
+    # re-pinned after 0.16.0 run 5 D1 (KO-reset V1 knock-outs on the cell-average projection, a sanctioned move);
+    # at 31f46955: price 0x1.9a7a04adb6823p+6, delta -0x1.a1fb6ee4c4000p-4, gamma -0x1.f9be62b912000p-6,
+    # rho -0x1.1706a55e54c00p-2, dividend_rho -0x1.32ad67fde6000p-5
     "ko_reset": (KOResetSnowballQuadEngine, QuadParams(), dated_ko_reset, env, {
-        "price": "0x1.9a7a04adb6823p+6", "delta": "-0x1.a1fb6ee4c4000p-4", "gamma": "-0x1.f9be62b912000p-6",
-        "rho": "-0x1.1706a55e54c00p-2", "dividend_rho": "-0x1.32ad67fde6000p-5"}),
+        "price": "0x1.9a7a5194111b2p+6", "delta": "-0x1.a205f2aa99400p-4", "gamma": "-0x1.f9d9cd80ea000p-6",
+        "rho": "-0x1.170deed1d9400p-2", "dividend_rho": "-0x1.32ba384a58000p-5"}),
 }
 
 
