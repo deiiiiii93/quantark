@@ -87,7 +87,7 @@ dates, `cash_to_pay`), `knock_in.expected_time`, `knock_in.expected_loss`, `expe
 | `pre_maturity_probability` | `maturity.probability` | |
 | `post_maturity_probability` | `ki_settlement.probability` | |
 | `pre_maturity_time`, `pre_maturity_payment_time` | `maturity.time`, `maturity.payment_time` | |
-| `post_maturity_time`, `post_maturity_payment_time` | `ki_settlement.time`, `ki_settlement.payment_time` | REBASED: the totals row at the latest candidate knocked-in settlement; actual dates in the `termination` `ki_settlement` rows. |
+| `post_maturity_time`, `post_maturity_payment_time` | `ki_settlement.time`, `ki_settlement.payment_time` | REBASED: the totals row at the latest candidate knocked-in settlement; actual dates in the `termination` `ki_settlement` rows. Since 0.16.0 every knocked-in note settles at the product terminal (the exercise date; item 24), so both are that one date. |
 | `post_ko_times_are_offsets` | `stats.rebased` | REBASED results carry `post_ki_offsets` and `termination`; `from_statistics` converts them instead of raising `NotImplementedError`. |
 
 ## 5. Fields of `DCNEventStats`
@@ -240,7 +240,8 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     settlement date. Its calendar schedule (simulated paths) places the same settlement day and
     delay. The intraday timeline's pre-KI KO events under EXPIRY pay carry that payment instant
     instead of the product terminal's. Booking only; the intraday price follows in item 25.
-24. **KO-reset MC: the knocked-in redemption reads the spot at the second schedule's end (D31).** On
+24. **KO-reset MC: the knocked-in redemption reads the spot at the second schedule's end (D31; replaced
+    in 0.16.0, see the end of this item).** On
     an ABSOLUTE second schedule (a carried knock-in included), BSM, local-vol, Heston and Heston-SLV MC
     paid the knocked-in redemption at the second schedule's end but read its spot at the grid's last
     node: the first schedule's end when that runs past the second schedule. They now read it at the
@@ -253,6 +254,16 @@ A statistic listed in `unavailable` is recorded as NaN, never as a stand-in.
     before the first); on valid contracts the readout moves only where the product `maturity` runs past
     the second schedule's end. A knock-in after the second schedule's end can no longer occur (item 26):
     every knocked-in path reads at the second schedule's end.
+    **Replaced in 0.16.0 (owner ruling 2026-11-27).** A knocked-in KO-reset observes the second
+    schedule's knock-outs up to its last observation; if none fires, it is a live put to the
+    product's exercise date. Every engine, MC included, on ABSOLUTE, carried and REBASED notes, reads
+    the put on the spot at the exercise date and pays it at the exercise settlement (an explicit
+    `settlement_date` when booked, else exercise + settlement delay; `resolve_terminal_timing`). The
+    `ki_settlement` row and EXPIRY-paid second-schedule knock-outs sit there too. A KO-reset whose
+    exercise date precedes the latest possible end of the second schedule is refused at construction.
+    The readout above therefore differs from 0.16.0 only where the exercise date is after the second
+    schedule's end; there MC moved (see the 0.16.0 CHANGELOG, "Knocked-in KO-reset put at the
+    exercise date").
 25. **KO-reset intraday twin: the first schedule is paid on the settlement date (D34).** The float-time
     twin of a dated KO-reset note now carries the payment of a note that ends with the first schedule
     as `first_schedule_settlement_time`, a new numeric-clock argument of

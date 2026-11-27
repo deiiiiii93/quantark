@@ -205,13 +205,16 @@ env time 0.5:
 | Phoenix, duplicate | PDE / QUAD V1 | -1.41192 / -1.412 (07-04 coupon dropped) | -1.071155 / -1.070890 | -1.049648 (z -1.26) |
 | Phoenix, step-down | PDE / QUAD V1 | -1.42396 / -1.410 | -1.083196 / -1.081637 | -1.059157 (z -1.42) |
 | Phoenix, any pair | QUAD V2 | refused | priced (within 1.4 SE of MC) | |
-| KO-reset, schedule-1 step-down | PDE | 8.657 | 9.008373 | 8.995663 (z +1.17) |
-| KO-reset, knock-in pair 80 → 75 | PDE | 8.8717 | 7.719715 | 7.702740 (z +1.33) |
-| KO-reset, schedule-1 step-down | QUAD V1 | the single-record price (step-down ignored) | 9.006584 | 8.995663 (z +1.00) |
-| KO-reset, overlapping KI/KO levels at one instant | QUAD V1 | 4.87 / 4.19 | within 3 SE of MC | 6.03 / 4.33 |
+| KO-reset, schedule-1 step-down | PDE | 8.657 | 9.016354 | 9.003973 (z +1.13) |
+| KO-reset, knock-in pair 80 → 75 | PDE | 8.8717 | 7.732242 | 7.715935 (z +1.27) |
+| KO-reset, schedule-1 step-down | QUAD V1 | the single-record price (step-down ignored) | 9.014574 | 9.003973 (z +0.97) |
+| KO-reset, overlapping KI/KO levels at one instant | QUAD V1 | 4.87 / 4.19 | 6.059480 / 4.362742 | 6.043249 / 4.346320 (z +1.03 / +1.01) |
 
-The KO-reset step-down and knock-in pair rows are the final 0.16.0 values: they include the knocked-in end date fix
-and the V1 projection from "QUAD numerics" below (MC: 1M paths, seed 7).
+The KO-reset rows are the final 0.16.0 values, measured on the final library (MC: 1M paths, seed 7). They include the
+V1 projection from "QUAD numerics" below and the knocked-in put at the exercise date ("Knocked-in KO-reset put at the
+exercise date" below). The PDE values equal the ones first measured for this section: run 9 reverted the grid engines'
+knocked-in end date, and the projection is V1 only. MC moved: these notes are exercised on 2026-01-05, after schedule
+2's last fixing on 2025-12-03.
 
 - **Snowball PDE equal-level knock-in duplicates** move to the product without the duplicate (1D
   2.474447 → 2.476399; local-vol and Heston likewise). The repeated cell-average projection drifted.
@@ -264,10 +267,12 @@ Pins moved: refusal and old-behaviour pins only. These are the 0.14.0 collapsed-
 `test_same_instant_ko.py`, whose old hex values are kept in a comment.
 
 Open items:
-- Resolved later in this release ("QUAD numerics" below): the KO-reset MC gap (+2 to +3 SE; z −9
-  with `disable_ko_after_ki`) was the grid engines running a knocked-in note to the exercise date
-  instead of schedule 2's last fixing; and with `disable_ko_after_ki` a schedule-2 knock-out record
-  on the knock-in instant is disabled (owner ruling), now on QUAD V2 too.
+- Resolved later in this release: the KO-reset MC gap (+2 to +3 SE; z −9 with
+  `disable_ko_after_ki`) came from the contract reading. MC read a knocked-in note's put at schedule
+  2's last fixing; the grid engines read it at the exercise date. The owner ruled for the exercise
+  date (2026-11-27), and MC now reads it there ("Knocked-in KO-reset put at the exercise date"
+  below). Also, with `disable_ko_after_ki` a schedule-2 knock-out record on the knock-in instant is
+  disabled (owner ruling), now on QUAD V2 too ("QUAD numerics" below).
 - QUAD V2 KO-reset knock-out pairs still refuse. KO-reset `REBASED` on QUAD V1 and the PDE stays
   refused (pre-existing).
 - Heston PDE knock-in statistics rows before a shared instant are 3.5–10 SE off MC, and so is one
@@ -277,9 +282,11 @@ Open items:
 
 ### QUAD numerics: V1 bump greeks, KO-reset fixes, FFT lengths
 
-Four changes to QUAD V1 (`SnowballQuadEngine`, `PhoenixQuadEngine`, `KOResetSnowballQuadEngine`), plus two KO-reset
-contract fixes that span the grid engines. The KO-reset changes and the FFT round-off moves are owner-signed
-(2026-11-27). The KO-reset, Snowball and Phoenix flat-BSM certificates were amended for them (see Notes).
+Changes to QUAD V1 (`SnowballQuadEngine`, `PhoenixQuadEngine`, `KOResetSnowballQuadEngine`), plus a KO-reset contract
+fix on QUAD V2. A second KO-reset change, the knocked-in end date on the grid engines, landed here and is reverted in
+this release by owner ruling 2026-11-27 (below, and "Knocked-in KO-reset put at the exercise date"). The KO-reset
+changes and the FFT round-off moves are owner-signed (2026-11-27). The KO-reset, Snowball and Phoenix flat-BSM
+certificates were amended for the V1 projection and the FFT lengths (see Notes).
 
 #### Changed: V1 bump greeks on the base lattice
 
@@ -333,21 +340,23 @@ statistics, the first step and the adjoint. The nodal and width-0 modes are unch
 - Cash-leg baselines record the move as cause "t"; the cross-engine smoke allowance for the KO-reset V1 cell was
   re-banked.
 
-#### Fixed: a knocked-in KO-reset ends at schedule 2's last fixing (owner ruling D31)
+#### Reverted: a knocked-in KO-reset ends at schedule 2's last fixing (D31)
 
-A knocked-in KO-reset is decided and settled at schedule 2's last fixing, as MC always priced it. The PDE (1D and
-local vol), Heston / Heston-SLV ADI, QUAD V1 and QUAD V2 ran the knocked-in leg to the product's exercise date
-instead. Notes whose exercise date is later than schedule 2's last fixing moved; notes whose exercise date is that
-fixing are unchanged, bit for bit.
+Run 5 staged the knocked-in leg at schedule 2's last fixing on the PDE (1D and local vol), Heston / Heston-SLV ADI,
+QUAD V1 and QUAD V2, to match MC's D31 readout. The owner then ruled the other way (2026-11-27): a knocked-in note's
+put is read on the spot at the product's exercise date and paid at the exercise settlement. Run 9 reverts the
+staging, and MC moves instead ("Knocked-in KO-reset put at the exercise date" below). The grid engines are back on
+their 0.15.0 exercise reading; notes whose exercise date is schedule 2's last fixing never moved.
 
-- The knocked-in payoff is staged at schedule 2's end and settled with the terminal's delay, or on an explicit
-  `settlement_date`. Under EXPIRY, schedule-2 knock-outs are paid there too. Statistics rows are timed there.
-- Referee (carried knock-in with `disable_ko_after_ki` = a European put to schedule 2's end): PDE -1.8e-6, V1 -5.2e-6,
-  V2 -4e-15 relative; all three were 4.6e-3 off (a put to the exercise date).
-- **This was the KO-reset MC gap** listed under "Same-instant observation records" (MC +2..+3 SE above the grid
-  engines; z -9 with `disable_ko_after_ki`): MC was right. Ten investigation cases now agree with MC at 1M paths within
-  1.25 SE on every grid engine.
-- Cash-leg folding binds the knocked-in slot at schedule 2's end. MC folding on such a product used to raise.
+- **The KO-reset MC gap** listed under "Same-instant observation records" (MC +2..+3 SE above the grid engines; z −9
+  with `disable_ko_after_ki`) came from the contract reading: MC read the put at schedule 2's end, the grid engines at
+  the exercise date. With MC on the exercise reading, the investigation's 12 cases (10, plus 2 settlement variants;
+  MC 1M paths, seed 7) agree: every grid engine (PDE, LV-PDE, QUAD V1, QUAD V2) is within −0.53..+1.20 SE of MC.
+- Referee (carried knock-in with `disable_ko_after_ki` = a European put to the exercise date, exact
+  −19.86527359248963): MC moved from −19.76689 to −19.86353. The grid engines are within 1.47e-6 (PDE, LV-PDE),
+  6.3e-6 (V1) and 1.8e-15 (V2) relative.
+- Cash-leg folding binds the knocked-in slot at the exercise terminal on every engine, MC included. EXPIRY schedule-2
+  knock-outs and the statistics rows are timed there too.
 
 #### Fixed: QUAD V2 KO-reset `disable_ko_after_ki` (owner: "disable that knockout is correct")
 
@@ -375,7 +384,8 @@ round-off rather than bit for bit. Factor 1 and odd padding factors keep their l
 
 Overall, back to back: synthetic V1 book `price` 3.50x faster (FFT lengths; the freeze is 1.00x with identical
 checksums). Full `GreeksCalculator` set: the freeze alone is 0.93x, 0.78x with auto_converge; the FFT change more than
-covers it. KO-reset V1 projection and the knocked-in staging: 1.00-1.02x (QUAD V2 staged notes 1.09x).
+covers it. KO-reset V1 projection and the knocked-in staging, measured together: 1.00-1.02x (QUAD V2 staged notes
+1.09x). The staging is reverted in this release; run 9's timing is in its own section.
 
 #### Notes
 
@@ -391,21 +401,12 @@ covers it. KO-reset V1 projection and the knocked-in staging: 1.00-1.02x (QUAD V
   4.333% against V2's 4.163%. The error is O(h²) and comes from the trapezoid rule across the KO jump on a 1.7-cell
   one-day step. An analytic jump correction improves the statistics 16-110x, but makes some default-grid prices worse.
   QUAD V2 is exact.
-- KO-reset V1 statistics refuse (`TODO(D31)`) a carried knock-in whose schedule 2 ends at the valuation instant; the
-  price decides it on the spot.
-- The PDE and V1 discount the staged knocked-in payoff's settlement delay with the terminal's delay factor, while V2
-  and MC use the exact ratio of discount factors; they differ only on term curves with a payment lag.
-- `intraday/events.py` (`_ko_reset_events`) and `theta_shift._knock_out_payment_time` still pay a schedule-2 EXPIRY
-  knock-out at the terminal.
-- Heston ADI KO-reset is -2.2 SE against MC on one investigation case at its coarse default grid.
+- Heston ADI KO-reset is -2.2 SE against MC on one investigation case at its coarse default grid (exercise on schedule
+  2's last fixing, so run 9 does not move it).
 - **Marginal resolved chains** (0.12.0 open item): already removed by 0.12.1's exact lattice mass, at ≤ 4.9e-6
   relative and flat in step count.
 - `greek_conventions_report.build_cash_greeks_report` reprices on the raw engine, outside the bump context (every
   engine family).
-- A carried-KI KO-reset valued strictly after schedule 2's last fixing but before the exercise date is priced to the
-  exercise date on today's spot by every engine (MC included): `get_post_maturity_time` falls back to the exercise
-  maturity once schedule 2's fixings are past. Under D31 the note was decided at that fixing (it needs the historical
-  fixing); e.g. -20.0 on the fixing day, -19.84 the day after. Pre-existing.
 - Under `auto_converge`, the frozen V1 clone does not carry the accepted rung's `local_steps_allowed`, so a bumped leg
   may take a local stencil step the base rung refused (inside the local-stencil guard).
 - Phoenix V1 KO/coupon blending probe (planned D3) was not run: unmeasured.
@@ -580,6 +581,135 @@ overstated (owner ruling, 2026-11-27).
 - Re-pinned tests are listed in the run report, split into lag moves and round-off moves. They include the
   environment-vs-hand-recipe pins, now on a `DateKnotTimeMap` recipe, and run 7's measurement of the lag, now an
   equality. No certificate moved.
+
+### Knocked-in KO-reset put at the exercise date
+
+A knocked-in KO-reset observes schedule 2's knock-outs up to schedule 2's last observation. If none fires, it is a
+live put to the product's exercise date: it pays the put on the spot at the exercise date, at the exercise settlement
+(an explicit `settlement_date` when booked, else exercise + settlement delay). This holds for ABSOLUTE notes, carried
+knock-ins and REBASED notes (owner ruling 2026-11-27: "the final put option value should be determined by the spot at
+the exercise date of the product", REBASED too). It replaces D31 (2026-11-14), under which MC read the put at
+schedule 2's last fixing. Notes whose exercise date is schedule 2's last observation are unchanged, bit for bit
+(pinned on every grid engine; MC on ABSOLUTE layouts).
+
+#### Changed
+
+- **MC reads the knocked-in put at the exercise date** (BSM, local-vol, Heston and Heston-SLV MC share the kernel).
+  The exercise date is a node of every MC time grid, and the put is paid at the product terminal. Before, ABSOLUTE and
+  carried knock-ins read the spot at schedule 2's last fixing and were paid there; REBASED notes read and paid at each
+  path's own schedule-2 end. The cash-leg fold, EXPIRY-paid schedule-2 knock-outs, `terminal_determination` and the
+  `ki_settlement` statistics row move to the terminal too. REBASED statistics now have one `ki_settlement` row in
+  `termination`, at the terminal. BSM MC, 1M paths, seed 7, on the run-5 investigation notes (exercise 2026-01-05,
+  schedule 2 ends 2025-12-03; SE 0.011–0.017):
+
+  | case | before | after | move |
+  |---|---|---|---|
+  | base, KI 75 | 8.85270 | 8.86101 | +0.76 SE |
+  | KI 97 on 07-03, `disable_ko_after_ki` | 3.40294 | 3.32660 | −4.55 SE |
+  | KI 85 | 5.79305 | 5.81226 | +1.28 SE |
+  | KI 85, exercise 2026-02-05 | 5.79305 | 5.81997 | +1.78 SE |
+  | carried knock-in | −18.68669 | −18.59900 | +6.30 SE |
+  | carried knock-in, `disable_ko_after_ki` (exact −19.86527) | −19.76689 | −19.86353 | −7.81 SE |
+
+  REBASED, the cash-leg bank note (knock-ins end schedule 2 before exercise 2.0): 94.94324 → 93.46977 at 4096 paths,
+  95.81653 → 94.42974 at 200k paths (−24 SE). This includes the accrual change below.
+- **The grid engines are back on the exercise reading.** Run 5's staging at schedule 2's end is reverted on the PDE
+  (1D and local vol), Heston / Heston-SLV ADI, QUAD V1 and QUAD V2 ("QUAD numerics" above). Run 5's V2
+  `disable_ko_after_ki` fix, the V1 projection and the FFT lengths stay. Grid pins taken before run 5 are restored,
+  e.g. the base note on the PDE 8.86368327529885 → 8.871664315881244. V1 pins that run 5 moved twice were recaptured;
+  each equals its pre-run-5 value within 2.2e-15 relative.
+- **Annualized knocked-in amounts accrue to the exercise date** (owner ruling 2026-11-27, "Accrue to exercise"). The
+  knocked-in tenor runs from the origin to the exercise date on every engine and the lifecycle tracker. It ran to
+  schedule 2's last fixing (ABSOLUTE) or to the knock-in plus schedule 2's last offset (REBASED), so the REBASED tenor
+  no longer depends on the knock-in. On the investigation note with annualized knock-in the tenor goes from 0.915068 to
+  1.005479 years (334 → 367 days):
+
+  | case | PDE | QUAD V1 | QUAD V2 | MC |
+  |---|---|---|---|---|
+  | base, KI 75 | 9.01461 → 8.86244 | 9.01307 → 8.86075 | 9.01472 → 8.86256 | 8.99010 → 8.84208 |
+  | KI 85 | 6.17256 → 5.80552 | 6.17075 → 5.80356 | 6.17271 → 5.80568 | 6.14863 → 5.79252 |
+  | carried, `disable_ko_after_ki` | −18.17811 → −19.97415 | −18.17820 → −19.97425 | −18.17809 → −19.97412 | −18.09512 → −19.97204 |
+
+  MC is 200k paths on the first two rows. On the grid engines the carried row moves by exactly the tenor ratio
+  (+9.88e-2 relative); the MC moves also include the readout change above.
+- **The lifecycle tracker keeps a knocked-in note alive to the exercise date.** `KOResetLifecycleTracker` books V1 on
+  the exercise close's spot at the terminal payment (`resolve_terminal_timing`), not at schedule 2's last observation.
+  The calendar placement, the simulated paths' maturity day and `matured_before_run` follow: a carried knock-in
+  retires only after its exercise date. `with_absolute_schedule_2` (a REBASED note's ABSOLUTE copy) keeps the original
+  exercise date and `settlement_date`; it used to end the copy at the rebased end. Replay and backtest results of
+  knocked-in KO-resets whose exercise date follows schedule 2's end move with it. No replay, backtest or execution
+  golden moved.
+
+#### Fixed
+
+- The KO-reset MC gap from "Same-instant observation records" above is closed. On the investigation's 12 cases
+  (MC 1M paths, seed 7) every grid engine (PDE, LV-PDE, QUAD V1, QUAD V2) is within −0.53..+1.20 SE of MC.
+- Referee (carried knock-in with `disable_ko_after_ki` = a European put to the exercise date, −19.86527359248963), also
+  with an explicit `settlement_date` and with a settlement lag: PDE and LV-PDE within 1.47e-6 relative, QUAD V1 6.3e-6,
+  QUAD V2 1.8e-15, MC within 3 SE. Heston ADI equals the closed-form Heston put to the exercise date within 7.7e-5, and
+  agrees with Heston MC within 3 SE (1M paths).
+- A knocked-in note valued between schedule 2's last observation and the exercise date prices as the live put to the
+  exercise date: every grid engine within 5e-7 relative of the Black-Scholes put, MC within 3 SE. There is no jump at
+  schedule 2's end beyond the put's time value. The run-5 open item on such notes is removed.
+- EXPIRY-paid schedule-2 knock-outs are paid at the exercise settlement on every engine (PDE, Heston PDE, QUAD V1,
+  QUAD V2, MC), as the intraday events and theta already paid them. The run-5 open item on this is removed.
+- The QUAD V1 statistics refusal `TODO(D31)` (a carried knock-in whose schedule 2 ends at the valuation instant) is
+  gone with the revert.
+
+#### Added: refusals
+
+- **A KO-reset whose exercise date precedes the latest possible end of schedule 2 is refused** at construction
+  (`ValidationError`; owner ruling 2026-11-27, "Refuse such notes"). ABSOLUTE: the exercise date (numeric: `maturity`)
+  must not precede schedule 2's last booked observation; dated notes compare full datetimes. REBASED, numeric:
+  `maturity` must not precede the last knock-in observation plus schedule 2's last offset (dated REBASED notes were
+  already checked). Equality is allowed. Under the new reading such a note would settle its put before the schedule
+  it follows ends.
+  - `create_ko_reset_snowball` builds valid REBASED notes: maturity is at least the last knock-in observation plus
+    schedule 2's last offset. ABSOLUTE is unchanged.
+  - The tracker's day-grid snapping moves a snapped numeric REBASED copy's maturity onto its snapped latest end when
+    rounding left it short (`snapping._keep_exercise_last`). Whole-day contracts are unchanged.
+  - Census: no banked, certified, golden or cash-leg baseline contract breaks the rule. The violating test contracts
+    were rebuilt. The KO-reset example demo dropped its one schedule-2 date after its exercise date (2030-01-21).
+- **The tracker refuses a REBASED copy whose schedule 2 would end after the exercise date** (`ValidationError`,
+  `TODO(owner)`). The tracker hangs a REBASED schedule 2 from the knock-in close, and a knock-in record due on a
+  non-trading day fires on the next close, so schedule 2 can end past the exercise date. The construction check above
+  covers only the booked records.
+
+#### Notes
+
+- Certificates did not move: every certified KO-reset product has its exercise date on schedule 2's end. Full suite
+  green on the run's last code commit (31106 passed, 0 failed).
+- Cash-leg baselines: the two records of the MC REBASED bank note (`mc_snowball__ko_reset_rebased__-__price` and
+  `__event_npv`, 94.94323994203444 → 93.4697686971873) carry the new cause (u). Its check rebuilds both readings from
+  the price's own paths: the new reading equals the live price and the old one gives back the banked value, bit for
+  bit. Every banked ABSOLUTE KO-reset has its exercise date on schedule 2's end. The D31 class census is replaced by
+  this run's.
+- `docs/event-statistics-migration.md` item 24 (D31) is marked replaced.
+- **Speed.** `price()` wall time, run against the commit before this run, back to back in one window (separate
+  interpreters, base and run 9 alternated). Two dated notes: exercise after schedule 2's end (the investigation's base
+  note), and the same note with schedule 2's last record on the exercise date. Medians of the per-run medians:
+
+  | engine | exercise after schedule 2's end | exercise on schedule 2's end |
+  |---|---|---|
+  | PDE | 0.98x | 0.99x |
+  | QUAD V1 (1001 nodes) | 1.02x (1.016–1.019x in two windows) | 1.00x |
+  | QUAD V2 | 1.03x (1.025–1.036x in three windows) | 1.00x |
+  | MC (1M paths) | 0.99x | 0.99x |
+
+  QUAD V2 on the first note is over the 1.02x budget in every window (per-run ratios 1.025–1.039x in the longest
+  one). The revert restores the code path from before run 5's staging: against that library (d83256db) QUAD V2 on the
+  same note is 0.998x, with the same price bit for bit. Prices on the second note are bitwise equal to the base on
+  every engine.
+
+#### Open items
+
+- The tracker's REBASED refusal above. A numeric REBASED note whose maturity equals its latest schedule-2 end (as
+  `create_ko_reset_snowball` builds it) refuses tracking or simulation when the last knock-in record falls on a
+  non-trading day. The calendar resolution places that day eagerly, so it refuses even if no path knocks in there.
+  Owner alternatives: hang REBASED schedule 2 from the record's fixing instead of the close, drop schedule-2 records
+  past the exercise date, or extend the exercise date to the copy's end for this edge only.
+- REBASED `post_ki_offsets`: the knocked-in (`ki_settlement`) row is still keyed at schedule 2's last offset, though
+  that note now settles at the exercise date.
 
 ## [0.15.0] - 2026-11-25
 
