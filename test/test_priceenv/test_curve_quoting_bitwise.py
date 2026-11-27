@@ -1,9 +1,10 @@
 """AC8: an environment that wraps its own calendar-quoted curves prices bitwise like the same curves wrapped by hand.
 
-``CALENDAR_YEAR`` + ``trading_clock_horizon`` on a ``BUSINESS_DAYS`` environment must be exactly the 0.14.0 recipe of
-``docs/trading-clock.md`` (``TradingClockRateCurve`` / ``TradingClockDividendYield`` over a ``BusinessTimeMap``
-anchored at the valuation date): one declaration replaces the hand wrapping, never a different model. The gate is
-``==`` on every engine family, not a tolerance.
+``CALENDAR_YEAR`` + ``trading_clock_horizon`` on a ``BUSINESS_DAYS`` environment must be exactly the hand recipe of
+``docs/trading-clock.md`` (``TradingClockRateCurve`` / ``TradingClockDividendYield`` over a ``DateKnotTimeMap``
+anchored at the valuation date with the environment's holiday convention -- run 8 D2/D6 moved the env's map from the
+0.14.0 ``BusinessTimeMap``, which lagged after non-trading days): one declaration replaces the hand wrapping, never a
+different model. The gate is ``==`` on every engine family, not a tolerance.
 """
 from datetime import datetime, timedelta
 
@@ -29,7 +30,7 @@ from quantark.param.rrf.rate_curve import FlatRateCurve
 from quantark.param.vol.vol_surface import FlatVolSurface
 from quantark.priceenv import CurveQuotingBasis, PricingEnvironment
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
-from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
+from quantark.util.calendar.trading_clock import DateKnotTimeMap, TradingClock
 from quantark.util.enum import ObservationType, OptionType
 
 from dcn_fixtures import SAMPLE_DCN_A, SSE, make_dcn
@@ -48,7 +49,7 @@ def _pair(calendar=CAL, anchor=ANCHOR, horizon=HORIZON, spot=SPOT):
     auto = PricingEnvironment(rate_curve=FlatRateCurve(R), div_yield=ContinuousDividendYield(Q),
                               basis_yield=FlatBasisYield(B), rate_curve_quoting=CAL_Q, div_yield_quoting=CAL_Q,
                               basis_yield_quoting=CAL_Q, trading_clock_horizon=horizon, **common)
-    m = BusinessTimeMap(TradingClock(calendar, D), anchor, horizon)
+    m = DateKnotTimeMap(TradingClock(calendar, D), anchor, horizon)   # run 8 D6: the env's recipe
     hand = PricingEnvironment(rate_curve=TradingClockRateCurve(FlatRateCurve(R), m),
                               div_yield=TradingClockDividendYield(ContinuousDividendYield(Q), m),
                               basis_yield=TradingClockBasisYield(FlatBasisYield(B), m), **common)

@@ -198,11 +198,13 @@ def test_holiday_anchor_rolled_forward_refuses():
                         holiday_time_adjustment=BusinessDayConvention.FOLLOWING)
 
 
-def test_map_needs_a_business_date_after_the_anchor():
+def test_map_needs_a_horizon_after_the_anchor_and_reaches_the_next_business_date():
     with pytest.raises(ValidationError):
         _map(horizon=ANCHOR)
-    with pytest.raises(ValidationError):
-        _map(anchor=datetime(2026, 2, 13), horizon=datetime(2026, 2, 20))   # festival block only
+    # run 8 R1: the knots reach the FIRST business date on or after the horizon, so a horizon inside the festival
+    # block builds (before run 8 it refused: no business date in (anchor, horizon])
+    m = _map(anchor=datetime(2026, 2, 13), horizon=datetime(2026, 2, 20))
+    assert m.knot_dates == (datetime(2026, 2, 13), POST_FESTIVAL)
 
 
 def test_env_keeps_a_wrapper_on_its_valuation_date_and_re_anchors_it():
@@ -323,17 +325,17 @@ def test_european_on_the_trading_clock_equals_the_calendar_clock_at_zero_rates(n
     assert p_bd == pytest.approx(p_cal, rel=1e-12, abs=0.0)
 
 
-def _lagged_calendar_time(expiry):
-    """Where the 0.15.0 CALENDAR_YEAR cash wrapper reads the calendar curve for ``expiry`` (D2b)."""
+def _cash_calendar_time(expiry):
+    """Where the CALENDAR_YEAR cash wrapper reads the calendar curve for ``expiry``."""
     env = _bd_env(FlatVolSurface(0.2))
     return float(env.rate_curve.time_map.to_calendar(env_time(env, expiry)))
 
 
 @pytest.mark.parametrize("expiry", [WEDNESDAY, NEXT_MONDAY, POST_FESTIVAL])
-def test_d2b_cash_wrapper_lag_measurement_at_three_percent(expiry):
-    """r = 3%, q = 0: the vol is exact, so the business-day price is the calendar price with the rate read at the
-    0.15.0 cash wrapper's lagged calendar time. Mid-week the lag is zero; the first trading day after a weekend or a
-    holiday is short by the non-trading days (DF to Monday = DF_cal(Saturday)). Measured values in the run report."""
+def test_d2b_cash_wrapper_lag_is_closed_at_three_percent(expiry):
+    """r = 3%, q = 0. Run 7 measured the 0.15.0 cash wrapper's lag here (DF to Monday = DF_cal(Saturday)): the call
+    K103 was -0.83% (Mon 01-26) / -1.73% (02-24) below its calendar-clock price. Run 8 D2 puts the env's cash curves
+    on the business-date knots: the cash read is the actual calendar time and the price is the calendar price."""
     r = 0.03
     inner = _inners()["flat"]
     bd_env = _bd_env(CalendarQuotedVolSurface(inner, _map()), rate=r)
@@ -341,16 +343,8 @@ def test_d2b_cash_wrapper_lag_measurement_at_three_percent(expiry):
     engine = BlackScholesEngine()
     p_bd = engine.price(opt, bd_env)
     p_cal = engine.price(opt, _cal_env(inner, rate=r))
-    c_true, c_lag = _cal_t(expiry), _lagged_calendar_time(expiry)
-    # the same contract on the calendar clock with r*T = r*c_lag: the whole difference is the cash lag
-    p_lag = engine.price(opt, _cal_env(inner, rate=r * c_lag / c_true))
-    assert p_bd == pytest.approx(p_lag, rel=1e-12, abs=0.0)
-    if expiry == WEDNESDAY:
-        assert c_lag == c_true and p_bd == pytest.approx(p_cal, rel=1e-12, abs=0.0)
-    else:
-        assert c_lag < c_true
-    print(f"D2b {expiry:%a %Y-%m-%d}: cal days {(expiry - ANCHOR).days}, lagged cal days {c_lag * 365:.6f}, "
-          f"P_bd={p_bd:.12f} P_cal={p_cal:.12f} diff={p_bd - p_cal:.6e} rel={(p_bd - p_cal) / p_cal:.6e}")
+    assert _cash_calendar_time(expiry) == _cal_t(expiry)
+    assert p_bd == pytest.approx(p_cal, rel=1e-12, abs=0.0)
 
 
 def test_deepcopy_and_pickle_keep_the_clock_and_the_knots():

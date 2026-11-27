@@ -10,7 +10,8 @@ from .vol_surface import (
     ParallelShiftVolSurface,
 )
 from .sabr import SABRVolSurface
-from .trading_clock_surface import CalendarQuotedVolSurface, DateKnotTimeMap, TradingClockVolSurface
+from .trading_clock_surface import CalendarQuotedVolSurface, TradingClockVolSurface
+from quantark.util.calendar.trading_clock import DateKnotTimeMap  # re-exported (lives next to BusinessTimeMap)
 from .vannavolga import VannaVolgaVolSurface, TermStructureVannaVolgaVolSurface
 
 __all__ = [

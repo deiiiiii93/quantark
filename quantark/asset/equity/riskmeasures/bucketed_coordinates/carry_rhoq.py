@@ -317,7 +317,7 @@ def _edge_to_calendar(time_map, edge: float) -> float:
     """A window edge on the trading axis, in calendar time. The wrapper refuses every read past the map's last
     knot, so an edge beyond it is never compared with a read: it is placed past the last calendar knot by the same
     distance (order kept, so ``start < end`` still holds) and every reading of the bumped curve is exact."""
-    u_max = float(time_map._u_knots[-1])
+    u_max = float(time_map.u_knots[-1])
     edge = float(edge)
     if edge <= u_max:
         return float(time_map.to_calendar(edge))

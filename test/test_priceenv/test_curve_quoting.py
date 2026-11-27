@@ -18,7 +18,7 @@ from quantark.param.rrf.rate_curve import FlatRateCurve, LinearRateCurve
 from quantark.param.vol import FlatVolSurface
 from quantark.priceenv import CurveQuotingBasis, PricingEnvironment
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
-from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
+from quantark.util.calendar.trading_clock import BusinessTimeMap, DateKnotTimeMap, TradingClock
 from quantark.util.exceptions import MarketDataError, ValidationError
 
 CAL = create_calendar(CalendarType.CHINA_SSE, year_range=(2025, 2029))
@@ -47,6 +47,11 @@ def _declared(q, **kw):
 
 def _map(anchor=VAL, horizon=HORIZON):
     return BusinessTimeMap(TradingClock(CAL, 244), anchor, horizon)
+
+
+def _env_map(anchor=VAL, horizon=HORIZON):
+    """The map the environment builds for its CALENDAR_YEAR curves (run 8 D2: business-date knots)."""
+    return DateKnotTimeMap(TradingClock(CAL, 244), anchor, horizon)
 
 
 WRAPPERS = {"rate_curve": TradingClockRateCurve, "div_yield": TradingClockDividendYield,
@@ -142,9 +147,18 @@ def test_calendar_year_on_none_leaves_none():
 # --- AC5: CALENDAR_YEAR on an existing wrapper ---------------------------------------------------------------------
 
 def test_matching_wrapper_is_kept():
-    w = TradingClockRateCurve(FlatRateCurve(0.02), _map())
+    # run 8 D3: "matching" is the env's own map -- a DateKnotTimeMap at its anchor, horizon and holiday convention
+    w = TradingClockRateCurve(FlatRateCurve(0.02), _env_map())
     env = _env(rate_curve=w, **_declared(CAL_Q, trading_clock_horizon=HORIZON))
     assert env.rate_curve is w
+
+
+def test_declared_wrapper_on_a_business_time_map_moves_onto_the_env_map():
+    # run 8 D3: the declaration owns the map (before run 8 a matching BusinessTimeMap wrapper was kept as is)
+    w = TradingClockRateCurve(FlatRateCurve(0.02), _map())
+    env = _env(rate_curve=w, **_declared(CAL_Q, trading_clock_horizon=HORIZON))
+    assert env.rate_curve.inner is w.inner and type(env.rate_curve.time_map) is DateKnotTimeMap
+    assert env.rate_curve.time_map is env.div_yield.time_map
 
 
 def test_replace_valuation_date_re_anchors():
@@ -345,7 +359,9 @@ def test_valuation_at_or_past_horizon_refuses_naming_field():
 def test_time_of_day_anchor_matches_hand_wrap():
     vt = datetime(2026, 2, 9, 14, 55)
     env = _env(valuation_date=vt, **_declared(CAL_Q, trading_clock_horizon=HORIZON))
-    hand = TradingClockRateCurve(FlatRateCurve(0.02), _map(anchor=vt))
+    # run 8 D6: the hand recipe is the env's DateKnotTimeMap (knots from the midnight-normalised anchor, like the
+    # engines' axis); on the 0.15.0 BusinessTimeMap recipe u = 1.0 read 0.9797154068310359, now 0.979715406831036
+    hand = TradingClockRateCurve(FlatRateCurve(0.02), _env_map(anchor=vt))
     for u in (1 / 244.0, 37 / 244.0, 1.0):
         assert env.rate_curve.get_discount_factor(u) == hand.get_discount_factor(u)
 

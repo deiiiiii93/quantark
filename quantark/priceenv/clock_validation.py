@@ -9,8 +9,11 @@ cash/vol wrappers carry a TradingClock — a 252-resolver paired with a
 0.15.0: a native (unwrapped) cash curve on a ``BUSINESS_DAYS`` environment is
 integrated over trading-year time, which is right only if it is quoted per
 trading year. The environment records the quoting basis per curve
-(``CurveQuotingBasis``) and owns one ``BusinessTimeMap`` for the curves it
-wraps; ``resolve_cash_curve_quoting`` applies the declarations at
+(``CurveQuotingBasis``) and owns one trading clock for the curves it
+wraps (0.16.0 run 8: a ``DateKnotTimeMap`` -- one knot per business date, so
+every business date reads the calendar curve at its actual calendar time; it
+was a ``BusinessTimeMap`` in 0.15.0, which lagged after non-trading days);
+``resolve_cash_curve_quoting`` applies the declarations at
 construction and ``re_anchor_clock_wrappers`` keeps every trading-clock
 wrapper (cash curves and the vol surface) on the environment's valuation
 date when it is reassigned.
@@ -19,7 +22,7 @@ from contextlib import contextmanager
 
 from quantark.priceenv.curve_quoting import CurveQuotingBasis
 from quantark.util.calendar import DayCountConvention
-from quantark.util.calendar.trading_clock import BusinessTimeMap
+from quantark.util.calendar.trading_clock import BusinessTimeMap, DateKnotTimeMap
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
@@ -84,7 +87,14 @@ def _wrapper_for(field: str):
 
 
 class _EnvMap:
-    """The environment's own BusinessTimeMap, built once and only if a curve needs it."""
+    """The environment's own ``DateKnotTimeMap``, built once and only if a curve needs it (run 8 D2).
+
+    One knot per business date (env time, ACT/365 calendar time), with the environment's calendar,
+    ``bus_days_in_year`` and ``holiday_time_adjustment``: every CALENDAR_YEAR-declared cash curve reads the calendar
+    curve at the actual calendar time of every business date (the 0.15.0 ``BusinessTimeMap`` lagged after
+    non-trading days). A FOLLOWING environment valued on a holiday of its calendar cannot build it (D4): the next
+    business date would sit at trading time 0 with calendar carry already accrued.
+    """
 
     def __init__(self, env) -> None:
         self._env = env
@@ -102,28 +112,42 @@ class _EnvMap:
             if horizon is None:
                 raise ValidationError(
                     f"{field} is declared CALENDAR_YEAR on a BUSINESS_DAYS environment; set "
-                    "trading_clock_horizon (a date strictly after the last date priced, e.g. last date + 1 day) "
-                    "so the environment can build the trading clock it wraps the curve onto"
+                    "trading_clock_horizon (a date strictly after every date priced, e.g. last date + 1 day; a read "
+                    "past the map's last knot raises) so the environment can build the trading clock it wraps the "
+                    "curve onto"
                 )
             if env.valuation_date >= horizon:
                 raise ValidationError(
                     f"valuation_date {env.valuation_date} is not before trading_clock_horizon {horizon}; "
                     f"the trading clock {field} is wrapped onto must run past the valuation date"
                 )
-            from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
-            self._map = BusinessTimeMap(TradingClock(env.calendar, env.bus_days_in_year), env.valuation_date,
-                                        horizon)
+            from quantark.util.calendar.trading_clock import DateKnotTimeMap, TradingClock
+            self._map = DateKnotTimeMap(TradingClock(env.calendar, env.bus_days_in_year), env.valuation_date,
+                                        horizon, env.holiday_time_adjustment)
         return self._map
 
 
-def _on_env_map(env, field: str, obj, env_map: _EnvMap):
-    """A CALENDAR_YEAR wrapper sits on the env's map: same anchor, same horizon; otherwise its inner moves there.
+def _is_env_map(env, tm) -> bool:
+    """True when ``tm`` is the map the environment would build: a ``DateKnotTimeMap`` at its valuation date, on its
+    horizon and holiday convention (the clock itself is checked by ``_check_clock``)."""
+    return (isinstance(tm, DateKnotTimeMap) and tm.anchor_date == env.valuation_date
+            and tm.horizon_date == env.trading_clock_horizon
+            and tm.holiday_time_adjustment is env.holiday_time_adjustment)
 
-    Returns the object the field should hold (``obj`` itself when it already sits on the env's map).
+
+def _on_env_map(env, field: str, obj, env_map: _EnvMap):
+    """A CALENDAR_YEAR wrapper sits on the env's map; otherwise its inner moves there (run 8 D3: the declaration owns
+    the map, so a declared curve means one thing whether the environment or the user wrapped it).
+
+    Returns ``obj`` itself when its map already is the env's map (``_is_env_map``): a hand-wrapped declared curve on
+    a ``BusinessTimeMap`` -- or on a ``DateKnotTimeMap`` of another anchor, horizon or holiday convention -- is
+    re-exposed on the env's ``DateKnotTimeMap`` at construction and after every valuation-date move. Undeclared
+    hand-wrapped curves never come here (``_on_own_horizon``). A declared wrapper on the date-knot map next to an
+    undeclared one on a ``BusinessTimeMap`` maps a Monday tenor to different calendar times, so
+    ``relationship_tenor`` refuses that mixed environment as "not on one clock" (R10).
     """
     _check_clock(field, obj.clock, env)
-    tm = obj.time_map
-    if tm.anchor_date == env.valuation_date and tm.horizon_date == env.trading_clock_horizon:
+    if _is_env_map(env, obj.time_map):
         return obj
     return obj.with_time_map(env_map.get(field))
 

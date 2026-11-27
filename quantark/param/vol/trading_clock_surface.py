@@ -12,19 +12,17 @@ and the map's anchor_date must equal the environment's valuation_date.
 
 ``CalendarQuotedVolSurface`` (run 7, .ship/2026-11-26-replay-business-day-clock D2) is the opposite direction: a
 calendar-quoted inner on the BUSINESS_DAYS trading axis, through a ``DateKnotTimeMap`` whose knots are the env times
-of business dates (exact total variance at every business date).
+of business dates (exact total variance at every business date). ``DateKnotTimeMap`` lives in
+``quantark.util.calendar.trading_clock`` (run 8 D1: the environment's cash curves use it too); it is re-exported here.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from types import SimpleNamespace
 
 import numpy as np
 
 from quantark.param.vol.vol_surface import BlackImpliedVolSurface
-from quantark.util.calendar import BusinessDayConvention, DayCountConvention
-from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
+from quantark.util.calendar.trading_clock import BusinessTimeMap, DateKnotTimeMap
 from quantark.util.exceptions import ValidationError
 
 
@@ -99,124 +97,6 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
 
     def __repr__(self) -> str:
         return f"TradingClockVolSurface({self.inner!r}, {self.time_map!r})"
-
-
-class DateKnotTimeMap(BusinessTimeMap):
-    """Trading time -> calendar time with one knot per business DATE (run 7 spec D2).
-
-    For every business date d in [anchor, horizon] the knot is (u_d, c_d): u_d is the env time of d exactly as
-    ``quantark.priceenv.date_axis.env_times`` computes it on a BUSINESS_DAYS environment with this clock's calendar
-    and ``bus_days_in_year`` (integer business-day count / D, the anchor rolled by ``holiday_time_adjustment``) and
-    c_d = (d - anchor).days / 365 (ACT/365, the vol-quote axis). The anchor itself is the knot (0, 0).
-    ``to_calendar`` is piecewise linear between consecutive knots, so it is exact at every business date, Mondays
-    and the first day after a holiday included -- unlike ``BusinessTimeMap.to_calendar``, whose knots sit at the
-    END of each trading day (a Monday maps back to the Saturday). ``to_trading`` is its exact inverse.
-
-    It subclasses ``BusinessTimeMap`` so the environment's trading-clock machinery (``clock`` identity checks,
-    ``re_anchored`` on a valuation-date move) treats it as the calendar trading clock it is; none of the parent's
-    day-cell state is built or used.
-    """
-
-    def __init__(
-        self,
-        clock: TradingClock,
-        anchor_date: datetime,
-        horizon_date: datetime,
-        holiday_time_adjustment: BusinessDayConvention = BusinessDayConvention.PRECEDING,
-    ) -> None:
-        if horizon_date <= anchor_date:
-            raise ValidationError("horizon_date must be after anchor_date")
-        self.clock = clock
-        self.anchor_date = anchor_date
-        self.horizon_date = horizon_date
-        self.extend_weekdays = False
-        self.holiday_time_adjustment = holiday_time_adjustment
-        a = _midnight(anchor_date)
-        dates, d, end = [], a + timedelta(days=1), _midnight(horizon_date)
-        while d <= end:
-            if clock.calendar.is_business_day(d):
-                dates.append(d)
-            d += timedelta(days=1)
-        if not dates:
-            raise ValidationError(
-                f"no business date of the clock's calendar in ({a.date()}, {end.date()}]; the date-knot map needs "
-                "at least one business date after its anchor"
-            )
-        from quantark.priceenv.date_axis import env_times
-
-        resolver = SimpleNamespace(
-            valuation_date=a, day_count_convention=DayCountConvention.BUSINESS_DAYS, calendar=clock.calendar,
-            holiday_time_adjustment=holiday_time_adjustment, bus_days_in_year=clock.days_per_year,
-        )
-        u = np.asarray(env_times(resolver, dates), dtype=float)
-        if not u[0] > 0.0:
-            # TODO: an anchor rolled FORWARD onto a later business date (FOLLOWING from a holiday) puts that date at
-            # u = 0 while (d - anchor).days / 365 > 0 of calendar variance has accrued: not representable.
-            raise ValidationError(
-                f"anchor {a.date()} is a holiday rolled forward by {holiday_time_adjustment.name}: the business date "
-                f"{dates[0].date()} sits at trading time 0 with {(dates[0] - a).days} calendar days of variance; a "
-                "calendar-quoted vol cannot be placed on that clock"
-            )
-        self._dates = (a, *dates)
-        self._u = np.r_[0.0, u]
-        self._c = np.r_[0.0, [(x - a).days / 365.0 for x in dates]]
-        self._u.setflags(write=False)
-        self._c.setflags(write=False)
-
-    @property
-    def knot_dates(self) -> tuple:
-        """The anchor (normalised to midnight) and every business date up to the horizon."""
-        return self._dates
-
-    @property
-    def u_knots(self) -> np.ndarray:
-        return self._u
-
-    @property
-    def c_knots(self) -> np.ndarray:
-        return self._c
-
-    def re_anchored(self, anchor_date: datetime) -> "DateKnotTimeMap":
-        """The same clock and horizon seen from another valuation date: the knots are rebuilt from it."""
-        return DateKnotTimeMap(self.clock, anchor_date, self.horizon_date, self.holiday_time_adjustment)
-
-    def to_calendar(self, tau_td):
-        """Trading year fraction -> calendar (ACT/365) year fraction, linear between business-date knots."""
-        arr = np.asarray(tau_td, dtype=float)
-        a = np.atleast_1d(arr)
-        if np.any(a < 0.0):
-            raise ValidationError("tau_td must be non-negative")
-        if np.any(a > self._u[-1]):
-            raise ValidationError(
-                f"tau_td beyond the date-knot map's last business date {self._dates[-1].date()} "
-                f"(horizon {self.horizon_date}); extend the horizon"
-            )
-        out = np.interp(a, self._u, self._c)
-        return float(out[0]) if arr.ndim == 0 else out
-
-    def to_trading(self, tau_cal):
-        """Calendar year fraction -> trading year fraction: the exact inverse of ``to_calendar``."""
-        arr = np.asarray(tau_cal, dtype=float)
-        a = np.atleast_1d(arr)
-        if np.any(a < 0.0):
-            raise ValidationError("tau_cal must be non-negative")
-        if np.any(a > self._c[-1]):
-            raise ValidationError(
-                f"tau_cal beyond the date-knot map's last business date {self._dates[-1].date()} "
-                f"(horizon {self.horizon_date}); extend the horizon"
-            )
-        out = np.interp(a, self._c, self._u)
-        return float(out[0]) if arr.ndim == 0 else out
-
-    def initial_slope(self) -> float:
-        """d(to_calendar)/d(tau_td) at 0+: calendar time per trading time to the first business date."""
-        return float(self._c[1] / self._u[1])
-
-    def __repr__(self) -> str:
-        return (
-            f"DateKnotTimeMap(D={self.clock.days_per_year}, anchor={self.anchor_date.date()}, "
-            f"horizon={self.horizon_date.date()}, knots={len(self._dates)})"
-        )
 
 
 @dataclass(frozen=True)
@@ -295,6 +175,3 @@ class CalendarQuotedVolSurface(BlackImpliedVolSurface):
     def __repr__(self) -> str:
         return f"CalendarQuotedVolSurface({self.inner!r}, {self.time_map!r})"
 
-
-def _midnight(value: datetime) -> datetime:
-    return datetime(value.year, value.month, value.day)
