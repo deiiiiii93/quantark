@@ -10,7 +10,7 @@ from .vol_surface import (
     ParallelShiftVolSurface,
 )
 from .sabr import SABRVolSurface
-from .trading_clock_surface import TradingClockVolSurface
+from .trading_clock_surface import CalendarQuotedVolSurface, DateKnotTimeMap, TradingClockVolSurface
 from .vannavolga import VannaVolgaVolSurface, TermStructureVannaVolgaVolSurface
 
 __all__ = [
@@ -22,6 +22,8 @@ __all__ = [
     "ParallelShiftVolSurface",
     "SABRVolSurface",
     "TradingClockVolSurface",
+    "CalendarQuotedVolSurface",
+    "DateKnotTimeMap",
     "VannaVolgaVolSurface",
     "TermStructureVannaVolgaVolSurface",
 ]

@@ -127,10 +127,20 @@ def bump_unit_vol(
     Spring Festival block has a ratio of 0.21, so a gate or a central/one-sided
     fallback reading sigma_cal would judge the bump against a level it never
     touches.
+
+    On a ``CalendarQuotedVolSurface`` (a calendar quote on the trading axis)
+    the bump moves the calendar-quoted inner: the unit vol is the inner's
+    sigma_cal at the calendar time the date-knot map gives the trading tenor.
     """
-    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+    from quantark.param.vol.trading_clock_surface import (
+        CalendarQuotedVolSurface,
+        TradingClockVolSurface,
+    )
 
     surface = pricing_env.vol_surface
+    if isinstance(surface, CalendarQuotedVolSurface):
+        tau_cal = surface.to_inner_time(float(time_to_maturity))
+        return float(surface.inner.get_vol(float(strike), tau_cal, float(pricing_env.spot)))
     if not isinstance(surface, TradingClockVolSurface):
         return pricing_env.get_vol(strike, time_to_maturity)
     tau_td = float(surface.time_map.to_trading(float(time_to_maturity)))

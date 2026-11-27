@@ -253,14 +253,17 @@ class AutocallableQuadEngineV2(BaseEngine):
             TermStructureVolSurface,
             ParallelShiftVolSurface,
         )
-        from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+        from quantark.param.vol.trading_clock_surface import (
+            CalendarQuotedVolSurface,
+            TradingClockVolSurface,
+        )
 
         def deterministic(surface):
             if type(surface) in {FlatVolSurface, TermStructureVolSurface}:
                 return True
             if type(surface) is ParallelShiftVolSurface:
                 return deterministic(surface.base)
-            if type(surface) is TradingClockVolSurface:
+            if type(surface) in {TradingClockVolSurface, CalendarQuotedVolSurface}:
                 return deterministic(surface.inner)
             return getattr(surface, "quad_v2_deterministic_variance", False) is True
 
