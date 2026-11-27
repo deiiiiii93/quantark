@@ -377,7 +377,9 @@ def test_phoenix_folding_onto_a_duplicate_only_instant_binds_the_effective_recor
 
 _PINS_PATH = os.path.join(os.path.dirname(__file__), "same_instant_phoenix_ko_reset_pins.json")
 with open(_PINS_PATH) as _f:
-    #: float.hex pins captured at 9fc56f6c BEFORE the T8 change (scratchpad t8_pins.py)
+    #: float.hex pins captured at 9fc56f6c BEFORE the T8 change (scratchpad t8_pins.py). 0.16.0 T7 (the knocked-in
+    #: KO-reset ends at schedule 2's last fixing, owner ruling D31) re-pinned ``ko_reset_absolute`` (price
+    #: 8.871664315881244 -> 8.86368327529885); its previous value is under "_superseded_by_0.16.0_T7"
     PINS = json.load(_f)
 
 

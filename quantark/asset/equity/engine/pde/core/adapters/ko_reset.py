@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from quantark.util.exceptions import PricingError
 from quantark.util.numerical import same_instant
 
 from .snowball import SnowballAdapter
@@ -49,7 +50,24 @@ class KOResetAdapter(SnowballAdapter):
         num_x, num_t = len(x_vec), len(prepared.layout.time.t)
         tau = prepared.tau
 
-        solver._set_terminal_condition_v1(grid_v1, x_vec, s_vec, product, env)
+        # A knocked-in note ends at schedule 2's last fixing (owner ruling D31, run 5 T7): when that falls before the
+        # grid's last node, V1 stays zero above it -- no knocked-in claim lives there -- and is seeded at that index
+        # during stepping (``_v1_seed_idx``), exactly as V0 is staged at schedule 1's end below.
+        solver._v1_seed_idx = None
+        solver._v1_seed_values = None
+        solver._v1_end = None
+        knocked_in = solver._knocked_in_settlement(product, env)
+        if knocked_in is not None:
+            solver._v1_end = (float(knocked_in.determination_time),
+                              float(knocked_in.delay_df) if knocked_in.settlement_date_governs
+                              else solver._structured_terminal_delay_df)
+            seed = np.zeros((num_x, 1))
+            solver._set_terminal_condition_v1(seed, x_vec, s_vec, product, env)
+            solver._v1_seed_values = seed[:, -1].copy()
+            solver._v1_seed_idx = self._knocked_in_end_index(prepared, knocked_in.determination_time)
+            grid_v1[:, -1] = 0.0
+        else:
+            solver._set_terminal_condition_v1(grid_v1, x_vec, s_vec, product, env)
 
         # A not-yet-knocked-in contract matures on the PRE-KI schedule; only a
         # knocked-in one runs on to `tau`. Seeding V0 at the end of the grid
@@ -105,6 +123,20 @@ class KOResetAdapter(SnowballAdapter):
             branch_v0[:, num_t - 1] = grid_v0[:, num_t - 1]
             branch_v1[:, num_t - 1] = grid_v1[:, num_t - 1]
             captures["branch"] = (branch_v0, branch_v1)
+
+    @staticmethod
+    def _knocked_in_end_index(prepared, post_end: float) -> int:
+        """The time index of schedule 2's last fixing (a contract instant: a grid node; time zero is index 0)."""
+        solver = prepared.solver
+        indices = [j for j, rec in solver._post_ko_observation_indices.items()
+                   if same_instant(float(rec.observation_time), post_end)]
+        if not indices:
+            # no schedule-2 record left in life: the knocked-in note ends with schedule 1 (get_post_maturity_time)
+            indices = [j for j, rec in solver._pre_ko_observation_indices.items()
+                       if same_instant(float(rec.observation_time), post_end)]
+        if not indices:
+            raise PricingError(f"schedule 2's end t={post_end!r} is not a node of the KO-reset grid")
+        return max(indices)
 
     def readout_mode(self, prepared) -> str:
         return "final column"   # no t0 capture (see _t0_readout)

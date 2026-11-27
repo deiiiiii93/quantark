@@ -810,17 +810,22 @@ def test_ko_reset_duplicate_record_prices_as_the_product_without_it(kind):
 #   "0x1.d46de38a3aa47p-5", stacked ["0x1.80415fbd50684p-2", "0x1.2504dfab8b362p-3", "0x1.296a191de821fp-4",
 #   "0x1.bdd25215ee2a0p-11", "0x1.bd8d9d64c9233p-10", "0x1.428e553c01de0p-10"] / "0x1.6474e8987cde0p-2" /
 #   "0x1.d46de38a3aa4ap-5".
+#: 0.16.0 T7 (the knocked-in KO-reset ends at schedule 2's last fixing 12-03, not the 01-05 exercise date: owner ruling
+#: D31) moved three entries; previous values (after D1) in the comments. ``base_first_step`` (valued 07-02, the last
+#: knock-in one day ahead at 75 against a spot of 100) is unchanged: the knock-in mass there is below one ulp.
 KOR_PINS = {
-    "base": "0x1.1bd6ebe4d78e9p+3",
-    "base_continuous_ki": "0x1.f96feee4b40b8p+2",
+    "base": "0x1.1b9577ec96dc6p+3",                 # was 0x1.1bd6ebe4d78e9p+3 (8.869985529858655 -> 8.861995660866238)
+    "base_continuous_ki": "0x1.f8b0ba7982223p+2",   # was 0x1.f96feee4b40b8p+2
     "base_first_step": "0x1.5337d6098b9fap+2",
-    "schedule2_base": "0x1.1bc3631600048p+3",
+    "schedule2_base": "0x1.1b81973704f13p+3",       # was 0x1.1bc3631600048p+3
 }
 KOR_ROW_PINS = {
     "forward": (["0x1.80415fbd50683p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab10p-4", "0x1.bd335c527f2fep-11",
-                 "0x1.bd361567b524fp-10", "0x1.4209b90434a97p-10"], "0x1.6491837c68afap-2", "0x1.d487ade805274p-5"),
+                 "0x1.bd361567b524fp-10", "0x1.4209b90434a97p-10"], "0x1.6491837c68afap-2",
+                "0x1.d487ade805272p-5"),    # T7: was 0x1.d487ade805274p-5 (the knocked-in row at 12-03)
     "stacked": (["0x1.80415fbd50684p-2", "0x1.24d5a02fa4dc0p-3", "0x1.294df5d37ab10p-4", "0x1.bd335c527f29fp-11",
-                 "0x1.bd361567b524cp-10", "0x1.4209b90434a9bp-10"], "0x1.6491837c68af9p-2", "0x1.d487ade80527ap-5"),
+                 "0x1.bd361567b524cp-10", "0x1.4209b90434a9bp-10"], "0x1.6491837c68af9p-2",
+                "0x1.d487ade80527ep-5"),    # T7: was 0x1.d487ade80527ap-5
 }
 
 
@@ -1466,15 +1471,18 @@ def _v2_pinned():
 # Pinned BEFORE the T4 change (worktree d0ac7fb4): price, pv, KO rows and discounted cash, coupon rows and discounted
 # cash (None: no coupon table), maturity / knocked-in settlement / knock-in probabilities.
 V2_PINS = {
+    # 0.16.0 T7 (knocked-in KO-reset ends at schedule 2's last fixing, D31): price/pv were 0x1.1be5a6a674620p+3
+    # (8.871783233), last ko row 0x1.41cce6cbff2c9p-10, last ko_cash 0x1.d9f825c451c88p-9, ki_settlement
+    # 0x1.d40a63d8bac41p-5
     'ko_reset_base': dict(
-        price='0x1.1be5a6a674620p+3', pv='0x1.1be5a6a674620p+3',
+        price='0x1.1ba4450b66f07p+3', pv='0x1.1ba4450b66f07p+3',
         ko=['0x1.80268d2a30d98p-2', '0x1.24f61998cb561p-3', '0x1.29640d787ce9dp-4', '0x1.bc6697ca056c6p-11',
-            '0x1.bcbb33e26a3d6p-10', '0x1.41cce6cbff2c9p-10'],
+            '0x1.bcbb33e26a3d6p-10', '0x1.41cce6cbff2c5p-10'],
         ko_cash=['0x1.670736d1b46cap+2', '0x1.10d38a23b978bp+1', '0x1.14079e3fd8ad3p+0', '0x1.48e2d461387b5p-9',
-                 '0x1.48090e4ccf7ebp-8', '0x1.d9f825c451c88p-9'],
+                 '0x1.48090e4ccf7ebp-8', '0x1.d9f825c451c8ap-9'],
         coupon=None,
         coupon_cash=None,
-        maturity='0x1.64a75ac99f7c8p-2', ki_settlement='0x1.d40a63d8bac41p-5', ki='0x1.f2f03f0d56208p-5'),
+        maturity='0x1.64a75ac99f7c8p-2', ki_settlement='0x1.d40a63d8bac43p-5', ki='0x1.f2f03f0d56208p-5'),
     'phoenix_EXPIRY_False_continuous': dict(
         price='-0x1.86b9c0248fabap+0', pv='-0x1.86b9c0248fabap+0',
         ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',

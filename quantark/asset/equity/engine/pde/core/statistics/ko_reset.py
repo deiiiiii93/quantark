@@ -17,7 +17,8 @@ from dataclasses import replace
 
 import numpy as np
 
-from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
+from quantark.asset.equity.engine.settlement_support import (first_schedule_settlement, knocked_in_row_timing,
+                                                             resolve_terminal_timing)
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import Tolerance, is_close, same_instant
 
@@ -43,6 +44,16 @@ class KOResetBreach(SnowballBreach):
         out = np.zeros_like(block)
         out[:, L.maturity[0]] = tmp[:, -1]
         out[:, L.maturity_unit[0]] = 1.0
+        return out
+
+    def seed_ki(self, block):
+        # the value's _v1_seed_values: _set_terminal_condition_v1 at schedule 2's last fixing (D31, run 5 T7)
+        s, L = self.stats, self.stats.layout
+        tmp = np.zeros((block.shape[0], 1))
+        s.solver._set_terminal_condition_v1(tmp, s.x, s.s, s.product, s.env)
+        out = np.zeros_like(block)
+        out[:, L.maturity[1]] = tmp[:, -1]
+        out[:, L.maturity_unit[1]] = 1.0
         return out
 
 
@@ -110,9 +121,21 @@ class KOResetStatistics(SnowballStatistics):
         v0, v1 = states["stats_v0"], states["stats_v1"]
         num_t = len(self.t)
         tmp = np.zeros((len(self.x), 1))
-        solver._set_terminal_condition_v1(tmp, self.x, self.s, product, env)
-        v1[:, L.maturity[1]] = tmp[:, -1]
-        v1[:, L.maturity_unit[1]] = 1.0
+        # the knocked-in block is staged at schedule 2's end as the value's (D31): zero above it, seeded there
+        knocked_in = solver._knocked_in_settlement(product, env)
+        if knocked_in is None:
+            solver._set_terminal_condition_v1(tmp, self.x, self.s, product, env)
+            v1[:, L.maturity[1]] = tmp[:, -1]
+            v1[:, L.maturity_unit[1]] = 1.0
+        if not self.prepared.request.price:
+            # the value terminal sets the knocked-in seed the stages read; a statistics-only march has none
+            solver._v1_seed_idx = (None if knocked_in is None
+                                   else self.prepared.adapter._knocked_in_end_index(self.prepared,
+                                                                                   knocked_in.determination_time))
+            solver._v1_end = (None if knocked_in is None else (
+                float(knocked_in.determination_time),
+                float(knocked_in.delay_df) if knocked_in.settlement_date_governs
+                else solver._structured_terminal_delay_df))
         pre_maturity = float(product.get_pre_maturity_time(env))
         staged = bool(solver._pre_ko_observation_indices and pre_maturity < self.tau
                       and not same_instant(pre_maturity, self.tau))
@@ -168,6 +191,8 @@ class KOResetStatistics(SnowballStatistics):
         seed = solver._v0_seed_idx
         if seed is not None and j == seed:
             stages.append(adjoint.Seed(adjoint.ALIVE))
+        if solver._v1_seed_idx is not None and j == solver._v1_seed_idx:
+            stages.append(adjoint.Seed(adjoint.KI))
         pre = solver._pre_ko_observation_indices.get(j)
         pre_last = pre is not None and solver._pre_ko_goes_last()
         pre_group = solver._pre_ko_groups.get(j) if solver._pre_ko_groups else None
@@ -224,7 +249,10 @@ class KOResetStatistics(SnowballStatistics):
         solver, product, L = self.solver, self.product, self.layout
         r_lo0, r_up0, r_lo1, r_up1 = rows
         lo0, up0, lo1, up1 = edges
-        det_post = solver._df_between_times(self.env, current, solver._total_tau)
+        # the knocked-in note determines at schedule 2's end (D31: ``_v1_end`` when it falls before the grid's end)
+        post_end = solver._total_tau if solver._v1_end is None else solver._v1_end[0]
+        det_post = (solver._df_between_times(self.env, current, post_end)
+                    if current <= post_end or same_instant(current, post_end) else 0.0)
         pre_maturity = self._pre_maturity_time()
         alive = current <= pre_maturity or same_instant(current, pre_maturity)
         det_pre = solver._df_between_times(self.env, current, pre_maturity) if alive else 0.0
@@ -267,6 +295,10 @@ class KOResetStatistics(SnowballStatistics):
                         else pre_det_date if is_close(delay, 0.0) else None)
         pre = dict(time=pre_maturity, payment_time=settlement.payment_time, date=pre_det_date,
                    payment_date=pre_pay_date)
+        knocked_in = self.solver._knocked_in_settlement(product, env)
+        if knocked_in is not None:
+            # the knocked-in note ends at schedule 2's last fixing (D31), paid by ``knocked_in_settlement``
+            return pre, knocked_in_row_timing(product, env, terminal, knocked_in)
         post = dict(time=float(self.tau), payment_time=float(self.tau) + delay, date=terminal.determination_date,
                     payment_date=terminal.payment_date)
         return pre, post

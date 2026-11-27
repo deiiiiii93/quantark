@@ -353,7 +353,11 @@ with open(_PINS_PATH) as _f:
     #: 0.16.0 D1 (QUAD numerics run 5, KO-reset V1 knock-outs by the cell-average projection) re-pinned the six
     #: KO-reset V1 default-projection entries (kor_{base,wide}_v1_{fwd,stk}, kor_base_v1_val78 / _val74); their
     #: previous values are kept in the file under "_superseded_by_0.16.0_D1" (e.g. kor_base_v1_fwd price
-    #: 0x1.1be31f43f709dp+3 = 8.87147486948407 -> 0x1.1bd6ebe4d78e9p+3 = 8.869985529858655)
+    #: 0x1.1be31f43f709dp+3 = 8.87147486948407 -> 0x1.1bd6ebe4d78e9p+3 = 8.869985529858655). 0.16.0 T7 (the
+    #: knocked-in KO-reset ends at schedule 2's last fixing, 12-03, not the 01-05 exercise date: owner ruling D31)
+    #: re-pinned the thirteen ``kor_*`` grid entries; their previous values are under "_superseded_by_0.16.0_T7"
+    #: (e.g. kor_base_pde price 8.871664315881244 -> 8.86368327529885, kor_base_pde_val78 -20.686395546090417 ->
+    #: -20.788510675853676)
     PINS = json.load(_f)
 
 

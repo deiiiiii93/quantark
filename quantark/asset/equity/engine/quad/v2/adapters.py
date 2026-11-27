@@ -13,6 +13,8 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
 from quantark.asset.equity.engine.settlement_support import (
     first_schedule_payment_time,
     first_schedule_settlement,
+    knocked_in_row_timing,
+    knocked_in_settlement,
     resolve_terminal_timing,
 )
 from quantark.util.enum import (
@@ -89,10 +91,15 @@ def _affine_payoff(product, env, ki, lo, hi):
 def _expiry_payment(product, env, config):
     """``(time, date)`` an EXPIRY-pay knock-out of ``config``'s schedule is paid at: the end of the note it ends --
     schedule 1's maturity plus the terminal delay for a first-schedule knock-out (a path never knocked in ends there,
-    spec D30), dated as the never-knocked-in maturity row dates it; the product terminal for a second-schedule one."""
+    spec D30), dated as the never-knocked-in maturity row dates it; for a second-schedule one the knocked-in note's
+    end -- schedule 2's last fixing's settlement (``knocked_in_settlement``, D31), the product terminal when schedule 2
+    ends with the product."""
     terminal = resolve_terminal_timing(product, env)
     if config is not product.barrier_config:
-        return terminal.payment_time, terminal.payment_date
+        knocked_in = knocked_in_settlement(product, env, terminal)
+        if knocked_in is None:
+            return terminal.payment_time, terminal.payment_date
+        return knocked_in.payment_time, knocked_in_row_timing(product, env, terminal, knocked_in)["payment_date"]
     time = first_schedule_payment_time(product, env, terminal)
     if time == terminal.payment_time:
         return time, terminal.payment_date              # one maturity: the product terminal's own
@@ -149,14 +156,16 @@ def _reset_record_dates(product, env, config):
     }
 
 
-def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity, no_ki_payment=None):
+def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity, no_ki_payment=None, ki_timing=None):
     """Add a fold overlay's KO cash to the records; return the per-branch terminal cash.
 
     Records are ``(observation_time, barrier, cash_at_settlement, payment_time)``.
     Times are the raw contractual ones (before canonical merging), the timing the
     overlay was built on. The alive branch of a KO-reset ends at its pre-maturity
     and settles after the same terminal delay as the knocked-in branch, or on the
-    explicit settlement date when one governs (``no_ki_payment``, spec D33).
+    explicit settlement date when one governs (``no_ki_payment``, spec D33). The knocked-in branch ends at maturity
+    and settles with the terminal, or at ``ki_timing`` ``(determination, payment)`` when a KO-reset's schedule 2 ends
+    before the maturity (D31).
     """
     schedules = (("pre", pre), ("post", post)) if reset else (("main", pre),)
     records = [(name, r[0], r[3]) for name, rows in schedules for r in rows]
@@ -171,7 +180,8 @@ def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity, no_ki_p
     branch_terminal = {
         "no_ki": float(fold.bind_terminal(
             "no_ki", pre_maturity, pre_maturity + delay if no_ki_payment is None else no_ki_payment)),
-        "ki": float(fold.bind_terminal("ki", maturity, terminal.payment_time)),
+        "ki": float(fold.bind_terminal("ki", maturity, terminal.payment_time) if ki_timing is None
+                    else fold.bind_terminal("ki", *ki_timing)),
     }
     return new_pre, new_post, branch_terminal
 
@@ -421,6 +431,11 @@ def compile_contract(
         pre = _reset_records(product, env, product.barrier_config)
         post = _reset_records(product, env, product.post_barrier_config)
         pre_maturity = float(product.get_pre_maturity_time(env))
+        terminal = resolve_terminal_timing(product, env)
+        # the knocked-in note ends at schedule 2's last fixing (owner ruling D31, run 5 T7): before the maturity when
+        # the product runs on past schedule 2 (``knocked_in_settlement``), else at the maturity as before
+        knocked_in = knocked_in_settlement(product, env, terminal, post_schedule_times=[r[0] for r in post])
+        post_maturity = maturity if knocked_in is None else float(knocked_in.determination_time)
         record_dates = (
             {"pre": _reset_record_dates(product, env, product.barrier_config),
              "post": _reset_record_dates(product, env, product.post_barrier_config)}
@@ -438,6 +453,8 @@ def compile_contract(
             for r in records
         ]
         post, pre_maturity = pre, maturity
+        knocked_in, post_maturity = None, maturity
+        terminal = resolve_terminal_timing(product, env)
         record_dates = (
             {"pre": {float(r.observation_time): (r.observation_date, r.settlement_date) for r in records}}
             if components == "events" else None
@@ -464,7 +481,7 @@ def compile_contract(
     if continuous and isinstance(product.barrier_config.ki_barrier, list):
         raise NotImplementedError("QUAD V2 continuous KI requires a constant barrier")
 
-    all_times = sorted({maturity, pre_maturity} | {r[0] for r in pre + post + ki})
+    all_times = sorted({maturity, pre_maturity, post_maturity} | {r[0] for r in pre + post + ki})
     continuous_model = None
     if continuous:
         from .continuous import continuous_time_grid
@@ -498,7 +515,6 @@ def compile_contract(
     # canonical times holding two or more knock-out records of a Snowball / Phoenix: one zero-gap event each (D7/D14);
     # empty for every schedule whose instants hold one record (the compile below is then exactly as before)
     instants = {} if reset else _ko_instants(ko_records, mapping, bool(product.is_reverse), phoenix)
-    terminal = resolve_terminal_timing(product, env)
     # a KO-reset note that ends with schedule 1 is paid on the explicit settlement date when booked (spec D33)
     first_schedule = first_schedule_settlement(product, env, terminal) if reset else None
     governed_payment = (
@@ -511,7 +527,8 @@ def compile_contract(
         if instants:
             _refuse_fold_on_instants(ko_records, instants)
         pre, post, fold_terminal = _bind_fold(
-            fold, reset, pre, post, terminal, maturity, pre_maturity, governed_payment
+            fold, reset, pre, post, terminal, maturity, pre_maturity, governed_payment,
+            None if knocked_in is None else (post_maturity, knocked_in.payment_time),
         )
     # a Snowball / Phoenix knock-out record's statistics key: ``pre:time`` (today's key), and per record of a shared
     # instant its position there (``#j``) so that every record has its own channels (D4); KO-reset keys stay by time
@@ -534,7 +551,7 @@ def compile_contract(
         ki_by = keyed(ki)
     else:
         ki_by, ki_split = _ki_instants(ki_records, mapping, bool(product.is_reverse))
-    maturity, pre_maturity = mapping[maturity], mapping[pre_maturity]
+    maturity, pre_maturity, post_maturity = mapping[maturity], mapping[pre_maturity], mapping[post_maturity]
     statistics = components == "events"
     # the price components' aggregate channels (``price_components``); a statistics context reads every outcome from
     # its own per-row channels instead
@@ -707,7 +724,7 @@ def compile_contract(
             coupon_key = f"pre:{t!r}"
             if phoenix and index is not None:
                 levels.append(coupon_barriers[index])
-        if t in (maturity, pre_maturity):
+        if t in (maturity, pre_maturity, post_maturity):
             levels += breaks_terminal
         split = ki_split.get(t, ()) if kr is not None and not continuous else ()
         levels += list(split)       # each narrower knock-in level bounds a region (the statistics' per-record split)
@@ -850,7 +867,7 @@ def compile_contract(
                 if phoenix and index is not None
                 else mem
             )
-            end = maturity if new_hit else pre_maturity
+            end = post_maturity if new_hit else pre_maturity
             c, a, terms = np.zeros(n_channels), np.zeros(n_channels), []
             channel_terms = []
             if last and t == end:
@@ -869,6 +886,9 @@ def compile_contract(
                 delay = (
                     terminal.delay_df
                     if t == maturity
+                    # the knocked-in note paid at schedule 2's end's settlement (D31), by its own exact ratio
+                    else env.get_discount_factor(knocked_in.payment_time) / env.get_discount_factor(t)
+                    if new_hit
                     else env.get_discount_factor(
                         t + terminal.payment_time - terminal.determination_time
                         if governed_payment is None
@@ -968,6 +988,7 @@ def compile_contract(
             "ko_metadata": tuple(ko_metadata),
             "pre_maturity": pre_maturity,
             "maturity": maturity,
+            "post_maturity": post_maturity,
             "terminal_delay": terminal.payment_time - terminal.determination_time,
             "initial_ki": initial_hit,
             "expiry_coupons": expiry,

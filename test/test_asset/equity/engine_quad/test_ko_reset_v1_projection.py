@@ -150,14 +150,16 @@ def test_the_projection_converges_under_refinement():
 
 # --- nodal and pointwise (width 0) paths: bitwise the base -----------------------------------------------------------
 
-#: captured on the base library (31f46955) before the D1 change
+#: captured on the base library (31f46955) before the D1 change; 0.16.0 T7 (the knocked-in KO-reset ends at schedule
+#: 2's last fixing 12-03, not the 01-05 exercise date of ``ko_reset()``: owner ruling D31) moved the three dated
+#: entries (previous values in the comments; the certification variants end schedule 2 with the product: unchanged)
 NODAL_PRICE_PINS = {
     "cert_ordinary": "0x1.82bd6c100745dp+6",
     "cert_discrete_ki": "0x1.82ed7bff2c507p+6",
     "cert_discrete_ki_width0": "0x1.833c3bbb1d358p+6",
-    "instant_schedule1_and_ki_pair": "0x1.f84212775e3e9p+2",
-    "instant_schedule2_width0": "0x1.91a7cb0311cf0p+2",
-    "reverse": "0x1.b2a8e099405bap+2",
+    "instant_schedule1_and_ki_pair": "0x1.f774fdd388aabp+2",    # was 0x1.f84212775e3e9p+2
+    "instant_schedule2_width0": "0x1.904245c6198b5p+2",         # was 0x1.91a7cb0311cf0p+2
+    "reverse": "0x1.b3eb9aee731b5p+2",                          # was 0x1.b2a8e099405bap+2
 }
 NODAL_STATS_PINS = {
     "cert_discrete_ki/forward": (
@@ -185,7 +187,7 @@ NODAL_STATS_PINS = {
     "instant_schedule1_and_ki_pair/forward": (
         ["0x1.80415fbd50683p-2", "0x1.2504dcfdc4bfbp-3", "0x1.2969dcf4d335cp-4", "0x1.dbf4e911af404p-6",
          "0x1.0196f2ef21c69p-9", "0x1.27d49ece235b2p-8", "0x1.845019eee3f0ap-9"],
-        "0x1.197b984108ca9p-2", "0x1.87eecc7e004d6p-4"),
+        "0x1.197b984108ca9p-2", "0x1.87eecc7e004d4p-4"),     # T7: ki_settlement was 0x1.87eecc7e004d6p-4
 }
 POINTWISE_EVENT_PINS = {
     "single_date": "97e73ef50910383512be26442e0e40c82c601828397cdceac95ef7459ca05e6e",

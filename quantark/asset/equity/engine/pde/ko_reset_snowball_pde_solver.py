@@ -18,6 +18,7 @@ from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolv
 from quantark.asset.equity.engine.settlement_support import (
     first_schedule_payment_time,
     first_schedule_settlement,
+    knocked_in_settlement,
 )
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
@@ -61,6 +62,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         #: runs to the full maturity, which is the un-staged case.
         self._v0_seed_idx: Optional[int] = None
         self._v0_seed_values = None
+        #: The knocked-in surface likewise (spec D31, run 5 T7): a knocked-in note ends at schedule 2's last fixing,
+        #: seeded at that index when it falls before the grid's last node (``knocked_in_settlement``); ``_v1_end`` is
+        #: ``(schedule 2's end, the seed's delay factor)`` for the knocked-in boundary rows. None when unstaged.
+        self._v1_seed_idx: Optional[int] = None
+        self._v1_seed_values = None
+        self._v1_end: Optional[Tuple[float, float]] = None
         self._post_ko_terminal_record: Optional[ResolvedObservationRecord] = None
         self._has_pre_terminal_ko: bool = False
         self._has_post_terminal_ko: bool = False
@@ -124,11 +131,13 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             settlement_time = rec.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
                 # EXPIRY pay: with the note's end -- schedule 1's maturity for a first-schedule knock-out (a path
-                # never knocked in ends there, spec D30), the product terminal for a second-schedule one
+                # never knocked in ends there, spec D30), the knocked-in note's end (schedule 2's last fixing, D31)
+                # for a second-schedule one
                 settlement_time = (
                     self._first_schedule_payment_time(product, pricing_env)
                     if first_schedule
-                    else self._terminal_payment_time(product, pricing_env)
+                    else self._knocked_in_payment_time(
+                        product, pricing_env, [float(r.observation_time) for r in resolved_schedule])
                 )
 
             ko_records.append(
@@ -223,13 +232,32 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         """``first_schedule_settlement``: the payment (and its delay factor) of a note that ends with schedule 1."""
         return first_schedule_settlement(product, pricing_env, self._terminal_timing(product, pricing_env))
 
+    def _knocked_in_settlement(self, product, pricing_env, post_schedule_times=None):
+        """``knocked_in_settlement``: the payment (and its delay factor) of a knocked-in note that ends at schedule 2's
+        last fixing before the grid's last node (spec D31, run 5 T7); None when schedule 2 ends with the product.
+        ``post_schedule_times``: schedule 2's active observation times (default: the cached records')."""
+        if post_schedule_times is None:
+            post_schedule_times = [float(rec.observation_time)
+                                   for rec in self._get_cached_post_ko_records(pricing_env, product)]
+        return knocked_in_settlement(product, pricing_env, self._terminal_timing(product, pricing_env),
+                                     post_schedule_times=post_schedule_times)
+
+    def _knocked_in_payment_time(self, product, pricing_env, post_schedule_times=None) -> float:
+        """When the knocked-in note is paid, and under EXPIRY pay a second-schedule knock-out: schedule 2's end's
+        settlement (``knocked_in_settlement``), the product terminal's when schedule 2 ends with the product."""
+        settlement = self._knocked_in_settlement(product, pricing_env, post_schedule_times)
+        if settlement is None:
+            return self._terminal_payment_time(product, pricing_env)
+        return float(settlement.payment_time)
+
     def _ko_settlement_time(self, product, pricing_env, record, regime):
         """A knock-out's payment time: its settlement, or under EXPIRY accrual the end of the note it ends --
-        schedule 1's maturity for a ``"pre"`` knock-out (spec D30), the terminal payment for a ``"post"`` one."""
+        schedule 1's maturity for a ``"pre"`` knock-out (spec D30), the knocked-in note's payment for a ``"post"``
+        one (schedule 2's end, D31)."""
         if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
             if regime == "pre":
                 return self._first_schedule_payment_time(product, pricing_env)
-            return self._terminal_payment_time(product, pricing_env)
+            return self._knocked_in_payment_time(product, pricing_env)
         return record.settlement_time
 
     def _get_immediate_ko_payoff(self, product, pricing_env) -> float:
@@ -288,6 +316,16 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         settlement = self._first_schedule_settlement(product, pricing_env)
         pre_maturity, payment = settlement.determination_time, settlement.payment_time
         return pre_maturity, payment, self._df_between_times(pricing_env, pre_maturity, payment)
+
+    def _fold_ki_timing(self, product, pricing_env):
+        """The knocked-in branch: the product terminal's when schedule 2 ends with the product, else determined at
+        schedule 2's last fixing and paid there by ``knocked_in_settlement`` (D31), discounted from its payment to
+        schedule 2's end by its own ratio (as the alive branch at schedule 1's end)."""
+        settlement = self._knocked_in_settlement(product, pricing_env)
+        if settlement is None:
+            return super()._fold_ki_timing(product, pricing_env)
+        post_end, payment = settlement.determination_time, settlement.payment_time
+        return post_end, payment, self._df_between_times(pricing_env, post_end, payment)
 
     def _folded_knock_out_cash(self, product, pricing_env, decision, fold) -> float:
         """The folded cash of the record the valuation-date decision fired, on its own schedule, at
@@ -457,6 +495,37 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         if self._fold is not None:
             grid[:, -1] += self._fold.no_ki * self._fold.no_ki_df
 
+    def _set_terminal_condition_v1(self, grid, x_vec, s_vec, product, pricing_env) -> None:
+        """The knocked-in redemption; seeded at schedule 2's last fixing when the note ends there before the grid's
+        last node (D31), with that payment's delay factor (``knocked_in_settlement``: an explicit settlement date's
+        own ratio when it governs, else the terminal's)."""
+        settlement = self._knocked_in_settlement(product, pricing_env)
+        if settlement is None or not settlement.settlement_date_governs:
+            super()._set_terminal_condition_v1(grid, x_vec, s_vec, product, pricing_env)
+            return
+        payoffs = np.array([product.get_maturity_payoff_v1(s, pricing_env) for s in s_vec])
+        grid[:, -1] = payoffs * settlement.delay_df
+        if self._fold is not None:
+            grid[:, -1] += self._fold.ki * self._fold.ki_df
+
+    def _boundary_rows_v1(self, t_idx, tau, product, pricing_env, s_vec):
+        """The knocked-in rows of a note that ends at schedule 2's last fixing (``_v1_end``, D31): the snowball's
+        rows for a contract maturing there (discounted to that end, with its seed's delay factor). Past it the
+        knocked-in claim is dead and the rows are never read (the seed overwrites the column at that index)."""
+        end = self._v1_end
+        if end is None:
+            return super()._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+        post_end, delay_df = end
+        tau_v1 = tau - (self._total_tau - post_end)
+        if tau_v1 < 0.0 and not same_instant(tau_v1, 0.0):
+            return super()._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+        saved = self._total_tau, self._structured_terminal_delay_df
+        self._total_tau, self._structured_terminal_delay_df = post_end, delay_df
+        try:
+            return super()._boundary_rows_v1(t_idx, max(tau_v1, 0.0), product, pricing_env, s_vec)
+        finally:
+            self._total_tau, self._structured_terminal_delay_df = saved
+
     def _apply_step_modifications_two_surface(
         self,
         grid_v0: np.ndarray,
@@ -479,6 +548,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         pre-maturity index."""
         if self._v0_seed_idx is not None and t_idx == self._v0_seed_idx:
             v0[...] = self._v0_seed_values if breach is None else breach.seed(v0)
+        if self._v1_seed_idx is not None and t_idx == self._v1_seed_idx:
+            # the knocked-in note's end (D31): seeded before schedule 2's last knock-out applies on it
+            v1[...] = self._v1_seed_values if breach is None else breach.seed_ki(v1)
 
         pre_record = self._pre_ko_observation_indices.get(t_idx)
         # the first-schedule knock-out wins a tie with a discrete knock-in (see _pre_ko_goes_last)
