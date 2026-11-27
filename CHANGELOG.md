@@ -451,6 +451,81 @@ passed with the product (owner choice, option A).
   in it compare equal.
 - Most library readers still spell the private attribute; they read the same slot.
 
+### Replay on a business-day clock
+
+A replay backtest can now price every day on a `BUSINESS_DAYS` trading clock. It is enabled by one opt-in object,
+`AutocallableEngineConfig(trading_clock=TradingClockConfig(calendar=..., bus_days_in_year=...))`, and works for a single
+product or a book on every BSM engine. Without it (the default) the replay is the calendar-day replay, unchanged: the
+replay goldens, env types and checksums are identical, and timing is within noise.
+
+#### Added
+
+- **`TradingClockConfig`** (`quantark.backtest.replay`, `quantark.backtest`) with fields `calendar`,
+  `bus_days_in_year` (252), `holiday_time_adjustment` (PRECEDING) and `vol_quoting` (CALENDAR_YEAR).
+  - Every env replay builds for a day sits on that clock: the day env, the maturity probe, the scenario and carry
+    callbacks, the book's spot-hedge carry and the surface grid.
+  - The cash curves (flat rate, implied or term dividend, basis) are declared `CALENDAR_YEAR`, and the env wraps them.
+  - `trading_clock_horizon` is the later of the last market date and every product's last contract, settlement or
+    payment date, plus 366 days.
+- **`CalendarQuotedVolSurface` / `DateKnotTimeMap`** (`quantark.param.vol`) read a calendar-quoted vol on the trading
+  axis: σ_td(u) = σ_cal(c(u))·√(c/u).
+  - c(u) goes through one knot per business date (the date's env time, then its ACT/365 time). Every business date,
+    Mondays and post-holiday dates included, therefore gets exactly the calendar variance.
+  - The env re-anchors it.
+  - `parallel_shifted`, `bump_unit_vol` and the QUAD V2 deterministic gate support it.
+- **Replay's own clock types.** `ClockSignedDividendYield` / `ClockImpliedBasisYield` (`backtest/replay/market.py`)
+  are the replay's flat carry types as library curves that the env can wrap; they check finiteness only.
+- **Clock-path conversions.**
+  - Event dates in the reports map engine times back by business-day count.
+  - Pending receivables are discounted at the settlement date's env time.
+  - The state row's `pricing_q` stays the calendar quote.
+  - `flat_atm_remaining` reads the surface at the calendar tenor.
+  - The run info records the clock.
+
+#### Refused on the clock path
+
+These would mix clocks silently, so each one raises with a `# TODO` scope line:
+- vol models other than `bsm` (LV/Heston/SLV calibrate in calendar time);
+- `trade_value`;
+- `pnl_explain`;
+- the simulated-path / ensemble engines;
+- products with a numeric (float-time) schedule;
+- a replay day that is not a business day of the clock's calendar;
+- dashboard snapshot repricing of a clock run.
+
+The MC event-statistics fallback lets a `ValidationError` through instead of turning it into an MC row.
+
+#### Verification
+
+- **Independent anchor.** With a calendar on which every day is a business day and `bus_days_in_year=365`, the clock
+  path equals the default replay to ≤ 3.3e-13 relative, every day. This holds on QUAD V1, PDE and MC, for a single
+  product and for a book.
+- **Holiday window.** Over an SSE window with the 2026 New Year closure, each replay day equals a hand-built
+  `BUSINESS_DAYS` env to 1e-12. This was checked on a snowball (QUAD V1, PDE, MC) and a KO-reset (QUAD V1).
+- **Holiday timing.** DCN holiday timing follows `holiday_time_adjustment` (oracle: business-day counts of the
+  adjusted date).
+- **Vol wrapper.** The vol wrapper's total variance equals the calendar variance at every business date to 1e-14.
+- **Speed.** The clock path is 1.28x the calendar-day replay on a 6-day QUAD window, from the per-day time maps.
+
+#### Notes
+
+- **Theta units.** On the clock path theta is per trading day.
+- **PDE grid.** The PDE's default grid counts `bus_days_in_year` steps-per-day days per env year.
+- **Cash-curve lag.** On a Monday or after a holiday, the 0.15.0 cash wrappers read the calendar curve at the day after
+  the previous trading day (DF to a Monday = DF_cal(Saturday)). The run measured this on a European call, strike 103 at
+  3%: -0.83% of premium on a Monday expiry and -1.73% after Spring Festival. This release fixes it in "Business-day cash
+  curves read the actual date" below (owner ruling).
+- **Fingerprinted trees.** This change edits `quantark/param` and `engine/quad/v2` (intraday certificate trees).
+
+#### Open items
+
+- **Late `trading_clock`.** `AutocallableEngineConfig` is mutable: a `trading_clock` set after construction skips the
+  vol-model refusal.
+- **Unchecked hand-built wrappers.** `TradingClockVolSurface` does not refuse a `DateKnotTimeMap`, whose slope and
+  `to_trading` have the opposite meaning. The env's clock check does not compare the vol map's
+  `holiday_time_adjustment`, and does not check a `CalendarQuotedVolSurface` placed on a calendar-day env. Replay builds
+  neither case.
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a

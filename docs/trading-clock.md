@@ -212,6 +212,73 @@ a grid "day" is still `1 / bus_days_in_year` of a year of engine time, not a cal
 day. The intraday route prices on its context's numerical environment, whose
 `bus_days_in_year` is the variance profile's `days_per_year`.
 
+## Calendar-quoted vol on the trading axis: `CalendarQuotedVolSurface` (0.16.0)
+
+On a `BUSINESS_DAYS` env the vol is read at trading time, so a calendar-quoted
+surface (a market vol column, the IV-surface artifacts) must be converted.
+`CalendarQuotedVolSurface(inner, DateKnotTimeMap(...))` presents a calendar-quoted
+`inner` on the trading axis:
+
+    σ_td(K, u) = σ_cal(K, c(u)) · √(c(u) / u)
+
+`c(u)` comes from a date-knot map: one knot per business date d, at
+(`env_time(d)`, ACT/365 calendar time of d), linear between knots. Every business
+date therefore carries exactly the calendar variance σ_cal(c_d)² · c_d. This includes
+a Monday and the first day after a holiday.
+
+`BusinessTimeMap.to_calendar` is not used here. It maps a date after a non-trading
+day back to the day after the previous trading day, so it would drop the weekend's
+variance. The env re-anchors the wrapper like any clock wrapper.
+`parallel_shifted` and `bump_unit_vol` act on the calendar quote. QUAD V2 accepts
+it when the inner is deterministic (flat or term structure).
+
+## Replay on a business-day clock (0.16.0)
+
+A replay backtest (single product or book, every BSM engine) can price each day on
+a `BUSINESS_DAYS` clock:
+
+```python
+from quantark.backtest.replay import AutocallableEngineConfig, TradingClockConfig
+from quantark.util.calendar import CalendarType, create_calendar
+
+sse = create_calendar(CalendarType.CHINA_SSE)
+engine_config = AutocallableEngineConfig(
+    ...,
+    trading_clock=TradingClockConfig(calendar=sse, bus_days_in_year=244),
+)
+```
+
+- **Cash curves.** Every day's env declares the flat rate, the implied or term
+  dividend curve and the basis `CALENDAR_YEAR`, and wraps them on its own clock.
+- **Vol.** The vol is wrapped in `CalendarQuotedVolSurface`
+  (`vol_quoting=CALENDAR_YEAR`, the default), in every surface mode. With
+  `vol_quoting=TRADING_YEAR` it is used as is.
+- **Same clock everywhere.** The day env, the maturity probe, the scenario and carry
+  callbacks, the book's spot-hedge carry and the surface grid all use one clock.
+- **Horizon.** `trading_clock_horizon` is the later of the last market date and every
+  product's last contract, settlement or payment date, plus 366 days.
+- **Unchanged.** Lifecycle trackers still decide by date. Futures tenors and the carry
+  inversion keep their ACT/365 market quotes. The state row's `pricing_q` stays the
+  calendar quote.
+- **Report dates and settlement.** Event dates in the reports map engine times back
+  through business-day counts. Pending receivables are discounted at the
+  settlement date's env time.
+- **Theta and the PDE grid.** Theta is per trading day (see the unit table). The
+  PDE's default grid counts `bus_days_in_year` steps-per-day days per env year.
+- **Refused** (each would mix clocks silently):
+  - vol models other than `bsm`;
+  - `trade_value`;
+  - `pnl_explain`;
+  - the simulated-path / ensemble engines;
+  - products with a numeric (float-time) schedule;
+  - a replay day that is not a business day of the clock's calendar;
+  - dashboard snapshot repricing of a clock run.
+- **No silent fallback.** On the clock path the MC event-statistics fallback lets a
+  `ValidationError` through.
+- **Results.** The results' run info records the clock.
+
+The default (`trading_clock=None`) is the calendar-day replay, unchanged.
+
 ## Scope
 
 BSM autocallable stack (Snowball / Phoenix / KO-reset PDE, QUAD, MC +
