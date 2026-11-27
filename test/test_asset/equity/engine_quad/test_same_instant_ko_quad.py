@@ -125,12 +125,17 @@ def test_snowball_duplicate_record_prices_as_the_product_without_it(dup_rate):
 
 
 # Pinned BEFORE the T3 change (worktree e4ffd608): the products without a shared instant stay bitwise.
-SNOWBALL_PIN = "-0x1.38663ea4a5adap-3"
+# 0.16.0 T5 (V1 convolutions on fast FFT lengths, owner-signed round-off) re-pinned; superseded (999795df):
+# SNOWBALL_PIN '-0x1.38663ea4a5adap-3' (max rel move 9.70e-14); SNOWBALL_ROW_PINS {'forward': ['0x1.80415fbd50683p-2',
+# '0x1.24d63e97900dfp-3', '0x1.2966a7b49f16dp-4', '0x1.7e1e7e9f8583ap-5', '0x1.0fea41ee53762p-5'], 'stacked':
+# ['0x1.80415fbd50684p-2', '0x1.24d63e97900e2p-3', '0x1.2966a7b49f16ep-4', '0x1.7e1e7e9f85839p-5',
+# '0x1.0fea41ee5375fp-5']} (max rel move 1.67e-15)
+SNOWBALL_PIN = "-0x1.38663ea4a58c5p-3"
 SNOWBALL_ROW_PINS = {
-    "forward": ["0x1.80415fbd50683p-2", "0x1.24d63e97900dfp-3", "0x1.2966a7b49f16dp-4", "0x1.7e1e7e9f8583ap-5",
-                "0x1.0fea41ee53762p-5"],
-    "stacked": ["0x1.80415fbd50684p-2", "0x1.24d63e97900e2p-3", "0x1.2966a7b49f16ep-4", "0x1.7e1e7e9f85839p-5",
-                "0x1.0fea41ee5375fp-5"],
+    "forward": ["0x1.80415fbd50682p-2", "0x1.24d63e97900e1p-3", "0x1.2966a7b49f16cp-4", "0x1.7e1e7e9f85833p-5",
+                "0x1.0fea41ee5375ap-5"],
+    "stacked": ["0x1.80415fbd50684p-2", "0x1.24d63e97900e1p-3", "0x1.2966a7b49f16cp-4", "0x1.7e1e7e9f85835p-5",
+                "0x1.0fea41ee5375ep-5"],
 }
 
 
@@ -394,16 +399,23 @@ def test_phoenix_pair_as_the_first_observation_matches_the_exact_reference():
 
 
 # Pinned BEFORE the T3 change (worktree e4ffd608).
-PHOENIX_PIN = "-0x1.695e6b15e0dbdp+0"
+# 0.16.0 T5 (V1 convolutions on fast FFT lengths, owner-signed round-off) re-pinned; superseded (999795df):
+# PHOENIX_PIN '-0x1.695e6b15e0dbdp+0' (max rel move 1.56e-14); PHOENIX_ROW_PINS {'forward': (['0x1.80415fbd50682p-2',
+# '0x1.24d64730c2803p-3', '0x1.2966df7925555p-4', '0x1.7e1f32a0c2d28p-5', '0x1.0feb0162982e6p-5'],
+# ['0x1.f9bb323cadd62p-1', '0x1.1f743539bf739p-1', '0x1.8579ece10550cp-2', '0x1.2248f09b18930p-2',
+# '0x1.c6d0a9eca64abp-3']), 'stacked': (['0x1.80415fbd50684p-2', '0x1.24d64730c2808p-3', '0x1.2966df7925553p-4',
+# '0x1.7e1f32a0c2d29p-5', '0x1.0feb0162982e7p-5'], ['0x1.f9bb323cadd61p-1', '0x1.1f743539bf738p-1',
+# '0x1.8579ece10550cp-2', '0x1.2248f09b18930p-2', '0x1.c6d0a9eca64adp-3'])} (max rel move 7.50e-16)
+PHOENIX_PIN = "-0x1.695e6b15e0d5ap+0"
 PHOENIX_ROW_PINS = {
-    "forward": (["0x1.80415fbd50682p-2", "0x1.24d64730c2803p-3", "0x1.2966df7925555p-4", "0x1.7e1f32a0c2d28p-5",
-                 "0x1.0feb0162982e6p-5"],
-                ["0x1.f9bb323cadd62p-1", "0x1.1f743539bf739p-1", "0x1.8579ece10550cp-2", "0x1.2248f09b18930p-2",
-                 "0x1.c6d0a9eca64abp-3"]),
-    "stacked": (["0x1.80415fbd50684p-2", "0x1.24d64730c2808p-3", "0x1.2966df7925553p-4", "0x1.7e1f32a0c2d29p-5",
+    "forward": (["0x1.80415fbd50682p-2", "0x1.24d64730c2805p-3", "0x1.2966df7925553p-4", "0x1.7e1f32a0c2d23p-5",
+                 "0x1.0feb0162982e5p-5"],
+                ["0x1.f9bb323cadd62p-1", "0x1.1f743539bf73ap-1", "0x1.8579ece10550fp-2", "0x1.2248f09b18932p-2",
+                 "0x1.c6d0a9eca64b1p-3"]),
+    "stacked": (["0x1.80415fbd50684p-2", "0x1.24d64730c2806p-3", "0x1.2966df7925552p-4", "0x1.7e1f32a0c2d26p-5",
                  "0x1.0feb0162982e7p-5"],
-                ["0x1.f9bb323cadd61p-1", "0x1.1f743539bf738p-1", "0x1.8579ece10550cp-2", "0x1.2248f09b18930p-2",
-                 "0x1.c6d0a9eca64adp-3"]),
+                ["0x1.f9bb323cadd62p-1", "0x1.1f743539bf738p-1", "0x1.8579ece10550ep-2", "0x1.2248f09b18933p-2",
+                 "0x1.c6d0a9eca64b0p-3"]),
 }
 
 
@@ -813,19 +825,27 @@ def test_ko_reset_duplicate_record_prices_as_the_product_without_it(kind):
 #: 0.16.0 T7 (the knocked-in KO-reset ends at schedule 2's last fixing 12-03, not the 01-05 exercise date: owner ruling
 #: D31) moved three entries; previous values (after D1) in the comments. ``base_first_step`` (valued 07-02, the last
 #: knock-in one day ahead at 75 against a spot of 100) is unchanged: the knock-in mass there is below one ulp.
+# 0.16.0 T5 (V1 convolutions on fast FFT lengths, owner-signed round-off) re-pinned; superseded (999795df): KOR_PINS
+# {'base': '0x1.1b9577ec96dc6p+3', 'base_continuous_ki': '0x1.f8b0ba7982223p+2', 'base_first_step':
+# '0x1.5337d6098b9fap+2', 'schedule2_base': '0x1.1b81973704f13p+3'} (max rel move 1.40e-15); KOR_ROW_PINS {'forward':
+# (['0x1.80415fbd50683p-2', '0x1.24d5a02fa4dbdp-3', '0x1.294df5d37ab10p-4', '0x1.bd335c527f2fep-11',
+# '0x1.bd361567b524fp-10', '0x1.4209b90434a97p-10'], '0x1.6491837c68afap-2', '0x1.d487ade805272p-5'), 'stacked':
+# (['0x1.80415fbd50684p-2', '0x1.24d5a02fa4dc0p-3', '0x1.294df5d37ab10p-4', '0x1.bd335c527f29fp-11',
+# '0x1.bd361567b524cp-10', '0x1.4209b90434a9bp-10'], '0x1.6491837c68af9p-2', '0x1.d487ade80527ep-5')} (max rel move
+# 2.15e-14)
 KOR_PINS = {
-    "base": "0x1.1b9577ec96dc6p+3",                 # was 0x1.1bd6ebe4d78e9p+3 (8.869985529858655 -> 8.861995660866238)
-    "base_continuous_ki": "0x1.f8b0ba7982223p+2",   # was 0x1.f96feee4b40b8p+2
+    "base": "0x1.1b9577ec96dc8p+3",                 # was 0x1.1bd6ebe4d78e9p+3 (8.869985529858655 -> 8.861995660866238)
+    "base_continuous_ki": "0x1.f8b0ba798222dp+2",   # was 0x1.f96feee4b40b8p+2
     "base_first_step": "0x1.5337d6098b9fap+2",
-    "schedule2_base": "0x1.1b81973704f13p+3",       # was 0x1.1bc3631600048p+3
+    "schedule2_base": "0x1.1b81973704f1ap+3",       # was 0x1.1bc3631600048p+3
 }
 KOR_ROW_PINS = {
-    "forward": (["0x1.80415fbd50683p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab10p-4", "0x1.bd335c527f2fep-11",
-                 "0x1.bd361567b524fp-10", "0x1.4209b90434a97p-10"], "0x1.6491837c68afap-2",
-                "0x1.d487ade805272p-5"),    # T7: was 0x1.d487ade805274p-5 (the knocked-in row at 12-03)
-    "stacked": (["0x1.80415fbd50684p-2", "0x1.24d5a02fa4dc0p-3", "0x1.294df5d37ab10p-4", "0x1.bd335c527f29fp-11",
-                 "0x1.bd361567b524cp-10", "0x1.4209b90434a9bp-10"], "0x1.6491837c68af9p-2",
-                "0x1.d487ade80527ep-5"),    # T7: was 0x1.d487ade80527ap-5
+    "forward": (["0x1.80415fbd50682p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab0ep-4", "0x1.bd335c527f256p-11",
+                 "0x1.bd361567b5221p-10", "0x1.4209b90434a74p-10"], "0x1.6491837c68afcp-2",
+                "0x1.d487ade805271p-5"),    # T7: was 0x1.d487ade805274p-5 (the knocked-in row at 12-03)
+    "stacked": (["0x1.80415fbd50684p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab0fp-4", "0x1.bd335c527f2afp-11",
+                 "0x1.bd361567b524bp-10", "0x1.4209b90434a93p-10"], "0x1.6491837c68afbp-2",
+                "0x1.d487ade805266p-5"),    # T7: was 0x1.d487ade80527ap-5
 }
 
 

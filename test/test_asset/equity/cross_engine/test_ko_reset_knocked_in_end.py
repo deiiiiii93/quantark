@@ -307,65 +307,78 @@ def stats_key(stats):
 
 
 #: pinned on d83256db (before T7)
+#: 0.16.0 T5 (V1 convolutions on fast FFT lengths, owner-signed round-off) re-pinned the V1 entries below; max rel move 1.5e-14. Superseded (999795df):
+#:   price ("base", "v1"): 0x1.1b9804bd93d19p+3
+#:   price ("disable", "v1"): 0x1.1add9b44824dcp+3
+#:   price ("continuous", "v1"): 0x1.f8bf40f2f2cc3p+2
+#:   price ("carried", "v1"): -0x1.2b26b78d22f41p+4
+#:   price ("carried_disable", "v1"): -0x1.3c5ef5e728866p+4
+#:   price ("expiry", "v1"): 0x1.1a217628b29b9p+3
+#:   price ("lag", "v1"): 0x1.1b7afbfc3c02ep+3
+#:   price ("ki_pair", "v1"): 0x1.edf09c9e8d9f4p+2
+#:   stats ("base", "v1"): ['0x1.1b9804bd93d19p+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d8550p-3', '0x1.29493ccbf5ccbp-4', '0x1.bd3743ddeb43fp-11', '0x1.bd279dd5f1adap-10', '0x1.421661503d5dfp-10', '0x1.3cf3cf3cf3cf4p-3', '0x1.5555555555555p-2', '0x1.0000000000000p-1', '0x1.5555555555555p-1', '0x1.aaaaaaaaaaaabp-1', '0x1.d34d34d34d34dp-1', '0x1.6497da39f3568p-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b94e67677bd20p+0', '0x1.d465385de81cap-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b13fdec6078bep+0']
+#:   stats ("carried", "v1"): ['-0x1.2b26b78d22f41p+4', '0x1.5c254b692100fp-5', '0x1.55a04afe61a3ep-4', '0x1.7dfb4341cb7c9p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a7a9edb58503cp-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.3361b229cbe0fp+4']
+#:   stats ("expiry", "v1"): ['0x1.1a217628b29b9p+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d8550p-3', '0x1.29493ccbf5ccbp-4', '0x1.bd3743ddeb43fp-11', '0x1.bd279dd5f1adap-10', '0x1.421661503d5dfp-10', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.6497da39f3568p-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b94e67677bd20p+0', '0x1.d465385de81cap-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b13fdec6078bep+0']
+#:   stats ("lag", "v1"): ['0x1.1b7afbfc3c02ep+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d8550p-3', '0x1.29493ccbf5ccap-4', '0x1.bd3743ddeb43fp-11', '0x1.bd279dd5f1adbp-10', '0x1.421661503d5dep-10', '0x1.65e991cc4ff83p-3', '0x1.69d0369d0369dp-2', '0x1.0a3d70a3d70a4p-1', '0x1.5f92c5f92c5f9p-1', '0x1.b4e81b4e81b4fp-1', '0x1.dd8aa577243f1p-1', '0x1.6497da39f3568p-2', '0x1.0000000000000p-1', '0x1.0a3d70a3d70a4p-1', '0x1.b921392380732p+0', '0x1.d465385de81cap-5', '0x1.d34d34d34d34dp-1', '0x1.dd8aa577243f1p-1', '-0x1.b11383ab51b4fp+0']
 PRICE_PINS = {
     ("base", "pde"): "0x1.1ba1680f9314ap+3",
     ("base", "lv_pde"): "0x1.1ba1680f9314cp+3",
     ("base", "heston"): "0x1.10ed738d4bdccp+3",
-    ("base", "v1"): "0x1.1b9804bd93d19p+3",
+    ("base", "v1"): "0x1.1b9804bd93d1dp+3",
     ("base", "v2"): "0x1.1ba4450b66f17p+3",
     ("disable", "pde"): "0x1.1ae730abdbe94p+3",
     ("disable", "lv_pde"): "0x1.1ae730abdbe98p+3",
     ("disable", "heston"): "0x1.0fb288a3add30p+3",
-    ("disable", "v1"): "0x1.1add9b44824dcp+3",
+    ("disable", "v1"): "0x1.1add9b44824e2p+3",
     ("disable", "v2"): "0x1.1aea1a97d6c92p+3",
     ("continuous", "pde"): "0x1.f8ca5a2a1cd9fp+2",
     ("continuous", "lv_pde"): "0x1.f8ca5a2a1cd75p+2",
     ("continuous", "heston"): "0x1.de7cdccb2c8b5p+2",
-    ("continuous", "v1"): "0x1.f8bf40f2f2cc3p+2",
+    ("continuous", "v1"): "0x1.f8bf40f2f2cd0p+2",
     ("continuous", "v2"): "0x1.f8d4c46c3c435p+2",
     ("carried", "pde"): "-0x1.2b25fed77d8d9p+4",
     ("carried", "lv_pde"): "-0x1.2b25fed77d96dp+4",
     ("carried", "heston"): "-0x1.2aa68bd1123aap+4",
-    ("carried", "v1"): "-0x1.2b26b78d22f41p+4",
+    ("carried", "v1"): "-0x1.2b26b78d22f3ep+4",
     ("carried", "v2"): "-0x1.2b25722c65763p+4",
     ("carried_disable", "pde"): "-0x1.3c5f2577595e1p+4",
     ("carried_disable", "lv_pde"): "-0x1.3c5f25775967cp+4",
     ("carried_disable", "heston"): "-0x1.39288531cfea8p+4",
-    ("carried_disable", "v1"): "-0x1.3c5ef5e728866p+4",
+    ("carried_disable", "v1"): "-0x1.3c5ef5e728861p+4",
     ("carried_disable", "v2"): "-0x1.3c5ef1a1d32ccp+4",
     ("expiry", "pde"): "0x1.1a2aea057a38fp+3",
     ("expiry", "lv_pde"): "0x1.1a2aea057a392p+3",
     ("expiry", "heston"): "0x1.0f64e135f3ef2p+3",
-    ("expiry", "v1"): "0x1.1a217628b29b9p+3",
+    ("expiry", "v1"): "0x1.1a217628b29c1p+3",
     ("expiry", "v2"): "0x1.1a2dc735ab379p+3",
     ("lag", "pde"): "0x1.1b845e582e45ep+3",
     ("lag", "lv_pde"): "0x1.1b845e582e465p+3",
     ("lag", "heston"): "0x1.10d18259d18adp+3",
-    ("lag", "v1"): "0x1.1b7afbfc3c02ep+3",
+    ("lag", "v1"): "0x1.1b7afbfc3c036p+3",
     ("lag", "v2"): "0x1.1b873b08f7401p+3",
     ("ki_pair", "pde"): "0x1.ee104e0f4e1e3p+2",
     ("ki_pair", "lv_pde"): "0x1.ee104e0f4e1bcp+2",
     ("ki_pair", "heston"): "0x1.e8cf304f84063p+2",
-    ("ki_pair", "v1"): "0x1.edf09c9e8d9f4p+2",
+    ("ki_pair", "v1"): "0x1.edf09c9e8d9fcp+2",
     ("ki_pair", "v2"): "0x1.ee130e47f5007p+2",
 }
 STATS_PINS = {
     ("base", "pde"): ['0x1.1ba1680f9314ap+3', '0x1.80279c3ebac48p-2', '0x1.24f2a28f84973p-3', '0x1.29622beca2c8dp-4', '0x1.bcb2d0c52b6f6p-11', '0x1.bcce8fb6a2ee4p-10', '0x1.41d5ad29ac10fp-10', '0x1.3cf3cf3cf3cf4p-3', '0x1.5555555555555p-2', '0x1.0000000000000p-1', '0x1.5555555555555p-1', '0x1.aaaaaaaaaaaabp-1', '0x1.d34d34d34d34dp-1', '0x1.64a5fd6a1c76ap-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b95fe65fff370p+0', '0x1.d41c6396b3c55p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b0f59d7e5e572p+0'],
     ("base", "lv_pde"): ['0x1.1ba1680f9314cp+3', '0x1.80279c3ebac5cp-2', '0x1.24f2a28f84974p-3', '0x1.29622beca2cb0p-4', '0x1.bcb2d0c52b7cap-11', '0x1.bcce8fb6a3043p-10', '0x1.41d5ad29ac298p-10', '0x1.3cf3cf3cf3cf4p-3', '0x1.5555555555555p-2', '0x1.0000000000000p-1', '0x1.5555555555555p-1', '0x1.aaaaaaaaaaaabp-1', '0x1.d34d34d34d34dp-1', '0x1.64a5fd6a1c7fep-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b95fe65fff431p+0', '0x1.d41c6396b3d88p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b0f59d7e5e66bp+0'],
-    ("base", "v1"): ['0x1.1b9804bd93d19p+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d8550p-3', '0x1.29493ccbf5ccbp-4', '0x1.bd3743ddeb43fp-11', '0x1.bd279dd5f1adap-10', '0x1.421661503d5dfp-10', '0x1.3cf3cf3cf3cf4p-3', '0x1.5555555555555p-2', '0x1.0000000000000p-1', '0x1.5555555555555p-1', '0x1.aaaaaaaaaaaabp-1', '0x1.d34d34d34d34dp-1', '0x1.6497da39f3568p-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b94e67677bd20p+0', '0x1.d465385de81cap-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b13fdec6078bep+0'],
+    ("base", "v1"): ['0x1.1b9804bd93d1dp+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d854ep-3', '0x1.29493ccbf5cc9p-4', '0x1.bd3743ddeb3cep-11', '0x1.bd279dd5f1ab2p-10', '0x1.421661503d5dbp-10', '0x1.3cf3cf3cf3cf4p-3', '0x1.5555555555555p-2', '0x1.0000000000000p-1', '0x1.5555555555555p-1', '0x1.aaaaaaaaaaaabp-1', '0x1.d34d34d34d34dp-1', '0x1.6497da39f356ap-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b94e67677bd23p+0', '0x1.d465385de81c8p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b13fdec6078aap+0'],
     ("base", "v2"): ['0x1.1ba4450b66f17p+3', '0x1.80268d2a30d98p-2', '0x1.24f61998cb59cp-3', '0x1.29640d787cedfp-4', '0x1.bc6697ca0586ep-11', '0x1.bcbb33e26a34fp-10', '0x1.41cce6cbfef2dp-10', '0x1.3cf3cf3cf3cf4p-3', '0x1.5555555555555p-2', '0x1.0000000000000p-1', '0x1.5555555555555p-1', '0x1.aaaaaaaaaaaabp-1', '0x1.d34d34d34d34dp-1', '0x1.64a75ac99f7a0p-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b96196bef6d21p+0', '0x1.d40a63d8bac35p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b0e472bd3c341p+0'],
     ("carried", "pde"): ['-0x1.2b25fed77d8d9p+4', '0x1.5c487f0ba9c14p-5', '0x1.559ce07fb82d7p-4', '0x1.7dfc6a6f711f6p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a7a8155abb13ap-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.3361259e97948p+4'],
     ("carried", "lv_pde"): ['-0x1.2b25fed77d96dp+4', '0x1.5c487f0ba9c65p-5', '0x1.559ce07fb833ep-4', '0x1.7dfc6a6f71267p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a7a8155abb206p-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.3361259e979e3p+4'],
     ("carried", "heston"): ['-0x1.2aa68bd1123aap+4', '0x1.1755c99f6cd04p-5', '0x1.2d56c61005dffp-4', '0x1.607dc042fbd00p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.b2d7ee9fd8b7cp-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.31d6b385c627bp+4'],
-    ("carried", "v1"): ['-0x1.2b26b78d22f41p+4', '0x1.5c254b692100fp-5', '0x1.55a04afe61a3ep-4', '0x1.7dfb4341cb7c9p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a7a9edb58503cp-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.3361b229cbe0fp+4'],
+    ("carried", "v1"): ['-0x1.2b26b78d22f3ep+4', '0x1.5c254b6921009p-5', '0x1.55a04afe61a36p-4', '0x1.7dfb4341cb7c5p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a7a9edb58503fp-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.3361b229cbe11p+4'],
     ("carried", "v2"): ['-0x1.2b25722c65763p+4', '0x1.5c30b22347665p-5', '0x1.55a4f8d775045p-4', '0x1.7e0a53ae710a8p-5', '0x1.4d34d34d34d35p-3', '0x1.5145145145145p-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '0x0.0p+0', '0x1.a7a7b087f5d82p-1', '0x1.a28a28a28a28ap-2', '0x1.a28a28a28a28ap-2', '-0x1.3360a2306a81fp+4'],
     ("expiry", "pde"): ['0x1.1a2aea057a38fp+3', '0x1.80279c3ebac47p-2', '0x1.24f2a28f84972p-3', '0x1.29622beca2c8dp-4', '0x1.bcb2d0c52b701p-11', '0x1.bcce8fb6a2eefp-10', '0x1.41d5ad29ac10fp-10', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.64a5fd6a1c76ap-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b95fe65fff370p+0', '0x1.d41c6396b3c55p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b0f59d7e5e572p+0'],
     ("expiry", "lv_pde"): ['0x1.1a2aea057a392p+3', '0x1.80279c3ebac5fp-2', '0x1.24f2a28f84970p-3', '0x1.29622beca2cb0p-4', '0x1.bcb2d0c52b7c4p-11', '0x1.bcce8fb6a303ep-10', '0x1.41d5ad29ac298p-10', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.64a5fd6a1c7fep-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b95fe65fff431p+0', '0x1.d41c6396b3d88p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b0f59d7e5e66bp+0'],
-    ("expiry", "v1"): ['0x1.1a217628b29b9p+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d8550p-3', '0x1.29493ccbf5ccbp-4', '0x1.bd3743ddeb43fp-11', '0x1.bd279dd5f1adap-10', '0x1.421661503d5dfp-10', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.6497da39f3568p-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b94e67677bd20p+0', '0x1.d465385de81cap-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b13fdec6078bep+0'],
+    ("expiry", "v1"): ['0x1.1a217628b29c1p+3', '0x1.80449db350e3ep-2', '0x1.24cd7065d854ep-3', '0x1.29493ccbf5cc9p-4', '0x1.bd3743ddeb3cdp-11', '0x1.bd279dd5f1ab2p-10', '0x1.421661503d5dbp-10', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.6497da39f356ap-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b94e67677bd23p+0', '0x1.d465385de81c8p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b13fdec6078aap+0'],
     ("expiry", "v2"): ['0x1.1a2dc735ab379p+3', '0x1.80268d2a30d98p-2', '0x1.24f61998cb59cp-3', '0x1.29640d787cedfp-4', '0x1.bc6697ca0586ep-11', '0x1.bcbb33e26a34fp-10', '0x1.41cce6cbfef2dp-10', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '0x1.64a75ac99f7a0p-2', '0x1.0000000000000p-1', '0x1.0000000000000p-1', '0x1.b96196bef6d21p+0', '0x1.d40a63d8bac35p-5', '0x1.d34d34d34d34dp-1', '0x1.d34d34d34d34dp-1', '-0x1.b0e472bd3c341p+0'],
     ("lag", "pde"): ['0x1.1b845e582e45ep+3', '0x1.80279c3ebac45p-2', '0x1.24f2a28f84973p-3', '0x1.29622beca2c8bp-4', '0x1.bcb2d0c52b6f9p-11', '0x1.bcce8fb6a2eeap-10', '0x1.41d5ad29ac10ap-10', '0x1.65e991cc4ff83p-3', '0x1.69d0369d0369dp-2', '0x1.0a3d70a3d70a4p-1', '0x1.5f92c5f92c5f9p-1', '0x1.b4e81b4e81b4fp-1', '0x1.dd8aa577243f1p-1', '0x1.64a5fd6a1c76ap-2', '0x1.0000000000000p-1', '0x1.0a3d70a3d70a4p-1', '0x1.b932b65175cb6p+0', '0x1.d41c6396b3c55p-5', '0x1.d34d34d34d34dp-1', '0x1.dd8aa577243f1p-1', '-0x1.b0c949fdd1b84p+0'],
     ("lag", "lv_pde"): ['0x1.1b845e582e465p+3', '0x1.80279c3ebac60p-2', '0x1.24f2a28f8496fp-3', '0x1.29622beca2ca5p-4', '0x1.bcb2d0c52b7d7p-11', '0x1.bcce8fb6a302bp-10', '0x1.41d5ad29ac298p-10', '0x1.65e991cc4ff83p-3', '0x1.69d0369d0369dp-2', '0x1.0a3d70a3d70a4p-1', '0x1.5f92c5f92c5f9p-1', '0x1.b4e81b4e81b4fp-1', '0x1.dd8aa577243f1p-1', '0x1.64a5fd6a1c7fep-2', '0x1.0000000000000p-1', '0x1.0a3d70a3d70a4p-1', '0x1.b932b65175d74p+0', '0x1.d41c6396b3d88p-5', '0x1.d34d34d34d34dp-1', '0x1.dd8aa577243f1p-1', '-0x1.b0c949fdd1c73p+0'],
-    ("lag", "v1"): ['0x1.1b7afbfc3c02ep+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d8550p-3', '0x1.29493ccbf5ccap-4', '0x1.bd3743ddeb43fp-11', '0x1.bd279dd5f1adbp-10', '0x1.421661503d5dep-10', '0x1.65e991cc4ff83p-3', '0x1.69d0369d0369dp-2', '0x1.0a3d70a3d70a4p-1', '0x1.5f92c5f92c5f9p-1', '0x1.b4e81b4e81b4fp-1', '0x1.dd8aa577243f1p-1', '0x1.6497da39f3568p-2', '0x1.0000000000000p-1', '0x1.0a3d70a3d70a4p-1', '0x1.b921392380732p+0', '0x1.d465385de81cap-5', '0x1.d34d34d34d34dp-1', '0x1.dd8aa577243f1p-1', '-0x1.b11383ab51b4fp+0'],
+    ("lag", "v1"): ['0x1.1b7afbfc3c036p+3', '0x1.80449db350e3dp-2', '0x1.24cd7065d854ep-3', '0x1.29493ccbf5cc9p-4', '0x1.bd3743ddeb3cep-11', '0x1.bd279dd5f1ab2p-10', '0x1.421661503d5dbp-10', '0x1.65e991cc4ff83p-3', '0x1.69d0369d0369dp-2', '0x1.0a3d70a3d70a4p-1', '0x1.5f92c5f92c5f9p-1', '0x1.b4e81b4e81b4fp-1', '0x1.dd8aa577243f1p-1', '0x1.6497da39f356ap-2', '0x1.0000000000000p-1', '0x1.0a3d70a3d70a4p-1', '0x1.b921392380735p+0', '0x1.d465385de81c8p-5', '0x1.d34d34d34d34dp-1', '0x1.dd8aa577243f1p-1', '-0x1.b11383ab51b3cp+0'],
     ("lag", "v2"): ['0x1.1b873b08f7401p+3', '0x1.80268d2a30d98p-2', '0x1.24f61998cb59cp-3', '0x1.29640d787cedfp-4', '0x1.bc6697ca0586ep-11', '0x1.bcbb33e26a34fp-10', '0x1.41cce6cbfef2dp-10', '0x1.65e991cc4ff83p-3', '0x1.69d0369d0369dp-2', '0x1.0a3d70a3d70a4p-1', '0x1.5f92c5f92c5f9p-1', '0x1.b4e81b4e81b4fp-1', '0x1.dd8aa577243f1p-1', '0x1.64a75ac99f7a0p-2', '0x1.0000000000000p-1', '0x1.0a3d70a3d70a4p-1', '0x1.b934668429519p+0', '0x1.d40a63d8bac35p-5', '0x1.d34d34d34d34dp-1', '0x1.dd8aa577243f1p-1', '-0x1.b0b820fe9e64ap+0'],
 }
 

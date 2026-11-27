@@ -245,13 +245,13 @@ def transition_readout_weights(math_utils, prefactor: float, alpha: float, beta:
     h = float(math_utils.h)
     scale = h if math_utils.integration_rule == "trapezoid" else h / 3.0
     base_len = 2 * n - 1
-    fft_len = base_len if math_utils.fft_padding_factor <= 1 else int(math_utils.fft_padding_factor * base_len)
+    fft_len, real = math_utils.fft_length(base_len)
     fft_filter = math_utils._get_fft_filter(fft_len)
     length = base_len if fft_filter is None else fft_len
     offsets = grid[0] + np.arange(length, dtype=float) * h
     omega = np.exp(-(offsets * offsets) / (4.0 * tau) + alpha * offsets)
     if fft_filter is not None:
-        omega = np.fft.ifft(np.fft.fft(omega) * fft_filter).real
+        omega = math_utils.apply_fft_filter(omega, fft_len, real)
     row = _simpson_coefficients(math_utils) * (prefactor * scale * omega[:n])
     sqrt_tau = math.sqrt(tau)
     u_left = (-grid[0] + 2.0 * tau * alpha) / (2.0 * sqrt_tau)

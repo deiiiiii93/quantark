@@ -357,7 +357,9 @@ with open(_PINS_PATH) as _f:
     #: knocked-in KO-reset ends at schedule 2's last fixing, 12-03, not the 01-05 exercise date: owner ruling D31)
     #: re-pinned the thirteen ``kor_*`` grid entries; their previous values are under "_superseded_by_0.16.0_T7"
     #: (e.g. kor_base_pde price 8.871664315881244 -> 8.86368327529885, kor_base_pde_val78 -20.686395546090417 ->
-    #: -20.788510675853676)
+    #: -20.788510675853676). 0.16.0 T5 (V1 convolutions on fast FFT lengths, owner-signed round-off) re-pinned the
+    #: twenty-two QUAD V1 entries; previous values under "_superseded_by_0.16.0_T5_fft" (max rel move 1.7e-13 over
+    #: values >= 1e-6, e.g. phx_wide_v1_fwd; the reconciliation residual ``recon`` is itself round-off, |v| <= 1.3e-14)
     PINS = json.load(_f)
 
 

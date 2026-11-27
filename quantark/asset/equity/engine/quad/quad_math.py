@@ -5,11 +5,32 @@ Shared quadrature math utilities for grid setup and convolution.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
+
+
+@lru_cache(maxsize=None)
+def _even_5_smooth_at_least(length: int) -> int:
+    """The smallest even ``2^a 3^b 5^c`` (``a >= 1``) that is ``>= length``: a length pocketfft transforms by its
+    radix-2/3/4/5 passes (an arbitrary length holding a large prime factor runs Bluestein, several times slower)."""
+    length = max(int(length), 2)
+    best = None
+    p5 = 1
+    while p5 < 2 * length:
+        p35 = p5
+        while p35 < 2 * length:
+            candidate = 2 * p35
+            while candidate < length:
+                candidate *= 2
+            if best is None or candidate < best:
+                best = candidate
+            p35 *= 3
+        p5 *= 5
+    return best
 
 
 def snap_cell_width(
@@ -268,7 +289,7 @@ class QuadratureMath:
         self.z_grid = -2.0 * half_width + np.arange(2 * self.grid_x - 1) * self.h
         self._weights: np.ndarray | None = None
         self._fft_filter_cache: dict[int, np.ndarray] = {}
-        self._omega_fft_cache: dict[tuple[int, bytes], np.ndarray] = {}
+        self._omega_fft_cache: dict[tuple[int, bool, bytes], np.ndarray] = {}
 
     @property
     def barrier_cell_offset(self) -> float:
@@ -363,20 +384,40 @@ class QuadratureMath:
                 self._weights = weights * self.h / 3.0
         return self._weights
 
+    def fft_length(self, base_len: int) -> Tuple[int, bool]:
+        """The transform length of a convolution of two ``base_len`` sequences, and whether it runs on real FFTs.
+
+        The padding factor fixes a legacy length ``L = factor * base_len`` (``base_len`` when the factor is 1). When
+        ``L`` is even and at least ``2 * base_len - 1`` -- the length of the full LINEAR convolution, so no output
+        index wraps whatever the inputs' support -- the transform runs instead on the smallest even 5-smooth length
+        ``>= L`` (0.16.0 T5): the result is the same linear convolution, and the spectral filter, sampled on
+        ``|fftfreq| / max|fftfreq|`` with ``max|fftfreq| = 1/2`` at every even length, is the same function of the
+        physical frequency (sampled on a finer frequency grid, so its circular response periodises on the longer
+        length); the moves measured are round-off, max 2.5e-13 rel on the synthetic V1 book (owner-signed). Real
+        inputs then transform with ``rfft`` /
+        ``irfft``. Any other ``L`` (the circular factor 1, an odd factor) is kept as it is, on complex FFTs.
+        """
+        base_len = int(base_len)
+        legacy = base_len if self.fft_padding_factor <= 1 else int(self.fft_padding_factor * base_len)
+        if legacy % 2 == 0 and legacy >= 2 * base_len - 1:
+            return _even_5_smooth_at_least(legacy), True
+        return legacy, False
+
     def convolution_fft(self, omega_array: np.ndarray, u_array: np.ndarray) -> np.ndarray:
         omega_array = np.asarray(omega_array).ravel()
         u_array = np.asarray(u_array).ravel()
         if len(omega_array) != len(u_array):
             raise NumericalError("omega_array and u_array must have the same length.")
-        base_len = len(u_array)
-        fft_len = base_len if self.fft_padding_factor <= 1 else int(self.fft_padding_factor * base_len)
-        omega_fft = self._get_omega_fft(omega_array, fft_len)
-        u_fft = np.fft.fft(u_array, n=fft_len)
-        product = omega_fft * u_fft
+        fft_len, real = self.fft_length(len(u_array))
+        omega_fft = self._get_omega_fft(omega_array, fft_len, real)
+        if real:
+            product = omega_fft * np.fft.rfft(u_array, n=fft_len)
+        else:
+            product = omega_fft * np.fft.fft(u_array, n=fft_len)
         fft_filter = self._get_fft_filter(fft_len)
         if fft_filter is not None:
-            product *= fft_filter
-        f_array = np.fft.ifft(product).real
+            product *= fft_filter[: fft_len // 2 + 1] if real else fft_filter
+        f_array = np.fft.irfft(product, n=fft_len) if real else np.fft.ifft(product).real
         scale = self.h if self.integration_rule == "trapezoid" else self.h / 3.0
         return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * scale
 
@@ -392,19 +433,21 @@ class QuadratureMath:
                 "omega_array length must match u_array second dimension."
             )
 
-        base_len = len(omega_array)
-        fft_len = (
-            base_len
-            if self.fft_padding_factor <= 1
-            else int(self.fft_padding_factor * base_len)
-        )
-        omega_fft = self._get_omega_fft(omega_array, fft_len)
-        u_fft = np.fft.fft(u_array, n=fft_len, axis=1)
+        fft_len, real = self.fft_length(len(omega_array))
+        omega_fft = self._get_omega_fft(omega_array, fft_len, real)
+        if real:
+            u_fft = np.fft.rfft(u_array, n=fft_len, axis=1)
+        else:
+            u_fft = np.fft.fft(u_array, n=fft_len, axis=1)
         product = u_fft * omega_fft.reshape(1, -1)
         fft_filter = self._get_fft_filter(fft_len)
         if fft_filter is not None:
-            product *= fft_filter.reshape(1, -1)
-        f_array = np.fft.ifft(product, axis=1).real
+            shaped = fft_filter[: fft_len // 2 + 1] if real else fft_filter
+            product *= shaped.reshape(1, -1)
+        if real:
+            f_array = np.fft.irfft(product, n=fft_len, axis=1)
+        else:
+            f_array = np.fft.ifft(product, axis=1).real
         scale = self.h if self.integration_rule == "trapezoid" else self.h / 3.0
         return f_array[:, self.grid_x - 1 : 2 * self.grid_x - 1] * scale
 
@@ -415,30 +458,36 @@ class QuadratureMath:
         weighted values and the filter, so the filter may be carried by
         either factor. Carrying it here leaves an analytic kernel, which is
         what lets a readout evaluate the transition away from the nodes.
-        Returns the input unchanged when no filter is configured.
+        Returns the input unchanged when no filter is configured; otherwise
+        the filtered values on the whole padded lattice (``fft_length``).
         """
         u_array = np.asarray(u_array, dtype=float)
-        base_len = u_array.shape[-1]
-        fft_len = (
-            base_len
-            if self.fft_padding_factor <= 1
-            else int(self.fft_padding_factor * base_len)
-        )
+        fft_len, real = self.fft_length(u_array.shape[-1])
+        return self.apply_fft_filter(u_array, fft_len, real)
+
+    def apply_fft_filter(self, u_array: np.ndarray, fft_len: int, real: bool) -> np.ndarray:
+        """The spectral filter of length ``fft_len`` applied circularly along the last axis (zero-padded to it);
+        ``u_array`` unchanged when no filter is configured. ``real`` as ``fft_length`` returns it."""
         fft_filter = self._get_fft_filter(fft_len)
         if fft_filter is None:
             return u_array
+        u_array = np.asarray(u_array, dtype=float)
         axis = u_array.ndim - 1
+        if real:
+            half = fft_filter[: fft_len // 2 + 1]
+            shaped = half if axis == 0 else half.reshape(1, -1)
+            return np.fft.irfft(np.fft.rfft(u_array, n=fft_len, axis=axis) * shaped, n=fft_len, axis=axis)
         spectrum = np.fft.fft(u_array, n=fft_len, axis=axis)
         shaped = fft_filter if axis == 0 else fft_filter.reshape(1, -1)
         return np.fft.ifft(spectrum * shaped, axis=axis).real
 
-    def _get_omega_fft(self, omega_array: np.ndarray, fft_len: int) -> np.ndarray:
+    def _get_omega_fft(self, omega_array: np.ndarray, fft_len: int, real: bool = False) -> np.ndarray:
         omega_array = np.ascontiguousarray(omega_array, dtype=float)
-        key = (int(fft_len), omega_array.tobytes())
+        key = (int(fft_len), bool(real), omega_array.tobytes())
         cached = self._omega_fft_cache.get(key)
         if cached is not None:
             return cached
-        omega_fft = np.fft.fft(omega_array, n=fft_len)
+        omega_fft = np.fft.rfft(omega_array, n=fft_len) if real else np.fft.fft(omega_array, n=fft_len)
         self._omega_fft_cache[key] = omega_fft
         return omega_fft
 
