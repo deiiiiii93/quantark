@@ -80,7 +80,8 @@ For desk replication where engine times are remaining-trading-days/D
 (date-based products + `day_count_convention=BUSINESS_DAYS` + calendar —
 see `example/case_studies/phoenix_engine_diagnostics/phoenix_external_case_compare.py`), the vol surface is native
 and the **cash curves** are wrapped instead. Since 0.15.0 the environment does this itself when the curves are
-declared `CALENDAR_YEAR` (next section); the hand recipe below is what it builds:
+declared `CALENDAR_YEAR` (next section), with the same wrappers over a `DateKnotTimeMap` (0.16.0). The hand recipe
+below uses a `BusinessTimeMap`, which keeps the 0.15.0 lag after non-trading days:
 
 ```python
 from quantark.param.rrf import TradingClockRateCurve
@@ -146,7 +147,7 @@ env = PricingEnvironment(
 
 | Declaration | `BUSINESS_DAYS` environment | any other convention |
 |---|---|---|
-| `CALENDAR_YEAR` | the environment wraps the curve on its own `BusinessTimeMap` (needs `calendar` and `trading_clock_horizon`) | read as is (a wrapper declared `CALENDAR_YEAR` is unwrapped to its inner) |
+| `CALENDAR_YEAR` | the environment wraps the curve on its own `DateKnotTimeMap` (needs `calendar` and `trading_clock_horizon`) | read as is (a wrapper declared `CALENDAR_YEAR` is unwrapped to its inner) |
 | `TRADING_YEAR` | read as is; a wrapper is refused | refused |
 | none | refused unless the curve is exactly zero or already wrapped (a wrapper is re-anchored at the valuation date) | read as is (a wrapper is re-anchored at the valuation date) |
 

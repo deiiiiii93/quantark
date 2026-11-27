@@ -530,8 +530,8 @@ On a `BUSINESS_DAYS` environment, the cash curves declared `CALENDAR_YEAR` (rate
 calendar curve one or more days early after a weekend or holiday. They now read it at the date's actual calendar time.
 The 0.15.0 wrappers map trading time back to calendar time through `BusinessTimeMap`, whose knots sit at the end of each
 trading day. A date that follows a non-trading day therefore came back as the day after the previous trading day: the
-discount factor to a Monday was the calendar discount factor to Saturday. Values were always overstated (owner ruling,
-2026-11-27).
+discount factor to a Monday was the calendar discount factor to Saturday, so discount factors (at positive rates) were
+overstated (owner ruling, 2026-11-27).
 
 #### Changed
 
@@ -539,8 +539,8 @@ discount factor to a Monday was the calendar discount factor to Saturday. Values
   ACT/365 calendar time), linear between knots, and follows the environment's `holiday_time_adjustment`. Every
   declared cash curve reads the calendar curve at the actual date, as run 7's `CalendarQuotedVolSurface` does for the
   vol, so vol and cash now agree on every business date.
-  - SSE, 244 days, valued Fri 2026-01-16, 3%: the discount-factor error was +1.64e-4 on every Monday (a year out
-    too), +8.20e-4 on 02-24 (after Spring Festival), +2.45e-4 on 04-07 (after Qingming), and 0 after a trading day.
+  - SSE, 244 days, valued Fri 2026-01-16, 3%: the discount-factor error was ≈+1.6e-4 on every Monday (+1.64e-4 the next week,
+    +1.60e-4 a year out), +8.20e-4 on 02-24 (after Spring Festival), +2.45e-4 on 04-07 (after Qingming), and 0 after a trading day.
     It is now 0 on every date.
   - A European call (strike 103, 3% rate, 1% dividend) on the business-day clock now equals its calendar-day price to
     ≤ 3.7e-14 at Wednesday, Monday and post-holiday expiries. Before, it was -0.83% of premium on a Monday expiry and
@@ -549,6 +549,8 @@ discount factor to a Monday was the calendar discount factor to Saturday. Values
 - **Moved:** every price, greek and statistic on a `BUSINESS_DAYS` environment with `CALENDAR_YEAR` cash curves.
   - Flows and observations on a date after a non-trading day move by the amounts above.
   - A `FOLLOWING`-placed holiday flow (DCN) is discounted at the business date it is placed on.
+  - Fractional env times between two knots next to a weekend or holiday (engine sub-steps) move too: the midpoint
+    between Fri 01-23 and Mon 01-26 read 7.5 calendar days and now reads 8.5.
   - Every other date moves at round-off (≤ 5.1e-15 relative): the old knots were a running sum of 1/D, the new ones
     exact.
   - Unchanged, bit for bit: calendar-day environments, `TRADING_YEAR` curves, undeclared hand-wrapped curves and every

@@ -2,7 +2,8 @@
 
 A TradingClock wrapper (``TradingClockVolSurface``, ``TradingClockRateCurve``,
 ``TradingClockDividendYield``, ``TradingClockBasisYield``) re-expresses an inner object through a
-``BusinessTimeMap`` anchored at the environment's valuation date. Two wrappers
+``BusinessTimeMap`` anchored at the environment's valuation date (the environment's CALENDAR_YEAR-declared
+curves use its ``DateKnotTimeMap`` subclass, 0.16.0). Two wrappers
 are the same MARKET when their class, inner object and clock agree; the anchor
 is the valuation date's business and moves with TIME, so every scenario state
 re-anchors its wrappers at its own valuation date (sticky trading tenor).
