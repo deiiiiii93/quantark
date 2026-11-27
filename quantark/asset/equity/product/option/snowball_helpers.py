@@ -870,7 +870,9 @@ def create_ko_reset_snowball(
         initial_price: Reference price for payoff calculations
         strike: Strike price for embedded option
         maturity_pre: Pre-KI schedule horizon in years
-        maturity_post: Post-KI schedule horizon in years (absolute or offset)
+        maturity_post: Post-KI schedule horizon in years (absolute or offset). The note's maturity is the latest
+            possible end: max(maturity_pre, maturity_post) for ABSOLUTE; for REBASED, also the last KI observation
+            plus schedule 2's last offset (owner ruling O1, 2026-11-27)
         contract_multiplier: Underlying units represented by one contract
         pre_ko_barrier: Pre-KI KO barrier (default: 103% of initial_price)
         pre_ko_rate: Pre-KI KO rate (annualized)
@@ -966,6 +968,12 @@ def create_ko_reset_snowball(
     accrual_config = AccrualConfig(**accrual_kwargs) if accrual_kwargs else None
     airbag_config = AirbagConfig(**airbag_kwargs) if airbag_kwargs else None
 
+    # The exercise covers the latest possible end of schedule 2 (owner ruling O1, 2026-11-27): ABSOLUTE, schedule 2's
+    # last time; REBASED, a knock-in on the last knock-in observation plus schedule 2's last offset.
+    maturity = max(maturity_pre, maturity_post)
+    if post_ko_mode == PostKOScheduleMode.REBASED and ki_observation_dates and post_obs:
+        maturity = max(maturity, max(ki_observation_dates) + max(post_obs))
+
     return KnockOutResetSnowballOption(
         initial_price=initial_price,
         strike=strike,
@@ -975,7 +983,7 @@ def create_ko_reset_snowball(
         accrual_config=accrual_config,
         airbag_config=airbag_config,
         contract_multiplier=contract_multiplier,
-        maturity=max(maturity_pre, maturity_post),
+        maturity=maturity,
         post_ko_mode=post_ko_mode,
     )
 

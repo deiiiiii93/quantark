@@ -164,6 +164,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         super().validate(allow_zero_maturity=allow_zero_maturity)
         self._validate_dated_rebased_end()
         self._validate_schedule_two_ends_last()
+        self._validate_exercise_covers_schedule_two()
         self._validate_first_schedule_settlement_range()
 
     def __eq__(self, other):
@@ -288,6 +289,65 @@ class KnockOutResetSnowballOption(SnowballOption):
                 f"replaces schedule 1 by schedule 2 for the rest of the note's life: a knock-in on the first knock-in "
                 f"observation {show(first)} plus schedule 2's last offset ({offset}) ends {show(end)}, before schedule "
                 f"1's last observation {show(pre_end)}"
+            )
+
+    def _validate_exercise_covers_schedule_two(self) -> None:
+        """The exercise date must not precede the latest possible end of schedule 2 (owner ruling O1, 2026-11-27).
+
+        A knocked-in note observes schedule 2 up to its last observation and, if it has not knocked out, is a put to
+        the product's exercise date (run 9, D1); an exercise before schedule 2 can end would settle that put before the
+        schedule it follows ends, which no contract means. Checked on the booked records, so an aged contract is held to
+        the rule it was booked under:
+
+        - ABSOLUTE: the exercise date (numeric: ``maturity``) against schedule 2's last booked date (numeric: time);
+        - REBASED, numeric: ``maturity`` against the last knock-in observation plus schedule 2's last offset (a knock-in
+          on that observation ends latest). The dated REBASED floor is ``_validate_dated_rebased_end``.
+
+        Numeric times compare as one instant within the contract clock's tolerance (``same_instant``). Raises
+        ``ValidationError`` naming the dates.
+        """
+        post = self.post_barrier_config.ko_observation_schedule
+        if post is None or not post.records:
+            return
+        from quantark.asset.clock import ProductClock, product_clock
+
+        dated = product_clock(self) is ProductClock.DATE
+        if self.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
+            if dated:
+                if self.exercise_date is None:
+                    return
+                end = max(r.observation_date for r in post.records)
+                if self.exercise_date < end:
+                    raise ValidationError(
+                        f"KO-reset snowball (ABSOLUTE): exercise_date {self.exercise_date:%Y-%m-%d} precedes schedule "
+                        f"2's last observation {end:%Y-%m-%d}: a knocked-in note follows schedule 2 to its end and is "
+                        "a put to the exercise date, so the exercise date must not come before schedule 2 ends"
+                    )
+                return
+            end = max(float(r.observation_time) for r in post.records)
+            maturity = float(self.maturity)
+            if maturity < end and not same_instant(maturity, end):
+                raise ValidationError(
+                    f"KO-reset snowball (ABSOLUTE): maturity {maturity!r} precedes schedule 2's last observation "
+                    f"{end!r}: a knocked-in note follows schedule 2 to its end and is a put to the exercise date, so "
+                    "the maturity must not come before schedule 2 ends"
+                )
+            return
+        if dated:
+            return  # _validate_dated_rebased_end
+        ki = self.barrier_config.ki_observation_schedule
+        records = [] if ki is None else ki.records
+        if not records:
+            return
+        last_ki = max(float(r.observation_time) for r in records)
+        last_offset = max(float(r.observation_time) for r in post.records)
+        end = last_ki + last_offset
+        maturity = float(self.maturity)
+        if maturity < end and not same_instant(maturity, end):
+            raise ValidationError(
+                f"KO-reset snowball (REBASED): maturity {maturity!r} precedes the latest end of schedule 2: a knock-in "
+                f"on the last knock-in observation {last_ki!r} plus schedule 2's last offset ({last_offset!r}) ends "
+                f"{end!r}, and a knocked-in note follows schedule 2 to its end and is a put to the exercise date"
             )
 
     def _validate_first_schedule_settlement_time(self) -> None:

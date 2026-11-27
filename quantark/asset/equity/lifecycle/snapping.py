@@ -144,6 +144,37 @@ def _keep_schedule_two_last(contract) -> None:
                                            ko_observation_schedule=replace(post, records=records))
 
 
+def _keep_exercise_last(contract) -> None:
+    """A numeric REBASED KO-reset keeps "the exercise covers schedule 2" (owner ruling O1, 2026-11-27) on the day grid.
+
+    The latest end of a REBASED note is a SUM, the last knock-in plus the last offset, and the two rounded terms (and
+    the day ``_keep_schedule_two_last`` may give the last offset) can pass the rounded maturity on a contract booked on
+    or near the boundary with off-day times (364.8 + 273.4 = 638.2 days rounds to 638, but 365 + 274 = 639). The rule
+    holds on the booked times; on the day grid a knock-in on the last knock-in close ends on that day plus the snapped
+    offset, so the maturity moves to that end (the days ``round`` took off), and the snapped contract -- and every
+    knocked-in copy built from it -- stays valid. A contract whose snapped maturity already covers it is unchanged.
+    """
+    from quantark.util.enum import PostKOScheduleMode
+    from quantark.util.numerical import same_instant
+
+    if getattr(contract, "post_ko_mode", None) != PostKOScheduleMode.REBASED:
+        return
+    maturity = getattr(contract, "maturity", None)
+    if getattr(contract, "exercise_date", None) is not None or not isinstance(maturity, (int, float)):
+        return
+    ki = contract.barrier_config.ki_observation_schedule
+    post = contract.post_barrier_config.ko_observation_schedule
+    if any(s is None or not s.records for s in (ki, post)):
+        return
+    times = [r.observation_time for s in (ki, post) for r in s.records]
+    if any(t is None for t in times):
+        return
+    end = max(float(r.observation_time) for r in ki.records) + max(float(r.observation_time) for r in post.records)
+    if float(maturity) >= end or same_instant(float(maturity), end):
+        return
+    contract.maturity = snap_time(end)
+
+
 def snap_contract(product):
     """A deep copy of ``product`` with every numeric observation time and a numeric maturity snapped."""
     contract = deepcopy(product)
@@ -164,6 +195,8 @@ def snap_contract(product):
     if getattr(contract, "exercise_date", None) is None and isinstance(maturity, (int, float)) and is_off_day(maturity):
         contract.maturity = snap_time(float(maturity))
         moved = True
+    if moved and not dated_rebased:
+        _keep_exercise_last(contract)
     if moved and getattr(contract, "_terminal_accrual", None):
         # Snapping moves observation timing only: the terminal tenors (V0, V1) stay the contract's. A numeric terminal
         # is derived from the last fixing or the maturity, so a later validate() (QUAD V2 validates every product)
