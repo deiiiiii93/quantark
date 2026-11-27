@@ -304,8 +304,8 @@ relative off QUAD V2.
   - dated 1-day theta on a mid-week daily-KI, monthly-KO 1y snowball: 7.9e-5 relative; it was 1.7e-2. Its vega:
     1.7e-4; it was 1.0e-3.
   - vega across the exact-first-step threshold: 1.84e-4 per vol point. The leg still switches route there.
-  - breadth gate: 16 Snowball / Phoenix / KO-reset products, 32 vega and theta rows. None is worse than 0.15.0; the
-    worst ratio of new to old error is 0.96.
+  - breadth gate: 16 Snowball / Phoenix / KO-reset products, 32 vega and theta rows. None is worse than with the
+    pre-freeze re-sizing legs; the worst ratio of new to old error is 0.96.
 - **Unchanged by the freeze:** base price and statistics. On spot-independent vol (flat or term structure), delta,
   gamma and rho are also unchanged, including auto_converge and cell stretch. On a spot-dependent smile surface the
   delta/gamma legs now share the base lattice and move within V1's default-grid error: one product's gamma error goes
@@ -360,8 +360,9 @@ MC, the PDE and V1 read it. QUAD V2 let it fire: on the repro it priced 3.712 (+
 15 of the 33 transform lengths in the synthetic book had a prime factor of 400 or more, so numpy ran them through
 Bluestein. V1 now pads each linear convolution to the smallest even 5-smooth length at or above the old one and runs
 real FFTs; the adjoint transposes on the same length. A circular convolution at any length of at least 2b-1 is the
-exact linear convolution, so this is the same operator; the optional spectral filter is the same function of frequency,
-sampled on the finer grid. Factor 1 and odd padding factors keep their lengths (`QuadratureCore` and
+exact linear convolution, so with the filter off this is the same operator. The default spectral filter
+(`fft_filter_alpha` 12) is the same function of frequency, sampled on the finer grid, so default results agree to
+round-off rather than bit for bit. Factor 1 and odd padding factors keep their lengths (`QuadratureCore` and
 `DiscreteQuadEngine` are unchanged, bit for bit).
 
 - **Speed** (back to back, separate interpreters): synthetic V1 book 3.50x (47.1 s → 13.5 s), the full
@@ -401,6 +402,15 @@ covers it. KO-reset V1 projection and the knocked-in staging: 1.00-1.02x (QUAD V
   relative and flat in step count.
 - `greek_conventions_report.build_cash_greeks_report` reprices on the raw engine, outside the bump context (every
   engine family).
+- A carried-KI KO-reset valued strictly after schedule 2's last fixing but before the exercise date is priced to the
+  exercise date on today's spot by every engine (MC included): `get_post_maturity_time` falls back to the exercise
+  maturity once schedule 2's fixings are past. Under D31 the note was decided at that fixing (it needs the historical
+  fixing); e.g. -20.0 on the fixing day, -19.84 the day after. Pre-existing.
+- Under `auto_converge`, the frozen V1 clone does not carry the accepted rung's `local_steps_allowed`, so a bumped leg
+  may take a local stencil step the base rung refused (inside the local-stencil guard).
+- Phoenix V1 KO/coupon blending probe (planned D3) was not run: unmeasured.
+- KO-reset V1's projected KI-narrowing weight (`_event_weight`) is inert: a same-date discrete KI forces the
+  `pre_ko_last` route, whose cell-average KI blend ignores it.
 
 ## [0.15.0] - 2026-11-25
 
