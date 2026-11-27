@@ -216,6 +216,13 @@ class EnsembleConfig:
             )
         if self.strategy is None:
             raise ValidationError("EnsembleConfig.strategy is required")
+        if getattr(self.engine_config, "trading_clock", None) is not None:
+            # TODO(run 7 D7): the simulated-path engine on a business-day clock (a non-goal of the replay clock
+            # run): its market paths, ladders and life surfaces are on ACT/365 day times.
+            raise ValidationError(
+                "engine_config.trading_clock is not supported on a simulated path: the simulated-path engine prices "
+                "on the calendar clock; the business-day clock is a historical-replay feature"
+            )
         from quantark.backtest.strategy.futures_bucket_strategy import (
             FuturesBucketHedgeStrategy,
         )

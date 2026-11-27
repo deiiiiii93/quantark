@@ -26,6 +26,68 @@ from quantark.backtest.futures_ledger import FuturesRollPolicy  # noqa: F401,E40
 # vol-calibration engine must not depend on the backtest package config shape.
 from quantark.volcalibration.config import VolModelCalibrationConfig  # noqa: E402
 
+from quantark.priceenv.curve_quoting import CurveQuotingBasis  # noqa: E402
+from quantark.util.calendar import BusinessDayConvention, Calendar  # noqa: E402
+
+
+@dataclass(frozen=True)
+class TradingClockConfig:
+    """Price every replay day on a BUSINESS_DAYS trading clock (run 7, .ship/2026-11-26-replay-business-day-clock D1).
+
+    Set as ``AutocallableEngineConfig.trading_clock``; ``None`` (the default) keeps the calendar-day replay.
+
+    - ``calendar``: the quantark ``Calendar`` whose business days the clock counts (required). Every env of a run
+      holds this very object (the env's clock checks compare calendar identity).
+    - ``bus_days_in_year``: the annualisation denominator D (252 by default; 244 for SSE).
+    - ``holiday_time_adjustment``: where a holiday of ``calendar`` sits on the clock (PRECEDING by default;
+      UNADJUSTED is refused: on a business-day clock a holiday has no time of its own).
+    - ``vol_quoting``: how the day's vol is quoted. ``CALENDAR_YEAR`` (default; the market convention of replay's
+      vol column and the IV-surface artifacts) wraps it in ``CalendarQuotedVolSurface`` (exact total variance at every
+      business date); ``TRADING_YEAR`` uses it as is, read at trading time.
+
+    The cash curves (flat rate, implied / term dividend, basis) are always declared ``CALENDAR_YEAR``: replay's market
+    data is calendar-quoted, and the environment wraps them on its own trading clock.
+    """
+
+    calendar: Calendar
+    bus_days_in_year: int = 252
+    holiday_time_adjustment: BusinessDayConvention = BusinessDayConvention.PRECEDING
+    vol_quoting: CurveQuotingBasis = CurveQuotingBasis.CALENDAR_YEAR
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.calendar, Calendar):
+            raise ValidationError(
+                f"TradingClockConfig.calendar must be a quantark Calendar, got {type(self.calendar).__name__}"
+            )
+        days = self.bus_days_in_year
+        if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+            raise ValidationError(
+                f"TradingClockConfig.bus_days_in_year must be a positive integer, got {days!r}"
+            )
+        if not isinstance(self.holiday_time_adjustment, BusinessDayConvention):
+            raise ValidationError(
+                "TradingClockConfig.holiday_time_adjustment must be a BusinessDayConvention, "
+                f"got {self.holiday_time_adjustment!r}"
+            )
+        if self.holiday_time_adjustment is BusinessDayConvention.UNADJUSTED:
+            raise ValidationError(
+                "TradingClockConfig.holiday_time_adjustment=UNADJUSTED is not a placement: on a business-day clock "
+                "a holiday has no time of its own (use PRECEDING or FOLLOWING)"
+            )
+        if not isinstance(self.vol_quoting, CurveQuotingBasis):
+            raise ValidationError(
+                f"TradingClockConfig.vol_quoting must be a CurveQuotingBasis, got {self.vol_quoting!r}"
+            )
+
+
+def _refuse_trading_clock_with(engine_config, feature: str, why: str) -> None:
+    """Refuse ``feature`` on a run whose engine config carries a trading clock (run 7 D7)."""
+    if getattr(engine_config, "trading_clock", None) is not None:
+        raise ValidationError(
+            f"{feature} is not supported with engine_config.trading_clock (replay on a business-day clock): {why}"
+        )
+
+
 @dataclass
 class AutocallableEngineConfig:
     """
@@ -128,6 +190,8 @@ class AutocallableEngineConfig:
         "flat_q", "flat_forward_carry", "surface_forward_carry"
     ] = "flat_q"
     futures_curve_min_tenor_days: int = 7
+    # Run 7 (replay on a business-day clock, D1): None keeps today's calendar-day envs, byte-identical.
+    trading_clock: Optional[TradingClockConfig] = None
 
     def uses_term_dividend_source(self) -> bool:
         """True when the day's dividend object is a term structure chosen by
@@ -173,6 +237,17 @@ class AutocallableEngineConfig:
             )
         if self.vol_model_solver not in ("pde", "mc"):
             raise ValidationError("vol_model_solver must be 'pde' or 'mc'")
+        if self.trading_clock is not None and not isinstance(self.trading_clock, TradingClockConfig):
+            raise ValidationError(
+                f"trading_clock must be a TradingClockConfig or None, got {type(self.trading_clock).__name__}"
+            )
+        if self.vol_model != "bsm":
+            # TODO(run 7 D7): LV / Heston / SLV on the replay business-day clock -- the vol-model engines gate on
+            # GridVolSurface and calibrate on ACT/365 artifact times; the trading-clock support is BSM-only.
+            _refuse_trading_clock_with(
+                self, f"vol_model={self.vol_model!r}",
+                "the vol-model engines are calibrated and priced on the calendar clock; use vol_model='bsm'",
+            )
         if self.event_stats_fallback not in ("none", "mc"):
             raise ValidationError("event_stats_fallback must be 'none' or 'mc'")
         if self.dividend_source not in (
@@ -532,6 +607,12 @@ class AutocallableBacktestConfig:
             float(self.fixed_dividend_yield)
         ):
             raise ValidationError("fixed_dividend_yield must be finite")
+        if self.pnl_explain is not None:
+            # TODO(run 7 D7): PnL explain on the business-day clock -- the recorder ages and decomposes on ACT/365
+            # day times (unverified on a trading clock).
+            _refuse_trading_clock_with(
+                self.engine_config, "pnl_explain", "the explain recorder measures day times on ACT/365"
+            )
         _validate_term_dividend_source(
             self.engine_config,
             fixed_dividend_yield=self.fixed_dividend_yield,
@@ -659,6 +740,18 @@ class ReplayBacktestConfig:
             raise ValidationError("market_data is required")
         if self.strategy is None:
             self.strategy = AutocallableDeltaHedgeStrategy()
+        if self.pnl_explain is not None:
+            # TODO(run 7 D7): PnL explain on the business-day clock -- the recorder ages and decomposes on ACT/365
+            # day times (unverified on a trading clock).
+            _refuse_trading_clock_with(
+                self.engine_config, "pnl_explain", "the explain recorder measures day times on ACT/365"
+            )
+        if self.trade_value:
+            # TODO(run 7 D7): trade value on the business-day clock -- the leg books time their cash legs in
+            # ACT/365 years from the contract origin (unverified on a trading clock).
+            _refuse_trading_clock_with(
+                self.engine_config, "trade_value=True", "the cash-leg books time their legs on ACT/365"
+            )
         _validate_term_dividend_source(
             self.engine_config,
             fixed_dividend_yield=self.fixed_dividend_yield,

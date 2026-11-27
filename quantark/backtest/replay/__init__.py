@@ -14,6 +14,7 @@ from .config import (
     BookProduct,
     HedgeSpec,
     SurfaceGridConfig,
+    TradingClockConfig,
 )
 # .dashboard (plotly) is imported lazily via __getattr__ below.
 from .engine import BookAutocallableBacktestEngine, ReplayBacktestEngine
@@ -92,6 +93,7 @@ __all__ = [
     "ReplayProduct",
     "SignedDividendYield",
     "SurfaceGridConfig",
+    "TradingClockConfig",
     "calculate_basis_yield",
     "create_autocallable_engine",
     "create_event_stats_engine",

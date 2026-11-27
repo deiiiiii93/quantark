@@ -78,6 +78,7 @@ from quantark.backtest.replay import (
     ImpliedBasisYield,
     SignedDividendYield,
     SurfaceGridConfig,
+    TradingClockConfig,
     calculate_basis_yield,
     derive_implied_dividend_yield,
 )
@@ -134,6 +135,7 @@ __all__ = [
     "ImpliedBasisYield",
     "SignedDividendYield",
     "SurfaceGridConfig",
+    "TradingClockConfig",
     "calculate_basis_yield",
     "derive_implied_dividend_yield",
     # Shared utilities
