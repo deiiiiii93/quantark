@@ -181,3 +181,34 @@ def test_ensemble_config_refuses_an_engine_config_on_a_trading_clock():
                 provider="repricing", cache=CacheConfig(memory_bytes=8_000_000),
                 gate=GateConfig(sample_states=0, pv_tolerance_bp=0.0, delta_tolerance_hands=0.0)),
         )
+
+
+# --------------------------------------------------------------------------- run 8 D5 / R7: refusals re-checked
+
+
+def test_engine_config_refuses_trading_year_vol_quoting_with_a_surface_vol_source():
+    clock = _clock(vol_quoting=CurveQuotingBasis.TRADING_YEAR)
+    with pytest.raises(ValidationError, match="vol_quoting=TRADING_YEAR"):
+        AutocallableEngineConfig(vol_source="surface", trading_clock=clock)
+    assert AutocallableEngineConfig(vol_source="scalar", trading_clock=clock).trading_clock is clock
+    assert AutocallableEngineConfig(vol_source="surface", trading_clock=_clock()).trading_clock is not None
+
+
+def test_replay_engine_re_checks_a_vol_model_set_after_the_config():
+    from quantark.backtest.replay import ReplayBacktestEngine
+
+    config = _book()
+    config.engine_config.vol_model = "heston"          # the engine config is mutable
+    config.engine_config.vol_source = "surface"
+    with pytest.raises(ValidationError, match="trading_clock"):
+        ReplayBacktestEngine(config)
+
+
+def test_replay_engine_re_checks_a_surface_vol_source_set_after_the_config():
+    from quantark.backtest.replay import ReplayBacktestEngine
+
+    config = _book()
+    config.engine_config.trading_clock = _clock(vol_quoting=CurveQuotingBasis.TRADING_YEAR)
+    config.engine_config.vol_source = "surface"
+    with pytest.raises(ValidationError, match="vol_quoting=TRADING_YEAR"):
+        ReplayBacktestEngine(config)

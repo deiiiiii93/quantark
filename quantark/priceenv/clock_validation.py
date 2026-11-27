@@ -35,7 +35,9 @@ CASH_CURVE_FIELDS = (
 
 
 def validate_trading_clock_configuration(env) -> None:
-    """Every wrapped curve's TradingClock must match the env resolver."""
+    """Every wrapped curve's TradingClock must match the env resolver; a ``DateKnotTimeMap`` (cash wrappers and the
+    vol wrapper) must also place holidays by the environment's ``holiday_time_adjustment`` (run 8 D5, R8), since its
+    knots are the env times of business dates."""
     for name in ("rate_curve", "div_yield", "basis_yield", "vol_surface"):
         obj = getattr(env, name, None)
         clock = getattr(obj, "clock", None)
@@ -45,6 +47,28 @@ def validate_trading_clock_configuration(env) -> None:
         if clock is None:
             continue
         _check_clock(name, clock, env)
+        tm = getattr(obj, "time_map", None)
+        if isinstance(tm, DateKnotTimeMap) and tm.holiday_time_adjustment is not env.holiday_time_adjustment:
+            raise ValidationError(
+                f"{name} sits on a DateKnotTimeMap with holiday_time_adjustment={tm.holiday_time_adjustment.name} "
+                f"but the environment places holidays by {env.holiday_time_adjustment.name}; its knots would not be "
+                "the environment's times. One clock per configuration"
+            )
+
+
+def _refuse_calendar_quoted_vol_off_business(env) -> None:
+    """A ``CalendarQuotedVolSurface`` is read on the BUSINESS_DAYS trading axis; on any other convention the engine
+    times are calendar fractions, so it is refused (run 8 D5, R8). A ``vol_surface`` assigned after construction is
+    not checked here until the next re-anchor (documented)."""
+    from quantark.param.vol.trading_clock_surface import CalendarQuotedVolSurface
+
+    if (isinstance(env.vol_surface, CalendarQuotedVolSurface)
+            and env.day_count_convention != DayCountConvention.BUSINESS_DAYS):
+        raise ValidationError(
+            f"vol_surface is a CalendarQuotedVolSurface (a calendar quote on the BUSINESS_DAYS trading axis) but the "
+            f"environment's day_count_convention is {env.day_count_convention.name}; pass the calendar-quoted inner "
+            "surface as is, or use day_count_convention=BUSINESS_DAYS"
+        )
 
 
 def _check_clock(name, clock, env) -> None:
@@ -237,6 +261,7 @@ def resolve_cash_curve_quoting(env) -> None:
             setattr(env, field, _on_env_map(env, field, obj, env_map))
         else:
             setattr(env, field, _wrapper_for(field)(obj, env_map.get(field)))
+    _refuse_calendar_quoted_vol_off_business(env)
     surface = env.vol_surface
     if is_clock_wrapped(surface):
         # owner ruling D19: the vol wrapper follows the valuation date like a hand-wrapped cash curve
@@ -254,6 +279,7 @@ def re_anchor_clock_wrappers(env) -> None:
     new date is not before the relevant horizon, or a wrapper's clock no longer matches the environment). Every new
     wrapper is built before any field is assigned, so a raise leaves the curve fields as they were.
     """
+    _refuse_calendar_quoted_vol_off_business(env)
     business = env.day_count_convention == DayCountConvention.BUSINESS_DAYS
     env_map = _EnvMap(env)
     updates = {}

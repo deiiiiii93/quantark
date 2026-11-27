@@ -17,8 +17,9 @@ from .config import (
     ReplayBacktestConfig,
     ReplayProduct,
     SurfaceGridConfig,
+    validate_engine_config_trading_clock,
 )
-from .market import AutocallableMarketDataSet, ImpliedBasisYield, SignedDividendYield
+from .market import AutocallableMarketDataSet
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 
@@ -118,6 +119,8 @@ class ReplayBacktestEngine:
     """
 
     def __init__(self, config: ReplayBacktestConfig):
+        # run 8 D5 / R7: the engine config is mutable -- re-check the business-day clock refusals it ran when built
+        validate_engine_config_trading_clock(config.engine_config)
         self.config = config
         self.strategy = config.strategy
         self.hedge = config.hedge

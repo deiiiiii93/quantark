@@ -88,6 +88,34 @@ def _refuse_trading_clock_with(engine_config, feature: str, why: str) -> None:
         )
 
 
+def validate_engine_config_trading_clock(engine_config) -> None:
+    """The engine-config refusals of a replay business-day clock (run 7 D7; run 8 D5, R7).
+
+    Run by ``AutocallableEngineConfig.__post_init__`` and again by ``ReplayBacktestEngine.__init__``: the engine
+    config is a mutable dataclass, so ``vol_model`` / ``vol_source`` / ``trading_clock`` may change after it is built.
+    """
+    clock = getattr(engine_config, "trading_clock", None)
+    if clock is None:
+        return
+    vol_model = getattr(engine_config, "vol_model", "bsm")
+    if vol_model != "bsm":
+        # TODO(run 7 D7): LV / Heston / SLV on the replay business-day clock -- the vol-model engines gate on
+        # GridVolSurface and calibrate on ACT/365 artifact times; the trading-clock support is BSM-only.
+        _refuse_trading_clock_with(
+            engine_config, f"vol_model={vol_model!r}",
+            "the vol-model engines are calibrated and priced on the calendar clock; use vol_model='bsm'",
+        )
+    trading_year = clock.vol_quoting is CurveQuotingBasis.TRADING_YEAR
+    if trading_year and getattr(engine_config, "vol_source", "scalar") == "surface":
+        # TODO(run 8 D5): a trading-year-quoted IV surface channel -- the surface artifacts are calendar-quoted ACT/365
+        # and flat_atm_remaining samples them at the calendar tenor, so reading them per trading year mixes clocks.
+        raise ValidationError(
+            "engine_config.trading_clock.vol_quoting=TRADING_YEAR is not supported with vol_source='surface': the "
+            "IV-surface artifacts are calendar-quoted (ACT/365) and sampled at the calendar tenor; use "
+            "vol_quoting=CALENDAR_YEAR, or vol_source='scalar' for a trading-year vol column"
+        )
+
+
 @dataclass
 class AutocallableEngineConfig:
     """
@@ -241,13 +269,7 @@ class AutocallableEngineConfig:
             raise ValidationError(
                 f"trading_clock must be a TradingClockConfig or None, got {type(self.trading_clock).__name__}"
             )
-        if self.vol_model != "bsm":
-            # TODO(run 7 D7): LV / Heston / SLV on the replay business-day clock -- the vol-model engines gate on
-            # GridVolSurface and calibrate on ACT/365 artifact times; the trading-clock support is BSM-only.
-            _refuse_trading_clock_with(
-                self, f"vol_model={self.vol_model!r}",
-                "the vol-model engines are calibrated and priced on the calendar clock; use vol_model='bsm'",
-            )
+        validate_engine_config_trading_clock(self)
         if self.event_stats_fallback not in ("none", "mc"):
             raise ValidationError("event_stats_fallback must be 'none' or 'mc'")
         if self.dividend_source not in (

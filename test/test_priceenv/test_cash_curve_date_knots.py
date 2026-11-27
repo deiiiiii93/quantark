@@ -359,3 +359,46 @@ def test_mixed_maps_refuse_a_relationship_at_a_monday_tenor():
         pytest.approx(_c(WEDNESDAY), rel=1e-12)
     with pytest.raises(ValidationError, match="not on one clock"):
         relationship_tenor(env, BasisRelationshipMode.AUTO_ADJUST_BASIS, env_time(env, MONDAY))
+
+
+# ---------------------------------------------------------------------------------------------------- AC6 (D5) / R8
+
+
+def test_trading_clock_vol_surface_refuses_a_date_knot_map():
+    """``TradingClockVolSurface`` reads ``to_trading`` / ``initial_slope`` as the variance clock; on a
+    ``DateKnotTimeMap`` they mean the opposite (inverse of the carry map, calendar per trading time)."""
+    from quantark.param.vol import TradingClockVolSurface
+
+    with pytest.raises(ValidationError, match="DateKnotTimeMap"):
+        TradingClockVolSurface(FlatVolSurface(0.2), DateKnotTimeMap(TradingClock(CAL, D), VAL, HORIZON))
+    TradingClockVolSurface(FlatVolSurface(0.2), BusinessTimeMap(TradingClock(CAL, D), VAL, HORIZON))
+
+
+def test_env_refuses_a_vol_date_knot_map_on_another_holiday_convention():
+    vol = CalendarQuotedVolSurface(FlatVolSurface(0.2), DateKnotTimeMap(TradingClock(CAL, D), VAL, HORIZON,
+                                                                        BusinessDayConvention.FOLLOWING))
+    with pytest.raises(ValidationError, match="holiday_time_adjustment"):
+        _env(FlatRateCurve(0.03), vol=vol)
+    env = _env(FlatRateCurve(0.03), vol=vol, holiday=BusinessDayConvention.FOLLOWING)
+    assert env.vol_surface is vol
+
+
+def test_env_refuses_an_undeclared_cash_date_knot_map_on_another_holiday_convention():
+    hand = TradingClockDividendYield(ContinuousDividendYield(0.01), DateKnotTimeMap(
+        TradingClock(CAL, D), VAL, HORIZON, BusinessDayConvention.FOLLOWING))
+    with pytest.raises(ValidationError, match="holiday_time_adjustment"):
+        _env(FlatRateCurve(0.03), hand, div_yield_quoting=None)
+
+
+def test_calendar_quoted_vol_on_a_calendar_day_env_refuses_at_construction_and_re_anchor():
+    vol = CalendarQuotedVolSurface(FlatVolSurface(0.2), DateKnotTimeMap(TradingClock(CAL, D), VAL, HORIZON))
+    for convention in (DayCountConvention.CALENDAR_DAYS, DayCountConvention.ACT_365):
+        with pytest.raises(ValidationError, match="BUSINESS_DAYS"):
+            PricingEnvironment(rate_curve=FlatRateCurve(0.03), valuation_date=VAL, spot_quote=SpotQuote(SPOT),
+                               vol_surface=vol, day_count_convention=convention, calendar=CAL)
+    env = PricingEnvironment(rate_curve=FlatRateCurve(0.03), valuation_date=VAL, spot_quote=SpotQuote(SPOT),
+                             vol_surface=FlatVolSurface(0.2), calendar=CAL)
+    env.vol_surface = vol            # a post-construction assignment is not checked (documented) ...
+    with pytest.raises(ValidationError, match="BUSINESS_DAYS"):
+        env.valuation_date = WEDNESDAY  # ... but the next re-anchor refuses it, leaving the env as it was
+    assert env.valuation_date == VAL and env.vol_surface is vol

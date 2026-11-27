@@ -41,6 +41,14 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
     def __post_init__(self) -> None:
         if not isinstance(self.inner, BlackImpliedVolSurface):
             raise ValidationError("inner must be a BlackImpliedVolSurface")
+        if isinstance(self.time_map, DateKnotTimeMap):
+            # run 8 D5: on a DateKnotTimeMap to_trading is the inverse of the carry map and initial_slope is calendar
+            # per trading time -- the opposite of the variance clock this wrapper reads
+            raise ValidationError(
+                "TradingClockVolSurface needs a BusinessTimeMap (the variance clock); a DateKnotTimeMap's "
+                "to_trading / initial_slope have the opposite meaning. A calendar-quoted surface on the BUSINESS_DAYS "
+                "axis is a CalendarQuotedVolSurface"
+            )
         object.__setattr__(self, "is_smile", bool(self.inner.is_smile))
 
     def total_variance(self, strike: float, time_to_maturity, spot: float):
