@@ -104,11 +104,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
-        return self._price_once(product, pricing_env)
+        return self._converging(lambda: self._price_once(product, pricing_env), None)
 
     def _folded_solve(self, product, pricing_env, fold) -> float:
         """``price`` never auto-converges on this engine, so neither does the folded solve."""
-        return self._price_once(product, pricing_env, fold=fold)
+        return self._converging(lambda: self._price_once(product, pricing_env, fold=fold), None)
 
     def _auto_converges(self) -> bool:
         """``price`` never runs the ``auto_converge`` ladder here, whatever the params say."""
@@ -833,7 +833,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             return None
         if pricing_env is None:
             raise PricingError("PricingEnvironment is required for KOResetSnowballQuadEngine.")
-        return self._compute_event_stats(product, pricing_env, streams=streams)
+        return self._converging(lambda: self._compute_event_stats(product, pricing_env, streams=streams), None)
 
     _statistics_family = "ko_reset"
 

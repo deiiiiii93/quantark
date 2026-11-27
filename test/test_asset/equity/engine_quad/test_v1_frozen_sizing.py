@@ -295,16 +295,59 @@ class TestCloneContract:
         assert unfrozen._last_local_steps == ()
         assert math.isfinite(leg)
 
-    def test_a_leg_the_guard_refuses_on_the_frozen_cell_is_refused(self):
-        """The same knock-out barrier observed on both sides of that step: the stencil cannot carry it, so the
-        vol-19% leg on the frozen cell is refused, by the rule a solve on that cell applies today."""
+    def test_a_leg_the_frozen_cell_refuses_prices_on_its_own_sizing(self):
+        """The same knock-out barrier observed on both sides of that step: the stencil cannot carry it, so on the
+        frozen cell the vol-19% leg is refused. A greek that priced must keep pricing: that leg alone falls back to
+        its own sizing (which resolves the step), bitwise today's leg, and is counted."""
         delta = (0.735 * default_h(0.2) / 0.2) ** 2
         product = float_snowball((0.25, 0.5, 0.5 + delta, 0.75, 1.0), QUARTERS)
+        params = QuadParams()
+        clone = SnowballQuadEngine(params).create_bump_context(product, env(0.2))
+        base = clone.price(product, env(0.2))
+        assert base.hex() == SnowballQuadEngine(params).price(product, env(0.2)).hex()
+        assert clone.frozen_sizing_fallbacks == 0
+        leg = clone.price(product, env(0.19))
+        assert leg.hex() == SnowballQuadEngine(params).price(product, env(0.19)).hex()
+        assert clone.frozen_sizing_fallbacks == 1
+        assert clone.price(product, env(0.21)) != SnowballQuadEngine(params).price(product, env(0.21))   # frozen
+        assert clone.frozen_sizing_fallbacks == 1
+        clone.calculate_event_stats(product, env(0.19))           # statistics fall back the same way
+        assert clone.frozen_sizing_fallbacks >= 2
+
+    def test_under_auto_converge_a_refused_leg_runs_its_own_ladder(self, monkeypatch):
+        """The fallback is the leg's own sizing, which under ``auto_converge`` is its ladder (forced refusal: the
+        frozen rung resolves every step of a natural case)."""
+        product, pricing_env, leg_env = dated_snowball(1.0, 3, "discrete"), env(), env(0.19)
+        clone = SnowballQuadEngine(QuadParams(auto_converge=True)).create_bump_context(product, pricing_env)
+        original = SnowballQuadEngine._require_resolved_kernels
+
+        def refuse_on_the_frozen_cell(self, times, tau, h, **kw):
+            vol_19 = tau[-1] < 0.5 * 0.195 ** 2 * (times[-1] - times[-2])
+            if self._frozen_sizing is not None and not self.__dict__.get("_frozen_suspended") and vol_19:
+                raise UnderResolvedStepError("forced")
+            return original(self, times, tau, h, **kw)
+
+        monkeypatch.setattr(SnowballQuadEngine, "_require_resolved_kernels", refuse_on_the_frozen_cell)
+        leg = clone.price(product, leg_env)
+        assert clone.frozen_sizing_fallbacks == 1
+        assert leg.hex() == SnowballQuadEngine(QuadParams(auto_converge=True)).price(product, leg_env).hex()
+
+    def test_volga_that_priced_still_prices(self):
+        delta = (0.735 * default_h(0.2) / 0.2) ** 2
+        product = float_snowball((0.25, 0.5, 0.5 + delta, 0.75, 1.0), QUARTERS)
+        volga = calc().calculate(product, env(0.2), SnowballQuadEngine(QuadParams()), greeks=["volga"])["volga"]
+        assert math.isfinite(volga)
+
+    def test_a_base_the_guard_refuses_still_raises(self):
+        """Base pricing is untouched: a contract today's sizing refuses is refused on the clone, with today's error."""
+        delta = (0.69 * default_h(0.2) / 0.2) ** 2
+        product = float_snowball((0.25, 0.5, 0.5 + delta, 0.75, 1.0), QUARTERS)
+        with pytest.raises(UnderResolvedStepError, match="same barrier") as today:
+            SnowballQuadEngine(QuadParams()).price(product, env(0.2))
         clone = SnowballQuadEngine(QuadParams()).create_bump_context(product, env(0.2))
-        clone.price(product, env(0.2))
-        with pytest.raises(UnderResolvedStepError, match="same barrier"):
-            clone.price(product, env(0.19))
-        assert math.isfinite(SnowballQuadEngine(QuadParams()).price(product, env(0.19)))   # its own cell resolves it
+        with pytest.raises(UnderResolvedStepError, match="same barrier") as frozen:
+            clone.price(product, env(0.2))
+        assert str(frozen.value) == str(today.value)
 
 
 SIZING_LEAD = (2.0 * (10.0 * 0.2 + 1.02) * 2.5 / (0.2 * 5000.0)) ** 2

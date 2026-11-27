@@ -7,6 +7,7 @@ Implements a direct two-state (knocked-in / not-knocked-in) quadrature recursion
 from __future__ import annotations
 
 import copy
+import logging
 import math
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -71,6 +72,8 @@ from quantark.util.numerical import (
 
 if TYPE_CHECKING:
     from quantark.cashleg.folding import FoldOverlay
+
+logger = logging.getLogger(__name__)
 
 # Broadie-Glasserman-Kou (1997) discrete-monitoring barrier correction:
 # beta = -zeta(1/2) / sqrt(2*pi). A barrier monitored discretely at spacing
@@ -217,6 +220,8 @@ class SnowballQuadEngine(BaseEngine):
     _frozen_clone = False
     #: the sizing record of the last solve, with its final cell (a diagnostic)
     _last_sizing: Optional[V1Sizing] = None
+    #: legs a bump context priced on their own sizing because routing on the frozen cell refused them
+    frozen_sizing_fallbacks: int = 0
 
     def _auto_converges(self) -> bool:
         """Whether ``price`` refines through the ``auto_converge`` ladder (KO-reset never does)."""
@@ -224,15 +229,32 @@ class SnowballQuadEngine(BaseEngine):
 
     def _converging(self, once, ladder):
         """``once()``, or the ``auto_converge`` ladder -- unless a bump context's record sizes this contract: its base
-        ladder already chose the rung, so a bumped leg is one solve on it."""
-        if not self._auto_converges():
-            return once()
-        if self._frozen_sizing is None:
-            return ladder()
+        ladder already chose the rung, so a bumped leg is one solve on it.
+
+        A leg whose routing on the frozen cell is refused (``UnderResolvedStepError``: the kernel guard, recomputed on
+        that cell) is priced on its own sizing instead, exactly the solve it got before 0.16.0 (bitwise), so a greek
+        that priced never starts raising; a leg its own sizing refuses too raises as before. Counted in
+        ``frozen_sizing_fallbacks``.
+        """
+        own = ladder if self._auto_converges() else once
+        if self._frozen_sizing is None or self.__dict__.get("_frozen_suspended"):
+            return own()
+        self._frozen_hit = False
         try:
             return once()
         except _OutsideFrozenSizing:
             return ladder()
+        except UnderResolvedStepError as refused:
+            if not self._frozen_hit:
+                raise                             # the leg sized itself already: today's refusal
+            self.frozen_sizing_fallbacks += 1
+            logger.debug("QUAD V1 bump context: the frozen cell refuses this leg (%s); pricing it on its own sizing",
+                         refused)
+            self._frozen_suspended = True
+            try:
+                return own()
+            finally:
+                self.__dict__.pop("_frozen_suspended", None)
 
     def create_bump_context(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> "SnowballQuadEngine":
         """A clone of this engine holding the BASE sizing record (owner ruling 2026-11-26, "freeze sizing at base").
@@ -260,6 +282,7 @@ class SnowballQuadEngine(BaseEngine):
             _frozen_sizing=record,
             _frozen_product=product,
             _frozen_key=self._contract_key(product),
+            frozen_sizing_fallbacks=0,
             _bridge_kernel_cache={},
             _backward_grids={},
         )
@@ -308,8 +331,9 @@ class SnowballQuadEngine(BaseEngine):
         """One solve's sizing record (side-effect free, no solve): a bump context's base record for the contract it was
         sized for, else the node count from the knock-in spacing and the domain from ``maturity`` and ``vol``."""
         record = self._frozen_sizing
-        if record is not None:
+        if record is not None and not self.__dict__.get("_frozen_suspended"):
             if self._frozen_covers(product, maturity):
+                self._frozen_hit = True
                 return record
             if self._auto_converges():
                 raise _OutsideFrozenSizing()
