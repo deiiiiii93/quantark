@@ -2,10 +2,16 @@
 
 Spec: docs/superpowers/specs/2026-09-01-trading-clock-vol-design.md §4.3.
 DF_td(u) = DF_cal(to_calendar(u)). ``to_calendar`` is the CONTINUOUS
-knot-to-knot map, so a holiday's carry spreads across its adjacent trading
-tick instead of appearing as a jump (review iter-2 P2a). DF ratios
-telescope exactly; the D5 invariant (same DF for the same date) holds at
-every trading-date knot.
+knot-to-knot map, so carry has no jumps (review iter-2 P2a). DF ratios
+telescope exactly.
+
+Which map: an environment's CALENDAR_YEAR declaration wraps on a
+``DateKnotTimeMap`` (0.16.0): one knot per business date at its actual
+ACT/365 calendar time, so a Monday or a post-holiday date reads the
+calendar curve at that date. A hand-made ``BusinessTimeMap`` puts its
+knots at the end of each trading day, so a date after a non-trading day
+reads the day after the previous trading day (DF to a Monday =
+DF_cal(Saturday)); it is kept as is for undeclared hand-wrapped curves.
 """
 from __future__ import annotations
 

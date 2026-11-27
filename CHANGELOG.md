@@ -515,18 +515,69 @@ The MC event-statistics fallback lets a `ValidationError` through instead of tur
 - **PDE grid.** The PDE's default grid has `steps_per_day × bus_days_in_year` steps per env year.
 - **Cash-curve lag.** On a Monday or after a holiday, the 0.15.0 cash wrappers read the calendar curve at the day after
   the previous trading day (DF to a Monday = DF_cal(Saturday)). The run measured this on a European call, strike 103 at
-  3%: -0.83% of premium on a Monday expiry and -1.73% after Spring Festival. The owner ruled it
-  fixed in this release, in a follow-up change to the cash wrappers (run 8 of the 0.16.0 queue).
+  3%: -0.83% of premium on a Monday expiry and -1.73% after Spring Festival. Fixed in this
+  release: "Business-day cash curves read the actual date" below (owner ruling).
 - **Fingerprinted trees.** This change edits `quantark/param` and `engine/quad/v2` (intraday certificate trees).
 
 #### Open items
 
-- **Late `trading_clock`.** `AutocallableEngineConfig` is mutable: a `trading_clock` set after construction skips the
-  vol-model refusal.
-- **Unchecked hand-built wrappers.** `TradingClockVolSurface` does not refuse a `DateKnotTimeMap`, whose slope and
-  `to_trading` have the opposite meaning. The env's clock check does not compare the vol map's
-  `holiday_time_adjustment`, and does not check a `CalendarQuotedVolSurface` placed on a calendar-day env. Replay builds
-  neither case.
+- **Late `trading_clock`.** Fixed in this release: the replay engine re-checks the refusals at start.
+- **Unchecked hand-built wrappers.** Fixed in this release ("Business-day cash curves read the actual date", guards).
+
+### Business-day cash curves read the actual date
+
+On a `BUSINESS_DAYS` environment, the cash curves declared `CALENDAR_YEAR` (rate, dividend, basis) used to read the
+calendar curve one or more days early after a weekend or holiday. They now read it at the date's actual calendar time.
+The 0.15.0 wrappers map trading time back to calendar time through `BusinessTimeMap`, whose knots sit at the end of each
+trading day. A date that follows a non-trading day therefore came back as the day after the previous trading day: the
+discount factor to a Monday was the calendar discount factor to Saturday. Values were always overstated (owner ruling,
+2026-11-27).
+
+#### Changed
+
+- **The environment's map is a `DateKnotTimeMap`.** It has one knot per business date at (the date's env time, its
+  ACT/365 calendar time), linear between knots, and follows the environment's `holiday_time_adjustment`. Every
+  declared cash curve reads the calendar curve at the actual date, as run 7's `CalendarQuotedVolSurface` does for the
+  vol, so vol and cash now agree on every business date.
+  - SSE, 244 days, valued Fri 2026-01-16, 3%: the discount-factor error was +1.64e-4 on every Monday (a year out
+    too), +8.20e-4 on 02-24 (after Spring Festival), +2.45e-4 on 04-07 (after Qingming), and 0 after a trading day.
+    It is now 0 on every date.
+  - A European call (strike 103, 3% rate, 1% dividend) on the business-day clock now equals its calendar-day price to
+    ≤ 3.7e-14 at Wednesday, Monday and post-holiday expiries. Before, it was -0.83% of premium on a Monday expiry and
+    -1.73% after Spring Festival.
+  - A dated one-year snowball (monthly KO, QUAD V1) valued on that environment goes from 99.365176 to 99.363132.
+- **Moved:** every price, greek and statistic on a `BUSINESS_DAYS` environment with `CALENDAR_YEAR` cash curves.
+  - Flows and observations on a date after a non-trading day move by the amounts above.
+  - A `FOLLOWING`-placed holiday flow (DCN) is discounted at the business date it is placed on.
+  - Every other date moves at round-off (≤ 5.1e-15 relative): the old knots were a running sum of 1/D, the new ones
+    exact.
+  - Unchanged, bit for bit: calendar-day environments, `TRADING_YEAR` curves, undeclared hand-wrapped curves and every
+    vol path.
+- **A declaration owns the map.** A curve declared `CALENDAR_YEAR` that was hand-wrapped on a `BusinessTimeMap` is moved
+  onto the environment's map at construction. Before, it moved only after a valuation-date move. Undeclared
+  hand-wrapped curves stay on their own maps and keep the old lag; the docs say so. An environment holding both kinds
+  refuses a relationship tenor as "not on one clock".
+- **Reach.** The map reaches the first business date on or after `trading_clock_horizon`, so short horizons such as
+  "last date + 1 day" keep building. A read past the last knot raises.
+- **New refusal.** A `FOLLOWING` environment valued on a holiday of its calendar is refused, at construction and on any
+  `valuation_date` move: the next business date would sit at u = 0 with calendar carry already accrued. Paths that can
+  reach it on such an environment are a theta calendar-day bump onto a weekend, a pnl-explain t1 or scenario date on a
+  non-business day, and any assignment of a holiday valuation date. `PRECEDING`, the default, is unaffected.
+- **Guards (run 7 review items).**
+  - `TradingClockVolSurface` refuses a `DateKnotTimeMap`, whose slope runs the other way.
+  - A `DateKnotTimeMap` on a wrapper must carry the environment's `holiday_time_adjustment`.
+  - `CalendarQuotedVolSurface` is refused on a non-`BUSINESS_DAYS` environment.
+  - The replay re-checks the trading-clock refusals when the engine starts, since the engine config is mutable.
+  - `vol_quoting=TRADING_YEAR` with `vol_source="surface"` is refused: the surface artifacts are calendar-quoted.
+- `BusinessTimeMap.u_knots` is now public; carry rho-q bucket bumps read it.
+- **Speed.** Building a business-day environment with declared curves takes 0.56 ms (was 0.19 ms). Pricing on it is
+  unchanged (1.00–1.03x, back to back).
+
+#### Notes
+
+- Re-pinned tests are listed in the run report, split into lag moves and round-off moves. They include the
+  environment-vs-hand-recipe pins, now on a `DateKnotTimeMap` recipe, and run 7's measurement of the lag, now an
+  equality. No certificate moved.
 
 ## [0.15.0] - 2026-11-25
 

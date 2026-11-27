@@ -6,6 +6,16 @@ trading day, exactly flat (stored knot value, no arithmetic) across
 holidays. ``to_calendar`` places CARRY: the continuous piecewise-linear map
 between consecutive trading-date knots — deliberately NOT the pointwise
 inverse of ``to_trading``; the two agree exactly at trading-date knots.
+Those knots sit at the END of each trading day, so a date after a
+non-trading day maps back to the day after the previous trading day.
+
+``DateKnotTimeMap`` (0.16.0) maps through the business DATES instead: one
+knot per business date at (its env time, its ACT/365 calendar time), so
+every business date — Mondays and post-holiday dates included — is exact.
+The environment's CALENDAR_YEAR-declared cash curves and
+``CalendarQuotedVolSurface`` use it; its ``initial_slope`` / ``to_trading``
+are calendar-per-trading (the opposite direction), so
+``TradingClockVolSurface`` refuses it.
 """
 from __future__ import annotations
 

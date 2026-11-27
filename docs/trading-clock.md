@@ -150,11 +150,21 @@ env = PricingEnvironment(
 | `TRADING_YEAR` | read as is; a wrapper is refused | refused |
 | none | refused unless the curve is exactly zero or already wrapped (a wrapper is re-anchored at the valuation date) | read as is (a wrapper is re-anchored at the valuation date) |
 
-- The environment's wrapping is exactly the hand recipe above (`TradingClockRateCurve` /
-  `TradingClockDividendYield` / `TradingClockBasisYield` over `BusinessTimeMap(TradingClock(calendar,
-  bus_days_in_year), valuation_date, trading_clock_horizon)`): the same prices bit for bit on every engine family.
-- `trading_clock_horizon` must lie strictly after the last date priced. `BusinessTimeMap` counts whole days from the
-  valuation instant, so with a time-of-day valuation (14:55) use last date + 1 day.
+- **The environment's map reads the actual date (0.16.0).** The environment wraps declared curves
+  (`TradingClockRateCurve` / `TradingClockDividendYield` / `TradingClockBasisYield`) over
+  `DateKnotTimeMap(TradingClock(calendar, bus_days_in_year), valuation_date, trading_clock_horizon,
+  holiday_time_adjustment)`. That map has one knot per business date: the date's env time against its actual
+  ACT/365 calendar time, linear between knots.
+  - A Monday, or the first day after a holiday, reads the calendar curve at that date.
+  - 0.15.0 used `BusinessTimeMap`, whose knots sit at the end of each trading day. A Monday was discounted as the
+    Saturday: +1.64e-4 on the DF at 3%, and +8.20e-4 after Spring Festival.
+  - A hand-made recipe on a `BusinessTimeMap` keeps that lag. A declared curve is always moved onto the
+    environment's map; an undeclared hand-wrapped curve is left as built.
+  - An environment holding both kinds can refuse a relationship tenor as "not on one clock".
+- `trading_clock_horizon` must lie strictly after the last date priced. The map reaches the first business date
+  on or after the horizon, and a read past its last knot raises.
+- A `FOLLOWING` environment valued on a holiday is refused, because the next business date would sit at u = 0
+  with calendar carry already accrued. This applies at construction and on a `valuation_date` move.
 - **The map follows the valuation date.** `dataclasses.replace(env, valuation_date=d)` and a plain
   `env.valuation_date = d` (what numerical theta, the product theta helpers, dynamic scenarios and lifecycle do on
   a copy) re-anchor every wrapped cash curve at `d`: an environment-made one on the environment's horizon, a
@@ -228,7 +238,9 @@ a Monday and the first day after a holiday.
 
 `BusinessTimeMap.to_calendar` is not used here. It maps a date after a non-trading
 day back to the day after the previous trading day, so it would drop the weekend's
-variance. The env re-anchors the wrapper like any clock wrapper.
+variance. The environment's declared cash curves use the same `DateKnotTimeMap`, so
+vol and cash agree on every business date. The env re-anchors the wrapper like any
+clock wrapper.
 `parallel_shifted` and `bump_unit_vol` act on the calendar quote. QUAD V2 accepts
 it when the inner is deterministic (flat or term structure).
 
