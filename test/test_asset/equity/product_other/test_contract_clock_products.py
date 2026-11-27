@@ -160,7 +160,7 @@ class TestRebased:
         record = p.barrier_config.ki_observation_schedule.records[0]
         copy = p.with_absolute_schedule_2(0.1, anchor=knock_in_anchor_for(record, 0))
         assert times(copy.post_barrier_config.ko_observation_schedule) == [0.2, 0.3]
-        assert copy.maturity == 0.3
+        assert copy.maturity == p.maturity == 0.5               # the exercise kept (run 9, D5)
 
 
 class TestCheckpointOneFixes:

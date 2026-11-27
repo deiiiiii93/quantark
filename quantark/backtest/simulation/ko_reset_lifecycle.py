@@ -3,8 +3,9 @@
 Every rule is ``KOResetLifecycleTracker``'s applied to arrays, on the days its ``resolve_calendar_schedule``
 names: a schedule-1 knock-out ends the path's day (R3); a knock-in is tested only while schedule 1 is live (R2)
 and switches the path to schedule 2 from that close, inclusive (R1), consuming schedule-2 records that fell due
-on an earlier close; a path not knocked in at schedule 1's end matures there on V0; a knocked-in path matures on
-V1 at its schedule 2's end -- its own end under REBASED, placed by its knock-in day.
+on an earlier close; a path not knocked in at schedule 1's end matures there on V0; a knocked-in path observes its
+schedule 2 (its own under REBASED, placed by its knock-in day) and, not knocked out, matures on V1 at the product's
+exercise date (owner ruling 2026-11-27, run 9: a live put to the exercise date, paid at the product terminal).
 """
 from __future__ import annotations
 
@@ -132,7 +133,7 @@ class KOResetVectorLifecycle(VectorLifecycle):
                                      schedule.pre_settlement_day, schedule.pre_settlement_delay)
 
     def _final_maturity(self, p, schedule, d, spot, payoff_fn) -> List[LifecycleRecord]:
-        """Knocked in: V1 at the knocked-in contract's end (each knock-in day's own under REBASED)."""
+        """Knocked in: V1 at the exercise date (the placement's ``final_due_day``, one day for every knock-in day)."""
         records: List[LifecycleRecord] = []
         for group, placement in self._groups(p, schedule, self.alive[p] & self.knocked_in[p]):
             if placement.final_due_day != d:

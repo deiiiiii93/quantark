@@ -623,13 +623,18 @@ class KnockOutResetSnowballOption(SnowballOption):
         """The ABSOLUTE contract a REBASED one becomes once knocked in at ``knock_in_time``.
 
         On the date clock ``knock_in_time`` is the knock-in DATE: schedule 2 becomes the dated records on the
-        generated dates of that knock-in (``rebased_dates_after``) and the contract's ``exercise_date`` the last of
-        them (ship spec 2026-10-26, Decision 6). Below, the numeric clock.
+        generated dates of that knock-in (``rebased_dates_after``; ship spec 2026-10-26, Decision 6). Below, the
+        numeric clock.
 
         ``knock_in_time`` is TIMING: the knock-in close on this product's own clock (years from its numeric origin;
-        negative for a knock-in before it). Every schedule-2 record is observed at ``knock_in_time + offset`` and the
-        contract ends at ``knock_in_time + max(offsets)``, the REBASED maturity (``get_post_maturity_time(ki_time)``),
-        so V1 is paid and discounted when it ends.
+        negative for a knock-in before it). Every schedule-2 record is observed at ``knock_in_time + offset``.
+
+        The copy keeps the contract's exercise date (numeric: ``maturity``) and settlement terms: a knocked-in note
+        observes schedule 2 up to its last observation and is then a live put to the PRODUCT'S EXERCISE DATE, paid at
+        the product terminal (owner ruling 2026-11-27, run 9, D5). Construction guarantees that every knock-in on a
+        knock-in record ends schedule 2 on or before the exercise (owner ruling O1); a knock-in close later than its
+        record (a record due on a non-trading day fires on the next close) can place schedule 2 past it, which the
+        contract does not define: refused (``ValidationError``).
 
         ``anchor`` is ACCRUAL: the knock-in record that fired, at its contractual fixing (accrual time spec §5.1),
         resolved once at the knock-in. Each converted record keeps its quoted ``relative`` period with the anchor
@@ -674,8 +679,9 @@ class KnockOutResetSnowballOption(SnowballOption):
                 ko_observation_dates=None,
             )
             product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
-            product.exercise_date = max(dates)
-            product.maturity = None
+            if self.exercise_date is not None and max(dates) > self.exercise_date:
+                _refuse_schedule_two_past_exercise(
+                    f"{knock_in_time:%Y-%m-%d}", f"{max(dates):%Y-%m-%d}", f"{self.exercise_date:%Y-%m-%d}")
             return self._with_converted_terminals(product, embedded)
 
         shift = float(knock_in_time)
@@ -701,7 +707,10 @@ class KnockOutResetSnowballOption(SnowballOption):
             ko_observation_dates=None,
         )
         product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
-        product.maturity = placed(max(float(record.observation_time) for record in schedule.records))
+        end = max(float(record.observation_time) for record in records)
+        maturity = float(self.maturity)
+        if end > maturity and not same_instant(end, maturity):
+            _refuse_schedule_two_past_exercise(repr(shift), repr(end), repr(maturity))
         canonicalize_contract_clock(product)
         return self._with_converted_terminals(product, embedded)
 
@@ -1130,3 +1139,16 @@ class KnockOutResetSnowballOption(SnowballOption):
         if self.first_schedule_settlement_time is not None:       # absent otherwise: existing keys stay as they were
             key["first_schedule_settlement_time"] = float(self.first_schedule_settlement_time)
         return key
+
+
+def _refuse_schedule_two_past_exercise(knock_in: str, end: str, exercise: str) -> None:
+    """``with_absolute_schedule_2``: a knock-in that would end schedule 2 after the exercise date."""
+    # TODO(owner): a knock-in close later than its record (a record due on a non-trading day) places a REBASED
+    # schedule 2 from that close and can end it after the exercise date; the contract rule (run 9, D1/D5) does not say
+    # whether such a note observes schedule 2 past its exercise or is a put to the exercise. Refused until ruled.
+    raise ValidationError(
+        f"KO-reset snowball (REBASED): a knock-in at {knock_in} places schedule 2's last observation at {end}, after "
+        f"the exercise {exercise}: a knocked-in note observes schedule 2 to its end and is then a put to the exercise "
+        "date, so schedule 2 cannot end after it (a knock-in close later than its record, e.g. a record due on a "
+        "non-trading day, can do this; the contract does not define it)"
+    )

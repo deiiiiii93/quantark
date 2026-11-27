@@ -107,7 +107,7 @@ def test_a_knock_in_converts_to_absolute_on_the_generated_dates():
     assert converted.post_ko_mode is M.ABSOLUTE
     assert [r.observation_date for r in records] == list(GENERATED[0])
     assert all(r.observation_time is None for r in records)
-    assert converted.exercise_date == GENERATED[0][-1]
+    assert converted.exercise_date == LATEST_END == note.exercise_date      # the exercise date kept (run 9, D5)
 
 
 def test_a_numeric_knock_in_time_is_refused_on_a_dated_contract():
@@ -140,9 +140,13 @@ def test_the_tracker_knocks_in_and_out_on_the_generated_dates():
         (_day(KI_DATES[0]), E.KNOCK_IN, None), (_day(GENERATED[0][0]), E.KNOCK_OUT, "knock-out:ko2:0")]
 
 
-def test_the_tracker_matures_a_knocked_in_contract_at_its_generated_end():
+def test_the_tracker_matures_a_knocked_in_contract_at_its_exercise_date():
+    """Schedule 2 ends on its generated end (2026-07-06); the knocked-in note lives on to the exercise date
+    (2026-10-06, the latest end) and matures there (owner ruling 2026-11-27, run 9, D5)."""
+    t = tracker(dated_rebased())
     closes = {_day(KI_DATES[0]): 70.0, _day(GENERATED[0][0]): 90.0, _day(GENERATED[0][1]): 80.0}
-    assert run(tracker(dated_rebased()), closes)[-1] == (_day(GENERATED[0][1]), E.MATURITY, "maturity")
+    assert run(t, closes) == [(_day(KI_DATES[0]), E.KNOCK_IN, None)] and t.lifecycle.alive
+    assert run(t, {_day(LATEST_END): 80.0}) == [(_day(LATEST_END), E.MATURITY, "maturity")]
 
 
 @pytest.mark.parametrize("engine", [

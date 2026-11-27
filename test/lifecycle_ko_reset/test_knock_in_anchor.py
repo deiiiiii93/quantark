@@ -30,9 +30,16 @@ from .conftest import env
 from .test_tracker_rules import D, day, kr, run, tracker
 
 
+def _day_95_contract():
+    """Knock-in records due on days 91 and 93; exercise on day 460, which covers schedule 2 hung from a day-95 close
+    (95 + 365; the booked latest end is 93 + 365 = 458, and a knocked-in copy whose schedule 2 would end after the
+    exercise is refused, run 9)."""
+    return kr(M.REBASED, pre=(91, 182), ki=(91, 93), post=(91, 365), annualized=True, exercise=460)
+
+
 def _knocked_in_on_day_95():
-    """Knock-in records due on days 91 and 93; the run's first close is day 95 and both fire on it."""
-    t = tracker(kr(M.REBASED, pre=(91, 182), ki=(91, 93), post=(91, 365), annualized=True))
+    """The run's first close is day 95 and both knock-in records fire on it."""
+    t = tracker(_day_95_contract())
     assert run(t, {95: 70.0}) == [(95, E.KNOCK_IN, None)]
     return t
 
@@ -52,9 +59,10 @@ def test_the_converted_copy_accrues_from_the_fixing_and_is_timed_from_the_close(
     assert first.observation_time == pytest.approx((95 + 91) * D)      # timing: the knock-in close + offset
     assert ko_accrual_factor(contract, first) == pytest.approx((91 + 91) * D, abs=1e-15)   # cash: fixing + offset
     assert first.accrual.relative and first.accrual.anchor == t.lifecycle.knock_in_anchor
-    # the knocked-in tenor runs to the REBASED note's exercise date, its maturity 93 + 365 days (owner ruling O2,
+    # the knocked-in tenor runs to the REBASED note's exercise date, its maturity 460 days (owner ruling O2,
     # 2026-11-27); it was the fired record's fixing + the last offset, 91 + 365
-    assert contract_tenor(contract, None, "post") == pytest.approx((93 + 365) * D, abs=1e-15)
+    assert contract_tenor(contract, None, "post") == pytest.approx(460 * D, abs=1e-15)
+    assert contract.maturity == pytest.approx(460 * D)               # the exercise date kept (run 9, D5)
 
 
 def test_the_anchor_survives_ageing_a_checkpoint_and_the_pricing_copy():
@@ -67,14 +75,14 @@ def test_the_anchor_survives_ageing_a_checkpoint_and_the_pricing_copy():
     assert [r.accrual.anchor for r in copy.post_barrier_config.ko_observation_schedule.records] == [anchor, anchor]
     assert ko_accrual_factor(copy, copy.post_barrier_config.ko_observation_schedule.records[0]) == pytest.approx(
         182 * D, abs=1e-15)
-    assert contract_tenor(copy, None, "post") == pytest.approx(458 * D, abs=1e-15)   # to the exercise (O2)
+    assert contract_tenor(copy, None, "post") == pytest.approx(460 * D, abs=1e-15)   # to the exercise (O2)
     copy.validate()                                                     # a re-validated copy keeps the cash
     assert ko_accrual_factor(copy, copy.post_barrier_config.ko_observation_schedule.records[0]) == pytest.approx(
         182 * D, abs=1e-15)
-    assert contract_tenor(copy, None, "post") == pytest.approx(458 * D, abs=1e-15)   # to the exercise (O2)
+    assert contract_tenor(copy, None, "post") == pytest.approx(460 * D, abs=1e-15)   # to the exercise (O2)
     assert t.product_for_lifecycle()._otc_lifecycle_knock_in_anchor == anchor
     # a checkpoint round trip of this test's own in-process state (no untrusted data is loaded)
-    resumed = tracker(kr(M.REBASED, pre=(91, 182), ki=(91, 93), post=(91, 365), annualized=True),
+    resumed = tracker(_day_95_contract(),
                       lifecycle=pickle.loads(pickle.dumps(t.lifecycle)))
     assert resumed.lifecycle.knock_in_anchor == anchor
     assert ko_accrual_factor(resumed.contract(), resumed.contract().post_barrier_config.ko_observation_schedule
@@ -174,7 +182,7 @@ def test_the_ko_reset_tracker_refuses_to_observe_an_aged_knock_in_schedule():
 
 
 def test_the_ko_reset_tracker_anchors_a_later_knock_in_at_its_contract_index():
-    t = tracker(kr(M.REBASED, pre=(200, 300), ki=(91, 93), post=(91, 365), annualized=True))
+    t = tracker(kr(M.REBASED, pre=(200, 300), ki=(91, 93), post=(91, 365), annualized=True, exercise=460))
     t.lifecycle.observed_ki_indices.add(0)              # the first knock-in test passed without a hit
     assert run(t, {95: 70.0}) == [(95, E.KNOCK_IN, None)]
     assert (t.lifecycle.knock_in_anchor.source_index, t.lifecycle.knock_in_anchor.fixing) == (1, 93 * D)

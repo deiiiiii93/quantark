@@ -22,11 +22,14 @@ D = 1 / 365.0
 
 
 def kr(mode=M.ABSOLUTE, post=(273, 365), *, pre=(91, 182), ki=(91, 182), ki_level=75.0, post_level=95.0,
-       annualized=False, disable=False, continuous=False):
+       annualized=False, disable=False, continuous=False, exercise=None):
     """Days on the numeric clock: schedule 1 at `pre` (103, 15%), KI at `ki`, schedule 2 at `post` (3%; offsets
-    from the knock-in under REBASED); 5% rebate, no principal."""
+    from the knock-in under REBASED); 5% rebate, no principal. The maturity (exercise) is day `exercise`, by default
+    schedule 2's latest end (REBASED: the last knock-in plus the last offset)."""
     pre_t, ki_t, post_t = ([d * D for d in x] for x in (pre, ki, post))
     maturity = max(ki_t) + max(post_t) if mode == M.REBASED else max(post_t)
+    if exercise is not None:
+        maturity = exercise * D
     barrier = BarrierConfig(
         ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
         ko_observation_schedule=schedule(pre_t, 103.0), ki_barrier=ki_level,
@@ -132,13 +135,14 @@ def test_rebased_schedule_two_follows_the_knock_in_date():
         (91, E.KNOCK_IN, None), (182, E.KNOCK_OUT, "knock-out:ko2:0")]
 
 
-@pytest.mark.parametrize("ki_day, maturity_day", [(91, 456), (182, 547)])
-def test_a_knocked_in_rebased_contract_matures_on_its_own_tenor(ki_day, maturity_day):
+@pytest.mark.parametrize("ki_day", [91, 182])
+def test_a_knocked_in_rebased_contract_matures_at_the_exercise_date(ki_day):
+    """Whatever the knock-in day, a knocked-in note not knocked out matures at the exercise date, the maturity 182 +
+    365 days, and its amount accrues to it (owner ruling 2026-11-27, run 9, D5 and O2; a day-91 knock-in matured at
+    its own end, day 456, before)."""
     t = tracker(kr(M.REBASED, post=(91, 365), annualized=True))
-    closes = {91: 90.0, ki_day: 70.0, maturity_day - 1: 80.0, maturity_day: 60.0}
-    assert run(t, closes)[-1] == (maturity_day, E.MATURITY, "maturity")
-    # the knocked-in amount accrues to the exercise date, the maturity 182 + 365 days (owner ruling O2, 2026-11-27;
-    # it accrued to the path's own end before)
+    closes = {91: 90.0, ki_day: 70.0, ki_day + 365: 80.0, 546: 80.0, 547: 60.0}
+    assert run(t, closes)[-1] == (547, E.MATURITY, "maturity")
     assert t.lifecycle.ledger.cashflows[-1].amount == pytest.approx(
         t.contract().get_maturity_payoff_v1(60.0, env(60.0), contract_tenor=547 * D))
 
@@ -210,7 +214,8 @@ def test_carried_rebased_knock_in_before_start():
     copy = t.product_for_pricing(day(1), env(90.0, day(1)))
     assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [
         pytest.approx(264 * D)]
-    assert run(t, {1: 99.0, 265: 80.0}) == [(265, E.MATURITY, "maturity")]
+    # schedule 2 ends on day 264; the knocked-in note lives on to the exercise date, day 547 (run 9, D5)
+    assert run(t, {1: 99.0, 265: 80.0, 547: 80.0}) == [(547, E.MATURITY, "maturity")]
 
 
 def test_a_knocked_in_rebased_pricing_copy_is_the_absolute_contract():
@@ -218,7 +223,7 @@ def test_a_knocked_in_rebased_pricing_copy_is_the_absolute_contract():
     run(t, {91: 70.0})
     copy = t.product_for_pricing(day(100), env(90.0, day(100)))
     assert copy.post_ko_mode == M.ABSOLUTE and copy._otc_lifecycle_knocked_in
-    assert copy.maturity == pytest.approx((91 + 365 - 100) * D)
+    assert copy.maturity == pytest.approx((547 - 100) * D)      # the exercise date kept (run 9, D5), aged 100 days
     assert copy._otc_lifecycle_knock_in_date == day(91).to_pydatetime()
 
 

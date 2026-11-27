@@ -128,21 +128,27 @@ def ko_reset(mode: M) -> Callable:
     def build(form: str, initial: pd.Timestamp):
         dated = form == "dated"
         sched = (lambda times, level: dated_schedule(initial, times, level)) if dated else numeric_schedule
+        first = pre
         if mode == M.ABSOLUTE:
             post_sched = sched(post, 95.0)
             maturity, exercise = 1.0, on(initial, 365) if dated else None
         else:
             offsets = post if dated else _rebased_gaps(initial)
             post_sched = numeric_schedule(offsets, 95.0)
-            maturity = pre[-1] + offsets[-1]
             exercise = add_months(on(initial, round(pre[-1] * 365)), 6) if dated else None
+            if not dated:
+                # the knocked-in note is a put to the exercise date (run 9, D5), so the numeric twin's maturity is
+                # the dated exercise in days: schedule 1 and the knock-in on the dated twin's whole days (k/12 years
+                # lands mid-day), the maturity their last day plus the last gap (O1 holds on the booked times)
+                first = [round(t * 365) / 365.0 for t in pre]
+            maturity = first[-1] + offsets[-1]
         p = KnockOutResetSnowballOption(
             initial_price=100.0, strike=100.0, maturity=None if exercise is not None else maturity,
             initial_date=initial.to_pydatetime() if dated else None, exercise_date=exercise,
             barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
-                                         ko_observation_schedule=sched(pre, 103.0), ki_barrier=75.0,
+                                         ko_observation_schedule=sched(first, 103.0), ki_barrier=75.0,
                                          ki_observation_type=ObservationType.DISCRETE,
-                                         ki_observation_schedule=sched(pre, 75.0)),
+                                         ki_observation_schedule=sched(first, 75.0)),
             post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.03,
                                               ko_observation_type=ObservationType.DISCRETE,
                                               ko_observation_schedule=post_sched),

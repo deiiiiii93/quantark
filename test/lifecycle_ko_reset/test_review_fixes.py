@@ -74,9 +74,14 @@ def test_a_dated_rebased_contract_knocks_out_on_schedule_two():
         (91, E.KNOCK_IN, None), (121, E.KNOCK_OUT, "knock-out:ko2:0")]
 
 
-def test_a_dated_rebased_contract_matures_at_its_knocked_in_end():
-    assert run(tracker(dated_rebased()), {91: 70.0, 121: 90.0, 181: 80.0, 182: 60.0})[-1] == (
-        182, E.MATURITY, "maturity")
+#: dated_rebased()'s exercise date, 2026-10-06, as a run day
+EXERCISE_DAY = 274
+
+
+def test_a_dated_rebased_contract_matures_at_its_exercise_date():
+    """Schedule 2 ends on day 182; the knocked-in note lives on to the exercise date (run 9, D5)."""
+    assert run(tracker(dated_rebased()), {91: 70.0, 121: 90.0, 182: 80.0, 273: 80.0, EXERCISE_DAY: 60.0}) == [
+        (91, E.KNOCK_IN, None), (EXERCISE_DAY, E.MATURITY, "maturity")]
 
 
 @pytest.mark.parametrize("engine", [
@@ -216,7 +221,7 @@ def test_a_non_accruing_rebased_contract_matures_on_v1_without_a_tenor():
     product = _non_accruing_dated_rebased()
     assert {r.accrual.kind for r in product.barrier_config.ki_observation_schedule.records} == {AccrualKind.NONE}
     t = tracker(product)
-    assert run(t, {91: 70.0, 121: 90.0, 181: 80.0, 182: 60.0})[-1] == (182, E.MATURITY, "maturity")
+    assert run(t, {91: 70.0, 121: 90.0, 182: 80.0, EXERCISE_DAY: 60.0})[-1] == (EXERCISE_DAY, E.MATURITY, "maturity")
     assert t.lifecycle.ledger.cashflows[-1].amount == pytest.approx(t.contract().get_maturity_payoff_v1(60.0, env(60.0)))
 
 
@@ -228,9 +233,9 @@ def test_a_non_accruing_rebased_contract_matures_on_v0_without_a_tenor():
 
 def test_a_non_accruing_rebased_contract_resolves_its_calendar_schedule():
     t = tracker(_non_accruing_dated_rebased())
-    dates = pd.date_range(START, periods=200, freq="D")
+    dates = pd.date_range(START, periods=300, freq="D")
     schedule = t.resolve_calendar_schedule(dates, env(date=START))
-    assert schedule.placement(91).final_due_day == 182
+    assert schedule.placement(91).final_due_day == EXERCISE_DAY       # the exercise date (run 9, D5)
     assert math.isnan(schedule.placement(91).final_tenor) and math.isnan(schedule.pre_tenor)
 
 
@@ -244,25 +249,27 @@ def _issued_100_days_early(product):
 
 def test_a_dated_rebased_copy_issued_before_the_run_is_timed_like_its_events():
     """Issued 100 days before the run, knocked in on run day 91, offsets 1 and 3 months: the knock-out falls due on
-    run day 121 and the contract ends on day 182, the generated dates, whatever the issue date (on the date clock it
-    only moves the accrual)."""
+    run day 121 and schedule 2 ends on day 182, the generated dates, whatever the issue date (on the date clock it
+    only moves the accrual); the note matures at the exercise date (run 9, D5)."""
     product = _issued_100_days_early(dated_rebased())
     t = tracker(product)
     run(t, {91: 70.0})
     copy = t.product_for_pricing(day(100), env(90.0, day(100)))
     assert [r.observation_date for r in copy.post_barrier_config.ko_observation_schedule.records] == [
         day(121).to_pydatetime(), day(182).to_pydatetime()]
-    assert copy.exercise_date == day(182).to_pydatetime()
+    assert copy.exercise_date == day(EXERCISE_DAY).to_pydatetime()     # the exercise date kept (run 9, D5)
     assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 96.0}) == [
         (91, E.KNOCK_IN, None), (121, E.KNOCK_OUT, "knock-out:ko2:0")]
-    assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 90.0, 181: 80.0, 182: 60.0})[-1] == (
-        182, E.MATURITY, "maturity")
+    assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 90.0, 182: 80.0,
+                                                                   EXERCISE_DAY: 60.0})[-1] == (
+        EXERCISE_DAY, E.MATURITY, "maturity")
 
 
 def test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events():
     """The C1 mid-life contract: knocked in on run day 60, offsets 30 and 90 (ending with schedule 1, spec D35). The
-    knock-out falls due on day 90, the contract ends on day 150; the day-70 copy holds them 20 and 80 days ahead (it
-    held 120/180) and V1 is booked on day 150 (it was booked on day 250)."""
+    knock-out falls due on day 90, schedule 2 ends on day 150; the day-70 copy holds them 20 and 80 days ahead (it
+    held 120/180). The note keeps its exercise date, contract day 340 (run day 240; run 9, D5): the copy ends 170
+    days ahead and V1 is booked on day 240."""
     def product():
         return _struck_100_days_before_the_run(kr(M.REBASED, post=(30, 90), pre=(160, 250), ki=(160, 250)))
     t = tracker(product())
@@ -270,5 +277,5 @@ def test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events():
     copy = t.product_for_pricing(day(70), env(90.0, day(70)))
     assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [
         pytest.approx(20 * D), pytest.approx(80 * D)]
-    assert copy.maturity == pytest.approx(80 * D)
-    assert run(tracker(product()), {60: 70.0, 90: 90.0, 149: 80.0, 150: 60.0})[-1] == (150, E.MATURITY, "maturity")
+    assert copy.maturity == pytest.approx(170 * D)
+    assert run(tracker(product()), {60: 70.0, 90: 90.0, 150: 80.0, 240: 60.0})[-1] == (240, E.MATURITY, "maturity")

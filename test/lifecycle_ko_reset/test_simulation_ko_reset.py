@@ -27,11 +27,14 @@ def _schedule(days, level):
     return ObservationSchedule(records=[ObservationRecord(observation_time=d * D, barrier=level) for d in days])
 
 
-def short_ko_reset(mode, *, pre=(2, 5), ki=(1, 3), post=(4, 7)):
+def short_ko_reset(mode, *, pre=(2, 5), ki=(1, 3), post=(4, 7), exercise=None):
     """Calendar days from 2024-01-02 (a Tuesday, INCEPTION, where every run starts): schedule 1 (103%) on `pre`, KI
     (75%) on `ki`, schedule 2 (100%) on `post`, absolute days or offsets from the knock-in close (REBASED). On the
-    numeric clock alone (clock rule 2026-10-26: no initial_date), counted from the run's start."""
+    numeric clock alone (clock rule 2026-10-26: no initial_date), counted from the run's start. The maturity
+    (exercise) is day `exercise`, by default schedule 2's latest end."""
     maturity = (max(ki) + max(post) if mode == M.REBASED else max(post)) * D
+    if exercise is not None:
+        maturity = exercise * D
     return KnockOutResetSnowballOption(
         initial_price=SPOT, strike=SPOT, maturity=maturity, contract_multiplier=1.0,
         barrier_config=BarrierConfig(ko_barrier=KO_BARRIER, ko_rate=0.20, ko_observation_type=ObservationType.DISCRETE,
@@ -142,7 +145,9 @@ def test_a_gap_close_knock_in_accrues_from_the_record_that_fired():
     import pandas as pd
     from .conftest import env
 
-    product = short_ko_reset(M.REBASED, pre=(2, 9), ki=(4, 5), post=(4, 7))
+    # exercise on day 13: schedule 2 hung from the day-6 close ends on 6 + 7 (the booked latest end is 5 + 7, and a
+    # knocked-in copy whose schedule 2 would end after the exercise is refused, run 9)
+    product = short_ko_reset(M.REBASED, pre=(2, 9), ki=(4, 5), post=(4, 7), exercise=13)
     path = _gap_close_path()
     cfg = ensemble_config(products=_book(product), engine_config=mc_engine_config())
     report = run_oracle(cfg, path, 0)                       # simulation == replay, cash included, to the bit

@@ -135,7 +135,7 @@ def tracker_copy(ki_record: int = 0, age: float = 0.30, spot: float = 78.0):
     discrete KI 80 on the same dates), schedule 2 quarterly offsets to 1.75y after the knock-in (0.25 + 1.75 == 2.0,
     D35's boundary); knocked in on record ``ki_record`` (0.25) and aged ``age`` (0.3): schedule 2 and schedule 1 both
     end at 1.70. The REBASED note's maturity covers its latest end, the last knock-in 2.0 plus 1.75 (owner ruling O1,
-    2026-11-27; was 2.0, the copy's prices are bitwise unchanged)."""
+    2026-11-27), and the copy keeps it (run 9, D5): the knocked-in put runs to 3.75, 3.45 after the ageing."""
     product = cases._ko_reset(PostKOScheduleMode.REBASED)
     pre = tuple(np.arange(1, 9) * 0.25)
     product.barrier_config = replace(product.barrier_config, ko_observation_schedule=cases._schedule(pre, 103.0),
@@ -262,11 +262,14 @@ def test_the_carried_knock_in_reads_v1_at_the_exercise(engine):
     _assert_v1_at_exercise(product_make(), env, call, ref, v1)
 
 
-def test_the_tracker_copy_of_a_valid_rebased_note_ends_with_schedule_two():
-    """D35: the tracker's ABSOLUTE copy ends at schedule 2's end and schedule 1 no later."""
+def test_the_tracker_copy_of_a_valid_rebased_note_keeps_the_exercise():
+    """D35: the tracker's ABSOLUTE copy's schedule 2 ends at 1.70, schedule 1 no later; the copy keeps the note's
+    exercise (run 9, D5), 3.75 aged 0.3, the end of its knocked-in put."""
     product, env = tracker_copy()
     assert is_close(float(product.get_post_maturity_time(env)), 1.70)
-    assert is_close(float(product.get_max_maturity_time(env)), float(product.get_post_maturity_time(env)))
+    assert is_close(float(product.get_pre_maturity_time(env)), 1.70)
+    assert is_close(float(product.get_max_maturity_time(env)), 3.45)
+    assert is_close(float(resolve_terminal_timing(product, env).determination_time), 3.45)
 
 
 def valid_native_absolute():

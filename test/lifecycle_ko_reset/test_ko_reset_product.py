@@ -68,7 +68,7 @@ def test_the_conversion_places_schedule_two_after_the_knock_in():
     times = [r.observation_time for r in converted.post_barrier_config.ko_observation_schedule.records]
     assert times == [182 * D + 91 * D, 182 * D + 365 * D]
     assert converted.post_ko_mode == PostKOScheduleMode.ABSOLUTE
-    assert converted.maturity == 182 * D + 365 * D
+    assert converted.maturity == product.maturity          # the exercise date kept (run 9, D5): 182 + 365 days
     assert product.post_ko_mode == PostKOScheduleMode.REBASED          # the original is untouched
     with pytest.raises(ValidationError):
         ko_reset(PostKOScheduleMode.ABSOLUTE, [273 * D]).with_absolute_schedule_2(0.1, anchor=None)
@@ -83,7 +83,8 @@ def test_the_conversion_places_schedule_two_after_the_knock_in():
 def test_a_converted_knocked_in_contract_prices_as_the_absolute_contract(engine):
     rebased = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D])
     rebased = rebased.with_absolute_schedule_2(91 * D, anchor=anchor(rebased, 0))
-    direct = ko_reset(PostKOScheduleMode.ABSOLUTE, [182 * D, 456 * D], maturity=456 * D)
+    # the copy keeps the REBASED note's exercise, day 547 (run 9, D5)
+    direct = ko_reset(PostKOScheduleMode.ABSOLUTE, [182 * D, 456 * D], maturity=rebased.maturity)
     for product in (rebased, direct):
         setattr(product, "_otc_lifecycle_knocked_in", True)
     assert engine().price(rebased, env(90.0)) == pytest.approx(engine().price(direct, env(90.0)), rel=1e-12)

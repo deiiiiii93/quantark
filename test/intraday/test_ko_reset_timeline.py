@@ -176,3 +176,32 @@ def test_an_expiry_schedule_one_knock_out_is_booked_on_the_settlement_date(sse_c
     assert timeline.terminal().payment_timestamp == paid
     for event in _ko_events(timeline, "pre") + _ko_events(timeline, "post"):
         assert event.payment_timestamp == paid
+
+
+@pytest.mark.parametrize("settled", [False, True], ids=["convention", "settlement_date"])
+def test_schedule_two_knock_outs_and_the_knocked_in_put_are_paid_at_the_exercise_settlement(sse_calendar, sse_sessions,
+                                                                                           settled):
+    """Run 9 (owner ruling 2026-11-27, AC5): a knocked-in note is a live put to the PRODUCT'S EXERCISE DATE, so the
+    product terminal -- the knocked-in V1 -- is determined on the exercise date and paid at the exercise settlement
+    (``resolve_terminal_timing``: the booked settlement date, else the exercise date plus the settlement delay), the
+    timing every engine prices it with; under EXPIRY pay a schedule-2 knock-out is paid there too. Schedule 2 ends a
+    month before the exercise here, so a note settled at schedule 2's end would show."""
+    from intraday.conftest import _monthly_trading_dates
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+
+    prod = dated_ko_reset(sse_calendar, T0, pre_months=6, post_months=11)
+    prod.exercise_date = _monthly_trading_dates(sse_calendar, T0, 12)[-1]
+    settlement = prod.exercise_date + timedelta(days=7) if settled else None
+    prod = _expiry(prod, settlement)
+    timeline = resolve_timeline(prod, sse_sessions, flat_env(TS))
+    terminal = timeline.terminal()
+    post = _ko_events(timeline, "post")
+    assert max(e.timestamp for e in post).date() < prod.exercise_date.date()
+    timing = resolve_terminal_timing(prod, flat_env(T0))
+    assert timing.determination_date.date() == terminal.timestamp.date() == prod.exercise_date.date()
+    if settled:
+        assert terminal.payment_timestamp == sse_sessions.payment_at(settlement.date())
+    else:
+        assert terminal.payment_timestamp.date() == (timing.payment_date or timing.determination_date).date()
+    for event in post:
+        assert event.payment_timestamp == terminal.payment_timestamp

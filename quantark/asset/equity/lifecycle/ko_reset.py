@@ -7,10 +7,14 @@ The contract's rules, as the desk stated them and every engine applies them:
 * R2 a contract not knocked in when schedule 1 ends has matured there: it pays V0 on schedule 1's contract
   length, and a knock-in is never tested after that;
 * R3 a schedule-1 knock-out and a knock-in at the same observation: the knock-out wins;
-* R4 a carried knock-in happened.
+* R4 a carried knock-in happened;
+* R5 a knocked-in contract observes schedule 2 up to its last observation; not knocked out, it is a live put to the
+  PRODUCT'S EXERCISE DATE and pays V1 on the exercise close's spot at the product terminal's payment (the explicit
+  settlement date when booked, else the exercise date plus the settlement delay; owner ruling 2026-11-27, run 9).
 
 A knocked-in REBASED contract is the ABSOLUTE contract ``with_absolute_schedule_2`` builds at the knock-in
-time, so every engine prices an ordinary knocked-in contract and the tracker books from that same contract.
+time (keeping the exercise date), so every engine prices an ordinary knocked-in contract and the tracker books from
+that same contract.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing_at
+from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, leg_annualized
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType
@@ -40,8 +44,9 @@ __all__ = ["KOResetCalendarSchedule", "KOResetLifecycleTracker", "SchedulePlacem
 
 @dataclass(frozen=True)
 class SchedulePlacement:
-    """Schedule 2 and the knocked-in maturity on a run calendar: an ABSOLUTE contract's, or a REBASED one's for one
-    knock-in day. Every ``*_day`` is a position in the calendar, -1 past its end."""
+    """Schedule 2 and the knocked-in maturity (V1 at the exercise date, R5) on a run calendar: an ABSOLUTE
+    contract's, or a REBASED one's for one knock-in day. Every ``*_day`` is a position in the calendar, -1 past its
+    end."""
 
     ko_due_day: np.ndarray
     ko_barrier: np.ndarray
@@ -59,9 +64,9 @@ class KOResetCalendarSchedule(CalendarSchedule):
     """A KO-reset's observations on a run calendar (``KOResetLifecycleTracker.resolve_calendar_schedule``).
 
     The inherited ``ko_*`` fields are schedule 1 and the ``ki_*`` fields the knock-in; ``terminal_*`` is the
-    latest terminal the calendar may have to hold (the knocked-in maturity of the last possible knock-in), which
-    is what the run's data-end check reads. ``pre_*`` is schedule 1's maturity (V0 on ``pre_tenor``). Schedule 2
-    is ``absolute`` for an ABSOLUTE contract, or ``place(knock_in_day)`` for a REBASED one.
+    latest terminal the calendar may have to hold (the knocked-in maturity, at the exercise date for every knock-in
+    day), which is what the run's data-end check reads. ``pre_*`` is schedule 1's maturity (V0 on ``pre_tenor``).
+    Schedule 2 is ``absolute`` for an ABSOLUTE contract, or ``place(knock_in_day)`` for a REBASED one.
     """
 
     pre_due_day: int
@@ -268,24 +273,16 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         ]
 
     def _final_timing(self, env: PricingEnvironment):
-        """V1's terminal timing: determined at the knocked-in contract's end."""
+        """V1's terminal timing (R5): the product terminal of the contract in force -- determined at its exercise date
+        (numeric: its maturity) and paid on the explicit settlement date when booked, else by the settlement
+        convention -- the timing every engine prices the knocked-in put with (``resolve_terminal_timing``). A REBASED
+        contract's ABSOLUTE copy keeps the original exercise date and settlement date (``with_absolute_schedule_2``)."""
         contract = self.contract()
-        schedule_env = self._schedule_resolution_env(contract, env)
-        # a dated contract's schedule 2 is dated (a REBASED one converts onto its generated dates), so its end is its
-        # last observation date; a numeric contract's is a time on its own clock
-        end_date = _last_observation_date(contract.post_barrier_config.ko_observation_schedule)
-        if end_date is not None and self._uses_date_timing(contract):
-            return resolve_terminal_timing_at(
-                contract, schedule_env, determination_date=end_date, cashflow_id="ko_reset_v1_terminal"
-            )
-        return resolve_terminal_timing_at(
-            contract, schedule_env, determination_time=float(contract.get_post_maturity_time(schedule_env)),
-            cashflow_id="ko_reset_v1_terminal",
-        )
+        return resolve_terminal_timing(contract, self._schedule_resolution_env(contract, env))
 
     def terminal_date(self, env: PricingEnvironment) -> Optional[pd.Timestamp]:
-        """The KO-reset's maturity: V1 at the knocked-in contract's end once knocked in, else V0 at schedule 1's last
-        record (R2), the day ``settle_maturity_if_due`` books it."""
+        """The KO-reset's maturity: V1 at the exercise date once knocked in (R5), else V0 at schedule 1's last record
+        (R2), the day ``settle_maturity_if_due`` books it."""
         if self.lifecycle.knocked_in:
             return self._timing_date(self._final_timing(env))
         last = self._last_pre_record(self.product, env)
@@ -442,7 +439,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> Optional[LifecycleEvent]:
-        """V0 at schedule 1's last observation (R2), or V1 at the knocked-in contract's end."""
+        """V0 at schedule 1's last observation (R2), or V1 at the exercise date on that close's spot (R5)."""
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
         if self.retire_if_matured_before_run(env) or not self.lifecycle.alive:
@@ -466,7 +463,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         return self._book_maturity(date, spot, payoff, timing, valuation_point)
 
     def _calendar_terminal(self, product, env, first_due, settlement_position, terminal_payment_date):
-        """Not resolved here: a KO-reset has two terminals (V0 at schedule 1's end, V1 at the knocked-in end), which
+        """Not resolved here: a KO-reset has two terminals (V0 at schedule 1's end, V1 at the exercise date), which
         ``resolve_calendar_schedule`` places itself and writes into the ``terminal_*`` fields. The snowball's
         single-terminal rule does not apply (a dated KO-reset with a numeric maturity has no date for it)."""
         return -1, -1, 0.0
@@ -555,7 +552,8 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
     pre_settle = tracker._settlement_position(dates, tracker._terminal_payment_date(product, pre_timing), pre_due)
     pre_delay = float(pre_timing.payment_time) - float(pre_timing.determination_time)
 
-    # the latest terminal the calendar may have to hold: the knocked-in maturity of the last knock-in day
+    # the latest terminal the calendar may have to hold: the knocked-in maturity (the exercise, R5) of the last
+    # knock-in day
     if rebased:
         knock_in_days = [int(d) for d in base.ki_due_day if d >= 0 and (pre_due < 0 or d <= pre_due)]
         latest = place(max(knock_in_days)) if knock_in_days else None
@@ -631,12 +629,6 @@ def _refuse_ambiguous_anchors(base: CalendarSchedule, product: Any) -> None:
             f"calendar (positions {clash}); the record that fires, and so the anchor schedule 2 accrues from, would "
             "depend on the path's spot. Simulated paths key a knocked-in path by its knock-in day only."
         )
-
-
-def _last_observation_date(schedule) -> Optional[Any]:
-    """A dated schedule's last observation date (its contract end); ``None`` for a numeric one."""
-    dates = [] if schedule is None else [r.observation_date for r in schedule.records if r.observation_date is not None]
-    return max(dates) if dates else None
 
 
 def tracker_for(product: Any, **kwargs):
