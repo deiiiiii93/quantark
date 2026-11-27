@@ -637,13 +637,6 @@ class SnowballPDESolver(BasePDESolver):
         return (float(timing.determination_time), float(timing.payment_time),
                 self._terminal_delay_df(product, pricing_env))
 
-    def _fold_ki_timing(self, product, pricing_env):
-        """``(determination, payment, determination -> payment DF)`` of the knocked-in maturity branch: the product
-        terminal's (the KO-reset knocked-in note's own end when schedule 2 ends before it)."""
-        timing = self._terminal_timing(product, pricing_env)
-        return (float(timing.determination_time), float(timing.payment_time),
-                self._terminal_delay_df(product, pricing_env))
-
     def _bind_fold(self, product, pricing_env, fold: Optional["FoldOverlay"]) -> Optional[_BoundFold]:
         """``fold`` bound one to one to this solve's knock-out records and maturity branches (D5)."""
         if fold is None:
@@ -676,13 +669,13 @@ class SnowballPDESolver(BasePDESolver):
                 raise ValidationError(f"two knock-out records share {key}: their folded cash is ambiguous")
             ko[key] = float(amount)
         no_ki_det, no_ki_pay, no_ki_df = self._fold_no_ki_timing(product, pricing_env)
-        ki_det, ki_pay, ki_df = self._fold_ki_timing(product, pricing_env)
+        timing = self._terminal_timing(product, pricing_env)
         return _BoundFold(
             ko=ko,
             no_ki=float(fold.bind_terminal("no_ki", no_ki_det, no_ki_pay)),
-            ki=float(fold.bind_terminal("ki", ki_det, ki_pay)),
+            ki=float(fold.bind_terminal("ki", float(timing.determination_time), float(timing.payment_time))),
             no_ki_df=float(no_ki_df),
-            ki_df=float(ki_df),
+            ki_df=float(self._terminal_delay_df(product, pricing_env)),
         )
 
     def _fold_shared_instants(self, product, tagged):

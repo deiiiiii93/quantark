@@ -74,9 +74,7 @@ class EventStep:
     zero. ``diffusion``: ``(tau, alpha, beta, prefactor, omega)`` of the step into this slice; ``bridge``:
     ``(log_barrier, vol, dt, is_reverse)`` when the ``out`` state rolls back with the knock-in bridge;
     ``out_diffused``: whether the ``out`` state rolls back at all (KO-reset: not after its first schedule ends);
-    ``seed_out``: the ``out`` state is seeded with its terminal value at this step, before its event (KO-reset);
-    ``in_diffused`` / ``seed_in``: the same for the ``in`` state (KO-reset: a knocked-in note ends at schedule 2's last
-    fixing, D31, and is dead above it).
+    ``seed_out``: the ``out`` state is seeded with its terminal value at this step, before its event (KO-reset).
     ``source_units``: per source key, the unit the event puts on the breach (the backward knock-out column's
     ``DF(settle)/DF(obs)``); the clean knock-out mass is the source's mass over its unit -- a probability mass
     discounted to the step (``DF(obs) P``), never ``DF(settle) P`` (CP6).
@@ -89,8 +87,6 @@ class EventStep:
     bridge: Optional[Tuple] = None
     out_diffused: bool = True
     seed_out: bool = False
-    in_diffused: bool = True
-    seed_in: bool = False
     source_units: Dict = field(default_factory=dict)
     #: the march extension's data for this step (``None``: the extension maps its rows by the step's event map)
     extension: Optional[object] = None
@@ -365,14 +361,12 @@ def _first_step_forward(first: FirstStepLog, step: EventStep, log: MarchLog, n: 
     zero_y = np.zeros(n_y, dtype=float)
     beta_out, beta_in = (zero_y, d) if log.readout_in else (d, zero_y)
     alpha_out = beta_out if step.out_diffused else zero_y
-    alpha_in = beta_in if step.in_diffused else zero_y
+    alpha_in = beta_in
     x_out = x_in = None
     if ext is not None:
         x_out, x_in = ext.readout(beta_out, beta_in)
         if not step.out_diffused:
             x_out = np.zeros_like(x_out)
-        if not step.in_diffused:
-            x_in = np.zeros_like(x_in)
     if step.bridge is not None and step.out_diffused:
         # the interval starts at the spot: a point mass there is its first-passage law
         starts[k] = (np.array([0.0]), np.array([float(np.sum(beta_out))]))
@@ -481,9 +475,9 @@ def forward_pass(log: MarchLog) -> ForwardResult:
                                               engine=engine)
                 x_beta_out = x_out
                 x_out = x_stacked[:r] if step.out_diffused else np.zeros_like(x_out)
-                x_in = x_stacked[r:2 * r] if step.in_diffused else np.zeros_like(x_in)
+                x_in = x_stacked[r:2 * r]
             alpha_out = stacked[0] if step.out_diffused else zero
-            alpha_in = stacked[1] if step.in_diffused else zero
+            alpha_in = stacked[1]
             if step.bridge is not None and step.out_diffused:
                 log_barrier, vol, dt, reverse = step.bridge
                 starts[k] = beta_out.copy()
@@ -521,18 +515,12 @@ def forward_pass(log: MarchLog) -> ForwardResult:
             for name, value in log.terminal_out.items():
                 terminal[name] = float(beta_out @ value)
             beta_out = zero
-        if step.seed_in:
-            if ext is not None:
-                raise PricingError("the QUAD V1 march extension has no seeded note state")
-            for name, value in log.terminal_in.items():
-                terminal[name] = float(beta_in @ value)
-            beta_in = zero
     if ext is not None and not (done_out and done_in):
         ext.finish(beta_out, beta_in, x_out, x_in)
     if not done_out and not any(step.seed_out for step in steps):
         for name, value in log.terminal_out.items():
             terminal[name] = float(beta_out @ value)
-    if not done_in and not any(step.seed_in for step in steps):
+    if not done_in:
         for name, value in log.terminal_in.items():
             terminal[name] = float(beta_in @ value)
     times = np.array([float(step.time) for step in steps], dtype=float)

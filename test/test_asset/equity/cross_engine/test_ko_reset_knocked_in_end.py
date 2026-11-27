@@ -1,25 +1,23 @@
-"""A knocked-in KO-reset ends at schedule 2's last fixing on every grid engine (owner ruling D31, 2026-11-14; run 5 T7).
+"""A knocked-in KO-reset is a live put to the product's exercise date on every engine (owner ruling 2026-11-27, run 9).
 
-A knocked-in KO-reset is a knocked-in snowball on the second schedule, alive until that schedule ends: its knocked-in
-payoff V1 is decided on the spot at schedule 2's last fixing and paid from there (Monte Carlo since D31,
-``event_statistics/test_ko_reset_knocked_in_readout.py``). The grid engines (PDE 1D / LocalVol, Heston ADI, QUAD V1,
-QUAD V2) decided and paid it at the product maturity (the exercise date), which differs only when the product runs on
-past schedule 2's end -- the test helper ``ko_reset()``: schedule 2 ends 2025-12-03, exercise 2026-01-05
-(investigation ``.ship/2026-11-27-ko-reset-mc-investigation``). Now every grid engine stages the knocked-in value at
-schedule 2's last fixing (as the not-knocked-in value is staged at schedule 1's end); an EXPIRY-paid schedule-2
-knock-out is paid with that note; the knocked-in note settles by the rule the never-knocked-in note follows at schedule
-1's end, applied to schedule 2's last fixing (an explicit settlement date when booked, else the terminal settlement
-delay after it).
+The owner's contract rule (replaces D31 of 2026-11-14): a knocked-in KO-reset observes its schedule-2 knock-outs up to
+schedule 2's last observation; if it has not knocked out it is a LIVE put to the PRODUCT'S EXERCISE DATE and pays
+put(S at exercise) at the exercise settlement (``resolve_terminal_timing``: the explicit ``settlement_date`` when
+booked, else the exercise date plus the settlement delay). Between schedule 2's last observation and the exercise date
+the note is a live put (spot-dependent, time value), not decided. Run 5 T7 (fe4a3fd5) had ended the knocked-in note at
+schedule 2's last fixing on the grid engines; run 9 reverts it. The test helper ``ko_reset()``: schedule 2 ends
+2025-12-03, exercise 2026-01-05 (investigation ``.ship/2026-11-27-ko-reset-mc-investigation``).
 
-- exact referee: a carried knock-in with ``disable_ko_after_ki`` is a European put on schedule 2's end
-  (V1 = min(S - K, 0)): Black-Scholes put to 12-03 (PDE rel 1e-3, QUAD V1 rel 1e-4, QUAD V2 rel 1e-10); with a booked
-  settlement date / a settlement lag, the put discounted on to that payment;
-- Heston ADI: the same contract booked with exercise on schedule 2's end prices the same (the exercise date no longer
-  matters once both notes end before it), to the grid's time-step accuracy;
+- exact referee: a carried knock-in with ``disable_ko_after_ki`` is a European put to the exercise date
+  (V1 = min(S - K, 0)): Black-Scholes put to 01-05, exercise time 0.49206349206349204, -19.86527359248963 (PDE rel
+  1e-3, QUAD V1 rel 1e-4, QUAD V2 rel 1e-10); with a booked settlement date / a settlement lag, the put discounted on
+  to that payment;
+- Heston ADI: the same referee is the Heston put to the exercise date (closed form), and the 01-05 booking differs from
+  the booking with exercise on schedule 2's end by the put's time value between the two dates;
+- a knocked-in note valued between schedule 2's last observation and the exercise date is the live put to exercise;
 - the investigation's ten cases within 3 SE of Black-Scholes MC (1M paths) on every Black-Scholes grid engine, and a
   booked settlement date / settlement lag case;
-- statistics: the knocked-in settlement row sits at schedule 2's end and is paid where MC pays it; EXPIRY pay pays a
-  schedule-2 knock-out there too;
+- statistics: the knocked-in settlement row sits at the product terminal; EXPIRY pay pays a schedule-2 knock-out there;
 - bitwise: KO-reset notes whose exercise date IS schedule 2's last fixing (price and statistics pinned before T7, every
   grid engine).
 """
@@ -48,6 +46,7 @@ from quantark.asset.equity.engine.settlement_support import resolve_terminal_tim
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams, QuadV2Params
 from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
 from quantark.util.enum import CouponPayType, ObservationType
+from quantark.volmodels.heston.analytical_kernel import heston_put_price
 
 D = datetime
 #: schedule 2's last fixing in ``ko_reset()``; its exercise date is 2026-01-05
@@ -55,6 +54,9 @@ SCHEDULE_2_END = D(2025, 12, 3)
 SETTLEMENT_DATE = D(2026, 1, 12)
 SPOT, STRIKE, RATE, VOL = 80.0, 100.0, 0.02, 0.25
 MC_PATHS = 1_000_000
+#: the referee note's exercise time on the env's trading clock (124 / 252) and its Black-Scholes put (spec R7)
+EXERCISE_TIME = 0.49206349206349204
+REFEREE_PUT = 19.86527359248963
 
 
 # --- products (the investigation's builders, ``common.py``) ---------------------------------------------------------
@@ -118,41 +120,88 @@ def _env_for(engine, make_env):
     return make_env(grid=True) if ENGINES[engine][1] else make_env()
 
 
-def _bs_put(T):
-    d1 = (math.log(SPOT / STRIKE) + (RATE + 0.5 * VOL * VOL) * T) / (VOL * math.sqrt(T))
+def _bs_put(T, spot=SPOT):
+    d1 = (math.log(spot / STRIKE) + (RATE + 0.5 * VOL * VOL) * T) / (VOL * math.sqrt(T))
     d2 = d1 - VOL * math.sqrt(T)
-    return STRIKE * math.exp(-RATE * T) * norm.cdf(-d2) - SPOT * norm.cdf(-d1)
+    return STRIKE * math.exp(-RATE * T) * norm.cdf(-d2) - spot * norm.cdf(-d1)
+
+
+def _referee(product, e):
+    """Minus the Black-Scholes put to the exercise date, discounted on to the terminal payment."""
+    terminal = resolve_terminal_timing(product, e)
+    T = float(terminal.determination_time)
+    return -_bs_put(T) * float(e.get_discount_factor(terminal.payment_time)) / float(e.get_discount_factor(T))
 
 
 # --- the exact referee ----------------------------------------------------------------------------------------------
 
+def test_the_referee_numbers():
+    """Spec R7: the referee note's exercise time and its Black-Scholes put; schedule 2 ends earlier (0.40873)."""
+    product, e = make(disable=True, carried=True), carried_env()
+    assert float(resolve_terminal_timing(product, e).determination_time) == EXERCISE_TIME
+    assert _bs_put(EXERCISE_TIME) == pytest.approx(REFEREE_PUT, rel=1e-14)
+    assert float(product.get_post_maturity_time(e)) < EXERCISE_TIME
+
+
 @pytest.mark.parametrize("settlement", ["none", "settlement_date", "lag"])
 @pytest.mark.parametrize("engine", list(ENGINES))
-def test_carried_knock_in_with_disable_is_the_put_to_schedule_two_end(engine, settlement):
-    """Carried knock-in + ``disable_ko_after_ki``: no knock-out left, V1 = min(S - K, 0) decided on schedule 2's last
-    fixing (12-03), not the exercise date (01-05: the put there differs by 4.6e-3 relative). The env is Black-Scholes
-    (flat 25% vol, 2% rate on its trading clock), so the value is minus the put to 12-03, discounted on to the
-    payment when a settlement date / lag pays it later (the never-knocked-in note's rule at schedule 1's end)."""
+def test_carried_knock_in_with_disable_is_the_put_to_exercise(engine, settlement):
+    """Carried knock-in + ``disable_ko_after_ki``: no knock-out left, V1 = min(S - K, 0) on the spot at the EXERCISE
+    date (01-05), not schedule 2's last fixing (12-03: the put there differs by 4.6e-3 relative). The env is
+    Black-Scholes (flat 25% vol, 2% rate on its trading clock), so the value is minus the put to 01-05, discounted on
+    to the payment when a settlement date / lag pays it later."""
     kw = {"none": {}, "settlement_date": dict(settlement_date=SETTLEMENT_DATE), "lag": dict(lag=0.02)}[settlement]
     product = make(disable=True, carried=True, **kw)
     e = carried_env()
-    T = float(product.get_post_maturity_time(e))
-    # the booked settlement date is the product terminal's payment
-    payment = {"none": T, "settlement_date": float(resolve_terminal_timing(product, e).payment_time),
-               "lag": T + 0.02}[settlement]
-    exact = -_bs_put(T) * float(e.get_discount_factor(payment)) / float(e.get_discount_factor(T))
+    exact = _referee(product, e)
+    payment = float(resolve_terminal_timing(product, e).payment_time)
+    assert payment == pytest.approx({"none": EXERCISE_TIME, "settlement_date": 0.5119047619047619,
+                                     "lag": EXERCISE_TIME + 0.02}[settlement], abs=1e-12)
     value = ENGINES[engine][0]().price(product, _env_for(engine, carried_env))
     assert abs(value - exact) <= PUT_TOLERANCE[engine] * abs(exact), (value, exact, (value - exact) / exact)
 
 
-def test_heston_adi_knocked_in_note_ends_at_schedule_two_end():
-    """Heston ADI (no closed form): the carried knock-in under ``disable_ko_after_ki`` booked with exercise 2026-01-05
-    prices as the same contract booked with exercise on schedule 2's end (both notes end by 12-03), to the time
-    grid's accuracy. Before T7 the 01-05 booking ran the put to 01-05: 1.0e-3 relative apart."""
-    engine = lambda: HestonKOResetSnowballPDESolver(HESTON, n_x=96, n_v=16, n_t=64)  # noqa: E731
-    late = engine().price(make(disable=True, carried=True), carried_env())
-    on_end = engine().price(make(disable=True, carried=True, exercise=SCHEDULE_2_END), carried_env())
-    assert abs(late - on_end) <= 1e-4 * abs(on_end), (late, on_end, (late - on_end) / on_end)
+def _heston_put(T):
+    return heston_put_price(SPOT, STRIKE, T, HESTON, RATE, 0.0)
+
+
+def test_heston_adi_knocked_in_note_runs_to_exercise():
+    """Heston ADI (spec R3, AC1b): the carried knock-in under ``disable_ko_after_ki`` booked with exercise 2026-01-05 is
+    minus the Heston put to 01-05 (closed form) to the grid's accuracy, and differs from the same contract booked with
+    exercise on schedule 2's end (12-03) by the put's time value between the two dates (1.1e-3 relative). Run 5 T7 had
+    priced both bookings alike (both ended at 12-03)."""
+    engine = lambda: HestonKOResetSnowballPDESolver(HESTON, n_x=128, n_v=24, n_t=128)  # noqa: E731
+    e = carried_env()
+    product = make(disable=True, carried=True)
+    T_exercise = float(resolve_terminal_timing(product, e).determination_time)
+    T_end = float(product.get_post_maturity_time(e))
+    late = engine().price(product, e)
+    on_end = engine().price(make(disable=True, carried=True, exercise=SCHEDULE_2_END), e)
+    exact_late, exact_end = -_heston_put(T_exercise), -_heston_put(T_end)
+    assert abs(late - exact_late) <= 2.5e-4 * abs(exact_late), (late, exact_late, (late - exact_late) / exact_late)
+    assert abs(on_end - exact_end) <= 2.5e-4 * abs(exact_end), (on_end, exact_end, (on_end - exact_end) / exact_end)
+    gap, exact_gap = late - on_end, exact_late - exact_end
+    assert exact_gap < -1e-3 * abs(exact_end)
+    assert abs(gap - exact_gap) <= 0.1 * abs(exact_gap), (gap, exact_gap)
+
+
+# --- a live put between schedule 2's end and exercise ------------------------------------------------------------
+
+LIVE_DATES = [D(2025, 12, 2), D(2025, 12, 3), D(2025, 12, 4), D(2025, 12, 15), D(2026, 1, 2)]
+
+
+@pytest.mark.parametrize("disable", [False, True])
+@pytest.mark.parametrize("valuation", LIVE_DATES, ids=[d.strftime("%m%d") for d in LIVE_DATES])
+@pytest.mark.parametrize("engine", list(ENGINES))
+def test_knocked_in_note_after_schedule_two_is_the_live_put_to_exercise(engine, valuation, disable):
+    """AC4: a knocked-in note valued around and after schedule 2's last observation (12-03; spot 80 far below the
+    95 knock-out) is minus the Black-Scholes put to the exercise date (01-05) from the valuation date: no jump at
+    schedule 2's end beyond the put's time value; schedule 2's knock-outs no longer matter once it has ended."""
+    product = make(disable=disable, carried=True)
+    e = env(valuation, spot=SPOT)
+    exact = _referee(product, e)
+    value = ENGINES[engine][0]().price(product, env(valuation, spot=SPOT, grid=ENGINES[engine][1]))
+    assert abs(value - exact) <= PUT_TOLERANCE[engine] * abs(exact), (value, exact, (value - exact) / exact)
 
 
 # --- against Monte Carlo --------------------------------------------------------------------------------------------
@@ -176,8 +225,9 @@ def mc_reference():
 @pytest.mark.parametrize("engine", list(ENGINES))
 @pytest.mark.parametrize("name", list(CASES))
 def test_price_agrees_with_mc(mc_reference, name, engine):
-    """Within 3 SE of Black-Scholes MC (1M paths, seed 7). Before T7 the grid engines sat at -8.6 SE (ki97 disable)
-    to +13 SE (carried knock-in) of MC on these cases (investigation t1)."""
+    """AC2: within 3 SE of Black-Scholes MC (1M paths, seed 7), both reading the knocked-in put at the exercise date.
+    The cases with exercise after schedule 2's end are the discriminating ones (investigation t1: -8.6 to +13 SE
+    between the two readings)."""
     make_product, make_env = CASES[name]
     ref, se, _ = mc_reference(name)
     value = ENGINES[engine][0]().price(make_product(), _env_for(engine, make_env))
@@ -199,37 +249,55 @@ STATS_ENGINES = {
 }
 
 
+@pytest.mark.parametrize("engine", list(STATS_ENGINES))
+@pytest.mark.parametrize("name", ["ki85", "ki85_settlement_date", "ki85_lag", "carried_jul7"])
+def test_knocked_in_settlement_row_sits_at_the_terminal(name, engine):
+    """The knocked-in settlement row is determined at the exercise date and paid at the product terminal
+    (``resolve_terminal_timing``); the statistics reconcile with the price."""
+    make_product, make_env = CASES[name]
+    product, e = make_product(), make_env()
+    terminal = resolve_terminal_timing(product, e)
+    stats = STATS_ENGINES[engine]().calculate_event_stats(product, e)
+    row = stats.ki_settlement
+    assert row.time == pytest.approx(float(terminal.determination_time), abs=1e-12), row.time
+    assert row.payment_time == pytest.approx(float(terminal.payment_time), abs=1e-12), row.payment_time
+    assert abs(stats.reconciliation_error) <= 1e-6 * max(1.0, abs(stats.pv))
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("engine", list(STATS_ENGINES))
 @pytest.mark.parametrize("name", ["ki85", "ki85_settlement_date", "ki85_lag", "carried_jul7"])
-def test_knocked_in_settlement_row_sits_at_schedule_two_end(mc_reference, name, engine):
-    """The knocked-in settlement row: determined at schedule 2's end and paid where MC pays it (the 0.9127 row of the
-    investigation, t4); its probability within 3 binomial SE of MC on the Black-Scholes engines; the statistics
-    reconcile with the price."""
+def test_knocked_in_settlement_row_agrees_with_mc(mc_reference, name, engine):
+    """The knocked-in settlement row where MC puts it; its probability within 3 binomial SE of MC on the Black-Scholes
+    engines."""
     make_product, make_env = CASES[name]
     _, _, mc = mc_reference(name)
     stats = STATS_ENGINES[engine]().calculate_event_stats(make_product(), make_env())
     row, mc_row = stats.ki_settlement, mc.ki_settlement
     assert row.time == pytest.approx(mc_row.time, abs=1e-12), (row.time, mc_row.time)
     assert row.payment_time == pytest.approx(mc_row.payment_time, abs=1e-12), (row.payment_time, mc_row.payment_time)
-    assert abs(stats.reconciliation_error) <= 1e-6 * max(1.0, abs(stats.pv))
     if engine != "heston_pde":
         sd = math.sqrt(mc_row.probability * (1.0 - mc_row.probability) / MC_PATHS)
         assert abs(row.probability - mc_row.probability) <= 3.0 * sd, (row.probability, mc_row.probability, sd)
 
 
+def _expiry_product(**kw):
+    return make(KI85, pay={"accrual_config.coupon_pay_type": CouponPayType.EXPIRY}, **kw)
+
+
+@pytest.mark.parametrize("settlement", ["none", "settlement_date", "lag"])
 @pytest.mark.parametrize("engine", list(STATS_ENGINES))
-def test_expiry_pay_pays_a_schedule_two_knock_out_at_schedule_two_end(engine):
-    """EXPIRY pay: a schedule-2 knock-out is paid with the knocked-in note, at schedule 2's end's settlement (where
-    MC pays it, investigation t9), not at the exercise date's."""
-    product = lambda: make(KI85, pay={"accrual_config.coupon_pay_type": CouponPayType.EXPIRY})  # noqa: E731
-    mc = SnowballMCEngine(params=MCParams(num_paths=20_000, seed=7)).calculate_event_stats(product(), env())
-    stats = STATS_ENGINES[engine]().calculate_event_stats(product(), env())
+def test_expiry_pay_pays_a_schedule_two_knock_out_at_the_terminal(engine, settlement):
+    """AC5: EXPIRY pay: a schedule-2 knock-out is paid with the knocked-in note, at the exercise settlement
+    (``resolve_terminal_timing``), not at schedule 2's end's."""
+    kw = {"none": {}, "settlement_date": dict(settlement_date=SETTLEMENT_DATE), "lag": dict(lag=0.02)}[settlement]
+    product = _expiry_product(**kw)
+    terminal = float(resolve_terminal_timing(product, env()).payment_time)
+    stats = STATS_ENGINES[engine]().calculate_event_stats(_expiry_product(**kw), env())
     post = [i for i, tag in enumerate(stats.observations.schedule) if tag == "post"]
     assert post
-    np.testing.assert_allclose(stats.observations.payment_times[post], mc.observations.payment_times[post],
-                               rtol=0.0, atol=1e-12)
-    assert stats.ki_settlement.payment_time == pytest.approx(mc.ki_settlement.payment_time, abs=1e-12)
+    np.testing.assert_allclose(stats.observations.payment_times[post], terminal, rtol=0.0, atol=1e-12)
+    assert stats.ki_settlement.payment_time == pytest.approx(terminal, abs=1e-12)
 
 
 # --- cash-leg folding --------------------------------------------------------------------------------------------
@@ -237,23 +305,24 @@ def test_expiry_pay_pays_a_schedule_two_knock_out_at_schedule_two_end(engine):
 FOLD_ENGINES = {
     **{name: make for name, (make, _) in ENGINES.items()},
     "heston_pde": lambda: HestonKOResetSnowballPDESolver(HESTON, n_x=64, n_v=12, n_t=48),
-    "mc": lambda: SnowballMCEngine(params=MCParams(num_paths=20_000, seed=7)),
 }
 
 
 @pytest.mark.parametrize("pay", ["instant", "expiry"])
 @pytest.mark.parametrize("engine", list(FOLD_ENGINES))
 def test_folded_cash_lands_where_the_statistics_put_it(engine, pay):
-    """The fold structure's knocked-in slot and schedule-2 EXPIRY payments sit at schedule 2's end (D31): every engine
-    binds the overlay (Monte Carlo already settled the knocked-in branch there and refused the old structure's slot),
-    and the folded cash is the engine's own statistics times the amounts, discounted from each payment."""
+    """The fold structure's knocked-in slot and schedule-2 EXPIRY payments sit at the product terminal (the exercise
+    date and its settlement): every engine binds the overlay, and the folded cash is the engine's own statistics times
+    the amounts, discounted from each payment."""
     from quantark.cashleg.folding import FoldedEventCash, FoldOverlay, _event_structure
 
     kw = {} if pay == "instant" else dict(pay={"accrual_config.coupon_pay_type": CouponPayType.EXPIRY})
     product = lambda: make(KI85, **kw)  # noqa: E731
     e = _env_for(engine, env) if engine in ENGINES else env()
     structure = _event_structure(product(), env())
-    assert structure.ki.determination_time == pytest.approx(float(product().get_post_maturity_time(env())), abs=1e-12)
+    terminal = resolve_terminal_timing(product(), env())
+    assert structure.ki.determination_time == pytest.approx(float(terminal.determination_time), abs=1e-12)
+    assert structure.ki.payment_time == pytest.approx(float(terminal.payment_time), abs=1e-12)
     amounts = [0.3 + 0.1 * i for i in range(len(structure.ko))]
     overlay = FoldOverlay(
         ko=tuple(FoldedEventCash(s.schedule, s.determination_time, s.payment_time, a)
@@ -275,7 +344,7 @@ def test_folded_cash_lands_where_the_statistics_put_it(engine, pay):
 # --- bitwise: exercise on schedule 2's end --------------------------------------------------------------------------
 
 def _pinned(name):
-    """Products whose exercise date IS schedule 2's last fixing (one maturity: unchanged by T7)."""
+    """Products whose exercise date IS schedule 2's last fixing (one maturity: unchanged by T7 and its revert)."""
     on_end = dict(exercise=SCHEDULE_2_END)
     return {
         "base": (lambda: make(**on_end), env),

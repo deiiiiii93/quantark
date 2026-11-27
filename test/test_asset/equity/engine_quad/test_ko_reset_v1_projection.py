@@ -244,13 +244,18 @@ def test_the_projection_converges_under_refinement():
 #: NODAL_STATS_PINS.instant_schedule1_and_ki_pair/forward[0][6]=0x1.845019eee3f0ap-9,
 #: NODAL_STATS_PINS.instant_schedule1_and_ki_pair/forward[1]=0x1.197b984108ca9p-2,
 #: NODAL_STATS_PINS.instant_schedule1_and_ki_pair/forward[2]=0x1.87eecc7e004d4p-4
+#: 0.16.0 run 9 (owner ruling 2026-11-27: the knocked-in KO-reset is a live put to the exercise date) reverted run 5
+#: T7: the three dated price entries T7 and then T5 moved were RECAPTURED on the reverted library (the pre-T7 values
+#: up to T5's round-off, <= 2.2e-15 rel); T7-era values (post T5): instant_schedule1_and_ki_pair 0x1.f774fdd388ab1p+2,
+#: instant_schedule2_width0 0x1.904245c6198cap+2, reverse 0x1.b3eb9aee73255p+2. The instant_schedule1_and_ki_pair
+#: statistics pin below is bitwise the same on the reverted library (its T7 move was one ulp, absorbed by T5).
 NODAL_PRICE_PINS = {
     "cert_ordinary": "0x1.82bd6c100745dp+6",
     "cert_discrete_ki": "0x1.82ed7bff2c4b4p+6",
     "cert_discrete_ki_width0": "0x1.833c3bbb1d306p+6",
-    "instant_schedule1_and_ki_pair": "0x1.f774fdd388ab1p+2",    # was 0x1.f84212775e3e9p+2
-    "instant_schedule2_width0": "0x1.904245c6198cap+2",         # was 0x1.91a7cb0311cf0p+2
-    "reverse": "0x1.b3eb9aee73255p+2",                          # was 0x1.b2a8e099405bap+2
+    "instant_schedule1_and_ki_pair": "0x1.f84212775e401p+2",    # pre-T7 0x1.f84212775e3e9p+2
+    "instant_schedule2_width0": "0x1.91a7cb0311d01p+2",         # pre-T7 0x1.91a7cb0311cf0p+2
+    "reverse": "0x1.b2a8e0994065dp+2",                          # pre-T7 0x1.b2a8e099405bap+2
 }
 NODAL_STATS_PINS = {
     "cert_discrete_ki/forward": (
@@ -278,7 +283,7 @@ NODAL_STATS_PINS = {
     "instant_schedule1_and_ki_pair/forward": (
         ["0x1.80415fbd50682p-2", "0x1.2504dcfdc4bfdp-3", "0x1.2969dcf4d335ap-4", "0x1.dbf4e911af406p-6",
          "0x1.0196f2ef21c37p-9", "0x1.27d49ece2359bp-8", "0x1.845019eee3ef4p-9"],
-        "0x1.197b984108caap-2", "0x1.87eecc7e004d8p-4"),     # T7: ki_settlement was 0x1.87eecc7e004d6p-4
+        "0x1.197b984108caap-2", "0x1.87eecc7e004d8p-4"),     # unchanged by the run-9 revert of T7 (see above)
 }
 POINTWISE_EVENT_PINS = {
     "single_date": "97e73ef50910383512be26442e0e40c82c601828397cdceac95ef7459ca05e6e",

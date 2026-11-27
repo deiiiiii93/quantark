@@ -46,8 +46,7 @@ from quantark.asset.equity.engine.pde.core.statistics.adjoint import (
     AdjointUnavailable,
     split_same_instant_rows,
 )
-from quantark.asset.equity.engine.settlement_support import (first_schedule_settlement, knocked_in_row_timing,
-                                                             knocked_in_settlement, resolve_terminal_timing)
+from quantark.asset.equity.engine.settlement_support import first_schedule_settlement, resolve_terminal_timing
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.util.exceptions import PricingError, ValidationError
@@ -361,10 +360,6 @@ def v2_event_statistics(product, env, context, values: Dict[str, float], *, pv: 
         if settlement.settlement_date_governs:
             # an explicit settlement date pays the note that ends with schedule 1 (spec D33)
             pre_timing.update(payment_time=settlement.payment_time, payment_date=settlement.payment_date)
-        knocked_in = knocked_in_settlement(product, env, terminal)
-        if knocked_in is not None:
-            # the knocked-in note ends at schedule 2's last fixing (D31), paid by ``knocked_in_settlement``
-            post_timing = knocked_in_row_timing(product, env, terminal, knocked_in)
     else:
         pre_timing = post_timing
     maturity = es.outcome_row(env, probability=values["terminal_alive_probability"],

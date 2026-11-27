@@ -353,13 +353,15 @@ with open(_PINS_PATH) as _f:
     #: 0.16.0 D1 (QUAD numerics run 5, KO-reset V1 knock-outs by the cell-average projection) re-pinned the six
     #: KO-reset V1 default-projection entries (kor_{base,wide}_v1_{fwd,stk}, kor_base_v1_val78 / _val74); their
     #: previous values are kept in the file under "_superseded_by_0.16.0_D1" (e.g. kor_base_v1_fwd price
-    #: 0x1.1be31f43f709dp+3 = 8.87147486948407 -> 0x1.1bd6ebe4d78e9p+3 = 8.869985529858655). 0.16.0 T7 (the
-    #: knocked-in KO-reset ends at schedule 2's last fixing, 12-03, not the 01-05 exercise date: owner ruling D31)
-    #: re-pinned the thirteen ``kor_*`` grid entries; their previous values are under "_superseded_by_0.16.0_T7"
-    #: (e.g. kor_base_pde price 8.871664315881244 -> 8.86368327529885, kor_base_pde_val78 -20.686395546090417 ->
-    #: -20.788510675853676). 0.16.0 T5 (V1 convolutions on fast FFT lengths, owner-signed round-off) re-pinned the
-    #: twenty-two QUAD V1 entries; previous values under "_superseded_by_0.16.0_T5_fft" (max rel move 1.7e-13 over
-    #: values >= 1e-6, e.g. phx_wide_v1_fwd; the reconciliation residual ``recon`` is itself round-off, |v| <= 1.3e-14)
+    #: 0x1.1be31f43f709dp+3 = 8.87147486948407 -> 0x1.1bd6ebe4d78e9p+3 = 8.869985529858655). 0.16.0 T5 (V1
+    #: convolutions on fast FFT lengths, owner-signed round-off) re-pinned the twenty-two QUAD V1 entries; previous
+    #: values under "_superseded_by_0.16.0_T5_fft" (max rel move 1.7e-13 over values >= 1e-6, e.g. phx_wide_v1_fwd;
+    #: the reconciliation residual ``recon`` is itself round-off, |v| <= 1.3e-14). 0.16.0 run 9 (owner ruling
+    #: 2026-11-27: a knocked-in KO-reset is a live put to the product's exercise date, 01-05) reverted run 5 T7 (which
+    #: had ended it at schedule 2's last fixing, 12-03): the seven non-V1 ``kor_*`` entries T7 had moved are RESTORED
+    #: to their pre-T7 values (e.g. kor_base_pde price 8.86368327529885 -> 8.871664315881244), the six V1 entries T7
+    #: and then T5 moved are RECAPTURED on the reverted library (pre-T7 values up to T5's round-off); the T7-era
+    #: values are kept under "_reverted_0.16.0_T7_run9"
     PINS = json.load(_f)
 
 

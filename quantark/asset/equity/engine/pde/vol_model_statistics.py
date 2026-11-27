@@ -67,11 +67,6 @@ class _VarianceClaimBreach:
         base = self.stats.breach.seed(np.zeros((block.shape[0], self.stats.n_cols)))
         return np.repeat(base[:, None, :], self.n_v, axis=1).reshape(block.shape)
 
-    def seed_ki(self, block):
-        """The knocked-in block's seed at schedule 2's end (KO-reset, D31), on every variance column."""
-        base = self.stats.breach.seed_ki(np.zeros((block.shape[0], self.stats.n_cols)))
-        return np.repeat(base[:, None, :], self.n_v, axis=1).reshape(block.shape)
-
 
 def _family(owner, product):
     from .snowball_pde_solver import SnowballPDESolver
@@ -300,18 +295,13 @@ def native_adi(owner, product, env, *, event_stats=False, streams=None, npv=None
                 values['alive'][...], values['ki'][...] = block['alive'], block['ki']
             else:
                 seed = family._v0_seed_values
-                seed_ki = getattr(family, "_v1_seed_values", None)
                 if seed is not None:
                     family._v0_seed_values = seed[:, None]
-                if seed_ki is not None:
-                    family._v1_seed_values = seed_ki[:, None]
                 try:
                     family._two_surface_events(values['alive'], values['ki'], core.S_grid, j,
                         core.N_T+1, float(p.layout.time.t[j]), product, env)
                 finally:
                     family._v0_seed_values = seed
-                    if seed_ki is not None:
-                        family._v1_seed_values = seed_ki
             if stats is not None:
                 stats_events_batched(j, blocks)
                 log.append(ADIEvents(j=j, half=False))

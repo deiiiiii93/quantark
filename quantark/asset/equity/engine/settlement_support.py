@@ -538,75 +538,6 @@ def first_schedule_payment_time(
     return first_schedule_settlement(product, pricing_env, terminal).payment_time
 
 
-def knocked_in_settlement(
-    product,
-    pricing_env: "PricingEnvironment",
-    terminal: Optional[ResolvedPaymentTiming] = None,
-    *,
-    post_schedule_times: Optional[Sequence[float]] = None,
-) -> Optional[FirstScheduleSettlement]:
-    """KO-reset (ABSOLUTE): the payment of a knocked-in note that ends at schedule 2's last fixing before the product
-    maturity, or ``None`` when schedule 2 ends with the product (one maturity: the product terminal pays it).
-
-    Owner ruling 2026-11-14 (unified event statistics spec D31): a knocked-in KO-reset is a knocked-in snowball on the
-    second schedule, alive until that schedule ends -- its knocked-in payoff is decided on the spot at schedule 2's
-    last fixing (``get_post_maturity_time``) and paid from there, as Monte Carlo decides and pays it. The payment
-    follows the rule the never-knocked-in note follows at schedule 1's end (``first_schedule_settlement``), applied to
-    schedule 2's last fixing (run 5 T7 ruling): the product's explicit ``settlement_date`` when booked (the resolver's
-    TERMINAL precedence at that determination, exactly where Monte Carlo pays it), else schedule 2's end plus the
-    terminal settlement delay, with the terminal's ``delay_df``. ``first_schedule_settlement_time`` is schedule 1's
-    payment only and plays no part here.
-
-    ``terminal``: the product's ``resolve_terminal_timing``, when the caller holds it. ``post_schedule_times``: the
-    observation times of schedule 2's active records (``_resolve_ko_schedule``, not cut to the maturity), when the
-    caller holds them -- their latest is ``get_post_maturity_time``; an empty schedule falls back to it.
-    """
-    from quantark.util.enum import PostKOScheduleMode
-
-    if getattr(product, "post_ko_mode", None) != PostKOScheduleMode.ABSOLUTE:
-        return None
-    terminal = resolve_terminal_timing(product, pricing_env) if terminal is None else terminal
-    post_end = (float(max(post_schedule_times)) if post_schedule_times
-                else float(product.get_post_maturity_time(pricing_env)))
-    determination = float(terminal.determination_time)
-    if same_instant(post_end, determination) or post_end > determination:
-        return None
-    post_end = max(post_end, 0.0)
-    if getattr(product, "settlement_date", None) is not None:
-        timing = resolve_terminal_timing_at(product, pricing_env, determination_time=post_end,
-                                            cashflow_id="ko_reset_v1_terminal")
-        return FirstScheduleSettlement(
-            determination_time=post_end,
-            payment_time=float(timing.payment_time),
-            payment_date=timing.payment_date,
-            delay_df=float(timing.delay_df),
-            settlement_date_governs=True,
-        )
-    return FirstScheduleSettlement(
-        determination_time=post_end,
-        payment_time=post_end + (float(terminal.payment_time) - determination),
-        payment_date=None,
-        delay_df=float(terminal.delay_df),
-        settlement_date_governs=False,
-    )
-
-
-def knocked_in_row_timing(product, pricing_env, terminal, settlement) -> dict:
-    """The knocked-in settlement row's ``time`` / ``payment_time`` / ``date`` / ``payment_date`` for a
-    ``knocked_in_settlement`` that is not ``None``: determined at schedule 2's last fixing (dated by its last record
-    when that record sits there), paid as ``settlement`` pays it (dated on the explicit settlement date when it
-    governs, else on the determination date when the delay is zero, else undated -- as the never-knocked-in row)."""
-    post_end = float(settlement.determination_time)
-    records = product._resolve_ko_schedule(product.post_barrier_config, pricing_env)[0]
-    last = max(records, key=lambda r: float(r.observation_time)) if records else None
-    date = (last.observation_date if last is not None and same_instant(float(last.observation_time), post_end)
-            else None)
-    delay = float(terminal.payment_time) - float(terminal.determination_time)
-    payment_date = (settlement.payment_date if settlement.settlement_date_governs
-                    else date if is_close(delay, 0.0) else None)
-    return dict(time=post_end, payment_time=float(settlement.payment_time), date=date, payment_date=payment_date)
-
-
 def apply_determination_to_payment(
     value_at_determination,
     timing: ResolvedPaymentTiming,
@@ -836,8 +767,6 @@ __all__ = [
     "first_schedule_payment_time",
     "first_schedule_settlement",
     "first_schedule_terminal_timing",
-    "knocked_in_row_timing",
-    "knocked_in_settlement",
     "pending_receivable_pv",
     "requested_settlement_support",
     "resolve_american_exercise_timings",

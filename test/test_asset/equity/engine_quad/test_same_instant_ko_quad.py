@@ -833,19 +833,24 @@ def test_ko_reset_duplicate_record_prices_as_the_product_without_it(kind):
 # (['0x1.80415fbd50684p-2', '0x1.24d5a02fa4dc0p-3', '0x1.294df5d37ab10p-4', '0x1.bd335c527f29fp-11',
 # '0x1.bd361567b524cp-10', '0x1.4209b90434a9bp-10'], '0x1.6491837c68af9p-2', '0x1.d487ade80527ep-5')} (max rel move
 # 2.15e-14)
+# 0.16.0 run 9 (owner ruling 2026-11-27: the knocked-in KO-reset is a live put to the 01-05 exercise date) reverted
+# run 5 T7; the entries T7 and then T5 moved were RECAPTURED on the reverted library (the pre-T7 values up to T5's
+# FFT-length round-off, prices <= 1.2e-15 rel): T7-era values (post T5) base 0x1.1b9577ec96dc8p+3, base_continuous_ki
+# 0x1.f8b0ba798222dp+2, schedule2_base 0x1.1b81973704f1ap+3, ki_settlement rows forward 0x1.d487ade805271p-5 /
+# stacked 0x1.d487ade805266p-5.
 KOR_PINS = {
-    "base": "0x1.1b9577ec96dc8p+3",                 # was 0x1.1bd6ebe4d78e9p+3 (8.869985529858655 -> 8.861995660866238)
-    "base_continuous_ki": "0x1.f8b0ba798222dp+2",   # was 0x1.f96feee4b40b8p+2
+    "base": "0x1.1bd6ebe4d78f4p+3",                 # pre-T7 0x1.1bd6ebe4d78e9p+3 (8.869985529858655)
+    "base_continuous_ki": "0x1.f96feee4b40c3p+2",   # pre-T7 0x1.f96feee4b40b8p+2
     "base_first_step": "0x1.5337d6098b9fap+2",
-    "schedule2_base": "0x1.1b81973704f1ap+3",       # was 0x1.1bc3631600048p+3
+    "schedule2_base": "0x1.1bc3631600053p+3",       # pre-T7 0x1.1bc3631600048p+3
 }
 KOR_ROW_PINS = {
     "forward": (["0x1.80415fbd50682p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab0ep-4", "0x1.bd335c527f256p-11",
                  "0x1.bd361567b5221p-10", "0x1.4209b90434a74p-10"], "0x1.6491837c68afcp-2",
-                "0x1.d487ade805271p-5"),    # T7: was 0x1.d487ade805274p-5 (the knocked-in row at 12-03)
+                "0x1.d487ade805273p-5"),    # pre-T7 0x1.d487ade805274p-5 (the knocked-in row at the 01-05 exercise)
     "stacked": (["0x1.80415fbd50684p-2", "0x1.24d5a02fa4dbdp-3", "0x1.294df5d37ab0fp-4", "0x1.bd335c527f2afp-11",
                  "0x1.bd361567b524bp-10", "0x1.4209b90434a93p-10"], "0x1.6491837c68afbp-2",
-                "0x1.d487ade805266p-5"),    # T7: was 0x1.d487ade80527ap-5
+                "0x1.d487ade805264p-5"),    # pre-T7 0x1.d487ade80527ap-5
 }
 
 
@@ -1491,18 +1496,19 @@ def _v2_pinned():
 # Pinned BEFORE the T4 change (worktree d0ac7fb4): price, pv, KO rows and discounted cash, coupon rows and discounted
 # cash (None: no coupon table), maturity / knocked-in settlement / knock-in probabilities.
 V2_PINS = {
-    # 0.16.0 T7 (knocked-in KO-reset ends at schedule 2's last fixing, D31): price/pv were 0x1.1be5a6a674620p+3
-    # (8.871783233), last ko row 0x1.41cce6cbff2c9p-10, last ko_cash 0x1.d9f825c451c88p-9, ki_settlement
-    # 0x1.d40a63d8bac41p-5
+    # 0.16.0 run 9 (owner ruling 2026-11-27: the knocked-in KO-reset is a live put to the 01-05 exercise date)
+    # reverted run 5 T7 and RESTORED the pre-T7 values; T7 (knocked-in note ending at schedule 2's last fixing) had
+    # price/pv 0x1.1ba4450b66f07p+3, last ko row 0x1.41cce6cbff2c5p-10, last ko_cash 0x1.d9f825c451c8ap-9,
+    # ki_settlement 0x1.d40a63d8bac43p-5
     'ko_reset_base': dict(
-        price='0x1.1ba4450b66f07p+3', pv='0x1.1ba4450b66f07p+3',
+        price='0x1.1be5a6a674620p+3', pv='0x1.1be5a6a674620p+3',
         ko=['0x1.80268d2a30d98p-2', '0x1.24f61998cb561p-3', '0x1.29640d787ce9dp-4', '0x1.bc6697ca056c6p-11',
-            '0x1.bcbb33e26a3d6p-10', '0x1.41cce6cbff2c5p-10'],
+            '0x1.bcbb33e26a3d6p-10', '0x1.41cce6cbff2c9p-10'],
         ko_cash=['0x1.670736d1b46cap+2', '0x1.10d38a23b978bp+1', '0x1.14079e3fd8ad3p+0', '0x1.48e2d461387b5p-9',
-                 '0x1.48090e4ccf7ebp-8', '0x1.d9f825c451c8ap-9'],
+                 '0x1.48090e4ccf7ebp-8', '0x1.d9f825c451c88p-9'],
         coupon=None,
         coupon_cash=None,
-        maturity='0x1.64a75ac99f7c8p-2', ki_settlement='0x1.d40a63d8bac43p-5', ki='0x1.f2f03f0d56208p-5'),
+        maturity='0x1.64a75ac99f7c8p-2', ki_settlement='0x1.d40a63d8bac41p-5', ki='0x1.f2f03f0d56208p-5'),
     'phoenix_EXPIRY_False_continuous': dict(
         price='-0x1.86b9c0248fabap+0', pv='-0x1.86b9c0248fabap+0',
         ko=['0x1.80268d2a30d98p-2', '0x1.24f6b675401c7p-3', '0x1.297c923798da7p-4', '0x1.7e337bafaeb13p-5',

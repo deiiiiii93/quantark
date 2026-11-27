@@ -18,8 +18,6 @@ from quantark.asset.equity.engine.event_stats import EventStatistics
 from quantark.asset.equity.engine.settlement_support import (
     first_schedule_payment_time,
     first_schedule_settlement,
-    knocked_in_row_timing,
-    knocked_in_settlement,
     first_schedule_terminal_timing,
     resolve_terminal_timing,
 )
@@ -182,7 +180,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 settlement = (
                     first_schedule_payment_time(product, pricing_env)
                     if decision.ko_regime == "pre"
-                    else self._knocked_in_payment_time(product, pricing_env)
+                    else resolve_terminal_timing(product, pricing_env).payment_time
                 )
             discount = (
                 pricing_env.get_discount_factor(settlement)
@@ -234,8 +232,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         post_ko_records = self._resolve_ko_records(
             product, pricing_env, product.post_barrier_config
         )
-        # schedule 2's active records before the cut to maturity: their latest is its end (``knocked_in_settlement``)
-        post_schedule_times = [float(rec.observation_time) for rec in post_ko_records]
         post_ko_records = [
             rec
             for rec in post_ko_records
@@ -330,11 +326,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         terminal = payment_timings.terminal
         pre_maturity = float(product.get_pre_maturity_time(pricing_env))
-        # A knocked-in note ends at schedule 2's last fixing (owner ruling D31, run 5 T7): when that falls before the
-        # product maturity, v_in is identically zero above it and seeded when the sweep reaches it, exactly as v_out
-        # is staged at schedule 1's end; paid by ``knocked_in_settlement``. None: schedule 2 ends with the product.
-        knocked_in = knocked_in_settlement(product, pricing_env, terminal, post_schedule_times=post_schedule_times)
-        post_maturity = None if knocked_in is None else float(knocked_in.determination_time)
 
         def terminal_in(spot_values):
             v_in_cash = np.array(
@@ -344,26 +335,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 ],
                 dtype=float,
             )
-            if knocked_in is not None:
-                v_in_cash = v_in_cash * (knocked_in.delay_df if knocked_in.settlement_date_governs
-                                         else terminal.delay_df)
-                if fold is not None:
-                    # the knocked-in branch's folded cash, paid with the note and discounted from there to schedule
-                    # 2's end by its own exact ratio (as the alive branch's at schedule 1's end)
-                    v_in_cash = v_in_cash + fold.bind_terminal("ki", post_maturity, knocked_in.payment_time) * (
-                        pricing_env.get_discount_factor(knocked_in.payment_time)
-                        / pricing_env.get_discount_factor(post_maturity)
-                    )
-                return v_in_cash
             if fold is not None:
                 v_in_cash = v_in_cash + fold.bind_terminal(
                     "ki", terminal.determination_time, terminal.payment_time
                 )
             return v_in_cash * terminal.delay_df
 
-        v_in_terminal = terminal_in(spot_grid)
-        v_in = v_in_terminal if knocked_in is None else np.zeros_like(v_in_terminal)
-        v_in_seeded = knocked_in is None
+        v_in = terminal_in(spot_grid)
         # The not-yet-knocked-in contract matures on the PRE-KI schedule; only a
         # knocked-in one runs on to `maturity`. Seeding v_out at the end of the
         # grid would price it through a period it can never reach, so it is
@@ -426,11 +404,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if seed_now:
                 v_out = v_out_terminal.copy()
                 v_out_seeded = True
-            in_live = knocked_in is None or obs_time < post_maturity or same_instant(obs_time, post_maturity)
-            seed_in_now = in_live and not v_in_seeded
-            if seed_in_now:
-                v_in = v_in_terminal.copy()
-                v_in_seeded = True
 
             pre_record = self._match_record(obs_time, pre_ko_records)
             post_record = self._match_record(obs_time, post_ko_records)
@@ -451,11 +424,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 # the pre-event states at the first event: a state seeded here holds its maturity seed exactly
                 first_pre = (
                     None if (seed_now or not out_live) else v_out.copy(),
-                    None if (len(times) == 1 if knocked_in is None else (seed_in_now or not in_live))
-                    else v_in.copy(),
+                    None if len(times) == 1 else v_in.copy(),
                 )
                 first_out_live = out_live
-                first_in_live = in_live
                 first_ki_record = self._match_record(obs_time, ki_records) if ki_records else None
                 first_levels = [
                     level for level in (
@@ -509,20 +480,18 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             # The bridge correction below samples BOTH surfaces at this step's
             # slice, so retain the knocked-in surface before it is rolled back.
             v_in_at_obs = v_in
-            if in_live:
-                # (v_in is identically zero above schedule 2's end: no knocked-in note lives there, D31)
-                v_in = self._diffuse_fft(
-                    v_in,
-                    math_utils,
-                    omega_array,
-                    prefactor,
-                    full_p_lr,
-                    full_p_ur,
-                    full_p0,
-                    alpha,
-                    beta,
-                    tau_step,
-                )
+            v_in = self._diffuse_fft(
+                v_in,
+                math_utils,
+                omega_array,
+                prefactor,
+                full_p_lr,
+                full_p_ur,
+                full_p0,
+                alpha,
+                beta,
+                tau_step,
+            )
 
             if not out_live:
                 # v_out is identically zero above pre_maturity: in that
@@ -573,8 +542,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             )
             if not first_out_live:
                 v_out = np.zeros_like(v_out)             # never seeded: the first schedule had ended
-            if not first_in_live:
-                v_in = np.zeros_like(v_in)               # never seeded: schedule 2 had ended (D31)
             first_value = first_in if carried_knock_in else first_out
 
         if record_grids:
@@ -596,12 +563,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                         "no_ki", pre_maturity, timing.payment_time
                     )
                 return float(redemption) * float(timing.payment_df)
-
-        if carried_knock_in and not v_in_seeded:
-            # Schedule 2 ends at the valuation instant (no step of its own) before the product maturity: the
-            # knocked-in note is decided now on the known spot (D31) and paid by ``knocked_in_settlement``.
-            return float(terminal_in(np.array([spot], dtype=float))[0]) * float(
-                pricing_env.get_discount_factor(post_maturity) if post_maturity > 0.0 else 1.0)
 
         # This engine always read the not-knocked-in surface, so a knocked-in contract was priced as if
         # its first schedule were still in force.
@@ -985,8 +946,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         post_ko_records = self._resolve_ko_records(
             product, pricing_env, product.post_barrier_config
         )
-        # schedule 2's active records before the cut to maturity: their latest is its end (``knocked_in_settlement``)
-        post_schedule_times = [float(rec.observation_time) for rec in post_ko_records]
         post_ko_records = [
             rec
             for rec in post_ko_records
@@ -1088,12 +1047,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         v_out_cash = np.array(
             [product.get_maturity_payoff_v0(s, pricing_env=pricing_env) for s in spot_grid], dtype=float
         )
-        # the knocked-in note's end, as ``price`` stages it (D31): schedule 2's last fixing when before the maturity
-        knocked_in = knocked_in_settlement(product, pricing_env, terminal, post_schedule_times=post_schedule_times)
-        post_maturity = None if knocked_in is None else float(knocked_in.determination_time)
-        in_delay_df = (knocked_in.delay_df if knocked_in is not None and knocked_in.settlement_date_governs
-                       else terminal.delay_df)
-        terminal_in_cash = v_in_cash * in_delay_df
+        terminal_in_cash = v_in_cash * terminal.delay_df
         # the maturity at schedule 1's end, as ``price`` seeds it (spec D33: an explicit settlement date governs)
         first_schedule = first_schedule_settlement(product, pricing_env, terminal)
         terminal_out_cash = v_out_cash * (
@@ -1102,10 +1056,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
-        if knocked_in is None:
-            v_in[kis_unit] = 1.0
-            v_in[kis_cash] = terminal_in_cash
-        v_in_seeded = knocked_in is None
+        v_in[kis_unit] = 1.0
+        v_in[kis_cash] = terminal_in_cash
         v_out_seeded = False
         first_exact = self._first_step_exact(float(tau[1]), math_utils.h)
         first = None
@@ -1142,12 +1094,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 v_out[m_unit] = 1.0
                 v_out[m_cash] = terminal_out_cash
                 v_out_seeded = True
-            in_live = knocked_in is None or obs_time < post_maturity or same_instant(obs_time, post_maturity)
-            seed_in = in_live and not v_in_seeded
-            if seed_in:
-                v_in[kis_unit] = 1.0
-                v_in[kis_cash] = terminal_in_cash
-                v_in_seeded = True
 
             pre_record = self._match_record(obs_time, pre_ko_records)
             post_record = self._match_record(obs_time, post_ko_records)
@@ -1191,12 +1137,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if step_index == 1 and first_exact:
                 first = self._reset_first_step_statistics(
                     product, pricing_env, math_utils, spot, float(tau[1]), float(alpha_vec[1]), float(beta_vec[1]),
-                    obs_time, out_live, seed, len(times) == 1 if knocked_in is None else seed_in, v_out, v_in,
-                    pre_value, post_value,
+                    obs_time, out_live, seed, len(times) == 1, v_out, v_in, pre_value, post_value,
                     pre_record, post_record, pre_ko_records, post_ko_records, ki_records, ki_continuous,
                     log_ki_barrier, rows=(n_rows, m_unit, m_cash, kis_unit, kis_cash),
-                    cash=(terminal.delay_df, first_schedule, in_delay_df), pre_unit=float(pre_unit),
-                    post_unit=float(post_unit),
+                    cash=(terminal.delay_df, first_schedule), pre_unit=float(pre_unit), post_unit=float(post_unit),
                     pre_key=sources[0] if pre_record is not None and instant is None else None,
                     log_type=FirstStepLog, instant=instant, group_values=group_values, group_units=group_units,
                 )
@@ -1239,27 +1183,23 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                         if ki_continuous and log_ki_barrier is not None else None),
                 out_diffused=bool(out_live),
                 seed_out=bool(seed),
-                in_diffused=bool(in_live),
-                seed_in=bool(seed_in and knocked_in is not None),
             ))
 
             # The bridge correction below samples BOTH surfaces at this step's
             # slice, so retain the knocked-in surface before it is rolled back.
             v_in_at_obs = v_in
-            if in_live:
-                # (v_in is identically zero above schedule 2's end, D31)
-                v_in = self._diffuse_fft(
-                    v_in,
-                    math_utils,
-                    omega_array,
-                    prefactor,
-                    full_p_lr,
-                    full_p_ur,
-                    full_p0,
-                    alpha,
-                    beta,
-                    tau_step,
-                )
+            v_in = self._diffuse_fft(
+                v_in,
+                math_utils,
+                omega_array,
+                prefactor,
+                full_p_lr,
+                full_p_ur,
+                full_p0,
+                alpha,
+                beta,
+                tau_step,
+            )
 
             if not out_live:
                 # v_out is identically zero above pre_maturity: in that
@@ -1300,12 +1240,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         if pv is None:
             pv = float(self.price(product, pricing_env))
-        if not v_in_seeded and knocked_in_at_valuation:
-            # TODO(D31): schedule 2 ends at the valuation instant before the product maturity on a knocked-in note --
-            # the knocked-in settlement is decided on the known spot (``price`` returns it); its statistics rows are
-            # not built here. Refused rather than reported from an unseeded march.
-            raise PricingError("KO-reset QUAD V1 statistics: schedule 2 ends at the valuation instant before the "
-                               "product maturity on a knocked-in note (not supported)")
         if not v_out_seeded and not knocked_in_at_valuation:
             # the first schedule ended at the valuation instant (no step of its own): ``price`` decides the
             # maturity on the known spot, so the whole price is the maturity row, certain
@@ -1372,7 +1306,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         pointwise, on the pre-event columns (a state seeded at the first event holds its maturity columns there,
         evaluated on the nodes), read at the spot; and its log for the adjoint pass."""
         n_rows, m_unit, m_cash, kis_unit, kis_cash = rows
-        delay_df, first_schedule, in_delay_df = cash
+        delay_df, first_schedule = cash
         ki_record = self._match_record(obs_time, ki_records) if ki_records else None
         bridged = bool(ki_continuous and log_ki_barrier is not None and out_live)
         levels = [
@@ -1409,7 +1343,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         if maturity_first:
             in_cash = np.array(
                 [product.get_maturity_payoff_v1(s, pricing_env=pricing_env) for s in spots_y], dtype=float
-            ) * in_delay_df
+            ) * delay_df
             in_y = np.zeros((n_rows, y.size), dtype=float)
             in_y[kis_unit] = 1.0
             in_y[kis_cash] = in_cash
@@ -1502,18 +1436,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             payment_date=settlement.payment_date if governs else pre_date if is_close(delay, 0.0) else None,
             probability=maturity_unit / df_pre, discounted=maturity_cash,
         )
-        knocked_in = knocked_in_settlement(product, pricing_env, terminal)
-        if knocked_in is not None:
-            # the knocked-in note ends at schedule 2's last fixing (D31), paid by ``knocked_in_settlement``
-            timing = knocked_in_row_timing(product, pricing_env, terminal, knocked_in)
-            df_post = float(pricing_env.get_discount_factor(timing["time"])) if timing["time"] > 0.0 else 1.0
-            ki_settlement = es.outcome_row(pricing_env, probability=ki_unit / df_post, discounted=ki_cash, **timing)
-        else:
-            ki_settlement = es.outcome_row(
-                pricing_env, time=maturity, payment_time=float(terminal.payment_time),
-                date=terminal.determination_date, payment_date=terminal.payment_date,
-                probability=ki_unit / float(pricing_env.get_discount_factor(maturity)), discounted=ki_cash,
-            )
+        ki_settlement = es.outcome_row(
+            pricing_env, time=maturity, payment_time=float(terminal.payment_time), date=terminal.determination_date,
+            payment_date=terminal.payment_date,
+            probability=ki_unit / float(pricing_env.get_discount_factor(maturity)), discounted=ki_cash,
+        )
         if observations.size and maturity_row.time < float(observations.times[-1]) - Tolerance.ZERO:
             from dataclasses import replace
 
@@ -1638,14 +1565,15 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             settlement_time = rec.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
                 # EXPIRY pay: with the note's end -- schedule 1's maturity for a first-schedule knock-out (a path
-                # never knocked in ends there, spec D30), the knocked-in note's end (schedule 2's last fixing, D31)
-                # for a second-schedule one
+                # never knocked in ends there, spec D30), the product terminal for a second-schedule one
                 terminal_payment_time = (
                     terminal_payment_time
                     if terminal_payment_time is not None
                     else first_schedule_payment_time(product, pricing_env)
                     if first_schedule
-                    else self._knocked_in_payment_time(product, pricing_env)
+                    else resolve_terminal_timing(
+                        product, pricing_env
+                    ).payment_time
                 )
                 settlement_time = terminal_payment_time
 
@@ -1660,14 +1588,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 )
             )
         return ko_records
-
-    @staticmethod
-    def _knocked_in_payment_time(product, pricing_env) -> float:
-        """When the knocked-in note is paid, and under EXPIRY pay a second-schedule knock-out: schedule 2's end's
-        settlement (``knocked_in_settlement``, D31), the product terminal's when schedule 2 ends with the product."""
-        terminal = resolve_terminal_timing(product, pricing_env)
-        settlement = knocked_in_settlement(product, pricing_env, terminal)
-        return float(terminal.payment_time if settlement is None else settlement.payment_time)
 
     def __repr__(self) -> str:
         return "KOResetSnowballQuadEngine()"

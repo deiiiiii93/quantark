@@ -1,8 +1,9 @@
 {
  "ko_reset_absolute": {
-  "price": "0x1.1ba34b1bb057ep+3",
+  "price": "0x1.1be4ac90399aep+3",
   "stats": {
-   "pv": "0x1.1ba34b1bb057ep+3",
+   "ki": "0x1.f2f17b5136b91p-5",
+   "ki_settlement": "0x1.d40cc57847e07p-5",
    "ko": [
     "0x1.8026c941eaa5bp-2",
     "0x1.24f38ea6265ddp-3",
@@ -19,11 +20,10 @@
     "0x1.47f926de8e830p-8",
     "0x1.d9de1d846b8acp-9"
    ],
+   "lifetime": "0x1.813a160e5f7efp-2",
    "maturity": "0x1.64a88aa70bd6dp-2",
-   "ki_settlement": "0x1.d40cc57782634p-5",
-   "lifetime": "0x1.7c59f3ffb2e20p-2",
-   "recon": "0x1.c000000000000p-47",
-   "ki": "0x1.f2f17b5136b91p-5"
+   "pv": "0x1.1be4ac90399aep+3",
+   "recon": "-0x1.0000000000000p-49"
   }
  },
  "phoenix_EXPIRY_False_continuous": {
@@ -744,35 +744,6 @@
    "maturity": "0x1.21ffe92402824p-2",
    "pv": "-0x1.37d05c7771af0p+4",
    "recon": "0x1.4000000000000p-46"
-  }
- },
- "_superseded_by_0.16.0_T7": {
-  "ko_reset_absolute": {
-   "price": "0x1.1be4ac90399aep+3",
-   "stats": {
-    "ki": "0x1.f2f17b5136b91p-5",
-    "ki_settlement": "0x1.d40cc57847e07p-5",
-    "ko": [
-     "0x1.8026c941eaa5bp-2",
-     "0x1.24f38ea6265ddp-3",
-     "0x1.2962d575486abp-4",
-     "0x1.bc6bbabb4f13dp-11",
-     "0x1.bca5a413667dbp-10",
-     "0x1.41bb3a1ea74fbp-10"
-    ],
-    "ko_cash": [
-     "0x1.67076efb605dfp+2",
-     "0x1.10d12bee4c3fep+1",
-     "0x1.14067ca5f0a31p+0",
-     "0x1.48e6a186469d0p-9",
-     "0x1.47f926de8e830p-8",
-     "0x1.d9de1d846b8acp-9"
-    ],
-    "lifetime": "0x1.813a160e5f7efp-2",
-    "maturity": "0x1.64a88aa70bd6dp-2",
-    "pv": "0x1.1be4ac90399aep+3",
-    "recon": "-0x1.0000000000000p-49"
-   }
   }
  }
 }
