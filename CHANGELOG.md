@@ -433,11 +433,16 @@ passed with the product (owner choice, option A).
 
 #### Changed
 
-- **The Snowball / Phoenix lifecycle tracker seeds its state from the flag.** `AutocallableLifecycleTracker` started
-  every contract not knocked in and overwrote the flag, so a flagged Snowball or Phoenix sent through replay, the
-  backtest or the portfolio lifecycle was priced as not knocked in, with no error. It now starts knocked in, as the
-  KO-reset tracker already did. Both trackers refuse a flagged contract given an explicit lifecycle state that is not
-  knocked in. Contracts without the flag are unchanged.
+- **A flagged Snowball / Phoenix now starts knocked in wherever a lifecycle is built for it.** The flag used to be
+  overwritten by a fresh not-knocked-in state, so the contract was priced as not knocked in, with no error:
+  - `AutocallableLifecycleTracker` seeds its state from the flag when no state is given, as the KO-reset tracker
+    already did (portfolio lifecycle manager);
+  - the replay engine (single product and book) no longer hands every Snowball / Phoenix a fresh state, so its tracker
+    seeds from the flag too;
+  - the intraday reconstruction without a checkpoint starts from the flag.
+  Both trackers refuse a flagged contract given an explicit lifecycle state that is not knocked in. The simulated-path
+  backtest keeps refusing a flagged contract, as before; its message now names both spellings. Contracts without the
+  flag are unchanged.
 - The RFQ product registry accepts the new keyword.
 
 #### Open items

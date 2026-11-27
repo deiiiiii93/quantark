@@ -322,7 +322,9 @@ def _reconstruct_autocallable(product, timeline, checkpoint, plan: _ReplayPlan, 
             "KO-reset snowball replay is not in the intraday inventory: the daily lifecycle tracker observes only the "
             "pre-KI schedule and settles at the post-KI maturity. Supply a checkpoint that covers every fixing due "
             f"before the valuation instant (first uncovered: {plan.instants[plan.replay[0]][0].timestamp.isoformat()}).")
-    state = deepcopy(checkpoint) if checkpoint is not None else AutocallableLifecycleState()
+    # Without a checkpoint the contract's own ``knocked_in_at_valuation`` seeds the state (0.16.0 run 6, D7).
+    state = (deepcopy(checkpoint) if checkpoint is not None
+             else AutocallableLifecycleState(knocked_in=bool(getattr(product, "knocked_in_at_valuation", False))))
     # The checkpoint is authoritative for everything on or before its day.
     for e in timeline.events:
         if _covered(plan.checkpoint_at, e.timestamp):

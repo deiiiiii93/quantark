@@ -190,11 +190,10 @@ class ReplayBacktestEngine:
         # every pricing call; vol-model days swap this list wholesale.
         self._pricing_engines: list[Any] = []
         for bp in config.products:
-            # A KO-reset and a DCN start from the product's carried state (their trackers build it); the others fresh.
-            lifecycle = (
-                None if isinstance(bp.product, (KnockOutResetSnowballOption, DCNOption))
-                else AutocallableLifecycleState()
-            )
+            # Every product starts from its own carried state: the tracker builds it (a KO-reset's and a DCN's from
+            # their lifecycle fields, a Snowball's / Phoenix's from ``knocked_in_at_valuation``; an unflagged one starts
+            # not knocked in, as before). 0.16.0 run 6: passing a fresh state here overwrote the flag.
+            lifecycle = None
             self._pricing_engines.append(
                 create_pricing_engine(
                     bp.product,

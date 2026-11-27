@@ -192,7 +192,8 @@ class EnsembleConfig:
                 # per-position starting state), so a carried knock-in would be silently dropped
                 raise ValidationError(
                     f"position {bp.position_id}: a carried knock-in ({type(bp.product).__name__} with "
-                    "_otc_lifecycle_knocked_in) cannot be simulated: every simulated path starts not knocked in; "
+                    "knocked_in_at_valuation / _otc_lifecycle_knocked_in) cannot be simulated: every simulated path "
+                    "starts not knocked in; "
                     "simulate the contract from before its knock-in or price it through the replay"
                 )
             if is_unknocked_rebased(bp.product):

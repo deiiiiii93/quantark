@@ -212,3 +212,13 @@ def test_checkpoint_fingerprint_distinguishes_states():
     assert lifecycle_state_fingerprint(a) != lifecycle_state_fingerprint(b)
     assert lifecycle_state_fingerprint(a) == lifecycle_state_fingerprint(AutocallableLifecycleState(
         valuation_point=ValuationPoint(date=datetime(2026, 9, 1))))
+
+
+def test_a_flagged_contract_without_a_checkpoint_starts_knocked_in(sse_calendar, sse_sessions):
+    """0.16.0 run 6 (D7, final review finding 2): the no-checkpoint default state is seeded from the contract's
+    ``knocked_in_at_valuation`` (it used to start not knocked in and the twin overwrote the flag)."""
+    prod, env, tl, senv = _setup(sse_calendar, sse_sessions)
+    prod.knocked_in_at_valuation = True
+    ts = _ko(tl, 0).timestamp - timedelta(days=1)
+    rec = _run(prod, tl, None, [], ts, EventPhase.AFTER, 100.0, ts, senv, sse_sessions)
+    assert rec.state.knocked_in
