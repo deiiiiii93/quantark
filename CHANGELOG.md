@@ -274,6 +274,66 @@ Open items:
 - A breached knock-in pair at t=0 reports the single "knocked in at valuation" row without naming
   the deciding record.
 
+### QUAD V1 bump greeks on the base lattice
+
+QUAD V1 (`SnowballQuadEngine`, `PhoenixQuadEngine`, `KOResetSnowballQuadEngine`) sizes its lattice from the inputs:
+the node count N, the domain (cell width h) and the cell stretch. A bumped leg used to size its own lattice, so every
+vega and theta leg was priced on a different grid from the base. At a sizing switch, the switch's own jump was read as
+a greek: 1 h of theta across the 5001-node cap gave -4.1/y against a reference of +3.69/y. On ordinary products the
+re-meshing showed up as greek error, e.g. a 1-day dated theta 1.7e-2 relative off QUAD V2. Prices are unchanged, bit
+for bit.
+
+#### Changed
+
+- **`create_bump_context` freezes the base sizing (owner ruling: "freeze sizing at base").** V1 returns a clone that
+  carries the base record: N, domain and cell stretch. Every leg priced through it uses that record, whatever the date
+  or bumped environment. The time-dependent routing is recomputed on the frozen cell for each leg (the exact-first-step
+  decision, the local-step mask and the kernel guard), as the PDE keeps its spatial layout and rebinds time. The record
+  binds to the base product or a same-contract copy: same type, strike, initial level and KI level, with a life that
+  fits the frozen domain. Any other product sizes itself. A frozen clone's `create_bump_context` returns itself, and
+  the auto_converge ladder runs once per clone. If a leg's routing on the frozen cell refuses an under-resolved step,
+  that leg alone prices on its own sizing, bit for bit as before (`frozen_sizing_fallbacks` counts these).
+- **Moved: V1 bumped greeks** (vega, theta, volga, the cross greeks built on them) on every path through the bump
+  context: `GreeksCalculator`, `BaseEngine.calculate_greeks`, carry-curve buckets, trade-value theta, position trade
+  risk, execution greeks and pnl-explain `ScenarioCache`. Measured against QUAD V2 (or V1 at 16001 nodes):
+  - 1 h theta across the 5001-node cap: 6e-9 abs from the reference; it was -4.1/y against +3.69/y.
+  - dated 1-day theta on a mid-week daily-KI, monthly-KO 1y snowball: 7.9e-5 relative; it was 1.7e-2. Its vega:
+    1.7e-4; it was 1.0e-3.
+  - vega across the exact-first-step threshold: 1.84e-4 per vol point. The leg still switches route there.
+  - breadth gate: 16 Snowball / Phoenix / KO-reset products, 32 vega and theta rows. None is worse than 0.15.0; the
+    worst ratio of new to old error is 0.96.
+- **Unchanged:** base price and statistics. On spot-independent vol (flat or term structure), delta, gamma and rho are
+  also unchanged, including auto_converge and cell stretch. On a spot-dependent smile surface the delta/gamma legs now
+  share the base lattice and move within V1's default-grid error: one product's gamma error goes from 27% to 0.1%,
+  another's delta error from 1.5e-4 to 3.0e-4.
+- **pnl-explain:** `ScenarioCache` values the t1 endpoint on the t0 bump context, now the frozen V1 lattice. The
+  backtest books t1 on a fresh lattice, so `gap_states` on V1 books is no longer exactly zero: it is up to about 1e-6 of
+  book value. The reconciliation tests allow 1e-8 of the day's PnL plus 2e-6 of book value. `pnlexplain/README.md`
+  says "gap_states is zero" only for engines without a bump context.
+- **Speed** (back to back): the synthetic book `price` is 1.00x, with identical checksums. The full `GreeksCalculator`
+  set is 0.93x, and 0.78x with auto_converge.
+
+#### Not changed (measured, open)
+
+- **KO-reset V1 knock-outs still use the nodal cosine smoothing** (`_smooth_step_weight`) under the default
+  cell-average `event_projection`. That is the root cause of KO-reset's 5e-3..1.4e-2 default-grid gap to QUAD V2 on
+  the certification variants. Projecting them as Snowball does cuts that gap 3-21x. But on products with a discrete KI
+  on the schedule-1 KO dates it makes default-grid prices worse and erratic in N: 6 of 12 breadth products got worse,
+  and the cash-leg bank product went from +5.1e-3 to -1.06e-2 at 401 nodes. The old smoothing's O(h) bias was partly
+  cancelling V1's O(h²) event error. The change is parked for an owner ruling; it would also need a KO-reset
+  certificate amendment.
+- **Early daily-observation KO probability in V1 statistics.** On a 1y daily-KO note at vol 20%, observation 2 reads
+  4.333% against V2's 4.163%. The error is O(h²) and comes from the trapezoid rule across the KO jump on a 1.7-cell
+  one-day step. An analytic jump correction improves the statistics 16-110x, but makes some default-grid prices worse.
+  QUAD V2 is exact.
+- **FFT lengths.** 15 of the 33 transform lengths of the synthetic book have a prime factor of 400 or more (Bluestein).
+  Padding them to 5-smooth lengths would make the book 2.4-3.3x faster. Prices move at round-off (max 3.1e-13
+  relative, not bitwise), so this is left for the owner to sign.
+- **Marginal resolved chains** (0.12.0 open item): already removed by 0.12.1's exact lattice mass, at ≤ 4.9e-6
+  relative and flat in step count.
+- `greek_conventions_report.build_cash_greeks_report` reprices on the raw engine, outside the bump context (every
+  engine family).
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a
