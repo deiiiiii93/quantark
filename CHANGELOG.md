@@ -205,10 +205,13 @@ env time 0.5:
 | Phoenix, duplicate | PDE / QUAD V1 | -1.41192 / -1.412 (07-04 coupon dropped) | -1.071155 / -1.070890 | -1.049648 (z -1.26) |
 | Phoenix, step-down | PDE / QUAD V1 | -1.42396 / -1.410 | -1.083196 / -1.081637 | -1.059157 (z -1.42) |
 | Phoenix, any pair | QUAD V2 | refused | priced (within 1.4 SE of MC) | |
-| KO-reset, schedule-1 step-down | PDE | 8.657 | 9.016354 | 8.995255 (z +1.23) |
-| KO-reset, knock-in pair 80 → 75 | PDE | 8.8717 | 7.732242 | 7.713325 (z +0.94) |
-| KO-reset, schedule-1 step-down | QUAD V1 | the single-record price (step-down ignored) | 9.015281 | 8.995255 (z +1.17) |
+| KO-reset, schedule-1 step-down | PDE | 8.657 | 9.008373 | 8.995663 (z +1.17) |
+| KO-reset, knock-in pair 80 → 75 | PDE | 8.8717 | 7.719715 | 7.702740 (z +1.33) |
+| KO-reset, schedule-1 step-down | QUAD V1 | the single-record price (step-down ignored) | 9.006584 | 8.995663 (z +1.00) |
 | KO-reset, overlapping KI/KO levels at one instant | QUAD V1 | 4.87 / 4.19 | within 3 SE of MC | 6.03 / 4.33 |
+
+The KO-reset step-down and knock-in pair rows are the final 0.16.0 values: they include the knocked-in end date fix
+and the V1 projection from "QUAD numerics" below (MC: 1M paths, seed 7).
 
 - **Snowball PDE equal-level knock-in duplicates** move to the product without the duplicate (1D
   2.474447 → 2.476399; local-vol and Heston likewise). The repeated cell-average projection drifted.
@@ -261,12 +264,10 @@ Pins moved: refusal and old-behaviour pins only. These are the 0.14.0 collapsed-
 `test_same_instant_ko.py`, whose old hex values are kept in a comment.
 
 Open items:
-- KO-reset MC sits +2 to +3 SE above the PDE / QUAD V1 / QUAD V2 at 4M paths on ordinary products,
-  and the three agree with each other. With `disable_ko_after_ki` and a schedule-1 knock-in it is
-  z −9. This reproduces without a shared instant and needs its own investigation.
-- KO-reset with `disable_ko_after_ki` and a schedule-2 knock-out record on the knock-in instant
-  (also on a single date): MC, PDE and V1 disable that record, while V2 lets it knock out. The
-  contract reading needs a ruling.
+- Resolved later in this release ("QUAD numerics" below): the KO-reset MC gap (+2 to +3 SE; z −9
+  with `disable_ko_after_ki`) was the grid engines running a knocked-in note to the exercise date
+  instead of schedule 2's last fixing; and with `disable_ko_after_ki` a schedule-2 knock-out record
+  on the knock-in instant is disabled (owner ruling), now on QUAD V2 too.
 - QUAD V2 KO-reset knock-out pairs still refuse. KO-reset `REBASED` on QUAD V1 and the PDE stays
   refused (pre-existing).
 - Heston PDE knock-in statistics rows before a shared instant are 3.5–10 SE off MC, and so is one
@@ -274,16 +275,19 @@ Open items:
 - A breached knock-in pair at t=0 reports the single "knocked in at valuation" row without naming
   the deciding record.
 
-### QUAD V1 bump greeks on the base lattice
+### QUAD numerics: V1 bump greeks, KO-reset fixes, FFT lengths
 
-QUAD V1 (`SnowballQuadEngine`, `PhoenixQuadEngine`, `KOResetSnowballQuadEngine`) sizes its lattice from the inputs:
-the node count N, the domain (cell width h) and the cell stretch. A bumped leg used to size its own lattice, so every
-vega and theta leg was priced on a different grid from the base. At a sizing switch, the switch's own jump was read as
-a greek: 1 h of theta across the 5001-node cap gave -4.1/y against a reference of +3.69/y. On ordinary products the
-re-meshing showed up as greek error, e.g. a 1-day dated theta 1.7e-2 relative off QUAD V2. Prices are unchanged, bit
-for bit.
+Four changes to QUAD V1 (`SnowballQuadEngine`, `PhoenixQuadEngine`, `KOResetSnowballQuadEngine`), plus two KO-reset
+contract fixes that span the grid engines. The KO-reset changes and the FFT round-off moves are owner-signed
+(2026-11-27). The KO-reset, Snowball and Phoenix flat-BSM certificates were amended for them (see Notes).
 
-#### Changed
+#### Changed: V1 bump greeks on the base lattice
+
+V1 sizes its lattice from the inputs: the node count N, the domain (cell width h) and the cell stretch. A bumped leg
+used to size its own lattice, so every vega and theta leg was priced on a different grid from the base. At a sizing
+switch, the switch's own jump was read as a greek: 1 h of theta across the 5001-node cap gave -4.1/y against a
+reference of +3.69/y. On ordinary products the re-meshing showed up as greek error, e.g. a 1-day dated theta 1.7e-2
+relative off QUAD V2.
 
 - **`create_bump_context` freezes the base sizing (owner ruling: "freeze sizing at base").** V1 returns a clone that
   carries the base record: N, domain and cell stretch. Every leg priced through it uses that record, whatever the date
@@ -302,33 +306,97 @@ for bit.
   - vega across the exact-first-step threshold: 1.84e-4 per vol point. The leg still switches route there.
   - breadth gate: 16 Snowball / Phoenix / KO-reset products, 32 vega and theta rows. None is worse than 0.15.0; the
     worst ratio of new to old error is 0.96.
-- **Unchanged:** base price and statistics. On spot-independent vol (flat or term structure), delta, gamma and rho are
-  also unchanged, including auto_converge and cell stretch. On a spot-dependent smile surface the delta/gamma legs now
-  share the base lattice and move within V1's default-grid error: one product's gamma error goes from 27% to 0.1%,
-  another's delta error from 1.5e-4 to 3.0e-4.
+- **Unchanged by the freeze:** base price and statistics. On spot-independent vol (flat or term structure), delta,
+  gamma and rho are also unchanged, including auto_converge and cell stretch. On a spot-dependent smile surface the
+  delta/gamma legs now share the base lattice and move within V1's default-grid error: one product's gamma error goes
+  from 27% to 0.1%, another's delta error from 1.5e-4 to 3.0e-4.
 - **pnl-explain:** `ScenarioCache` values the t1 endpoint on the t0 bump context, now the frozen V1 lattice. The
   backtest books t1 on a fresh lattice, so `gap_states` on V1 books is no longer exactly zero: it is up to about 1e-6 of
   book value. The reconciliation tests allow 1e-8 of the day's PnL plus 2e-6 of book value. `pnlexplain/README.md`
   says "gap_states is zero" only for engines without a bump context.
-- **Speed** (back to back): the synthetic book `price` is 1.00x, with identical checksums. The full `GreeksCalculator`
-  set is 0.93x, and 0.78x with auto_converge.
 
-#### Not changed (measured, open)
+#### Changed: KO-reset V1 knock-outs use the cell-average projection (owner: "land it")
 
-- **KO-reset V1 knock-outs still use the nodal cosine smoothing** (`_smooth_step_weight`) under the default
-  cell-average `event_projection`. That is the root cause of KO-reset's 5e-3..1.4e-2 default-grid gap to QUAD V2 on
-  the certification variants. Projecting them as Snowball does cuts that gap 3-21x. But on products with a discrete KI
-  on the schedule-1 KO dates it makes default-grid prices worse and erratic in N: 6 of 12 breadth products got worse,
-  and the cash-leg bank product went from +5.1e-3 to -1.06e-2 at 401 nodes. The old smoothing's O(h) bias was partly
-  cancelling V1's O(h²) event error. The change is parked for an owner ruling; it would also need a KO-reset
-  certificate amendment.
+KO-reset V1 knock-outs used the nodal cosine smoothing (`_smooth_step_weight`) even under the default cell-average
+`event_projection`, unlike Snowball and Phoenix. They now project as Snowball does: single records through
+`_project_quad_event`, a same-instant group through the piecewise projection in the instant-unit order, and the
+pre-KO weight that narrows a same-instant discrete KI through the breach fractions. One code path serves price,
+statistics, the first step and the adjoint. The nodal and width-0 modes are unchanged, bit for bit.
+
+- **Moved: every default KO-reset V1 price, greek and statistic.** On the certification variants at 1001 nodes, the
+  error against QUAD V2 falls from +2.0e-3..+1.36e-2 to 3.5e-4..2.1e-3 (3-21x closer); certificate pv anchors move by
+  -3.3e-4 to -1.47e-2.
+- **Not monotone outside those variants.** The old smoothing's O(h) bias was partly cancelling V1's O(h²) event error.
+  On products with a discrete KI on the schedule-1 KO dates the new default-grid error is clean O(h²) but can be larger:
+  in a 12-product breadth probe 6 got closer and 6 further (worst -1.04e-3 → -3.47e-3), and the cash-leg bank product
+  is erratic in N (401 nodes +5.1e-3 → -1.06e-2; 801 +3.3e-3 → +1.5e-4). Refining the grid converges both.
+- Cash-leg baselines record the move as cause "t"; the cross-engine smoke allowance for the KO-reset V1 cell was
+  re-banked.
+
+#### Fixed: a knocked-in KO-reset ends at schedule 2's last fixing (owner ruling D31)
+
+A knocked-in KO-reset is decided and settled at schedule 2's last fixing, as MC always priced it. The PDE (1D and
+local vol), Heston / Heston-SLV ADI, QUAD V1 and QUAD V2 ran the knocked-in leg to the product's exercise date
+instead. Notes whose exercise date is later than schedule 2's last fixing moved; notes whose exercise date is that
+fixing are unchanged, bit for bit.
+
+- The knocked-in payoff is staged at schedule 2's end and settled with the terminal's delay, or on an explicit
+  `settlement_date`. Under EXPIRY, schedule-2 knock-outs are paid there too. Statistics rows are timed there.
+- Referee (carried knock-in with `disable_ko_after_ki` = a European put to schedule 2's end): PDE -1.8e-6, V1 -5.2e-6,
+  V2 -4e-15 relative; all three were 4.6e-3 off (a put to the exercise date).
+- **This was the KO-reset MC gap** listed under "Same-instant observation records" (MC +2..+3 SE above the grid
+  engines; z -9 with `disable_ko_after_ki`): MC was right. Ten investigation cases now agree with MC at 1M paths within
+  1.25 SE on every grid engine.
+- Cash-leg folding binds the knocked-in slot at schedule 2's end. MC folding on such a product used to raise.
+
+#### Fixed: QUAD V2 KO-reset `disable_ko_after_ki` (owner: "disable that knockout is correct")
+
+With `disable_ko_after_ki`, a schedule-2 knock-out record on the knock-in instant is disabled by that knock-in, as
+MC, the PDE and V1 read it. QUAD V2 let it fire: on the repro it priced 3.712 (+11.5 SE against MC); it now prices
+3.421 (+0.35 SE), equal to the same note without the record to 1e-10.
+
+#### Changed: V1 convolutions on fast FFT lengths (owner: "approved")
+
+15 of the 33 transform lengths in the synthetic book had a prime factor of 400 or more, so numpy ran them through
+Bluestein. V1 now pads each linear convolution to the smallest even 5-smooth length at or above the old one and runs
+real FFTs; the adjoint transposes on the same length. A circular convolution at any length of at least 2b-1 is the
+exact linear convolution, so this is the same operator; the optional spectral filter is the same function of frequency,
+sampled on the finer grid. Factor 1 and odd padding factors keep their lengths (`QuadratureCore` and
+`DiscreteQuadEngine` are unchanged, bit for bit).
+
+- **Speed** (back to back, separate interpreters): synthetic V1 book 3.50x (47.1 s → 13.5 s), the full
+  `GreeksCalculator` set 3.30x, V1 statistics on daily-KO notes 1.34x.
+- **Round-off moves, not bitwise:** book prices at most 2.45e-13 relative; statistics of size ≥ 1e-6 at most 1.7e-11;
+  finite-difference greeks up to 2.9e-8 relative on rho (1 bp legs that differ by 8.7e-5; each leg moves at most
+  4.4e-14).
+
+#### Speed
+
+Overall, back to back: synthetic V1 book `price` 3.50x faster (FFT lengths; the freeze is 1.00x with identical
+checksums). Full `GreeksCalculator` set: the freeze alone is 0.93x, 0.78x with auto_converge; the FFT change more than
+covers it. KO-reset V1 projection and the knocked-in staging: 1.00-1.02x (QUAD V2 staged notes 1.09x).
+
+#### Notes
+
+- Certificates amended (QUAD candidates re-run against the carried benchmarks, every candidate ADMITTED, parents
+  retired in place with `superseded_by`):
+  - `ko-reset-flat-bsm/2026-11-27` (D1 projection; parent 2026-11-24), then `ko-reset-flat-bsm/2026-11-27-2` (FFT
+    lengths);
+  - `snowball-flat-bsm/2026-11-27` and `phoenix-flat-bsm/2026-11-27` (FFT lengths; parents 2026-11-24).
+
+#### Open items
+
 - **Early daily-observation KO probability in V1 statistics.** On a 1y daily-KO note at vol 20%, observation 2 reads
   4.333% against V2's 4.163%. The error is O(h²) and comes from the trapezoid rule across the KO jump on a 1.7-cell
   one-day step. An analytic jump correction improves the statistics 16-110x, but makes some default-grid prices worse.
   QUAD V2 is exact.
-- **FFT lengths.** 15 of the 33 transform lengths of the synthetic book have a prime factor of 400 or more (Bluestein).
-  Padding them to 5-smooth lengths would make the book 2.4-3.3x faster. Prices move at round-off (max 3.1e-13
-  relative, not bitwise), so this is left for the owner to sign.
+- KO-reset V1 statistics refuse (`TODO(D31)`) a carried knock-in whose schedule 2 ends at the valuation instant; the
+  price decides it on the spot.
+- The PDE and V1 discount the staged knocked-in payoff's settlement delay with the terminal's delay factor, while V2
+  and MC use the exact ratio of discount factors; they differ only on term curves with a payment lag.
+- `intraday/events.py` (`_ko_reset_events`) and `theta_shift._knock_out_payment_time` still pay a schedule-2 EXPIRY
+  knock-out at the terminal.
+- Heston ADI KO-reset is -2.2 SE against MC on one investigation case at its coarse default grid.
 - **Marginal resolved chains** (0.12.0 open item): already removed by 0.12.1's exact lattice mass, at ≤ 4.9e-6
   relative and flat in step count.
 - `greek_conventions_report.build_cash_greeks_report` reprices on the raw engine, outside the bump context (every
