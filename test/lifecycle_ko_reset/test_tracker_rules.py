@@ -137,8 +137,10 @@ def test_a_knocked_in_rebased_contract_matures_on_its_own_tenor(ki_day, maturity
     t = tracker(kr(M.REBASED, post=(91, 365), annualized=True))
     closes = {91: 90.0, ki_day: 70.0, maturity_day - 1: 80.0, maturity_day: 60.0}
     assert run(t, closes)[-1] == (maturity_day, E.MATURITY, "maturity")
+    # the knocked-in amount accrues to the exercise date, the maturity 182 + 365 days (owner ruling O2, 2026-11-27;
+    # it accrued to the path's own end before)
     assert t.lifecycle.ledger.cashflows[-1].amount == pytest.approx(
-        t.contract().get_maturity_payoff_v1(60.0, env(60.0), contract_tenor=maturity_day * D))
+        t.contract().get_maturity_payoff_v1(60.0, env(60.0), contract_tenor=547 * D))
 
 
 @pytest.mark.parametrize("carried", [False, True], ids=["fresh", "carried"])

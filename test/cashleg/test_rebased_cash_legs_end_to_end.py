@@ -333,7 +333,10 @@ def test_the_event_route_is_not_trivially_zero(state):
     if state == "unknocked":
         assert all(count > 0 for count in outcomes.values()), outcomes
         assert np.count_nonzero(ref["ki_first"]) > 0
-        assert len(set(ref["settle"][ref["event"] == "ki_settlement"].tolist())) > 1   # path-dependent settlement
+        # one knocked-in settlement, the product terminal (run 9: a live put to the exercise date); schedule 2's
+        # knock-outs keep their path-dependent dates
+        assert len(set(ref["settle"][ref["event"] == "ki_settlement"].tolist())) == 1
+        assert len(set(ref["det"][ref["event"] == "ko_post"].tolist())) > 1
     else:
         assert outcomes["ko_post"] > 0 and outcomes["ki_settlement"] > 0 and outcomes["ko_pre"] == 0
     for name in LEG_NAMES:
@@ -549,19 +552,18 @@ def _expected_survival(ref, nodes, t: float) -> float:
     return float(np.interp(t, [nodes[i], nodes[i + 1]], [left, right]))
 
 
-def test_the_unknocked_rebased_note_settled_at_1_25_is_gone_at_1_5():
-    """D29 on the AC16 note: paths settling knocked in at 1.25 are alive at 1.25 and gone at 1.5 and in between; the
-    accrual legs (COMPLETE and ENTER) pay them nothing after 1.25 (``test_event_route_leg_equals_the_same_path_valuation``
-    checks the legs against the same oracle)."""
+def test_the_unknocked_rebased_knocked_in_note_lives_past_schedule_two_to_the_exercise():
+    """D29 on the AC16 note under the owner's ruling of 2026-11-27 (run 9): paths whose schedule 2 ends at 1.25
+    without a knock-out are a live put to the exercise date (2.0), settled there -- alive at 1.25, 1.3, 1.5 and in
+    between, as the same-path oracle reads them (they settled at 1.25 and were gone after it before)."""
     _, dist, _, _ = event_route("unknocked")
     ref = paths("unknocked")
-    at = (ref["event"] == "ki_settlement") & (ref["det"] == 1.25)
-    assert np.count_nonzero(at) > 0
-    for t in (1.25, 1.3, 1.5, 1.25 + 1e-9):
+    at = (ref["event"] == "ki_settlement") & (ref["post_end"] == 1.25)
+    assert np.count_nonzero(at) > 0 and np.all(ref["det"][at] == 2.0)
+    for t in (1.25, 1.3, 1.5, 1.25 + 1e-9, 2.0):
         assert abs(dist.survival_at(t) - _expected_survival(ref, dist.survival_times, t)) <= 1e-15, t
-    assert dist.survival_at(1.25 + 1e-9) <= dist.survival_after(1.25) + 1e-15     # never interpolated back to life
     assert abs(dist.survival_after(1.25) - _alive(ref, 1.25, entering=True)) <= 1e-15
-    assert dist.survival_at(1.25) - dist.survival_after(1.25) >= np.count_nonzero(at) / ref["n"] - 1e-15
+    assert dist.survival_after(1.5) >= np.count_nonzero(at) / ref["n"] - 1e-15      # still alive past 1.25
 
 
 def _accrual_over(starts, *, basis):

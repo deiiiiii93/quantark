@@ -633,8 +633,8 @@ class KnockOutResetSnowballOption(SnowballOption):
 
         ``anchor`` is ACCRUAL: the knock-in record that fired, at its contractual fixing (accrual time spec §5.1),
         resolved once at the knock-in. Each converted record keeps its quoted ``relative`` period with the anchor
-        embedded, and so does the ``post`` terminal (§5.2): a DATE anchor plus a quoted offset is never rounded into a
-        date, and the copy books the cash the un-knocked contract's Monte Carlo route pays on the same path. The
+        embedded (§5.2; the ``post`` terminal runs to the exercise date and carries no anchor, owner ruling O2): a DATE
+        anchor plus a quoted offset is never rounded into a date, and the copy books the cash the un-knocked contract's Monte Carlo route pays on the same path. The
         periods become explicit, so a re-validated copy keeps them. A contract whose knock-in records accrue refuses a
         missing anchor; it is never looked up by date.
         """
@@ -829,8 +829,9 @@ class KnockOutResetSnowballOption(SnowballOption):
         return _contract_tenor(self, pricing_env, "pre")
 
     def _resolve_post_contract_tenor(self, pricing_env: PricingEnv, *, knock_in=None) -> float:
-        """The knocked-in (V1) tenor: to schedule 2's last contractual fixing; a REBASED contract's hangs from its
-        knock-in anchor (``knock_in``)."""
+        """The knocked-in (V1) tenor: origin to the product's exercise date, ABSOLUTE and REBASED alike (owner ruling
+        O2, 2026-11-27: the knocked-in note is a live put to the exercise date). The terminal is not anchored, so
+        ``knock_in`` does not change it."""
         return _contract_tenor(self, pricing_env, "post", knock_in=knock_in)
 
     def get_contract_tenor(self, pricing_env: PricingEnv = None) -> float:
@@ -941,8 +942,8 @@ class KnockOutResetSnowballOption(SnowballOption):
         """
         KO-reset V1 payoff uses post-KI tenor when annualized.
 
-        ``contract_tenor`` is the post-KI tenor resolved by a caller that knows the knock-in (a REBASED
-        contract's tenor hangs from it); ``None`` resolves it here, from a carried anchor if the copy has one.
+        ``contract_tenor`` is the post-KI tenor (origin to the exercise date, owner ruling O2) resolved once by a caller
+        that prices many spots; ``None`` resolves it here.
         """
         if spot < 0:
             raise ValidationError(f"Spot price must be non-negative, got {spot}")

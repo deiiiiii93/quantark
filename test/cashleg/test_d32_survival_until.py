@@ -419,7 +419,10 @@ def test_rebased_per_path_settlements_are_honoured():
     dist, paths, env = _rebased()
     assert dist.rebased
     knocked = paths["event"] == "ki_settlement"
-    assert np.unique(paths["settle"][knocked]).size > 1          # the knocked-in settlement varies by path
+    # every knocked-in path settles at the product terminal (owner ruling 2026-11-27, run 9: a live put to the exercise
+    # date; it settled at each path's rebased end before); the schedule-2 knock-outs still vary by path
+    assert knocked.any() and np.unique(paths["settle"][knocked]).size == 1
+    assert np.unique(paths["settle"][paths["event"] == "ko_post"]).size > 1
     for t in sorted({*np.unique(paths["settle"]).tolist(), *np.linspace(0.0, 2.2, 45).tolist()}):
         assert dist.survival_at(t, anchor=PAYMENT) == pytest.approx(_path_alive(paths, t), abs=ROUND_OFF), t
         assert dist.survival_after(t, anchor=PAYMENT) == pytest.approx(

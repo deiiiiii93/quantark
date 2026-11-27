@@ -32,12 +32,14 @@ def test_rebased_mc_ko_cash_is_the_resolvers(monkeypatch):
     assert rebased and all(v == f + end for end, f, v in rebased)
 
 
-def test_rebased_v1_tenor_is_per_path_anchor():
+def test_rebased_v1_tenor_runs_to_the_exercise_whatever_the_anchor():
+    """Owner ruling O2 (2026-11-27): the knocked-in tenor runs to the exercise date (the maturity 1.25) on every path;
+    it hung from each path's knock-in anchor before (0.25 / 0.5 + the final offset 0.75: 1.0 / 1.25)."""
     # numeric clock alone (clock rule 2026-10-26: no initial_date on a numeric contract)
     p = ko_reset(M.REBASED, accrual=AccrualConfig(is_annualized_ki=True), payoff_config=PayoffConfig(rebate_rate=0.05))
     ki = p.barrier_config.ki_observation_schedule.records
     tenors = {contract_tenor(p, None, "post", knock_in=knock_in_anchor_for(r, i)) for i, r in enumerate(ki)}
-    assert tenors == {1.0, 1.25}  # final offset 0.75 after fixings 0.25 and 0.5
+    assert tenors == {1.25} == {contract_tenor(p, None, "post")}
     _price_parts(p)   # used to raise "ki_time is required for rebased post-KO maturity"
 
 

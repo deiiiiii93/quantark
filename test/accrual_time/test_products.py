@@ -67,11 +67,12 @@ def test_aged_dated_phoenix_first_remaining_period_starts_at_the_previous_record
 def test_tenors():
     assert contract_tenor(snowball(tenor=1.0)) == 1.0
     p = ko_reset(M.REBASED, post=times(0.25, 0.5, level=100.0))   # final offset 0.5 (spec round 1 control)
-    with pytest.raises(ValidationError, match="anchor"):
-        contract_tenor(p, None, "post")
+    # the knocked-in tenor runs to the exercise date, the maturity 1.25 (owner ruling O2, 2026-11-27): no anchor
+    # needed, none read (it was the anchor + 0.5: 0.75 / 1.0, and refused without one)
+    assert contract_tenor(p, None, "post") == 1.25
     ki = p.barrier_config.ki_observation_schedule.records
     assert [contract_tenor(p, None, "post", knock_in=knock_in_anchor_for(r, i)) for i, r in enumerate(ki)] == [
-        0.75, 1.0]
+        1.25, 1.25]
 
 
 def test_rebased_offset_on_an_aged_contract():
@@ -84,16 +85,16 @@ def test_rebased_offset_on_an_aged_contract():
 
 
 def test_embedded_anchor_terminal_matches_the_mc_route():
-    """Round 3 P1-3: knock-in 0.25, final observation offset 0.5, payment offset 0.52 under SETTLEMENT -> 0.75."""
+    """Round 3 P1-3: knock-in 0.25, final observation offset 0.5, payment offset 0.52 under SETTLEMENT: the knock-out
+    leg 0.77. The knocked-in terminal is no longer anchored: it runs to the exercise date, the maturity 1.25 (owner
+    ruling O2, 2026-11-27; it was the anchor + 0.5 = 0.75), anchor or not."""
     from quantark.util.enum import AccrualEndType
     post = times(0.25, 0.5, level=100.0)
     post.records[1].settlement_time = 0.52
     p = ko_reset(M.REBASED, post=post, accrual=AccrualConfig(accrual_end=AccrualEndType.SETTLEMENT))
     anchor = knock_in_anchor_for(p.barrier_config.ki_observation_schedule.records[0], 0)
-    embedded = replace(p._terminal_accrual["post"], anchor=anchor)
-    assert contract_tenor(p, None, "post", knock_in=anchor) == 0.75
-    from quantark.asset.equity.product.option.accrual import cumulative_accrual
-    assert cumulative_accrual(embedded) == 0.75
+    assert not p._terminal_accrual["post"].relative
+    assert contract_tenor(p, None, "post", knock_in=anchor) == contract_tenor(p, None, "post") == 1.25
     paid = p.post_barrier_config.ko_observation_schedule.records[1]
     assert ko_accrual_factor(p, paid, knock_in=anchor) == pytest.approx(0.77, abs=1e-15)
 

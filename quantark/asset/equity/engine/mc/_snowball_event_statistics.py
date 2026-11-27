@@ -48,7 +48,7 @@ from quantark.asset.equity.engine.mc._mc_event_statistics import (
     standard_errors_or_reason,
 )
 from quantark.asset.equity.settlement import CashflowKind
-from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing
+from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import PricingError
@@ -295,18 +295,18 @@ class _KOResetAssembly(_Assembly):
         self.pre_payment_dates = self._schedule_payment_dates(self.pre_times, pre_profile["records"],
                                                               self.pre_maturity)
         self.v0_timing = first_schedule_terminal_timing(product, pricing_env, determination_time=self.pre_maturity)
+        # the knocked-in note, every layout: a live put to the exercise date, paid at the product terminal (owner
+        # ruling 2026-11-27, run 9); its EXPIRY schedule-2 knock-outs are paid there too
+        self.v1_timing = resolve_terminal_timing(product, pricing_env)
+        self.post_maturity = float(grid["exercise_time"])
         if not self.rebased:
-            self.post_maturity = float(product.get_post_maturity_time(pricing_env))
             _, self.post_settlement = engine._compute_ko_schedule_payoffs(
                 product, self.post_times, np.asarray(post_profile["rates"], dtype=float), post_profile["records"],
                 pricing_env, self.post_maturity,
             )
             self.post_dates = _all_dates(record.observation_date for record in post_profile["records"])
             self.post_payment_dates = self._schedule_payment_dates(self.post_times, post_profile["records"],
-                                                                   self.post_maturity)
-            self.v1_timing = engine._resolve_payment_timing(
-                product, pricing_env, self.post_maturity, CashflowKind.TERMINAL,
-                cashflow_id="ko_reset_v1_terminal")
+                                                                   self.post_maturity, knocked_in=True)
             self._absolute_axis()
         else:
             self._rebased_axis()
@@ -315,13 +315,17 @@ class _KOResetAssembly(_Assembly):
         self.layout = self.knock_in_layout(
             totals["ki_row_times"], bool(grid["ki_continuous"]), self.carried, self.pre_maturity, discrete_dates)
 
-    def _schedule_payment_dates(self, times: np.ndarray, records, maturity: float) -> Optional[tuple]:
-        """Settlement dates of a schedule's knock-outs, as ``_compute_ko_schedule_payoffs`` settles them."""
+    def _schedule_payment_dates(self, times: np.ndarray, records, maturity: float, *,
+                                knocked_in: bool = False) -> Optional[tuple]:
+        """Settlement dates of a schedule's knock-outs, as ``_compute_ko_schedule_payoffs`` settles them
+        (``knocked_in``: schedule 2, whose EXPIRY knock-outs are paid at the product terminal)."""
         engine, product, env = self.engine, self.product, self.env
         if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
             timings = [engine._resolve_payment_timing(product, env, float(t), CashflowKind.REDEMPTION,
                                                       record=records[i], cashflow_id=f"ko_reset[{i}]")
                        for i, t in enumerate(times)]
+        elif knocked_in:
+            timings = [self.v1_timing] * len(times)
         else:
             terminal = engine._resolve_payment_timing(product, env, float(maturity), CashflowKind.TERMINAL,
                                                       cashflow_id="ko_reset_terminal")
@@ -354,7 +358,6 @@ class _KOResetAssembly(_Assembly):
         post_profile = grid["post_profile"]
         post_records = post_profile["records"]
         n_post = self.post_times.size
-        post_last = int(np.argmax(self.post_times)) if n_post else -1
         ki_times = np.asarray(grid["ki_times"], dtype=float)
         by_ki = grid["post_times_by_ki"] or []
         instant = product.accrual_config.coupon_pay_type == CouponPayType.INSTANT
@@ -376,8 +379,6 @@ class _KOResetAssembly(_Assembly):
         for k in range(ki_times.size):
             post_k = np.asarray(by_ki[k], dtype=float) if n_post else np.zeros(0)
             post_dates = extended.get(source[k]) if dated and k < len(source) else None
-            end = float(post_k[post_last]) if n_post else float(ki_times[k])
-            end_date = post_dates[post_last] if post_dates else None
             if allow_post:
                 for j in range(n_post):
                     if instant:
@@ -385,11 +386,13 @@ class _KOResetAssembly(_Assembly):
                             product, env, float(post_k[j]), CashflowKind.REDEMPTION, record=post_records[j],
                             cashflow_id=f"ko_reset_rebased[{j}]")
                     else:
-                        timing = engine._resolve_payment_timing(
-                            product, env, end, CashflowKind.TERMINAL, cashflow_id="ko_reset_rebased_terminal")
+                        # EXPIRY: paid with the knocked-in note, at the product terminal (run 9)
+                        timing = self.v1_timing
                     add("ko_post", float(post_k[j]), timing, post_dates[j] if post_dates else None)
-            add("ki_settlement", end, engine._resolve_payment_timing(
-                product, env, end, CashflowKind.TERMINAL, cashflow_id="ko_reset_v1_rebased_terminal"), end_date)
+        if ki_times.size:
+            # every knock-in's knocked-in note is a live put to the exercise date, one row whatever its schedule-2
+            # end (owner ruling 2026-11-27, run 9; it stood at each knock-in's rebased end before)
+            add("ki_settlement", self.post_maturity, self.v1_timing, self.v1_timing.determination_date)
         add("maturity", self.pre_maturity, self.v0_timing,
             self.pre_dates[int(np.argmax(self.pre_times))] if self.pre_dates else None)
         keys = sorted(rows, key=lambda key: (key[1], _EVENT_RANK[key[0]], key[2]))
@@ -525,9 +528,8 @@ class _KOResetAssembly(_Assembly):
                 discounted_cash=fields["observations.discounted_cash"],
                 cash_to_pay=fields["observations.cash_to_pay"], payment_is_path_dependent=np.zeros(n, dtype=bool),
             )
-            # T9 convention: a REBASED knocked-in settlement has a path-dependent date; the scalar row stands at
-            # the latest candidate settlement (the contract's last possible knocked-in end), the actual dates are
-            # the termination distribution's ``ki_settlement`` rows
+            # the knocked-in settlement: one row at the product terminal on every path (run 9; T9 had placed it at
+            # the latest candidate rebased end), the termination distribution's ``ki_settlement`` row
             row = self.ki_settlement_row
             if row is None:
                 ki_time, ki_payment, ki_date, ki_payment_date = self.pre_maturity, float(v0.payment_time), None, None

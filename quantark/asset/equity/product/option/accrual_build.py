@@ -290,6 +290,21 @@ def _contract_terminal(product, terms: _Terms) -> AccrualPeriod:
     return AccrualPeriod(AccrualKind.NONE)
 
 
+def _exercise_terminal(product, terms: _Terms) -> AccrualPeriod:
+    """KO-reset ``post`` (the knocked-in V1 tenor): origin to the PRODUCT'S EXERCISE DATE, ABSOLUTE and REBASED alike
+    (owner ruling O2, 2026-11-27: a knocked-in note is a live put to the exercise date, its annualized amounts accrue
+    to it). Dated: the exercise date; numeric: the maturity (on the record clock, ``accrued_offset`` + maturity)."""
+    exercise = getattr(product, "exercise_date", None)
+    if exercise is not None:
+        if terms.initial_date is None:
+            return AccrualPeriod(AccrualKind.NONE)
+        return AccrualPeriod(AccrualKind.DATE, origin=terms.initial_date, end=exercise, basis=terms.basis)
+    if product.maturity is None:
+        raise ValidationError("a KO-reset contract needs its exercise date or maturity: the knocked-in tenor runs to it")
+    return AccrualPeriod(AccrualKind.TIME, origin=0.0, end=terms.accrued_offset + float(product.maturity),
+                         basis=terms.basis)
+
+
 def _terminals(product, terms: _Terms, stored: Optional[Dict[str, AccrualPeriod]]) -> Dict[str, AccrualPeriod]:
     """The terminal periods (§4.4). A stored terminal is kept while the one derived from today's terms agrees with
     it, and when its schedule has aged out (nothing left to derive it from); otherwise today's replaces it. A
@@ -307,15 +322,9 @@ def _terminals(product, terms: _Terms, stored: Optional[Dict[str, AccrualPeriod]
     if post_config is not None:
         out["pre"] = settle("pre", _schedule_terminal(product.barrier_config.ko_observation_schedule.records, terms)) \
             or out["contract"]
-        post_records = post_config.ko_observation_schedule.records
-        if product.post_ko_mode is PostKOScheduleMode.REBASED:
-            candidate = None if not post_records else AccrualPeriod(
-                AccrualKind.TIME, start=0.0, end=max(float(r.observation_time) for r in post_records),
-                basis=terms.basis, relative=True)
-            out["post"] = settle("post", candidate) or AccrualPeriod(
-                AccrualKind.TIME, start=0.0, end=0.0, basis=terms.basis, relative=True)
-        else:
-            out["post"] = settle("post", _schedule_terminal(post_records, terms)) or out["pre"]
+        # the knocked-in tenor runs to the exercise date on both layouts (owner ruling O2): it was origin to schedule
+        # 2's last fixing (ABSOLUTE) and the knock-in anchor plus schedule 2's last offset (REBASED)
+        out["post"] = settle("post", _exercise_terminal(product, terms))
     v0 = "pre" if post_config is not None else "contract"
     v1 = "post" if post_config is not None else "contract"
     for leg, needed in ((v0, leg_annualized(product, "rebate")), (v1, leg_annualized(product, "knock_in"))):

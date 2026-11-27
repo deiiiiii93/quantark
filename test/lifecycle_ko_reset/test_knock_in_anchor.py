@@ -52,7 +52,9 @@ def test_the_converted_copy_accrues_from_the_fixing_and_is_timed_from_the_close(
     assert first.observation_time == pytest.approx((95 + 91) * D)      # timing: the knock-in close + offset
     assert ko_accrual_factor(contract, first) == pytest.approx((91 + 91) * D, abs=1e-15)   # cash: fixing + offset
     assert first.accrual.relative and first.accrual.anchor == t.lifecycle.knock_in_anchor
-    assert contract_tenor(contract, None, "post") == pytest.approx((91 + 365) * D, abs=1e-15)
+    # the knocked-in tenor runs to the REBASED note's exercise date, its maturity 93 + 365 days (owner ruling O2,
+    # 2026-11-27); it was the fired record's fixing + the last offset, 91 + 365
+    assert contract_tenor(contract, None, "post") == pytest.approx((93 + 365) * D, abs=1e-15)
 
 
 def test_the_anchor_survives_ageing_a_checkpoint_and_the_pricing_copy():
@@ -65,11 +67,11 @@ def test_the_anchor_survives_ageing_a_checkpoint_and_the_pricing_copy():
     assert [r.accrual.anchor for r in copy.post_barrier_config.ko_observation_schedule.records] == [anchor, anchor]
     assert ko_accrual_factor(copy, copy.post_barrier_config.ko_observation_schedule.records[0]) == pytest.approx(
         182 * D, abs=1e-15)
-    assert contract_tenor(copy, None, "post") == pytest.approx(456 * D, abs=1e-15)
+    assert contract_tenor(copy, None, "post") == pytest.approx(458 * D, abs=1e-15)   # to the exercise (O2)
     copy.validate()                                                     # a re-validated copy keeps the cash
     assert ko_accrual_factor(copy, copy.post_barrier_config.ko_observation_schedule.records[0]) == pytest.approx(
         182 * D, abs=1e-15)
-    assert contract_tenor(copy, None, "post") == pytest.approx(456 * D, abs=1e-15)
+    assert contract_tenor(copy, None, "post") == pytest.approx(458 * D, abs=1e-15)   # to the exercise (O2)
     assert t.product_for_lifecycle()._otc_lifecycle_knock_in_anchor == anchor
     # a checkpoint round trip of this test's own in-process state (no untrusted data is loaded)
     resumed = tracker(kr(M.REBASED, pre=(91, 182), ki=(91, 93), post=(91, 365), annualized=True),
@@ -136,13 +138,15 @@ def test_the_converted_record_accrues_the_lag_once():
 
 
 def test_the_converted_terminal_is_the_mc_routes():
+    """The converted copy's knocked-in tenor is the REBASED note's: origin to its exercise date, the maturity 1.25
+    (owner ruling O2, 2026-11-27; it was the anchor 0.25 + the last offset 0.5 = 0.75), as SnowballMCEngine reads it."""
     p = _settlement_control()
     anchor = knock_in_anchor_for(p.barrier_config.ki_observation_schedule.records[0], 0)
     converted = p.with_absolute_schedule_2(0.25, anchor=anchor)
-    mc_route = p._resolve_post_contract_tenor(None, knock_in=anchor)    # SnowballMCEngine's per-path call
-    assert contract_tenor(converted, None, "post") == mc_route == 0.75
+    mc_route = p._resolve_post_contract_tenor(None, knock_in=anchor)
+    assert contract_tenor(converted, None, "post") == mc_route == p.maturity == 1.25
     converted.validate()
-    assert contract_tenor(converted, None, "post") == 0.75
+    assert contract_tenor(converted, None, "post") == 1.25
 
 
 def test_a_dated_knock_in_plus_a_quoted_offset_in_the_converted_copy():

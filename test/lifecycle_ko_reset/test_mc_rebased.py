@@ -29,19 +29,25 @@ def test_an_annualized_rebased_v1_prices():
     assert np.isfinite(_mc().price(product, env(80.0)))
 
 
-def test_v1_is_read_at_each_paths_own_maturity_on_its_tenor():
-    """A path knocked in at 91 days matures at 91 + 365; the grid runs on to 182 + 365."""
+def test_v1_is_read_at_the_exercise_date_on_its_tenor_to_the_exercise():
+    """A path knocked in at 91 days ends schedule 2 at 91 + 365; the knocked-in note is then a live put to the
+    exercise date (the maturity 182 + 365, the grid's last node) and reads V1 there, on the tenor to the exercise
+    (owner rulings 2026-11-27, run 9: put at exercise, O2 accrue to exercise). It read V1 at 456 days on a 456-day
+    tenor before."""
     product = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D], annualized=True)
     engine = _mc()
     pricing_env = env(80.0)
     grid = engine._build_time_grid_ko_reset(product, pricing_env, product.get_max_maturity_time(pricing_env))
     times = grid["all_times"]
     paths = np.full((1, times.size + 1), 70.0)               # knocked in at 91 days, never above 95
-    maturity_node = int(np.searchsorted(times, 91 * D + 365 * D))
-    assert maturity_node < times.size - 1
-    paths[0, maturity_node + 1] = 60.0
-    paths[0, -1] = 40.0                                       # the grid's last node: another path's maturity
-    payoffs, _, stats, _ = engine._compute_payoffs_ko_reset(product, pricing_env, paths, grid, 0.03,
-                                                            float(times[-1]), 0.25, 1)
+    schedule_two_end = int(np.searchsorted(times, 91 * D + 365 * D))
+    assert schedule_two_end < times.size - 1
+    assert times[-1] == pytest.approx(547 * D, abs=1e-12)    # the exercise
+    paths[0, schedule_two_end + 1] = 60.0
+    paths[0, -1] = 40.0
+    payoffs, settle, stats, _ = engine._compute_payoffs_ko_reset(product, pricing_env, paths, grid, 0.03,
+                                                                 float(times[-1]), 0.25, 1)
     assert stats["v1_count"] == 1
-    assert payoffs[0] == pytest.approx(product.get_maturity_payoff_v1(60.0, pricing_env, contract_tenor=456 * D))
+    assert payoffs[0] == product.get_maturity_payoff_v1(40.0, pricing_env, contract_tenor=547 * D)
+    assert payoffs[0] == product.get_maturity_payoff_v1(40.0, pricing_env)
+    assert settle[0] == pytest.approx(547 * D, abs=1e-12)

@@ -146,9 +146,9 @@ Columns: `time`, `payment_time`, `date`, `payment_date`, `probability`, `discoun
 
 Both are computed directly by every engine (a marched or integrated column, or a path sum), never
 as `1 − ΣKO − …`. KO-reset ABSOLUTE: `maturity` is at the first schedule's end with its own
-settlement; `ki_settlement` at the post-schedule maturity. REBASED: `ki_settlement` is the totals
-row placed at the latest candidate knocked-in settlement; the actual dates are the
-`ki_settlement` rows of `termination`.
+settlement; `ki_settlement` at the product terminal (the exercise date and its settlement: a
+knocked-in note is a live put to the exercise date, owner ruling 2026-11-27). REBASED: the same
+single `ki_settlement` row, also the `ki_settlement` row of `termination`.
 
 ### Knock-in path statistics (`KnockInStatistics`)
 
@@ -209,8 +209,8 @@ they refuse to price it).
   For reading.
 - `termination`: one row per (absolute determination time, event) for the events `"ko_pre"`,
   `"ko_post"`, `"maturity"`, `"ki_settlement"`, on the full deterministic candidate date set (every
-  `pre` row, every reachable KI date plus each offset, calendar-rolled, every knocked-in end, and
-  the maturity). Zero rows are kept, so the axis depends only on the contract and the valuation
+  `pre` row, every reachable KI date plus each offset, calendar-rolled, the knocked-in settlement at
+  the product terminal, and the maturity). Zero rows are kept, so the axis depends only on the contract and the valuation
   date, never on the seed or a bump. Columns: `times`, `payment_times`, `dates`, `payment_dates`,
   `event`, `probability`, `discounted_cash`, `cash_to_pay`, plus `survival_times` / `survival`.
   Its totals by event equal the offset table's totals. The residuals and

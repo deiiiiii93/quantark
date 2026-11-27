@@ -1,29 +1,26 @@
-"""KO-reset Monte Carlo: the knocked-in payoff reads the spot at schedule 2's end (spec D31, AC34).
+"""KO-reset Monte Carlo: the knocked-in payoff reads the spot at the PRODUCT'S EXERCISE DATE (owner ruling 2026-11-27).
 
-Owner ruling (2026-11-14, option A). A knocked-in KO-reset is a knocked-in snowball on the second schedule, alive
-until that schedule ends: its knocked-in payoff V1 is decided on the spot at schedule 2's last fixing and paid there.
-The MC kernel's ABSOLUTE branch (and the carried-knock-in branch, which is ABSOLUTE) settled V1 at schedule 2's end
-but read its spot at the grid's last column (diagnosis T25d). REBASED MC already read each path's own schedule-2 end,
-as PDE and QUAD do. Paths do not change.
+Owner ruling (2026-11-27, run 9; replaces D31 of 2026-11-14). A knocked-in KO-reset observes its schedule-2 knock-outs
+up to schedule 2's last observation; if it has not knocked out it is a live put to the product's exercise date and
+pays V1 of the spot there, at the exercise settlement (``resolve_terminal_timing``: the explicit settlement date when
+booked, else the exercise date plus the settlement delay). This holds for ABSOLUTE, a carried knock-in and REBASED.
+D31 had read V1 at schedule 2's end (ABSOLUTE) and at each path's rebased end (REBASED); the MC kernel
+(``_compute_payoffs_ko_reset``, shared by the BSM, LocalVol, Heston and Heston-SLV MC engines) now reads it on the
+exercise node, a pinned node of every grid. Annualized knocked-in amounts accrue to the exercise date (owner ruling O2).
+Paths do not change.
 
-Contract shapes (T25h, spec D35: schedule 2 ends last). The T23 ``settles_inside`` pair, the tracker example (2y
-schedule 1, 1y schedule 2 after a knock-in on 0.25) and the native ABSOLUTE with schedule 2 ending before schedule 1
-are refused at construction now. On a valid contract the grid outruns schedule 2 only through the product
-``maturity``: the pair here keeps schedule 2 ending with schedule 1 (1.0) and books a maturity of 1.5 on both layouts
-(the same grid, the same paths), so the readout still separates schedule 2's end from the grid's last node. The
-tracker's ABSOLUTE copy of a valid REBASED note ends exactly with schedule 2 (its maturity is schedule 2's end, and
-schedule 1 ends no later), so the readout is the grid's last node there: the bug cannot occur on it, and its MC vs PDE
-check stays as an agreement check. A knock-in after schedule 2's end can no longer happen (T25e's late-knock-in
-narrowing is removed): every knocked-in path reads at schedule 2's end.
+Contract shapes. The pair keeps schedule 2 ending with schedule 1 (1.0) and books a maturity (the exercise) of 1.5 on
+both layouts (the same grid, the same paths), so the readout separates schedule 2's end from the exercise.
 
 - the pair (one contract, two layouts, the same paths): ABSOLUTE MC price == REBASED MC price to round-off on the
-  BSM, LocalVol, Heston and Heston-SLV MC engines (they share ``_compute_payoffs_ko_reset``);
-- every knocked-in path's payoff is V1 of the spot at schedule 2's end node, on the carried knock-in and on the
-  native ABSOLUTE pair, and on a native ABSOLUTE whose knock-ins run to schedule 1's end (= schedule 2's end); the
-  node is found here from the grid's times, the knocked-in paths decided by the independent same-path reference;
+  BSM, LocalVol, Heston and Heston-SLV MC engines (both read at the exercise);
+- every knocked-in path's payoff is V1 of the spot at the exercise node, settled at the terminal payment, on the
+  carried knock-in, the native ABSOLUTE pair, a native ABSOLUTE whose knock-ins run to schedule 1's end and REBASED
+  notes whose knock-ins end their schedule 2 early (AC3); the node is found here from the grid's times, the
+  knocked-in paths decided by the independent same-path reference;
 - on the tracker's ABSOLUTE copy of an early knock-in MC agrees with PDE 1D within 4 standard errors;
 - the statistics follow the price: ``price_with_events(...).npv == price()`` bitwise, and the knocked-in settlement
-  cash is the sum of V1 at schedule 2's end over the knocked-in paths, discounted from the settlement.
+  cash is the sum of V1 at the exercise over the knocked-in paths, discounted from the terminal payment.
 """
 from __future__ import annotations
 
@@ -45,6 +42,7 @@ from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
     LocalVolSnowballMCEngine,
 )
 from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
+from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.util.enum.option_enums import PostKOScheduleMode
@@ -87,7 +85,7 @@ MC_ENGINES = {
 # --- contracts ------------------------------------------------------------------------------------------------------
 
 
-#: the pair's product maturity: past schedule 2's end (1.0), so the grid's last node (1.5) is not schedule 2's end
+#: the pair's product maturity (its exercise): past schedule 2's end (1.0)
 PAIR_MATURITY = 1.5
 
 
@@ -114,6 +112,22 @@ def pair(layout: str, *, knocked_in: bool = False):
 
 
 QUARTERS = (0.25, 0.5, 0.75, 1.0)
+
+
+#: ``rebased_early``'s maturity (its exercise): the last knock-in (1.0) plus schedule 2's last offset (0.75)
+EARLY_MATURITY = 1.75
+
+
+def rebased_early():
+    """A REBASED note whose knock-ins (quarterly to 1.0, at 80) start schedule 2 offsets (0.25, 0.5, 0.75): a knock-in
+    at 0.25 ends schedule 2 at 1.0 (with schedule 1, D35's floor), one at 1.0 at 1.75 -- the exercise (maturity 1.75,
+    owner ruling O1's floor)."""
+    product = cases._ko_reset(PostKOScheduleMode.REBASED)
+    product.post_barrier_config = replace(product.post_barrier_config,
+                                          ko_observation_schedule=cases._schedule((0.25, 0.5, 0.75), 95.0))
+    product.maturity = EARLY_MATURITY
+    product.validate()
+    return product
 
 
 def tracker_copy(ki_record: int = 0, age: float = 0.30, spot: float = 78.0):
@@ -162,33 +176,42 @@ def _kernel_call(engine, product, env) -> dict:
     return dict(calls[0], price=price)
 
 
-def _schedule_two_end_column(grid, end: float) -> int:
-    """The path column of the grid node at ``end`` (column 0 is the valuation spot)."""
+def _column(grid, time: float) -> int:
+    """The path column of the grid node at ``time`` (column 0 is the valuation spot)."""
     times = np.r_[0.0, np.asarray(grid["all_times"], dtype=float)]
-    matches = [j for j, t in enumerate(times) if is_close(float(t), end)]
-    assert len(matches) == 1, (end, times)
+    matches = [j for j, t in enumerate(times) if is_close(float(t), time)]
+    assert len(matches) == 1, (time, times)
     return matches[0]
 
 
-def _v1_at_schedule_two_end(engine_make, product_make, env):
-    """Per path: the kernel's payoff, the reference's knocked-in flags, V1 of the spot at schedule 2's end."""
+def _v1_at_exercise(engine_make, product_make, env):
+    """Per path: the kernel's payoff, the reference's knocked-in flags, V1 of the spot at the exercise (its tenor to
+    the exercise, O2), the exercise time and its column."""
     product = product_make()
     call = _kernel_call(engine_make(), product, env)
     ref = mc_same_path_reference.ko_reset_paths(engine_make(), product_make(), env)
     np.testing.assert_array_equal(ref["payoffs"], call["payoffs"])  # the same paths
-    end = float(product.get_post_maturity_time(env))
-    column = _schedule_two_end_column(call["grid"], end)
+    exercise = float(resolve_terminal_timing(product, env).determination_time)
+    column = _column(call["grid"], exercise)
     v1 = np.array([product.get_maturity_payoff_v1(s, env) for s in call["paths"][:, column]], dtype=float)
-    return call, ref, v1, end, column
+    return call, ref, v1, exercise, column
 
 
-# --- AC34: the pair -------------------------------------------------------------------------------------------------
+def _assert_v1_at_exercise(product, env, call, ref, v1):
+    assert ref["v1"].any()
+    np.testing.assert_array_equal(call["payoffs"][ref["v1"]], v1[ref["v1"]])
+    terminal = resolve_terminal_timing(product, env)
+    np.testing.assert_array_equal(call["settle"][ref["v1"]], float(terminal.payment_time))
+    np.testing.assert_array_equal(ref["det"][ref["v1"]], float(terminal.determination_time))
+
+
+# --- the pair -------------------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("engine", tuple(MC_ENGINES))
 def test_the_pair_prices_the_same_on_both_layouts(engine):
-    """One contract, two layouts, the same paths (T23): ABSOLUTE MC == REBASED MC to round-off. Before D31 the ABSOLUTE
-    layout read V1 on the grid's last node (the maturity, 1.5) instead of schedule 2's end (1.0)."""
+    """One contract, two layouts, the same paths (T23, AC3): ABSOLUTE MC == REBASED MC to round-off, both reading V1
+    at the exercise (1.5) on the tenor to the exercise."""
     make, market = MC_ENGINES[engine]
     env = market(PAIR_SPOT)
     rebased = float(make().price(pair("rebased"), env))
@@ -196,37 +219,51 @@ def test_the_pair_prices_the_same_on_both_layouts(engine):
     assert abs(absolute - rebased) <= ROUND_OFF * abs(rebased), (engine, absolute, rebased, absolute - rebased)
 
 
+@pytest.mark.parametrize("layout", ("absolute", "rebased"))
 @pytest.mark.parametrize("engine", tuple(MC_ENGINES))
-def test_the_pair_absolute_reads_v1_at_schedule_two_end(engine):
-    """Native ABSOLUTE (no carried knock-in; knocked in at valuation on the paths): every knocked-in path pays V1 of the
-    spot at schedule 2's end node (1.0), not the grid's last (1.5)."""
+def test_the_pair_reads_v1_at_the_exercise(engine, layout):
+    """Knocked in at valuation on the paths: every knocked-in path pays V1 of the spot at the exercise node (1.5), not
+    schedule 2's end (1.0), and settles at the terminal payment."""
     make, market = MC_ENGINES[engine]
     env = market(PAIR_SPOT)
-    call, ref, v1, end, column = _v1_at_schedule_two_end(make, lambda: pair("absolute"), env)
-    assert end == 1.0 and column < call["paths"].shape[1] - 1  # the grid runs past schedule 2's end
-    assert ref["v1"].any()
-    np.testing.assert_array_equal(call["payoffs"][ref["v1"]], v1[ref["v1"]])
-
-
-# --- AC34: the carried knock-in (tracker copy) ----------------------------------------------------------------------
+    product_make = lambda: pair(layout)  # noqa: E731
+    call, ref, v1, exercise, column = _v1_at_exercise(make, product_make, env)
+    assert exercise == PAIR_MATURITY and column > _column(call["grid"], 1.0)
+    _assert_v1_at_exercise(product_make(), env, call, ref, v1)
 
 
 @pytest.mark.parametrize("engine", tuple(MC_ENGINES))
-def test_the_carried_knock_in_reads_v1_at_schedule_two_end(engine):
+def test_a_rebased_early_knock_in_reads_v1_at_the_exercise(engine):
+    """AC3: REBASED knock-ins whose schedule 2 ends before the exercise (a knock-in at 0.25 ends it at 1.0) read V1
+    at the exercise (1.75), the hand payoff on the kernel's own paths."""
+    make, market = MC_ENGINES[engine]
+    env = market(90.0)
+    call, ref, v1, exercise, column = _v1_at_exercise(make, rebased_early, env)
+    assert exercise == EARLY_MATURITY
+    early = ref["v1"] & (ref["post_end"] < exercise - 1e-9)
+    assert early.any()
+    assert column > _column(call["grid"], 1.0)
+    _assert_v1_at_exercise(rebased_early(), env, call, ref, v1)
+
+
+# --- the carried knock-in (tracker copy) ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("engine", tuple(MC_ENGINES))
+def test_the_carried_knock_in_reads_v1_at_the_exercise(engine):
     """A carried knock-in (the tracker's flag) on the pair's ABSOLUTE layout: every path is knocked in, and each one that
-    does not knock out on schedule 2 pays V1 of the spot at schedule 2's end node (1.0), not the grid's last (1.5).
-    (The tracker's own copy of a valid REBASED note ends with schedule 2, so there the two nodes coincide.)"""
+    does not knock out on schedule 2 pays V1 of the spot at the exercise node (1.5), not schedule 2's end (1.0)."""
     make, market = MC_ENGINES[engine]
     env = market(78.0)
-    call, ref, v1, end, column = _v1_at_schedule_two_end(make, lambda: pair("absolute", knocked_in=True), env)
-    assert end == 1.0 and column < call["paths"].shape[1] - 1
-    assert ref["v1"].any() and not ref["v0"].any()
-    np.testing.assert_array_equal(call["payoffs"][ref["v1"]], v1[ref["v1"]])
+    product_make = lambda: pair("absolute", knocked_in=True)  # noqa: E731
+    call, ref, v1, exercise, column = _v1_at_exercise(make, product_make, env)
+    assert exercise == PAIR_MATURITY and column > _column(call["grid"], 1.0)
+    assert not ref["v0"].any()
+    _assert_v1_at_exercise(product_make(), env, call, ref, v1)
 
 
 def test_the_tracker_copy_of_a_valid_rebased_note_ends_with_schedule_two():
-    """D35: the tracker's ABSOLUTE copy ends at schedule 2's end and schedule 1 no later, so the grid's last node IS
-    schedule 2's end (the D31 readout is the identity there)."""
+    """D35: the tracker's ABSOLUTE copy ends at schedule 2's end and schedule 1 no later."""
     product, env = tracker_copy()
     assert is_close(float(product.get_post_maturity_time(env)), 1.70)
     assert is_close(float(product.get_max_maturity_time(env)), float(product.get_post_maturity_time(env)))
@@ -254,15 +291,15 @@ def test_a_native_absolute_whose_schedule_two_ends_first_is_refused():
 
 
 @pytest.mark.parametrize("engine", tuple(MC_ENGINES))
-def test_every_knock_in_reads_v1_at_schedule_two_end(engine):
+def test_every_knock_in_reads_v1_at_the_exercise(engine):
     """Every knocked-in path, the ones knocking in on schedule 1's last record (1.0 == schedule 2's end) included,
-    pays V1 of the spot at schedule 2's end node (1.0), not the grid's last (1.5)."""
+    pays V1 of the spot at the exercise node (1.5)."""
     make, market = MC_ENGINES[engine]
     env = market(90.0)
-    call, ref, v1, end, column = _v1_at_schedule_two_end(make, valid_native_absolute, env)
-    assert end == 1.0 and column < call["paths"].shape[1] - 1
-    assert ref["v1"].any() and (ref["ki_time"][ref["v1"]] == end).any()
-    np.testing.assert_array_equal(call["payoffs"][ref["v1"]], v1[ref["v1"]])
+    call, ref, v1, exercise, column = _v1_at_exercise(make, valid_native_absolute, env)
+    assert exercise == PAIR_MATURITY and column > _column(call["grid"], 1.0)
+    assert (ref["ki_time"][ref["v1"]] == 1.0).any()
+    _assert_v1_at_exercise(valid_native_absolute(), env, call, ref, v1)
 
 
 #: 16 independent PSEUDO runs
@@ -280,17 +317,19 @@ def test_the_tracker_copy_agrees_with_pde_within_four_standard_errors():
     assert abs(mc - pde) <= 4.0 * se, (mc, se, pde, (mc - pde) / se)
 
 
-# --- AC34: the statistics follow the price --------------------------------------------------------------------------
+# --- the statistics follow the price --------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("contract", ("pair_absolute", "pair_carried"))
+@pytest.mark.parametrize("contract", ("pair_absolute", "pair_carried", "rebased_early"))
 def test_statistics_follow_the_knocked_in_readout(contract):
-    """``npv`` is ``price()`` bitwise (D23) and the knocked-in settlement cash is V1 at schedule 2's end summed over
-    the knocked-in paths (decided by the reference), each discounted from its settlement."""
-    if contract == "pair_absolute":
-        make_product, env = (lambda: pair("absolute")), cases.flat_env(PAIR_SPOT)
-    else:
-        make_product, env = (lambda: pair("absolute", knocked_in=True)), cases.flat_env(PAIR_SPOT)
+    """``npv`` is ``price()`` bitwise (D23) and the knocked-in settlement cash is V1 at the exercise summed over the
+    knocked-in paths (decided by the reference), each discounted from the terminal payment; the knocked-in settlement
+    row sits at the terminal."""
+    make_product, env = {
+        "pair_absolute": (lambda: pair("absolute"), cases.flat_env(PAIR_SPOT)),
+        "pair_carried": (lambda: pair("absolute", knocked_in=True), cases.flat_env(PAIR_SPOT)),
+        "rebased_early": (rebased_early, cases.flat_env(90.0)),
+    }[contract]
 
     def make():
         return SnowballMCEngine(params=MCParams(**_MC))
@@ -298,10 +337,13 @@ def test_statistics_follow_the_knocked_in_readout(contract):
     result = make().price_with_events(make_product(), env)
     price = float(make().price(make_product(), env))
     assert result.npv == price
-    _, ref, v1, _, _ = _v1_at_schedule_two_end(make, make_product, env)
+    _, ref, v1, _, _ = _v1_at_exercise(make, make_product, env)
     df = np.array([env.rate_curve.get_discount_factor(float(t)) for t in ref["settle"]], dtype=float)
     expected = float(np.sum(np.where(ref["v1"], v1 * df, 0.0)) / ref["n"])
     stats = make().calculate_event_stats(make_product(), env)
     assert stats.pv == price
     cash = float(stats.ki_settlement.discounted_cash)
     assert abs(cash - expected) <= ROUND_OFF * abs(expected), (cash, expected)
+    terminal = resolve_terminal_timing(make_product(), env)
+    assert stats.ki_settlement.time == float(terminal.determination_time)
+    assert stats.ki_settlement.payment_time == float(terminal.payment_time)

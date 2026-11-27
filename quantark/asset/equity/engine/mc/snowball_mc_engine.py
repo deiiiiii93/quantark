@@ -24,7 +24,11 @@ from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import EventStatistics
-from quantark.asset.equity.engine.settlement_support import first_schedule_payment_time, first_schedule_terminal_timing
+from quantark.asset.equity.engine.settlement_support import (
+    first_schedule_payment_time,
+    first_schedule_terminal_timing,
+    resolve_terminal_timing,
+)
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
 )
@@ -56,7 +60,7 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
-from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, leg_annualized
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
 from quantark.asset.equity.settlement import (
     CashflowKind,
@@ -1112,10 +1116,13 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             ki_record_indices = [ki_source_indices[index] for index in in_horizon]
             ki_records = [ki_schedule_records[index] for index in ki_record_indices]
 
-        all_times_set = set(pre_times) | set(ki_times) | {T}
+        # the knocked-in note's end, on every layout (owner ruling 2026-11-27, run 9): a live put to the product's
+        # exercise date, read on this node (a pinned node: owner ruling O1 puts every schedule end at or before it)
+        exercise = float(resolve_terminal_timing(product, pricing_env).determination_time)
+        all_times_set = set(pre_times) | set(ki_times) | {T, exercise}
         # the contract's own instants (contract clock D2): every time below except the continuous-KI linspace and
         # the business-day grid, which the engine adds itself
-        contract_set = set(pre_times) | (set() if ki_continuous else set(ki_times)) | {T}
+        contract_set = set(pre_times) | (set() if ki_continuous else set(ki_times)) | {T, exercise}
 
         daily_times = np.array([], dtype=float)
         use_daily_grid = getattr(self.params, "use_business_day_grid", False)
@@ -1245,13 +1252,10 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             "ki_record_indices": ki_record_indices,
             # the not-knocked-in contract matures HERE: its rebate is read off this node
             "pre_maturity_idx": int(indices_for([pre_maturity])[0]) if len(pre_times) else None,
-            # ABSOLUTE (a carried knock-in included): the knocked-in contract matures at schedule 2's end, before
-            # the grid's last node when schedule 1 runs on past it; its V1 is read off this node (spec D31)
-            "post_maturity_idx": (
-                int(indices_for([float(product.get_post_maturity_time(pricing_env))])[0])
-                if post_mode == PostKOScheduleMode.ABSOLUTE
-                else None
-            ),
+            # every layout (ABSOLUTE, a carried knock-in, REBASED): the knocked-in contract is a live put to the
+            # product's exercise date and its V1 is read off this node (owner ruling 2026-11-27, run 9)
+            "exercise_time": exercise,
+            "exercise_idx": int(indices_for([exercise])[0]),
             "all_times": all_times,
             "dt_array": dt_array,
             "pre_times": pre_times,
@@ -1282,9 +1286,12 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
         """
         Compute KO payoffs and settlement times for a resolved schedule.
 
-        Under EXPIRY pay every knock-out is paid with the note it ends, determined at ``maturity_time``. For schedule 1
-        (``first_schedule``) that note ends with schedule 1 (spec D30) and is paid by ``first_schedule_terminal_timing``:
-        its explicit payment when booked (spec D33, D34), else the settlement convention after ``maturity_time``.
+        Under EXPIRY pay every knock-out is paid with the note it ends. For schedule 1 (``first_schedule``) that note
+        ends with schedule 1 (spec D30), determined at ``maturity_time``, and is paid by
+        ``first_schedule_terminal_timing``: its explicit payment when booked (spec D33, D34), else the settlement
+        convention after ``maturity_time``. For schedule 2 it is the knocked-in note, a live put to the product's
+        exercise date (owner ruling 2026-11-27, run 9): paid at the product terminal (``resolve_terminal_timing``);
+        ``maturity_time`` is not read.
         """
         if len(times) == 0:
             return np.array([]), np.array([])
@@ -1329,13 +1336,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                 len(times), terminal_payment_time, dtype=float
             )
         else:
-            terminal_payment_time = self._resolve_payment_time(
-                product,
-                pricing_env,
-                float(maturity_time),
-                CashflowKind.TERMINAL,
-                cashflow_id="ko_reset_terminal",
-            )
+            terminal_payment_time = float(resolve_terminal_timing(product, pricing_env).payment_time)
             settlement_times = np.full(
                 len(times), terminal_payment_time, dtype=float
             )
@@ -1982,13 +1983,14 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
 
         pre_maturity = product.get_pre_maturity_time(pricing_env)
         post_max_offset = float(max(post_times)) if len(post_times) else 0.0
-        post_maturity_abs = (
-            product.get_post_maturity_time(pricing_env)
-            if post_mode == PostKOScheduleMode.ABSOLUTE
-            else None
-        )
+        # the knocked-in note, every layout (owner ruling 2026-11-27, run 9): schedule 2's knock-outs are observed up
+        # to its last observation, then the note is a live put to the product's exercise date, read on the exercise
+        # node and paid at the product terminal (explicit settlement date when booked, else exercise + delay)
+        terminal = resolve_terminal_timing(product, pricing_env)
+        knocked_in_end = float(grid["exercise_time"])
+        knocked_in_payment = float(terminal.payment_time)
         # REBASED: row k holds schedule 2's times after a knock-in on ki_times[k]; ``post_last`` is its final
-        # record (the largest offset), the knocked-in end
+        # record (the largest offset), schedule 2's end on that path (no longer the knocked-in note's end: run 9)
         post_table = (
             np.vstack(post_times_by_ki)
             if post_times_by_ki and len(post_times) > 0
@@ -2016,7 +2018,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                 post_rates,
                 post_records,
                 pricing_env,
-                float(post_maturity_abs),
+                knocked_in_end,
             )
 
         # KI barriers: the records the grid kept (rule 2), or the contract's level when monitored continuously
@@ -2180,13 +2182,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                         product, pricing_env, determination_time=float(pre_maturity),
                     ).payment_time),
                 ),
-                (
-                    float(post_maturity_abs),
-                    self._resolve_payment_time(
-                        product, pricing_env, float(post_maturity_abs), CashflowKind.TERMINAL,
-                        cashflow_id="ko_reset_v1_terminal",
-                    ),
-                ),
+                (knocked_in_end, knocked_in_payment),
             )
             n_pre = len(pre_times)
             pre_payoffs = pre_payoffs + fold[0][:n_pre]
@@ -2238,14 +2234,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
                         cashflow_id="ko_reset_rebased",
                     )
                 else:
-                    determination_times = post_table[first_ki_idx[idx], post_last]
-                    settlement_times[idx] = self._resolve_payment_time_array(
-                        product,
-                        pricing_env,
-                        determination_times,
-                        CashflowKind.TERMINAL,
-                        cashflow_id="ko_reset_rebased_terminal",
-                    )
+                    # EXPIRY: paid with the knocked-in note it ends, at the product terminal (run 9)
+                    settlement_times[idx] = knocked_in_payment
 
         if is_v0.any():
             # rule 2: not knocked in at the end of the first schedule means matured THERE, so a rebate
@@ -2265,65 +2255,17 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             ).payment_time)
 
         if is_v1.any():
-            tenors = None
-            if post_mode == PostKOScheduleMode.ABSOLUTE:
-                # a knocked-in snowball on schedule 2 (a carried knock-in is ABSOLUTE): decided at schedule 2's end,
-                # where it settles below -- not the grid's last node, schedule 1's end when that runs on past it
-                # (spec D31; the never-knocked-in readout above reads its own schedule's end likewise). Every knock-in
-                # meets schedule 2 in force: a knock-in is tested only during schedule 1, which ends no later than
-                # schedule 2 (spec D35, refused at construction otherwise), so no path knocks in after schedule 2's end.
-                terminal_spots = paths[is_v1, grid["post_maturity_idx"] + 1]
-            elif len(post_times) == 0:
-                # (a carried knock-in never reaches here: the grid refuses a REBASED one)
-                terminal_spots = paths[is_v1, -1]
-            else:
-                # REBASED: each path matures at its own ki_time + max(offset), before the grid's last node when
-                # it knocked in early, so V1 is read there
-                v1_paths = np.flatnonzero(is_v1)
-                last = int(np.argmax(post_times))
-                nodes = np.array(
-                    [post_indices_by_ki[int(first_ki_idx[i])][last] for i in v1_paths], dtype=int
-                )
-                terminal_spots = paths[v1_paths, nodes + 1]
-                if leg_annualized(product, "knock_in"):
-                    # a REBASED knocked-in tenor hangs from the path's knock-in (accrual spec §4.4, §5.1)
-                    anchors = self._knock_in_anchors(grid)
-                    by_ki = np.array(
-                        [product._resolve_post_contract_tenor(pricing_env, knock_in=a) for a in anchors],
-                        dtype=float,
-                    )
-                    tenors = by_ki[first_ki_idx[v1_paths]]
+            # Every layout (ABSOLUTE, a carried knock-in, REBASED): a knocked-in path not knocked out on schedule 2 is
+            # a live put to the product's exercise date, decided on the spot at the exercise node and paid at the
+            # product terminal (owner ruling 2026-11-27, run 9; replaces D31's readout at schedule 2's end). Its
+            # annualized amount accrues to the exercise date (owner ruling O2: the product's ``post`` terminal).
+            terminal_spots = paths[is_v1, grid["exercise_idx"] + 1]
             v1_payoffs = np.array(
-                [
-                    product.get_maturity_payoff_v1(
-                        spot, pricing_env, contract_tenor=None if tenors is None else float(tenors[n])
-                    )
-                    for n, spot in enumerate(terminal_spots)
-                ],
+                [product.get_maturity_payoff_v1(spot, pricing_env) for spot in terminal_spots],
                 dtype=float,
             )
             payoffs[is_v1] = v1_payoffs if fold is None else v1_payoffs + fold[2]
-            if post_mode == PostKOScheduleMode.ABSOLUTE:
-                settlement_times[is_v1] = self._resolve_payment_time(
-                    product,
-                    pricing_env,
-                    float(post_maturity_abs),
-                    CashflowKind.TERMINAL,
-                    cashflow_id="ko_reset_v1_terminal",
-                )
-            else:
-                determination_times = (
-                    ki_time[is_v1] + post_max_offset
-                    if post_table is None
-                    else post_table[first_ki_idx[is_v1], post_last]
-                )
-                settlement_times[is_v1] = self._resolve_payment_time_array(
-                    product,
-                    pricing_env,
-                    determination_times,
-                    CashflowKind.TERMINAL,
-                    cashflow_id="ko_reset_v1_rebased_terminal",
-                )
+            settlement_times[is_v1] = knocked_in_payment
 
         ko_time = np.where(is_pre_ko, pre_ko_time, np.where(is_post_ko, post_ko_time, np.inf))
 
@@ -2345,7 +2287,7 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
             stats["ko_time_sum"] = 0.0
             stats["ko_time_count"] = 0
 
-        # each path's knocked-in end under REBASED (inf where it never knocked in)
+        # each path's schedule-2 end under REBASED (inf where never knocked in); the knocked-in note runs to exercise
         post_end_time = ki_time + post_max_offset
         if post_mode != PostKOScheduleMode.ABSOLUTE and post_table is not None and not carried_knock_in:
             knocked = first_ki_idx >= 0
@@ -2365,12 +2307,8 @@ class SnowballMCEngine(_FoldedPayoffMixin, EventStatsRecordingMixin, BaseEngine)
 
         if self._stats_recording():
             # event statistics of a recorded price (calculate_event_stats): this batch's outcome sums
-            if post_mode == PostKOScheduleMode.ABSOLUTE:
-                terminal_determination = np.where(
-                    is_v0, float(pre_maturity), float(post_maturity_abs)
-                )
-            else:
-                terminal_determination = np.where(is_v0, float(pre_maturity), post_end_time)
+            # the knocked-in settlement is determined at the exercise on every layout (run 9)
+            terminal_determination = np.where(is_v0, float(pre_maturity), knocked_in_end)
             breached_now = False
             if carried_knock_in or ki_barriers_val is None:
                 ki_row_times = np.zeros(0, dtype=float)

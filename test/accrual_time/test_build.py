@@ -185,18 +185,21 @@ def test_terminals():
     assert (n._terminal_accrual["contract"].kind, n._terminal_accrual["contract"].end) == (K.TIME, 0.1 + 0.25)
     d = snowball(ko=dates(30, 60), initial_date=T0, maturity=None, exercise_date=T0 + timedelta(days=60))
     assert d._terminal_accrual["contract"].end == T0 + timedelta(days=60)
+    # the knocked-in (``post``) terminal runs from the origin to the exercise date (the maturity) on both layouts
+    # (owner ruling O2, 2026-11-27); REBASED was relative, anchor + schedule 2's last offset (0.75)
     r = ko_reset(M.REBASED)
     assert (r._terminal_accrual["pre"].end, r._terminal_accrual["post"].relative, r._terminal_accrual["post"].end) == (
-        0.5, True, 0.75)
+        0.5, False, 1.25)
     a = ko_reset()
     assert a._terminal_accrual["post"].end == 0.75
 
 
 def test_rebased_terminal_ignores_the_payment_offset():
+    """The knocked-in terminal ends at the exercise date (the maturity, O2), whatever schedule 2's payment offsets."""
     post = times(0.25, 0.5, level=100.0)
     post.records[1].settlement_time = 0.52
     p = ko_reset(M.REBASED, post=post, accrual=AccrualConfig(accrual_end=AccrualEndType.SETTLEMENT))
-    assert p._terminal_accrual["post"].end == 0.5
+    assert p._terminal_accrual["post"].end == p.maturity == 1.25
 
 
 def test_annualized_rebate_without_dated_origin_is_refused():

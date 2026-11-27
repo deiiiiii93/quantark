@@ -204,6 +204,58 @@ def test_knocked_in_note_after_schedule_two_is_the_live_put_to_exercise(engine, 
     assert abs(value - exact) <= PUT_TOLERANCE[engine] * abs(exact), (value, exact, (value - exact) / exact)
 
 
+# --- Monte Carlo: the referee, the live put, Heston (run 9 T2) ------------------------------------------------------
+
+#: paths for the Monte Carlo referee cells: 3 SE (~0.035) separates the put to 01-05 from the put to 12-03 (0.092)
+REFEREE_PATHS = 1_000_000
+
+
+def _mc(paths=REFEREE_PATHS):
+    return SnowballMCEngine(params=MCParams(num_paths=paths, seed=7))
+
+
+@pytest.mark.parametrize("settlement", ["none", "settlement_date", "lag"])
+def test_mc_carried_knock_in_with_disable_is_the_put_to_exercise(settlement):
+    """AC1 on Black-Scholes MC: the referee within 3 SE of minus the put to the exercise date, discounted on to the
+    terminal payment. (D31 read the spot at 12-03: -19.773, 7 SE off.)"""
+    kw = {"none": {}, "settlement_date": dict(settlement_date=SETTLEMENT_DATE), "lag": dict(lag=0.02)}[settlement]
+    product = make(disable=True, carried=True, **kw)
+    e = carried_env()
+    exact = _referee(product, e)
+    engine = _mc()
+    value = engine.price(product, e)
+    se = engine.get_last_std_error()
+    assert abs(value - exact) <= 3.0 * se, (value, exact, se, (value - exact) / se)
+
+
+@pytest.mark.parametrize("disable", [False, True])
+@pytest.mark.parametrize("valuation", LIVE_DATES, ids=[d.strftime("%m%d") for d in LIVE_DATES])
+def test_mc_knocked_in_note_after_schedule_two_is_the_live_put_to_exercise(valuation, disable):
+    """AC4 on Black-Scholes MC: the live put to the exercise date within 3 SE, around and after schedule 2's end (D31
+    decided the 12-02 / 12-03 bookings on the spot at 12-03: -19.99 / -20.0, 58 SE and more off)."""
+    product = make(disable=disable, carried=True)
+    e = env(valuation, spot=SPOT)
+    exact = _referee(product, e)
+    engine = _mc(200_000)
+    value = engine.price(product, e)
+    se = engine.get_last_std_error()
+    assert abs(value - exact) <= 3.0 * se, (value, exact, se, (value - exact) / se)
+
+
+@pytest.mark.slow
+def test_heston_adi_agrees_with_heston_mc_on_a_carried_knock_in():
+    """AC1b (spec R3): Heston ADI vs Heston MC (1M paths) within 3 SE on the carried knock-in with schedule-2 knock-outs
+    (12-03) and the exercise after it (01-05): both read the put at the exercise date."""
+    from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import HestonSnowballMCEngine
+
+    product = lambda: make(carried=True)  # noqa: E731
+    mc = HestonSnowballMCEngine(HESTON, params=MCParams(num_paths=REFEREE_PATHS, seed=7))
+    ref = mc.price(product(), carried_env())
+    se = mc.get_last_std_error()
+    adi = HestonKOResetSnowballPDESolver(HESTON, n_x=128, n_v=24, n_t=128).price(product(), carried_env())
+    assert abs(adi - ref) <= 3.0 * se, (adi, ref, se, (adi - ref) / se)
+
+
 # --- against Monte Carlo --------------------------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -247,9 +299,11 @@ STATS_ENGINES = {
     "v1_stacked": lambda: _v1_route("stacked"),
     "v2": lambda: KOResetSnowballQuadEngineV2(QuadV2Params()),
 }
+#: the grid engines and Black-Scholes MC (20k paths: timing only)
+TIMING_ENGINES = {**STATS_ENGINES, "mc": lambda: SnowballMCEngine(params=MCParams(num_paths=20_000, seed=7))}
 
 
-@pytest.mark.parametrize("engine", list(STATS_ENGINES))
+@pytest.mark.parametrize("engine", list(TIMING_ENGINES))
 @pytest.mark.parametrize("name", ["ki85", "ki85_settlement_date", "ki85_lag", "carried_jul7"])
 def test_knocked_in_settlement_row_sits_at_the_terminal(name, engine):
     """The knocked-in settlement row is determined at the exercise date and paid at the product terminal
@@ -257,7 +311,7 @@ def test_knocked_in_settlement_row_sits_at_the_terminal(name, engine):
     make_product, make_env = CASES[name]
     product, e = make_product(), make_env()
     terminal = resolve_terminal_timing(product, e)
-    stats = STATS_ENGINES[engine]().calculate_event_stats(product, e)
+    stats = TIMING_ENGINES[engine]().calculate_event_stats(product, e)
     row = stats.ki_settlement
     assert row.time == pytest.approx(float(terminal.determination_time), abs=1e-12), row.time
     assert row.payment_time == pytest.approx(float(terminal.payment_time), abs=1e-12), row.payment_time
@@ -286,14 +340,14 @@ def _expiry_product(**kw):
 
 
 @pytest.mark.parametrize("settlement", ["none", "settlement_date", "lag"])
-@pytest.mark.parametrize("engine", list(STATS_ENGINES))
+@pytest.mark.parametrize("engine", list(TIMING_ENGINES))
 def test_expiry_pay_pays_a_schedule_two_knock_out_at_the_terminal(engine, settlement):
     """AC5: EXPIRY pay: a schedule-2 knock-out is paid with the knocked-in note, at the exercise settlement
     (``resolve_terminal_timing``), not at schedule 2's end's."""
     kw = {"none": {}, "settlement_date": dict(settlement_date=SETTLEMENT_DATE), "lag": dict(lag=0.02)}[settlement]
     product = _expiry_product(**kw)
     terminal = float(resolve_terminal_timing(product, env()).payment_time)
-    stats = STATS_ENGINES[engine]().calculate_event_stats(_expiry_product(**kw), env())
+    stats = TIMING_ENGINES[engine]().calculate_event_stats(_expiry_product(**kw), env())
     post = [i for i, tag in enumerate(stats.observations.schedule) if tag == "post"]
     assert post
     np.testing.assert_allclose(stats.observations.payment_times[post], terminal, rtol=0.0, atol=1e-12)
@@ -305,6 +359,7 @@ def test_expiry_pay_pays_a_schedule_two_knock_out_at_the_terminal(engine, settle
 FOLD_ENGINES = {
     **{name: make for name, (make, _) in ENGINES.items()},
     "heston_pde": lambda: HestonKOResetSnowballPDESolver(HESTON, n_x=64, n_v=12, n_t=48),
+    "mc": lambda: SnowballMCEngine(params=MCParams(num_paths=20_000, seed=7)),
 }
 
 

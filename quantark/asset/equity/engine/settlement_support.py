@@ -402,8 +402,9 @@ def resolve_terminal_timing_at(
 ) -> ResolvedPaymentTiming:
     """A terminal determination/payment pair at a given determination.
 
-    A KO-reset contract ends at its first schedule's last observation (not knocked in) or at its second
-    schedule's end (knocked in), neither of which is the product's own maturity.
+    A KO-reset contract that never knocks in ends at its first schedule's last observation, which is not the product's
+    own maturity; a knocked-in one is a live put to the exercise date and ends with the product terminal
+    (``resolve_terminal_timing``; owner ruling 2026-11-27, run 9).
     """
     if (determination_time is None) == (determination_date is None):
         raise ValidationError("give exactly one of determination_time and determination_date")

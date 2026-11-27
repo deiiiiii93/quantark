@@ -51,11 +51,14 @@ def test_an_explicit_v1_tenor_is_the_resolved_one_on_absolute():
 
 
 def test_a_rebased_annualized_v1_with_its_tenor_prices():
+    """The knocked-in tenor runs to the exercise date, the maturity 182 + 365 days, on the REBASED note and its
+    converted copy alike (owner ruling O2, 2026-11-27): no anchor needed (it hung from the knock-in before and was
+    refused without one)."""
     product = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D], annualized=True)
-    with pytest.raises(ValidationError, match="needs its knock-in anchor"):
-        product.get_maturity_payoff_v1(60.0, env())
+    assert product.get_maturity_payoff_v1(60.0, env()) == product.get_maturity_payoff_v1(
+        60.0, env(), contract_tenor=547 * D)
     converted = product.with_absolute_schedule_2(91 * D, anchor=anchor(product, 0))
-    assert product.get_maturity_payoff_v1(60.0, env(), contract_tenor=91 * D + 365 * D) == pytest.approx(
+    assert product.get_maturity_payoff_v1(60.0, env()) == pytest.approx(
         converted.get_maturity_payoff_v1(60.0, env()), rel=1e-15)
 
 

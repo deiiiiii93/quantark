@@ -20,6 +20,7 @@ from typing import Dict
 
 import numpy as np
 
+from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.numerical import Tolerance
 
@@ -216,8 +217,11 @@ def ko_reset_paths(engine, product, env) -> Dict[str, np.ndarray]:
                                  f"{int(np.count_nonzero(mine != kernel))} paths")
     event = np.where(is_pre, "ko_pre", np.where(is_post, "ko_post", np.where(v1, "ki_settlement", "maturity")))
     pre_maturity = float(product.get_pre_maturity_time(env))
-    det = np.where(is_pre, pre_time, np.where(is_post, post_time, np.where(v1, post_end, pre_maturity)))
-    return dict(n=n, payoffs=payoffs, settle=settle, event=event, det=det, v0=v0, v1=v1,
+    # a knocked-in note not knocked out is a live put to the product's exercise date, determined there (owner ruling
+    # 2026-11-27, run 9), whatever its schedule 2's end (``post_end``)
+    exercise = float(resolve_terminal_timing(product, env).determination_time)
+    det = np.where(is_pre, pre_time, np.where(is_post, post_time, np.where(v1, exercise, pre_maturity)))
+    return dict(n=n, payoffs=payoffs, settle=settle, event=event, det=det, v0=v0, v1=v1, post_end=post_end,
                 ki_first=knocked & ~is_pre, ki_index=ki_index, ki_time=ki_time, continuous=continuous,
                 step_ends=steps, is_pre=is_pre, is_post=is_post, pre_maturity=pre_maturity, grid=grid)
 
