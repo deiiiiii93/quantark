@@ -275,7 +275,8 @@ class KOResetStatistics(SnowballStatistics):
         """``EventStatistics`` (ABSOLUTE): both schedules on one observation table tagged ``pre``/``post`` (the pre
         record first at a tie), survival with the F5 drop of the first schedule's maturity mass at its own
         determination; the maturity row is the first schedule's end never knocked in, the knock-in settlement
-        row the second schedule's end knocked in and never knocked out (DESIGN §4.2, §4.4, §4.5)."""
+        row the notes knocked in and never knocked out by the second schedule, at the exercise date and its
+        settlement (owner ruling 2026-11-27; DESIGN §4.2, §4.4, §4.5)."""
         L, env, product = self.layout, self.env, self.product
         at = self._reader(states, captures)
         records = list(self.ko_records) + list(self.post_records)

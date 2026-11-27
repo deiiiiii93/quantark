@@ -230,7 +230,9 @@ Every limit below raises rather than approximating. None of them is a silent fal
   `BEFORE` / `AFTER` lifecycle identity the snowball and the Phoenix resolve it with.
 - **A KO-reset snowball past its pre-KI schedule.** A knock-in replaces the first knock-out
   schedule by the second and stays to the end, so a knocked-in contract is valued on the
-  second schedule up to its final maturity. A contract NOT knocked in when the first schedule
+  second schedule up to that schedule's last observation and then as a live put to the
+  product's exercise date, paid at the exercise settlement (owner ruling 2026-11-27). Second-schedule
+  knock-outs under EXPIRY pay are paid at that settlement too. A contract NOT knocked in when the first schedule
   ends matured there: a checkpoint that still calls it alive is refused (`ValidationError`),
   and a knock-in is never tested after that schedule's last observation.
 - **A KO-reset snowball with an explicit `settlement_date`.** A note that ends with the first

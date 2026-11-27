@@ -138,7 +138,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     # ------------------------------------------------------------------
 
     def _schedule_two_base(self) -> Optional[pd.Timestamp]:
-        """The day a REBASED contract's converted schedule 2 and its knocked-in end are dated from: the tracker's
+        """The day a REBASED contract's converted schedule 2 is dated from (its knocked-in end is the exercise date,
+        R5): the tracker's
         ``clock_origin`` (``initial_date`` when set, else ``start_date``), the origin ``product_for_pricing`` ages
         every numeric time from and ``knock_in_time`` is measured from. ``None`` for ABSOLUTE, whose numeric records
         are contract times dated like schedule 1's.

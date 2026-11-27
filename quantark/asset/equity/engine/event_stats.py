@@ -542,8 +542,8 @@ class TerminationDistribution:
         values["survival_times"] = survival_times
         values["survival"] = _float_array(owner, "survival", self.survival, survival_times.size)
         _check_not_before_valuation(owner, "times", times)
-        # a (time, event) pair repeats only with distinct payment times: an EXPIRY-paid REBASED knock-out on
-        # one date settles with the knocked-in end of the knock-in that put its schedule in force
+        # a (time, event) pair repeats only with distinct payment times (an EXPIRY-paid REBASED knock-out once
+        # settled with its own knock-in's rebased end; since 0.16.0 run 9 it settles at the product terminal)
         _check_ordered_rows(owner, "times", times, tuple(zip(values["event"], values["payment_times"].tolist())))
         _check_payment_not_before(owner, times, values["payment_times"])
         _check_probability(owner, "probability", values["probability"])

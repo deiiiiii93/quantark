@@ -68,11 +68,15 @@ class KnockOutResetSnowballOption(SnowballOption):
     The pre-KI KO schedule is defined by `barrier_config` (same as SnowballOption).
     The post-KI KO schedule is defined by `post_barrier_config` (KO-only).
 
-    Two rules fix the contract's life:
+    These rules fix the contract's life:
 
     1. A knock-in REPLACES the first knock-out schedule by the second (usually more dates at lower
-       rates), and the knocked-in state stays to the end. A knocked-in contract is a knocked-in
-       snowball on the second schedule, alive until that schedule ends.
+       rates), and the knocked-in state stays to the end. A knocked-in contract observes the second
+       schedule's knock-outs up to that schedule's last observation; if none fires, it is a live put to
+       the product's EXERCISE date, read on the spot there and paid at the exercise settlement (an
+       explicit ``settlement_date`` when booked, else exercise + settlement delay;
+       ``settlement_support.resolve_terminal_timing``). Owner ruling 2026-11-27, ABSOLUTE and REBASED
+       alike; it replaces D31's reading at the second schedule's end.
     2. The second schedule only becomes effective through a knock-in DURING the first one. A
        contract not knocked in when the first schedule ends matures there, so a knock-in is never
        tested after that (``first_schedule_ended``, ``require_alive``).
@@ -80,6 +84,8 @@ class KnockOutResetSnowballOption(SnowballOption):
        knock-in meets a schedule 2 in force until the note ends. ABSOLUTE checks the booked dates; REBASED
        checks the earliest possible knock-in (the first knock-in observation) plus schedule 2's last offset.
        A contract that breaks it is refused at construction (``ValidationError``, on both clocks).
+    4. The exercise date covers schedule 2 (owner ruling O1, 2026-11-27): it must not precede the
+       latest possible end of schedule 2 (``_validate_exercise_covers_schedule_two``).
 
     Two rules fix what one instant decides:
 

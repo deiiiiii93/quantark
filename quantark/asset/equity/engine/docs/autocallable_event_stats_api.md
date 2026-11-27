@@ -206,7 +206,9 @@ they refuse to price it).
 - `observations` holds the `pre` rows only (absolute times, absolute survival).
 - `post_ki_offsets`: one `"ko_post"` row per offset from the knock-in and one `"ki_settlement"`
   row; columns `offsets`, `kind`, `probability`, `discounted_cash`, `cash_to_pay`; no survival.
-  For reading.
+  For reading. The `"ki_settlement"` row's offset is schedule 2's last offset, but the knocked-in
+  note it totals settles at the product terminal (the exercise date), not at that offset (0.16.0;
+  open item).
 - `termination`: one row per (absolute determination time, event) for the events `"ko_pre"`,
   `"ko_post"`, `"maturity"`, `"ki_settlement"`, on the full deterministic candidate date set (every
   `pre` row, every reachable KI date plus each offset, calendar-rolled, the knocked-in settlement at
