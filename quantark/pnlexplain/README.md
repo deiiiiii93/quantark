@@ -144,7 +144,10 @@ per explain row per day, `date` first) and `explain_reconciliation_df`
 is the value identity; `expected_states` is the engine's own booked PnL
 change. `gap` is zero by construction. `gap_states` is zero for all three
 hedge paths (the simple `HedgeExecutor` books hedges at average cost with
-realised PnL, like the multi-instrument executor and the replay engine).
+realised PnL, like the multi-instrument executor and the replay engine) on
+engines without a bump context; on PDE and (since 0.16.0) QUAD V1 the explain
+values the t1 endpoint on the t0 bump context's frozen grid, so `gap_states`
+carries the day's re-meshing (QUAD V1 books measured <= 1e-6 of book value).
 
 ## Vol-model engines
 

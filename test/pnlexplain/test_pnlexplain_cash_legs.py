@@ -16,11 +16,20 @@ from test_backtest import test_trade_value_runs as backtest_fx
 WF = PnLExplainConfig(methods=(ExplainMethod.WATERFALL,))
 
 
-def _assert_reconciles(recon):
+def _states_gap_within_the_frozen_lattice(port, states):
+    """``gap_states``: the engine's booked PnL less the explained total. The explain values the t1 endpoint on the
+    QUAD V1 bump context frozen at t0 (0.16.0 D2, its sizing record) while the backtest marks t1 on that day's own
+    lattice, so they differ by V1's re-meshing, measured <= 1.0e-6 of the book value on these runs (31f46955: zero,
+    to 1e-8 of the day's PnL, when V1's bump context was the engine itself)."""
+    bound = 1e-8 * port["expected"].abs().clip(lower=1.0) + 2e-6 * float(states["portfolio_value"].abs().max())
+    return (port["gap_states"].abs() <= bound).all()
+
+
+def _assert_reconciles(recon, states):
     port = recon[recon["level"] == "portfolio"]
     assert not port.empty
     assert port["ok"].all()
-    assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
+    assert _states_gap_within_the_frozen_lattice(port, states)
 
 
 def _cash_leg_rows(explain):
@@ -31,7 +40,7 @@ def test_backtest_explain_has_a_cash_legs_line_and_reconciles_to_state_pnl():
     config = backtest_fx._config()
     config.pnl_explain = WF
     results = BacktestEngine(config).run()
-    _assert_reconciles(results.explain_reconciliation_df)
+    _assert_reconciles(results.explain_reconciliation_df, results.states_df)
     rows = _cash_leg_rows(results.explain_df)
     assert not rows.empty
     assert (rows["pnl"].abs() > 0.0).any()
@@ -41,7 +50,7 @@ def test_backtest_explain_without_legs_has_no_cash_legs_line():
     config = backtest_fx._config(trade_value=False)
     config.pnl_explain = WF
     results = BacktestEngine(config).run()
-    _assert_reconciles(results.explain_reconciliation_df)
+    _assert_reconciles(results.explain_reconciliation_df, results.states_df)
     assert _cash_leg_rows(results.explain_df).empty
 
 
@@ -50,7 +59,7 @@ def test_replay_explain_has_a_cash_legs_line_and_reconciles_to_state_pnl(kind):
     config = replay_fx._config(kind, days=replay_fx.PATH + replay_fx.TAIL)
     config.pnl_explain = WF
     result = ReplayBacktestEngine(config).run()
-    _assert_reconciles(result.explain_reconciliation_df())
+    _assert_reconciles(result.explain_reconciliation_df(), result.states_df())
     rows = _cash_leg_rows(result.explain_df())
     assert not rows.empty and (rows["pnl"].abs() > 0.0).any()
 

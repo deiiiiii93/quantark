@@ -19,6 +19,15 @@ WF = PnLExplainConfig(methods=(ExplainMethod.WATERFALL,))
 D = datetime(2024, 1, 2)
 
 
+def _states_gap_within_the_frozen_lattice(port, states):
+    """``gap_states``: the engine's booked PnL less the explained total. The explain values the t1 endpoint on the
+    QUAD V1 bump context frozen at t0 (0.16.0 D2, its sizing record) while the backtest marks t1 on that day's own
+    lattice, so they differ by V1's re-meshing, measured <= 1.0e-6 of the book value on these runs (31f46955: zero,
+    to 1e-8 of the day's PnL, when V1's bump context was the engine itself)."""
+    bound = 1e-8 * port["expected"].abs().clip(lower=1.0) + 2e-6 * float(states["portfolio_value"].abs().max())
+    return (port["gap_states"].abs() <= bound).all()
+
+
 def _row(**kw):
     base = dict(date=D, trade_type="hedge_rebalance", instrument_type="futures", contract="IF2401",
                 quantity=2.0, price=101.5, multiplier=300.0, notional=60900.0, transaction_cost=0.0, reason="x")
@@ -40,7 +49,7 @@ def test_replay_book_explain_off_identical_and_on_reconciles():
     port = recon[recon["level"] == "portfolio"]
     assert len(port) == len(on.states_df()) - 1
     assert port["ok"].all()
-    assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
+    assert _states_gap_within_the_frozen_lattice(port, on.states_df())
     ex = on.explain_df()
     hedge_rows = ex[ex["position_id"].str.startswith("hedge:")]
     assert set(hedge_rows["term"]) >= {"spot", "basis"}
@@ -67,7 +76,7 @@ def test_replay_roll_produces_close_and_open_legs():
     port = recon[recon["level"] == "portfolio"]
     assert len(port) == len(results.states_df()) - 1
     assert port["ok"].all()
-    assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
+    assert _states_gap_within_the_frozen_lattice(port, results.states_df())
     # the explain is a pure observer: the same run without it books the same states and trades
     off_cfg = fixtures.make_book_config()
     off_cfg.hedge.roll_policy = FuturesRollPolicy(roll_days_before_expiry=3)
