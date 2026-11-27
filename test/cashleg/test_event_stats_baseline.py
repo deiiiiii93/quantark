@@ -81,8 +81,8 @@ D9_CAUSES: Dict[str, str] = {
          "test_no_banked_case_is_in_the_d28_partial_protection_class)",
     "p": "D31 MC knocked-in spot at schedule-2 end: the KO-reset MC kernel (BSM, LocalVol, Heston, Heston-SLV MC) "
          "reads an ABSOLUTE (carried knock-in included) knocked-in payoff's spot at schedule 2's end node, where it "
-         "settles, not the grid's last node (schedule 1's end when that runs on past schedule 2) (no banked case is "
-         "one: test_no_banked_case_is_in_the_d31_schedule_two_readout_class)",
+         "settles, not the grid's last node (schedule 1's end when that runs on past schedule 2) (no banked case was "
+         "one; replaced by cause (u), run 9, whose census is test_the_run_nine_exercise_readout_class_is_pinned)",
     "q": "D33 settlement precedence: a KO-reset note that ends with schedule 1 (the never-knocked-in maturity; under "
          "EXPIRY also a schedule-1 knock-out) is paid on the product's explicit settlement_date when booked, the "
          "settlement delay only without one, on PDE 1D / LV PDE / ADI, QUAD V1, QUAD V2 and the fold structure (no "
@@ -98,6 +98,14 @@ D9_CAUSES: Dict[str, str] = {
          "(``_legacy_ko_reset_knock_outs``, the 0.15 code path bit for bit) on top of cause (s)'s first step off: that "
          "must reproduce the bank under every other cause, so D1 is the only new source of a move; "
          "``test_ko_reset_v1_projection_moves_are_bounded`` measures the moves themselves",
+    "u": "run 9 knocked-in KO-reset put at the exercise date (owner ruling 2026-11-27, replaces D31): a knocked-in "
+         "KO-reset not knocked out is a live put to the PRODUCT'S EXERCISE DATE -- every engine reads V1's spot at "
+         "the exercise date and pays it at the product terminal (the explicit settlement_date when booked, else the "
+         "exercise date plus the settlement delay), ABSOLUTE, carried knock-in and REBASED alike -- and annualized "
+         "knocked-in amounts accrue from the origin to the exercise date (O2). Only notes whose schedule 2 can end "
+         "before the exercise move; in the bank that is the MC REBASED case (an early knock-in ends schedule 2 "
+         "before exercise 2.0): its price and event_npv, checked against the price's own paths "
+         "(``_put_at_exercise_on_the_same_paths``); census test_the_run_nine_exercise_readout_class_is_pinned",
     "r": "D34 intraday twin carries the D33 payment: a numeric KO-reset with first_schedule_settlement_time (the "
          "intraday twin of a dated D33-class note) is paid there; only intraday prices of D33-class notes move (no "
          "banked case carries it: test_no_banked_case_is_in_the_d34_intraday_twin_class)",
@@ -1349,6 +1357,95 @@ _D29_MOVES = tuple(
         *(f"{case}__{leg}__{route}" for leg in legs for route in ("event", "fold_total", "fold_drilldown")))
 )
 
+# --- moves (run 9: the knocked-in KO-reset put at the exercise date, cause u) ---------------------------------------
+#
+# Owner ruling 2026-11-27 (replaces D31): a knocked-in KO-reset not knocked out is a live put to the product's exercise
+# date, read there and paid at the product terminal; annualized knocked-in amounts accrue origin -> exercise (O2). The
+# banked REBASED note (``cases._ko_reset``: offsets to 1y after the knock-in, maturity 2.0) read an early knock-in's
+# put at its own rebased end (knock-in + 1y), on the tenor to it, and settled it there; now at 2.0, on the tenor 2.0.
+# Only MC prices REBASED (the grid engines' REBASED cases are banked raises that still raise); every banked ABSOLUTE
+# KO-reset has its exercise on schedule 2's end, which run 9 leaves bitwise.
+_RUN9_PUT_AT_EXERCISE = ("mc_snowball__ko_reset_rebased__-__price", "mc_snowball__ko_reset_rebased__-__event_npv")
+
+
+def _rebased_put_readings(case_id: str):
+    """(run 9 price, pre-run-9 price) of an MC REBASED KO-reset, both from the price's own paths (a spy on the kernel):
+    every path that is not a knocked-in settlement keeps the kernel's cash and settlement (run 9 does not touch it);
+    a knocked-in path's V1 is ``get_maturity_payoff_v1`` read off its path
+
+    - run 9: at the exercise node, on the tenor to the exercise date (origin -> exercise, O2), paid at the product
+      terminal (``resolve_terminal_timing``);
+    - before: at the path's own rebased end (its knock-in record + schedule 2's last offset), on the tenor to that
+      end, paid at that end's terminal timing (``resolve_terminal_timing_at``),
+
+    each discounted to its payment and averaged as ``price()`` averages."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing, resolve_terminal_timing_at
+    from quantark.util.enum.option_enums import PostKOScheduleMode
+
+    same_path = _same_path()
+    case = _case(case_id)
+    engine, product, env = case.fresh()
+    assert product.post_ko_mode is PostKOScheduleMode.REBASED and not case.kwargs(), case_id
+    calls = same_path._spy(engine, "_compute_payoffs_ko_reset")
+    try:
+        engine.price(product, env)
+    finally:
+        del engine.__dict__["_compute_payoffs_ko_reset"]
+    assert len(calls) == 1, f"{case_id}: a single-batch price makes one kernel call, got {len(calls)}"
+    args, kwargs, (payoffs, settle, _stats, _extra) = calls[0]
+    call = {**dict(zip(("product", "pricing_env", "paths", "grid"), args)), **kwargs}
+    paths, grid = call["paths"], call["grid"]
+    ref = same_path.ko_reset_paths(*case.fresh())
+    v1 = np.asarray(ref["v1"], dtype=bool)
+    assert v1.any(), f"{case_id}: no knocked-in settlement on the price's paths"
+
+    terminal = resolve_terminal_timing(product, env)
+    exercise_col = int(grid["exercise_idx"]) + 1
+    assert float(grid["all_times"][exercise_col - 1]) == float(terminal.determination_time)
+    tenor = float(product._resolve_post_contract_tenor(env))
+    new_cash, new_pay = np.array(payoffs, dtype=float), np.array(settle, dtype=float)
+    old_cash, old_pay = new_cash.copy(), new_pay.copy()
+    last = int(np.argmax(np.asarray(grid["post_times"], dtype=float)))
+    for p in np.flatnonzero(v1):
+        new_cash[p] = product.get_maturity_payoff_v1(float(paths[p, exercise_col]), env, contract_tenor=tenor)
+        new_pay[p] = float(terminal.payment_time)
+        k = int(ref["ki_index"][p])
+        end = float(grid["post_times_by_ki"][k][last])
+        end_col = int(grid["post_indices_by_ki"][k][last]) + 1
+        old_cash[p] = product.get_maturity_payoff_v1(float(paths[p, end_col]), env, contract_tenor=end)
+        old_pay[p] = float(resolve_terminal_timing_at(product, env, determination_time=end).payment_time)
+    assert np.any(old_pay[v1] < new_pay[v1]), f"{case_id}: no knocked-in path ends schedule 2 before the exercise"
+
+    def price(cash, pay):
+        return float(np.mean(cash * np.array([env.get_discount_factor(float(t)) for t in pay])))
+
+    return price(new_cash, new_pay), price(old_cash, old_pay)
+
+
+def _put_at_exercise_on_the_same_paths(live: dict, banked: dict, record: dict) -> None:
+    """Cause (u), run 9. The live price is the run-9 reading of the price's own paths (V1 at the exercise date, on the
+    tenor to it, paid at the product terminal); the pre-run-9 reading of the same paths (V1 at each path's rebased
+    end) gives back the banked price, so the knocked-in readout, its tenor and its settlement are the only source of
+    the move. The event_npv record also carries cause (g): base refused REBASED on the event route
+    (``NotImplementedError``), and its npv is ``price()`` bitwise."""
+    price_record = RECORDS[f"{record['case']}__-__price"]
+    if record["route"] == "event_npv":
+        assert banked.get("raises") == "NotImplementedError", banked            # cause (g)
+        live_price = live_outcome(price_record)
+        assert live == {"value": live_price["value"]}, (live, live_price)
+    else:
+        assert record["route"] == "price" and "value" in banked, (record["id"], banked)
+    banked_price = float(price_record["outcome"]["value"])
+    run9, before = _rebased_put_readings(record["case"])
+    value = float(live["value"])
+    assert abs(value - run9) <= 1e-12 * float(record["scale"]), (
+        f"{record['id']}: live {value!r} != the put at exercise on the price's paths {run9!r}")
+    tol = GOLDEN_REL_TOL * abs(banked_price)
+    assert close(before, banked_price, rel_tol=0.0, abs_tol=tol), (
+        f"{record['id']}: the pre-run-9 reading {before!r} does not give back the banked price {banked_price!r}")
+    assert abs(value - banked_price) > tol, f"{record['id']}: the move is round-off"
+
+
 #: record id -> MovedBy; every other banked record must reproduce.
 EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _carried_knock_in_is_past) for case in _KI_AXIS_MOVES},
@@ -1358,7 +1455,7 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T9_KI_AXIS},
     **{f"{case}__fixed_at_ki__event": MovedBy("a", _knock_in_after_ko_removed) for case in _T9_KI_AFTER_KO},
     **{rid: MovedBy("d", _ko_reset_maturity_on_its_own_date) for rid in _T9_KO_RESET_MATURITY},
-    **{rid: MovedBy("g", _rebased_now_supported) for rid in _T9_REBASED},
+    **{rid: MovedBy("g", _rebased_now_supported) for rid in _T9_REBASED if rid not in _RUN9_PUT_AT_EXERCISE},
     # T10: MC Phoenix statistics
     **{f"{case}__fixed_at_ki__event": MovedBy("e", _knock_in_on_its_own_axis_before_any_ko) for case in _T10_KI_AXIS},
     # T11: MC DCN statistics
@@ -1400,6 +1497,8 @@ EXPECTED_MOVES: Dict[str, MovedBy] = {
        and rid not in _T15_FOLDED},
     **{rid: MovedBy("k", _edge_row_and_settled_notes) for rid in _D29_MOVES if rid in _T14B_EDGE_ROW},
     **{rid: MovedBy("h", _dcn_pde_event_is_the_folded_leg_after_d29) for rid in _D29_MOVES if rid in _T15_FOLDED},
+    # run 9: the knocked-in KO-reset put at the exercise date (the event_npv record's check also pins cause g)
+    **{rid: MovedBy("u", _put_at_exercise_on_the_same_paths) for rid in _RUN9_PUT_AT_EXERCISE},
 }
 #: T23 census: records D29 moves on top of an earlier cause (their checks pin both)
 D29_ALSO = frozenset(rid for rid in _D29_MOVES if rid in EXPECTED_MOVES and EXPECTED_MOVES[rid].cause != "m")
@@ -1665,39 +1764,46 @@ def test_no_banked_case_is_in_the_d30_ko_reset_expiry_class():
     assert in_class == [], f"in the D30 class, pin under cause (n): {in_class}"
 
 
-def test_no_banked_case_is_in_the_d31_schedule_two_readout_class():
-    """Cause (p), D31, pins no record, because no banked case is in its class: an ABSOLUTE KO-reset (a carried knock-in
-    included) whose schedule 2 ends before the contract's last time, so the MC grid runs on past schedule 2's end and
-    the knocked-in payoff used to read the spot of a later node (only MC engines move; PDE / QUAD already read schedule
-    2's end). The class is read off each case's contract; on every banked MC KO-reset the engine's own grid is checked
-    to end on schedule 2's last node (the two readouts are one column, so each record reproduces bitwise). A case added
-    to the bank in that class would have to be pinned here under (p), its expected value recomputed from the price's
-    paths with V1 read at the schedule-2 end node (``mc_same_path_reference.ko_reset_paths`` + the product's
-    ``get_maturity_payoff_v1``), never from the value under test."""
+def test_the_run_nine_exercise_readout_class_is_pinned():
+    """Cause (u), run 9 (replaces the D31 census): the class is a KO-reset whose knocked-in note can end schedule 2
+    before the exercise date -- ABSOLUTE (a carried knock-in included): schedule 2's last observation before it;
+    REBASED: a knock-in whose rebased end (the knock-in record plus schedule 2's last offset) is before it. Only such a
+    note's knocked-in readout, tenor and settlement move (a note whose exercise is schedule 2's end reads and pays the
+    put there before and after). Read off each case's contract: every banked ABSOLUTE KO-reset is out of the class
+    (exercise on schedule 2's end); every banked REBASED KO-reset is in it, and is either a banked raise on the price
+    (the grid engines: nothing to move) or the MC case whose price and event_npv are pinned under (u) -- exactly the
+    cause (u) records. A case added to the bank in the class would have to be pinned here under (u), its expected value
+    the put at exercise recomputed from the price's paths (``_rebased_put_readings``), never the value under test."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
     from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     from quantark.util.enum.option_enums import PostKOScheduleMode
     from quantark.util.numerical import is_close
 
     assert BANKED is not None, "baseline.json is not banked"
-    assert not any(move.cause == "p" for move in EXPECTED_MOVES.values())
-    ko_resets, mc_ko_resets, in_class = [], [], []
+    pinned = {rid for rid, move in EXPECTED_MOVES.items() if move.cause == "u"}
+    assert pinned == set(_RUN9_PUT_AT_EXERCISE), pinned
+    absolute, in_class, expected = [], [], set()
     for case_id in BANKED["cases"]:
-        engine, product, env = _case(case_id).fresh()
+        _, product, env = _case(case_id).fresh()
         if not isinstance(product, KnockOutResetSnowballOption):
             continue
-        ko_resets.append(case_id)
-        if product.post_ko_mode != PostKOScheduleMode.ABSOLUTE:
+        exercise = float(resolve_terminal_timing(product, env).determination_time)
+        post = [float(t) for t in product.get_post_ko_observation_profile(env)["observation_times"]]
+        if product.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
+            absolute.append(case_id)
+            ends = [float(product.get_post_maturity_time(env))]
+        else:
+            ki = [float(t) for t in product.get_ki_observation_profile(env)["observation_times"]]
+            ends = [t + max(post) for t in ki]
+        if not any(end < exercise and not is_close(end, exercise) for end in ends):
+            assert product.post_ko_mode == PostKOScheduleMode.ABSOLUTE, case_id
             continue
-        end = float(product.get_post_maturity_time(env))
-        last = float(product.get_max_maturity_time(env))
-        if end < last and not is_close(end, last):
-            in_class.append(case_id)
-        if _case(case_id).engine.kind.startswith("mc"):
-            mc_ko_resets.append(case_id)
-            grid = engine._build_time_grid_ko_reset(product, env, last)
-            assert is_close(float(grid["all_times"][-1]), end), (case_id, grid["all_times"][-1], end)
-    assert ko_resets and mc_ko_resets, "the bank holds (MC) ABSOLUTE KO-reset cases: the census must see them"
-    assert in_class == [], f"in the D31 class, pin under cause (p): {in_class}"
+        in_class.append(case_id)
+        assert product.post_ko_mode == PostKOScheduleMode.REBASED, f"in the run-9 class, pin under cause (u): {case_id}"
+        if "raises" not in RECORDS[f"{case_id}__-__price"]["outcome"]:
+            expected |= {f"{case_id}__-__price", f"{case_id}__-__event_npv"}
+    assert absolute and in_class, "the bank holds ABSOLUTE and REBASED KO-reset cases: the census must see them"
+    assert expected == pinned, f"the run-9 class prices {sorted(expected)}, pinned {sorted(pinned)}"
 
 
 def test_no_banked_case_is_in_the_d33_settlement_precedence_class():
