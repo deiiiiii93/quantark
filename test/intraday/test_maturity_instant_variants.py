@@ -310,7 +310,8 @@ def _float_ko_reset(pre_times, post_times, ki_times, post_ko=95.0, mode=PostKOSc
     schedule = lambda times, level: ObservationSchedule(                                                   # noqa: E731
         records=[ObservationRecord(observation_time=t, barrier=level) for t in times])
     product = KnockOutResetSnowballOption(
-        initial_price=100.0, strike=100.0, maturity=1.0,
+        # REBASED: the booked maturity covers the knock-in 1.0 plus the offset 1.0 (owner ruling O1, 2026-11-27)
+        initial_price=100.0, strike=100.0, maturity=1.0 if mode is PostKOScheduleMode.ABSOLUTE else 2.0,
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=schedule([1.0], 103.0),
                                      ki_barrier=75.0, ki_observation_type=ObservationType.DISCRETE,

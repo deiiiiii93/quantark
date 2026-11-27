@@ -52,9 +52,10 @@ def test_mc_ko_reset_pays_the_explicit_factor_without_annualization():
     lambda: KOResetSnowballQuadEngine(params=QuadParams(grid_points=401)),
 ], ids=["mc", "pde", "quad"])
 def test_every_ko_reset_engine_pays_the_factor_at_the_valuation_instant(engine):
-    """One answer everywhere (spec §8): an aged contract knocked out now pays principal + rate x factor."""
+    """One answer everywhere (spec §8): an aged contract knocked out now pays principal + rate x factor. The maturity
+    covers schedule 2's end 0.75 (owner ruling O1, 2026-11-27; was 0.5, the knock-out now pays the same cash)."""
     p = ko_reset(pre=times(0.0, 0.25), accrual=AccrualConfig(is_annualized=False, accrual_factors=[0.4, 0.4],
-                                                              accrued_offset=0.25), maturity=0.5)
+                                                              accrued_offset=0.25), maturity=0.75)
     assert float(engine().price(p, env(spot=110.0))) == pytest.approx(100.0 + 100.0 * 0.12 * 0.4, abs=1e-12)
 
 

@@ -71,8 +71,10 @@ def phoenix(**kw):
 
 
 def ko_reset(mode=PostKOScheduleMode.ABSOLUTE, **kw):
+    # REBASED: the maturity covers the last knock-in (1.0) plus the last offset (1.5) (owner ruling O1, 2026-11-27)
+    maturity = 1.5 if mode is PostKOScheduleMode.ABSOLUTE else 2.5
     return KnockOutResetSnowballOption(
-        initial_price=100.0, strike=100.0, maturity=1.5, contract_multiplier=1.0,
+        initial_price=100.0, strike=100.0, maturity=maturity, contract_multiplier=1.0,
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=_schedule(KO_DATES, 103.0), ki_barrier=75.0,
                                      ki_observation_type=ObservationType.DISCRETE,

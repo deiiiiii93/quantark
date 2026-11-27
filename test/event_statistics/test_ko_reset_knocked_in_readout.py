@@ -120,14 +120,15 @@ def tracker_copy(ki_record: int = 0, age: float = 0.30, spot: float = 78.0):
     """The ABSOLUTE copy the KO-reset tracker prices for a knocked-in REBASED note: schedule 1 quarterly to 2y (KO 103,
     discrete KI 80 on the same dates), schedule 2 quarterly offsets to 1.75y after the knock-in (0.25 + 1.75 == 2.0,
     D35's boundary); knocked in on record ``ki_record`` (0.25) and aged ``age`` (0.3): schedule 2 and schedule 1 both
-    end at 1.70."""
+    end at 1.70. The REBASED note's maturity covers its latest end, the last knock-in 2.0 plus 1.75 (owner ruling O1,
+    2026-11-27; was 2.0, the copy's prices are bitwise unchanged)."""
     product = cases._ko_reset(PostKOScheduleMode.REBASED)
     pre = tuple(np.arange(1, 9) * 0.25)
     product.barrier_config = replace(product.barrier_config, ko_observation_schedule=cases._schedule(pre, 103.0),
                                      ki_observation_schedule=cases._schedule(pre, 80.0))
     product.post_barrier_config = replace(product.post_barrier_config,
                                           ko_observation_schedule=cases._schedule(pre[:7], 95.0))
-    product.maturity = 2.0
+    product.maturity = 3.75
     product.validate()
     env = cases.flat_env(spot)
     record = product.barrier_config.ki_observation_schedule.records[ki_record]

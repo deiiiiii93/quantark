@@ -102,9 +102,10 @@ def test_ko_reset_rebased_post_schedule_holds_offsets_and_does_not_age():
     from dataclasses import replace
     from test_quad_empty_side import make
     from quantark.util.enum import PostKOScheduleMode
-    # offsets to 1.0: valid on both layouts (schedule 2 ends last, D35)
+    # offsets to 1.0: valid on both layouts (schedule 2 ends last, D35); the maturity covers the last knock-in 0.75
+    # plus the last offset 1.0 (owner ruling O1, 2026-11-27)
     base = make("ko_reset", (0.5, 0.75, 1.0), (0.25, 0.5, 0.75), (0.1, 0.3, 1.0))
-    p = type(base)(initial_price=100.0, strike=100.0, maturity=1.0, barrier_config=base.barrier_config,
+    p = type(base)(initial_price=100.0, strike=100.0, maturity=1.75, barrier_config=base.barrier_config,
                    post_barrier_config=base.post_barrier_config, accrual_config=base.accrual_config,
                    payoff_config=base.payoff_config, post_ko_mode=PostKOScheduleMode.REBASED)
     p.time_shift(0.3, None, env_const(), keep_landing=True)

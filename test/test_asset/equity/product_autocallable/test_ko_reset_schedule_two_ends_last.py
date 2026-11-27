@@ -50,9 +50,12 @@ def _ki(ki, schedule):
 
 def numeric(mode, post, *, pre=QUARTERS, ki="discrete", ki_times=None, maturity=None):
     """Schedule 1 ``pre`` (KO 103), knock-in at 80 (discrete on ``ki_times``, default schedule 1's times), schedule 2
-    ``post`` (absolute times, or offsets from the knock-in for REBASED)."""
+    ``post`` (absolute times, or offsets from the knock-in for REBASED). The default maturity is the latest possible
+    end (owner ruling O1, 2026-11-27): ABSOLUTE, schedule 2's last time; REBASED, the last knock-in plus the last
+    offset."""
+    latest = max(post) if mode is M.ABSOLUTE else max(ki_times or pre) + max(post)
     return KnockOutResetSnowballOption(
-        initial_price=100.0, strike=100.0, maturity=maturity or max(max(pre), max(post)),
+        initial_price=100.0, strike=100.0, maturity=maturity or max(max(pre), latest),
         barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
                                      ko_observation_schedule=_times(pre, 103.0),
                                      **_ki(ki, _times(ki_times or pre, 80.0))),

@@ -139,10 +139,11 @@ class TestRebased:
     """AC8: every absolute REBASED schedule-2 time within the tolerance of a contract instant IS that instant."""
 
     def _contract(self):
-        # schedule 1 ends at 0.3; a knock-in at 0.1 plus offset 0.2 spells 0.30000000000000004
+        # schedule 1 ends at 0.3; a knock-in at 0.1 plus offset 0.2 spells 0.30000000000000004. The maturity covers
+        # the latest end, the last knock-in 0.3 plus 0.2 (owner ruling O1, 2026-11-27)
         assert 0.1 + 0.2 != 0.3
         return KnockOutResetSnowballOption(
-            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=0.3,
+            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=0.5,
             barrier_config=barrier((0.2, 0.3), (0.1, 0.2, 0.3)), post_ko_mode=PostKOScheduleMode.REBASED,
             post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.12, ko_observation_dates=[0.1, 0.2]),
         )
@@ -171,7 +172,7 @@ class TestCheckpointOneFixes:
             ObservationRecord(observation_time=0.2, barrier=95.0, return_rate=0.03, settlement_time=0.25),
         ]
         p = KnockOutResetSnowballOption(
-            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=0.3,
+            initial_price=100.0, strike=100.0, contract_multiplier=1.0, maturity=0.5,   # 0.3 + 0.2 (O1)
             barrier_config=barrier((0.2, 0.3), (0.1, 0.2, 0.3)), post_ko_mode=PostKOScheduleMode.REBASED,
             post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.12,
                                               ko_observation_schedule=ObservationSchedule(records=records)),
