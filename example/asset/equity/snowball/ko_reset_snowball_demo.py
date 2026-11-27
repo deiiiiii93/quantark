@@ -187,7 +187,6 @@ def main():
         datetime(2029, 10, 22),
         datetime(2029, 11, 21),
         datetime(2029, 12, 21),
-        datetime(2030, 1, 21),
     ]
 
     pre_ko_schedule = build_observation_schedule(
