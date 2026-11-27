@@ -859,6 +859,11 @@ class KnockOutResetSnowballOption(SnowballOption):
     def get_post_maturity_time(
         self, pricing_env: PricingEnv, ki_time: Optional[float] = None
     ) -> float:
+        """Time of schedule 2's last observation (REBASED: from ``ki_time``), not the knocked-in maturity.
+
+        A knocked-in note runs on as a put to the product's exercise date (owner ruling 2026-11-27); its
+        determination and payment come from ``resolve_terminal_timing``, not from this time.
+        """
         profile = self.get_post_ko_observation_profile(pricing_env)
         times = profile["observation_times"]
         if not times:

@@ -617,7 +617,7 @@ schedule 2's last fixing. Notes whose exercise date is schedule 2's last observa
   (1D and local vol), Heston / Heston-SLV ADI, QUAD V1 and QUAD V2 ("QUAD numerics" above). Run 5's V2
   `disable_ko_after_ki` fix, the V1 projection and the FFT lengths stay. Grid pins taken before run 5 are restored,
   e.g. the base note on the PDE 8.86368327529885 → 8.871664315881244. V1 pins that run 5 moved twice were recaptured;
-  each equals its pre-run-5 value within 2.2e-15 relative.
+  prices are within 2.2e-15 and statistics within 2.2e-14 (relative) of their values before run 5's staging.
 - **Annualized knocked-in amounts accrue to the exercise date** (owner ruling 2026-11-27, "Accrue to exercise"). The
   knocked-in tenor runs from the origin to the exercise date on every engine and the lifecycle tracker. It ran to
   schedule 2's last fixing (ABSOLUTE) or to the knock-in plus schedule 2's last offset (REBASED), so the REBASED tenor
@@ -704,8 +704,9 @@ schedule 2's last fixing. Notes whose exercise date is schedule 2's last observa
 #### Open items
 
 - The tracker's REBASED refusal above. A numeric REBASED note whose maturity equals its latest schedule-2 end (as
-  `create_ko_reset_snowball` builds it) refuses tracking or simulation when the last knock-in record falls on a
-  non-trading day. The calendar resolution places that day eagerly, so it refuses even if no path knocks in there.
+  `create_ko_reset_snowball` builds it) can be refused when the last knock-in record falls on a non-trading day.
+  Single-note tracking and replay refuse only when the note actually knocks in on that late close. The simulated-path
+  backtest resolves its calendar up front, so it refuses before any path runs, even if no path knocks in there.
   Owner alternatives: hang REBASED schedule 2 from the record's fixing instead of the close, drop schedule-2 records
   past the exercise date, or extend the exercise date to the copy's end for this edge only.
 - REBASED `post_ki_offsets`: the knocked-in (`ki_settlement`) row is still keyed at schedule 2's last offset, though
