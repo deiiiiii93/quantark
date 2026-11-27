@@ -40,6 +40,8 @@ from .observation_schedule import (
     ObservationAggregation,
     ObservationsAtValuation,
     knock_in_decided_at_valuation,
+    knocked_in_at_valuation_property,
+    LIFECYCLE_KNOCKED_IN,
     ObservationRecord,
     ObservationSchedule,
     ResolvedObservationRecord,
@@ -158,6 +160,9 @@ class PhoenixOption(BaseEquityOption):
     accrual_config: AccrualConfig = field(default_factory=AccrualConfig)
     airbag_config: AirbagConfig = field(default_factory=AirbagConfig)
 
+    # not annotated: a property, not a dataclass field (0.16.0 run 6, spec D3)
+    knocked_in_at_valuation = knocked_in_at_valuation_property
+
     def __init__(
         self,
         initial_price: float,
@@ -178,6 +183,7 @@ class PhoenixOption(BaseEquityOption):
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
         settlement_convention: Optional[SettlementConvention] = None,
+        knocked_in_at_valuation: bool = False,
     ):
         """
         Initialize Phoenix option.
@@ -200,6 +206,8 @@ class PhoenixOption(BaseEquityOption):
             maturity_date: Explicit maturity date
             tenor_end: Tenor end-point selection
             annualization_day_count: Day count basis for annualization
+            knocked_in_at_valuation: The contract is already knocked in at the valuation date (the public
+                spelling of the lifecycle flag ``_otc_lifecycle_knocked_in``; see the property)
 
         Raises:
             ValidationError: If parameters are invalid
@@ -240,6 +248,10 @@ class PhoenixOption(BaseEquityOption):
             contract_multiplier=contract_multiplier,
             settlement_convention=settlement_convention,
         )
+        # Last, and only when set: a default contract's __dict__ is unchanged, and a flagged one's key order equals
+        # the alias set after construction (spec D2).
+        if knocked_in_at_valuation:
+            setattr(self, LIFECYCLE_KNOCKED_IN, True)
 
     def validate(self, *, allow_zero_maturity: bool = False) -> None:
         """

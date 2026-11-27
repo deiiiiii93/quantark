@@ -119,6 +119,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         post_ko_mode: PostKOScheduleMode = PostKOScheduleMode.ABSOLUTE,
         settlement_convention: Optional[SettlementConvention] = None,
         first_schedule_settlement_time: Optional[float] = None,
+        knocked_in_at_valuation: bool = False,
     ):
         """``first_schedule_settlement_time`` (numeric clock only): when a note that ends with its first schedule is
         paid -- the never-knocked-in maturity and, under EXPIRY coupon pay, a first-schedule knock-out (spec D30) --
@@ -127,6 +128,9 @@ class KnockOutResetSnowballOption(SnowballOption):
         dated note whose settlement date pays its first schedule carries it (spec D34). ``None`` (the default): an
         explicit ``settlement_date`` when booked, else schedule 1's maturity plus the settlement delay
         (``settlement_support.first_schedule_settlement``). A dated contract books a ``settlement_date`` instead.
+
+        ``knocked_in_at_valuation``: the contract is already knocked in at the valuation date (see
+        ``SnowballOption.knocked_in_at_valuation``); a REBASED schedule 2 also needs the knock-in date.
         """
         self.post_barrier_config = post_barrier_config
         self.post_ko_mode = post_ko_mode
@@ -151,6 +155,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             settlement_convention=settlement_convention,
+            knocked_in_at_valuation=knocked_in_at_valuation,
         )
 
     def validate(self, *, allow_zero_maturity: bool = False) -> None:

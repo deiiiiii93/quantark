@@ -355,6 +355,33 @@ def active_record_indices(schedule: Optional["ObservationSchedule"], pricing_env
     ]
 
 
+#: The lifecycle flag every engine, tracker and reader of the autocallables reads (``getattr(product, ..., False)``).
+LIFECYCLE_KNOCKED_IN = "_otc_lifecycle_knocked_in"
+
+
+def _get_knocked_in_at_valuation(self) -> bool:
+    return bool(getattr(self, LIFECYCLE_KNOCKED_IN, False))
+
+
+def _set_knocked_in_at_valuation(self, value) -> None:
+    setattr(self, LIFECYCLE_KNOCKED_IN, bool(value))
+
+
+#: Public ``knocked_in_at_valuation`` of Snowball, Phoenix and KO-reset (0.16.0 run 6): the public spelling of the
+#: lifecycle flag ``_otc_lifecycle_knocked_in``, one storage slot, so the two can never disagree. Assigned on the
+#: classes WITHOUT an annotation: an annotated name would become a dataclass field (``__eq__``, ``cache_key``).
+knocked_in_at_valuation_property = property(
+    _get_knocked_in_at_valuation,
+    _set_knocked_in_at_valuation,
+    doc="""Whether the contract is already knocked in at the valuation date (the lifecycle flag
+    ``_otc_lifecycle_knocked_in``; both spellings read and write one attribute). Every engine prices a flagged contract
+    as knocked in; a knock-in decided by the market at valuation still applies to an unflagged one. Not a dataclass
+    field: ``==``, ``asdict`` and ``cache_key`` ignore it, as they ignore the private flag. A KO-reset whose schedule 2
+    is REBASED also needs its knock-in date, which only the private ``_otc_lifecycle_knock_in_date`` /
+    ``_otc_lifecycle_knock_in_anchor`` carry (the lifecycle tracker sets them); without it MC and the tracker refuse.""",
+)
+
+
 def knock_in_decided_at_valuation(product, spot: float, pricing_env) -> bool:
     """Whether a knock-in observation AT the valuation instant is breached by the known spot.
 

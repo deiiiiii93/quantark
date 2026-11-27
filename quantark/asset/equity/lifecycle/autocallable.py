@@ -55,7 +55,7 @@ from quantark.asset.equity.engine.settlement_support import (
 )
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.asset.equity.product.option.contract_clock import canonicalize_contract_clock
-from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
+from quantark.asset.equity.product.option.observation_schedule import LIFECYCLE_KNOCKED_IN, ObservationSchedule
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.settlement import SettlementLagUnit
 from quantark.priceenv import PricingEnvironment
@@ -117,9 +117,23 @@ class AutocallableLifecycleTracker:
     ) -> None:
         # The snapped contract (spec 2026-10-08 section 4a): every numeric observation time on the
         # day this tracker observes it, so every consumer that builds from it agrees with the tracker.
+        # The contract's own knock-in flag (``knocked_in_at_valuation``) seeds the state, as the KO-reset tracker
+        # does; it was overwritten by a fresh not-knocked-in state, silently pricing a flagged contract as not
+        # knocked in (0.16.0 run 6, D7). A flag an explicit state contradicts is refused, not overwritten.
+        flagged = bool(getattr(product, LIFECYCLE_KNOCKED_IN, False))
+        if lifecycle is None:
+            lifecycle = AutocallableLifecycleState(knocked_in=flagged)
+            if flagged:
+                lifecycle.ki_date = getattr(product, "_otc_lifecycle_knock_in_date", None)
+                lifecycle.knock_in_anchor = getattr(product, "_otc_lifecycle_knock_in_anchor", None)
+        elif flagged and not lifecycle.knocked_in:
+            raise ValidationError(
+                f"{type(product).__name__} is flagged knocked_in_at_valuation but the lifecycle state given with it "
+                "is not knocked in: pass a knocked-in state, or the contract without the flag"
+            )
         self.product = snap_contract(product)
         self.quantity = float(quantity)
-        self.lifecycle = lifecycle if lifecycle is not None else AutocallableLifecycleState()
+        self.lifecycle = lifecycle
         self.start_date = start_date
         self.has_lifecycle = has_lifecycle
         self._date_resolver = date_resolver or _identity_date_resolver
