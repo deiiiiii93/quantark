@@ -412,6 +412,40 @@ covers it. KO-reset V1 projection and the knocked-in staging: 1.00-1.02x (QUAD V
 - KO-reset V1's projected KI-narrowing weight (`_event_weight`) is inert: a same-date discrete KI forces the
   `pre_ko_last` route, whose cell-average KI blend ignores it.
 
+### Public `knocked_in_at_valuation` on Snowball, Phoenix and KO-reset
+
+A Snowball, Phoenix or KO-reset that is already knocked in can now be priced by setting it on the product, as a DCN
+can: `SnowballOption(..., knocked_in_at_valuation=True)`, or `product.knocked_in_at_valuation = True`. Until now this
+needed the private lifecycle flag `_otc_lifecycle_knocked_in`. Engines still refuse an `AutocallableLifecycleState`
+passed with the product (owner choice, option A).
+
+#### Added
+
+- **`knocked_in_at_valuation`** (read/write property and the last constructor keyword) on `SnowballOption`,
+  `PhoenixOption` and `KnockOutResetSnowballOption`. It is the public spelling of `_otc_lifecycle_knocked_in`: both
+  read and write one attribute, so the lifecycle stack, the intraday twin, replay and every engine see the same flag.
+  A product built with the keyword is the same object, key order and pickle bytes included, as one flagged through the
+  private attribute. Prices and statistics are those of the private flag, bit for bit.
+- It is not a dataclass field: `==`, `asdict` and `cache_key()` ignore it, as they ignore the private flag. A default
+  product's attributes are unchanged.
+- A REBASED KO-reset also needs its knock-in date, which only the private `_otc_lifecycle_knock_in_date` /
+  `_otc_lifecycle_knock_in_anchor` carry; without it MC and the lifecycle tracker refuse, as before.
+
+#### Changed
+
+- **The Snowball / Phoenix lifecycle tracker seeds its state from the flag.** `AutocallableLifecycleTracker` started
+  every contract not knocked in and overwrote the flag, so a flagged Snowball or Phoenix sent through replay, the
+  backtest or the portfolio lifecycle was priced as not knocked in, with no error. It now starts knocked in, as the
+  KO-reset tracker already did. Both trackers refuse a flagged contract given an explicit lifecycle state that is not
+  knocked in. Contracts without the flag are unchanged.
+- The RFQ product registry accepts the new keyword.
+
+#### Open items
+
+- `==` on these products ignores the knock-in flag (as it did for the private attribute); two contracts differing only
+  in it compare equal.
+- Most library readers still spell the private attribute; they read the same slot.
+
 ## [0.15.0] - 2026-11-25
 
 A `BUSINESS_DAYS` environment knows how its cash curves are quoted. On a business-day clock every time is a
