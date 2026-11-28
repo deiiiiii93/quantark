@@ -654,14 +654,15 @@ class KnockOutResetSnowballOption(SnowballOption):
         - numeric: ``maturity`` becomes schedule 2's last observation time exactly.
 
         A settlement by the convention follows the new exercise by itself. The knocked-in tenor (the ``post`` terminal)
-        runs to the new exercise and the contract tenor (``contract``) is derived again from the copy's dates. The extended copy is a valid ABSOLUTE contract (O1, D35). A copy whose schedule 2 ends on
-        or before the exercise keeps the contract's exercise, settlement and terminals unchanged.
+        runs to the new exercise and the contract tenor (``contract``) is derived again from the copy's dates. The
+        extended copy is a valid ABSOLUTE contract (O1, D35). A copy whose schedule 2 ends on or before the exercise
+        keeps the contract's exercise, settlement and terminals unchanged.
 
         ``anchor`` is ACCRUAL: the knock-in record that fired, at its contractual fixing (accrual time spec §5.1),
         resolved once at the knock-in. Each converted record keeps its quoted ``relative`` period with the anchor
         embedded (§5.2; the ``post`` terminal runs to the exercise date and carries no anchor, owner ruling O2): a DATE
-        anchor plus a quoted offset is never rounded into a date, and the copy books the cash the un-knocked contract's Monte Carlo route pays on the same path. The
-        periods become explicit, so a re-validated copy keeps them. A contract whose knock-in records accrue refuses a
+        anchor plus a quoted offset is never rounded into a date, and the copy books the cash the un-knocked
+        contract's Monte Carlo route pays on the same path. The periods become explicit, so a re-validated copy keeps them. A contract whose knock-in records accrue refuses a
         missing anchor; it is never looked up by date.
         """
         if self.post_ko_mode != PostKOScheduleMode.REBASED:
@@ -747,15 +748,16 @@ class KnockOutResetSnowballOption(SnowballOption):
         ``maturity_date`` on the exercise date is the exercise date and moves with it (controller ruling 2026-11-28). A
         settlement by the convention follows the new exercise by itself (``resolve_terminal_timing``)."""
         exercise = self.exercise_date
-        if end.date() <= exercise.date():
-            # TODO(owner): schedule 2 ends later on the exercise day itself (a knock-in date carrying a time of day);
-            # the ruling extends the exercise to a later DATE only. Refused until ruled.
-            raise ValidationError(
-                f"KO-reset snowball (REBASED): schedule 2's last observation {end} falls after the exercise {exercise} "
-                "on the same day; the exercise date extends only to a later date"
-            )
-        shift = timedelta(days=(end.date() - exercise.date()).days)
+        shift = timedelta(days=max(0, (end.date() - exercise.date()).days))
         new_exercise = exercise + shift
+        if new_exercise < end:
+            # TODO(owner): schedule 2 ends later in the day than the (extended) exercise -- the same day, or a knock-in
+            # time of day later than the exercise's; the ruling moves the exercise by whole dates, keeping its time of
+            # day. Refused until ruled.
+            raise ValidationError(
+                f"KO-reset snowball (REBASED): schedule 2's last observation {end} falls later in the day than the "
+                f"exercise {new_exercise}; the exercise date extends by whole dates only"
+            )
         maturity_date = self.maturity_date
         if maturity_date is not None and maturity_date.date() == exercise.date():
             # on the exercise date (a maturity_date booking supplies the exercise): it IS the exercise date

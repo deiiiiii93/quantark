@@ -722,14 +722,17 @@ Owner ruling 2026-11-28, "extend exercise date". It replaces run 9's tracker ref
   again from the copy, so `tenor_end` MATURITY reads the moved date.
 - **Scope.** Single-note tracking, replay and the simulated-path backtest follow the copy: the note stays alive to
   the extended exercise, books V1 there and pays at that terminal; `matured_before_run` retires it only after it. The
-  simulated-path calendar no longer refuses up front. A path knocked in on the late close settles at the extended
-  terminal, other paths at the original one, and the calendar terminal is the latest placement.
+  simulated-path calendar no longer refuses up front, except for a dated note with a booked `settlement_date` and no
+  settlement-convention calendar: the simulated-path backtest's schedule environment carries no calendar, so that note
+  still refuses there (replay on a calendar-bearing environment extends it). A path knocked in on the late close
+  settles at the extended terminal, other paths at the original one, and the calendar terminal is the latest
+  placement.
 - **Unchanged.** Copies whose schedule 2 ends on or before the exercise keep the original exercise, settlement date
   and terminals. The O1 refusal at construction, the pricing engines (they place REBASED schedule 2 from the record
   fixing) and Snowball, Phoenix and DCN are unchanged.
 - **Still refused** (`TODO(owner)`): a dated copy whose booked `maturity_date` is not on the exercise date and would
-  precede the extended exercise, and a schedule 2 that ends later on the exercise day itself (a knock-in date carrying
-  a time of day).
+  precede the extended exercise, and a schedule 2 that ends later in the day than the extended exercise (a knock-in
+  date carrying a time of day later than the exercise's, on the exercise day or a later one).
 
 ### Tests: cross-architecture pins
 

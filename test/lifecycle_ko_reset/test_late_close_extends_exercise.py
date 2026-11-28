@@ -202,8 +202,16 @@ def test_schedule_two_ending_later_on_the_exercise_day_is_refused():
     """A knock-in date carrying a time of day can end schedule 2 later on the exercise day itself; the ruling extends
     the exercise to a later DATE only."""
     product = late_note(exercise=datetime(2026, 10, 5, 15, 0))
-    with pytest.raises(ValidationError, match="same day"):
+    with pytest.raises(ValidationError, match="later in the day"):
         product.with_absolute_schedule_2(datetime(2026, 7, 5, 16, 0), anchor=_anchor(product))
+
+
+def test_a_knock_in_time_of_day_later_than_the_exercise_is_refused_across_days():
+    """Final review: a knock-in at 16:00 on exercise time 15:00 would extend the exercise by whole days to 15:00 while
+    schedule 2 ends at 16:00 the same day -- not a valid ABSOLUTE note (O1); refused, as same-day overruns are."""
+    product = late_note(exercise=datetime(2026, 10, 5, 15, 0))
+    with pytest.raises(ValidationError, match="later in the day"):
+        product.with_absolute_schedule_2(datetime(2026, 7, 6, 16, 0), anchor=_anchor(product))
 
 
 def test_a_dated_copy_ending_on_or_before_the_exercise_is_unchanged():
