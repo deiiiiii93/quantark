@@ -29,6 +29,7 @@ import pandas as pd
 
 from quantark.asset.equity.engine.settlement_support import first_schedule_terminal_timing, resolve_terminal_timing
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, leg_annualized
+from quantark.asset.equity.settlement import effective_settlement_calendar
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType
 from quantark.util.enum.option_enums import PostKOScheduleMode
@@ -167,17 +168,24 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             return None
         return (pd.Timestamp(self.lifecycle.ki_date).normalize() - origin.normalize()).days / DAYS_PER_YEAR
 
-    def contract(self) -> Any:
+    def contract(self, env: Optional[PricingEnvironment] = None) -> Any:
         """The snapped contract, or the ABSOLUTE contract a knocked-in REBASED one has become (on the generated dates
-        of its knock-in date for a dated contract, ship spec 2026-10-26 Decision 6)."""
+        of its knock-in date for a dated contract, ship spec 2026-10-26 Decision 6).
+
+        ``env`` supplies the settlement calendar a late-close copy's booked settlement date shifts on when the contract's
+        convention names none (``effective_settlement_calendar``, controller ruling 2026-11-28). Every tracker path
+        passes the environment it holds; without one only the convention's calendar is read."""
         if self.lifecycle.knocked_in and self.product.post_ko_mode == PostKOScheduleMode.REBASED:
+            calendar = effective_settlement_calendar(self.product, env)
             if self.product._dated_rebased():
                 knock_in_date = pd.Timestamp(self.lifecycle.ki_date).normalize().to_pydatetime()
-                return self.product.with_absolute_schedule_2(knock_in_date, anchor=self.lifecycle.knock_in_anchor)
+                return self.product.with_absolute_schedule_2(knock_in_date, anchor=self.lifecycle.knock_in_anchor,
+                                                             settlement_calendar=calendar)
             knock_in_time = self.knock_in_time()
             if knock_in_time is None:
                 raise ValidationError("a knocked-in REBASED KO-reset needs start_date and its knock-in date")
-            converted = self.product.with_absolute_schedule_2(knock_in_time, anchor=self.lifecycle.knock_in_anchor)
+            converted = self.product.with_absolute_schedule_2(knock_in_time, anchor=self.lifecycle.knock_in_anchor,
+                                                              settlement_calendar=calendar)
             return _on_the_day_grid(converted)
         return self.product
 
@@ -186,8 +194,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         setattr(product, "_otc_lifecycle_knock_in_date", self.lifecycle.ki_date)
         return product
 
-    def _contract_for_pricing(self) -> Any:
-        product = deepcopy(self.contract())
+    def _contract_for_pricing(self, pricing_env: Optional[PricingEnvironment] = None) -> Any:
+        product = deepcopy(self.contract(pricing_env))
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
         setattr(product, "_otc_lifecycle_knock_in_date", self.lifecycle.ki_date)
         setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
@@ -234,7 +242,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         """The knocked-in contract's length (V1's tenor); ``None`` when the knock-in amount is not annualized, which
         reads none (a non-accruing REBASED contract has no anchor, so its tenor cannot be resolved -- and is not
         needed). The Monte Carlo route gates it the same way."""
-        contract = self.contract()
+        contract = self.contract(env)
         if not leg_annualized(contract, "knock_in"):
             return None
         return float(contract._resolve_post_contract_tenor(self._schedule_resolution_env(contract, env)))
@@ -283,7 +291,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         contract's ABSOLUTE copy keeps the original exercise date and settlement date, unless a late knock-in close
         places schedule 2 past them: then they extend with it (``with_absolute_schedule_2``, owner ruling
         2026-11-28)."""
-        contract = self.contract()
+        contract = self.contract(env)
         return resolve_terminal_timing(contract, self._schedule_resolution_env(contract, env))
 
     def terminal_date(self, env: PricingEnvironment) -> Optional[pd.Timestamp]:
@@ -324,7 +332,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
                     return events
                 events.append(knock_in)
                 self._consume_schedule_two(env)
-            contract = self.contract()
+            contract = self.contract(env)
             if not contract.barrier_config.disable_ko_after_ki:
                 knock_out = self._test_knock_outs(date, contract, env, spot, valuation_point, schedule=2)
                 if knock_out is not None:
@@ -437,7 +445,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     def _consume_schedule_two(self, env: PricingEnvironment) -> None:
         """At the knock-in close: schedule-2 records that fell due on an EARLIER close were due while schedule 2
         was not in force, so the knock-in consumes them (observed, never tested)."""
-        contract = self.contract()
+        contract = self.contract(env)
         for idx, rec in enumerate(self._schedule_records(contract, env, contract.post_barrier_config)):
             if self._due_at_previous_close(contract, rec):
                 self.lifecycle.observed_post_ko_indices.add(idx)
@@ -454,7 +462,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             timing = self._final_timing(env)
             if not self._timing_is_due(date, valuation_point, timing):
                 return None
-            contract = self.contract()
+            contract = self.contract(env)
             payoff = float(contract.get_maturity_payoff_v1(
                 spot, self._schedule_resolution_env(contract, env), contract_tenor=self.final_contract_tenor(env)
             ))
@@ -516,7 +524,7 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
         )
 
     def placement(owner: KOResetLifecycleTracker) -> SchedulePlacement:
-        contract = owner.contract()
+        contract = owner.contract(env)
         due, barrier, payoff, settle, delay = records_on_calendar(owner, contract, contract.post_barrier_config)
         timing = owner._final_timing(env)
         final_due = owner._first_due(dates, lambda day, vp: owner._timing_is_due(day, vp, timing), contract)

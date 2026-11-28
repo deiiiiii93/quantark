@@ -42,7 +42,7 @@ from .observation_schedule import (
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
 from .accrual import (AccrualKind, AccrualPeriod, KnockInAnchor, contract_tenor as _contract_tenor, ko_accrual_factor,
                       leg_annualized)
-from .accrual_build import snapshot_terms
+from .accrual_build import _contract_terminal, _exercise_terminal, _Terms, snapshot_terms
 from .contract_clock import canonical_clock_after, canonicalize_contract_clock, contract_instants, snap_to_instants
 from .snowball_option import SnowballOption
 
@@ -626,7 +626,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         return any(r.accrual is not None and r.accrual.kind is not AccrualKind.NONE for r in records)
 
     def with_absolute_schedule_2(
-        self, knock_in_time: Union[float, datetime], *, anchor: Optional[KnockInAnchor]
+        self, knock_in_time: Union[float, datetime], *, anchor: Optional[KnockInAnchor], settlement_calendar=None
     ) -> "KnockOutResetSnowballOption":
         """The ABSOLUTE contract a REBASED one becomes once knocked in at ``knock_in_time``.
 
@@ -644,15 +644,17 @@ class KnockOutResetSnowballOption(SnowballOption):
         record (a record due on a non-trading day fires on the next close) can place schedule 2 past it; then the
         copy's exercise is EXTENDED to schedule 2's last observation (owner ruling 2026-11-28, "extend exercise date"):
 
-        - dated: ``exercise_date`` becomes schedule 2's last date, keeping its time of day; an explicit
-          ``settlement_date`` keeps its business-day lag from the exercise on the contract's settlement calendar
-          (``settlement_convention.calendar``). Refused (``ValidationError``) when the contract names no such calendar,
-          when the booked settlement date is no whole business-day lag on it, when a booked ``maturity_date`` would
-          precede the new exercise, and when schedule 2 ends later on the exercise day itself;
+        - dated: ``exercise_date`` becomes schedule 2's last date, keeping its time of day. An explicit
+          ``settlement_date`` keeps its business-day lag from the exercise on the effective settlement calendar
+          (``settlement.effective_settlement_calendar``: the convention's calendar, else ``settlement_calendar``, the
+          pricing environment's calendar the caller passes). A booked ``maturity_date`` on the exercise date moves by
+          the same days; a later one is kept. Refused (``ValidationError``) when neither calendar exists, when the
+          booked settlement date is no whole business-day lag on it, when a ``maturity_date`` off the exercise date
+          would precede the new exercise, and when schedule 2 ends later on the exercise day itself;
         - numeric: ``maturity`` becomes schedule 2's last observation time exactly.
 
-        A settlement by the convention follows the new exercise by itself, and the knocked-in tenor (the ``post``
-        terminal) runs to it. The extended copy is a valid ABSOLUTE contract (O1, D35). A copy whose schedule 2 ends on
+        A settlement by the convention follows the new exercise by itself. The knocked-in tenor (the ``post`` terminal)
+        runs to the new exercise and the contract tenor (``contract``) is derived again from the copy's dates. The extended copy is a valid ABSOLUTE contract (O1, D35). A copy whose schedule 2 ends on
         or before the exercise keeps the contract's exercise, settlement and terminals unchanged.
 
         ``anchor`` is ACCRUAL: the knock-in record that fired, at its contractual fixing (accrual time spec §5.1),
@@ -700,7 +702,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
             extended = self.exercise_date is not None and max(dates) > self.exercise_date
             if extended:
-                self._extend_dated_exercise(product, max(dates))
+                self._extend_dated_exercise(product, max(dates), settlement_calendar)
             return self._with_converted_terminals(product, embedded, extended=extended)
 
         shift = float(knock_in_time)
@@ -737,11 +739,13 @@ class KnockOutResetSnowballOption(SnowballOption):
         canonicalize_contract_clock(product)
         return self._with_converted_terminals(product, embedded, extended=extended)
 
-    def _extend_dated_exercise(self, product: "KnockOutResetSnowballOption", end: datetime) -> None:
+    def _extend_dated_exercise(self, product: "KnockOutResetSnowballOption", end: datetime,
+                               settlement_calendar) -> None:
         """A dated copy whose schedule 2 ends after the exercise date: the exercise moves to schedule 2's last date
         (owner ruling 2026-11-28, "extend exercise date"), keeping its time of day, and an explicit ``settlement_date``
-        keeps its business-day lag from the exercise on the contract's settlement calendar (D2). A settlement by the
-        convention follows the new exercise by itself (``resolve_terminal_timing``)."""
+        keeps its business-day lag from the exercise on the effective settlement calendar (D2). A booked
+        ``maturity_date`` on the exercise date is the exercise date and moves with it (controller ruling 2026-11-28). A
+        settlement by the convention follows the new exercise by itself (``resolve_terminal_timing``)."""
         exercise = self.exercise_date
         if end.date() <= exercise.date():
             # TODO(owner): schedule 2 ends later on the exercise day itself (a knock-in date carrying a time of day);
@@ -750,31 +754,39 @@ class KnockOutResetSnowballOption(SnowballOption):
                 f"KO-reset snowball (REBASED): schedule 2's last observation {end} falls after the exercise {exercise} "
                 "on the same day; the exercise date extends only to a later date"
             )
-        new_exercise = exercise + timedelta(days=(end.date() - exercise.date()).days)
-        if self.maturity_date is not None and self.maturity_date < new_exercise:
-            # TODO(owner): the ruling moves the exercise date; a booked maturity_date before the new exercise would
-            # break the date order, and moving it too is not ruled. Refused until ruled.
+        shift = timedelta(days=(end.date() - exercise.date()).days)
+        new_exercise = exercise + shift
+        maturity_date = self.maturity_date
+        if maturity_date is not None and maturity_date.date() == exercise.date():
+            # on the exercise date (a maturity_date booking supplies the exercise): it IS the exercise date
+            product.maturity_date = maturity_date + shift
+        elif maturity_date is not None and maturity_date < new_exercise:
+            # TODO(owner): a booked maturity_date off the exercise date that the new exercise passes would break the
+            # date order, and moving it is not ruled. Refused until ruled.
             raise ValidationError(
                 f"KO-reset snowball (REBASED): the copy's exercise date extends to {new_exercise:%Y-%m-%d} (schedule 2 "
-                f"placed from a later knock-in close), after the booked maturity_date {self.maturity_date:%Y-%m-%d}"
+                f"placed from a later knock-in close), after the booked maturity_date {maturity_date:%Y-%m-%d}, which "
+                f"is not the exercise date {exercise:%Y-%m-%d}"
             )
         product.exercise_date = new_exercise
         if self.settlement_date is not None:
-            product.settlement_date = self._shifted_settlement_date(exercise, new_exercise)
+            product.settlement_date = self._shifted_settlement_date(exercise, new_exercise, settlement_calendar)
 
-    def _shifted_settlement_date(self, exercise: datetime, new_exercise: datetime) -> datetime:
+    def _shifted_settlement_date(self, exercise: datetime, new_exercise: datetime, settlement_calendar) -> datetime:
         """The booked ``settlement_date`` moved with an extended exercise: the same number of business days after it on
-        the contract's settlement calendar (``settlement_convention.calendar``), the settlement's time of day kept."""
-        convention = self.settlement_convention
-        calendar = None if convention is None else convention.calendar
+        the effective settlement calendar -- the convention's calendar, else ``settlement_calendar`` (the pricing
+        environment's; ``settlement.effective_settlement_calendar``) -- the settlement's time of day kept."""
+        from quantark.asset.equity.settlement import effective_settlement_calendar
+
+        calendar = effective_settlement_calendar(self, None) or settlement_calendar
         settlement = self.settlement_date
         if calendar is None:
-            # TODO(owner): the business-day lag needs the contract's own calendar; the contract names none (the pricing
-            # environment's calendar is not the contract's). Refused until ruled.
+            # TODO(owner): the business-day lag needs a settlement calendar; neither the contract's convention nor the
+            # caller's pricing environment names one. Refused until ruled.
             raise ValidationError(
                 "KO-reset snowball (REBASED): the copy's exercise date extends past the booked one, and its explicit "
-                f"settlement_date {settlement:%Y-%m-%d} keeps its business-day lag from the exercise on the contract's "
-                "settlement calendar; the contract names none (settlement_convention.calendar)"
+                f"settlement_date {settlement:%Y-%m-%d} keeps its business-day lag from the exercise on the settlement "
+                "calendar; there is none (settlement_convention.calendar, or the pricing environment's calendar)"
             )
         day = lambda d: datetime(d.year, d.month, d.day)  # noqa: E731
         lag = calendar.count_business_days(day(exercise), day(settlement), include_start=False, include_end=True)
@@ -783,7 +795,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             # non-business day of the contract calendar) has no lag to keep. Refused until ruled.
             raise ValidationError(
                 f"KO-reset snowball (REBASED): the explicit settlement_date {settlement:%Y-%m-%d} is no whole "
-                f"business-day lag from the exercise {exercise:%Y-%m-%d} on the contract's settlement calendar, so it "
+                f"business-day lag from the exercise {exercise:%Y-%m-%d} on the settlement calendar, so it "
                 "cannot follow the extended exercise date"
             )
         return calendar.add_business_days(day(new_exercise), lag) + (settlement - day(settlement))
@@ -794,10 +806,11 @@ class KnockOutResetSnowballOption(SnowballOption):
         if "post" in terminals:
             if extended:
                 # D3: the knocked-in tenor runs to the copy's own (extended) exercise date (owner ruling O2)
-                from .accrual_build import _exercise_terminal, _Terms
-
                 terminals["post"] = _exercise_terminal(product, _Terms(product))
             terminals["post"] = embedded(terminals["post"])
+        if extended and "contract" in terminals:
+            # the contract tenor reads the copy's (moved) tenor end too: exercise, settlement or maturity date
+            terminals["contract"] = _contract_terminal(product, _Terms(product))
         product._terminal_accrual = terminals
         # the converted terminals are the contract's, kept as they are when the copy is validated again
         product._terminal_accrual_explicit = True

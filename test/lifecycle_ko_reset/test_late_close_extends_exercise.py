@@ -5,8 +5,12 @@ the next close, so schedule 2 can end after the product's exercise date. Run 9 r
 exercise date (numeric: ``maturity``) moves to schedule 2's last observation (D1), and its settlement follows (D2):
 
 - no explicit ``settlement_date``: the settlement convention applies to the new exercise by itself;
-- an explicit ``settlement_date``: shifted by the booked exercise -> settlement lag in business days on the contract's
-  settlement calendar (``settlement_convention.calendar``); refused when the contract names none.
+- an explicit ``settlement_date``: shifted by the booked exercise -> settlement lag in business days on the
+  effective settlement calendar (``effective_settlement_calendar``: the convention's calendar, else the pricing
+  environment's, which the tracker passes as ``settlement_calendar``); refused when neither exists.
+
+A booked ``maturity_date`` on the exercise date moves with it (controller ruling 2026-11-28); one after it is kept while
+it still covers the new exercise, and refused otherwise.
 
 The extended copy is a valid ABSOLUTE note (O1, D35), reads put(S at the extended exercise) and pays at its terminal.
 The knocked-in tenor (O2) runs to the extended exercise (D3). The simulated-path calendar holds the latest placement
@@ -62,8 +66,15 @@ def _valid(copy):
     again = deepcopy(copy)
     again.validate()
     assert again.exercise_date == copy.exercise_date and again.settlement_date == copy.settlement_date
-    assert again.maturity == copy.maturity
+    assert again.maturity == copy.maturity and again.maturity_date == copy.maturity_date
     return copy
+
+
+def _cal_env(spot=100.0, date=START, calendar=CALENDAR):
+    """``conftest.env`` with a pricing calendar (the effective settlement calendar of a contract that names none)."""
+    e = env(spot, date)
+    e.calendar = calendar
+    return e
 
 
 # --- AC1: dated ------------------------------------------------------------------------------------------------------
@@ -124,6 +135,24 @@ def test_a_dated_extension_with_an_explicit_settlement_date_and_no_contract_cale
         product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product))
 
 
+def test_a_dated_extension_shifts_a_settlement_date_on_the_pricing_calendar():
+    """No convention calendar: the lag is counted on the pricing environment's calendar (the library's settlement rule,
+    ``effective_settlement_calendar``), passed as ``settlement_calendar``. Booked 10-05 -> 10-09 is 3 business days
+    (10-07 a holiday); the copy settles Mon 10-12."""
+    product = late_note(settlement_date=datetime(2026, 10, 9))
+    copy = _valid(product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product), settlement_calendar=CALENDAR))
+    assert (copy.exercise_date, copy.settlement_date) == (EXTENDED, datetime(2026, 10, 12))
+
+
+def test_the_convention_calendar_beats_the_pricing_calendar():
+    convention = SettlementConvention(lag=0, calendar=CALENDAR)
+    product = late_note(settlement_convention=convention, settlement_date=datetime(2026, 10, 9))
+    copy = product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product),
+                                            settlement_calendar=Calendar(holidays={datetime(2026, 10, 12)}))
+    # on the convention's calendar: 3 business days, 10-06 -> 10-12; the pricing calendar would count 4 -> 10-13
+    assert copy.settlement_date == datetime(2026, 10, 12)
+
+
 def test_a_dated_extension_refuses_a_settlement_date_that_is_no_business_day_lag():
     """Sat 10-10 is not a whole business-day lag from the exercise on the contract calendar."""
     convention = SettlementConvention(lag=0, calendar=CALENDAR)
@@ -132,12 +161,41 @@ def test_a_dated_extension_refuses_a_settlement_date_that_is_no_business_day_lag
         product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product))
 
 
-def test_a_dated_extension_past_a_booked_maturity_date_is_refused():
-    """A maturity_date booking supplies the exercise (10-05); the extended exercise (10-06) would pass it, and moving
-    the maturity date is not ruled."""
+def test_a_maturity_date_booking_extends_with_the_exercise():
+    """A maturity_date booking supplies the exercise (10-05): it IS the exercise date, so it moves to 10-06 too."""
     product = late_note(exercise=None, maturity_date=EXERCISE)
+    assert product.exercise_date == EXERCISE
+    copy = _valid(product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product)))
+    assert (copy.exercise_date, copy.maturity_date) == (EXTENDED, EXTENDED)
+    assert product.maturity_date == EXERCISE
+
+
+def test_a_maturity_date_after_the_exercise_that_covers_the_new_one_is_kept():
+    product = late_note(maturity_date=datetime(2026, 10, 9))
+    copy = _valid(product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product)))
+    assert (copy.exercise_date, copy.maturity_date) == (EXTENDED, datetime(2026, 10, 9))
+
+
+def test_a_maturity_date_off_the_exercise_and_before_the_new_one_is_refused():
+    """Exercise Sun 10-04 (the booked latest end), maturity date Mon 10-05: the late close extends the exercise to
+    10-06, past a maturity date that is not the exercise date. Moving it is not ruled."""
+    product = late_note(exercise=datetime(2026, 10, 4), maturity_date=EXERCISE)
     with pytest.raises(ValidationError, match="maturity_date"):
         product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product))
+
+
+def test_tenor_end_maturity_reads_follow_the_extended_copy():
+    """D3 / O2: the knocked-in tenor runs to the extended exercise; the contract tenor (tenor_end MATURITY) to the
+    moved maturity date. Both 274 days (START -> 10-06), the booked note's 273."""
+    from quantark.util.enum import TenorEnd
+
+    product = late_note(exercise=None, maturity_date=EXERCISE, tenor_end=TenorEnd.MATURITY)
+    copy = _valid(product.with_absolute_schedule_2(LATE_CLOSE, anchor=_anchor(product)))
+    e = env(100.0, START)
+    assert copy._resolve_post_contract_tenor(e) == pytest.approx(274 / 365, abs=1e-15)
+    assert copy.get_contract_tenor() == pytest.approx(274 / 365, abs=1e-15)
+    assert product._resolve_post_contract_tenor(e) == pytest.approx(273 / 365, abs=1e-15)
+    assert product.get_contract_tenor() == pytest.approx(273 / 365, abs=1e-15)
 
 
 def test_schedule_two_ending_later_on_the_exercise_day_is_refused():
@@ -221,6 +279,38 @@ def test_a_dated_late_close_knock_in_lives_to_the_extended_exercise_and_books_th
     assert pd.Timestamp(cash.determination_date).normalize() == pd.Timestamp(EXTENDED)
     assert pd.Timestamp(cash.payment_date).normalize() == pd.Timestamp(2026, 10, 12)
     assert t.terminal_date(env(60.0, EXTENDED)) == pd.Timestamp(EXTENDED)
+
+
+def test_the_tracker_shifts_a_booked_settlement_date_on_its_pricing_calendar():
+    """No convention calendar on the contract: the tracker passes its environment's calendar. Knocked in on the late
+    close, V1 on 10-06 paid Mon 10-12; the run calendar places the same payment."""
+    t = tracker(late_note(settlement_date=datetime(2026, 10, 9)))
+    closes = {91: 90.0, _day(LATE_CLOSE): 70.0, 213: 90.0, _day(EXERCISE): 85.0, _day(EXTENDED): 60.0}
+    for n, spot in sorted(closes.items()):
+        date = START + pd.Timedelta(days=n)
+        e = _cal_env(spot, date)
+        product = t.product_for_lifecycle()
+        t.observe(date, product, e, spot)
+        t.settle_maturity_if_due(date, product, e, spot)
+    cash = t.lifecycle.ledger.cashflows[-1]
+    assert pd.Timestamp(cash.determination_date).normalize() == pd.Timestamp(EXTENDED)
+    assert pd.Timestamp(cash.payment_date).normalize() == pd.Timestamp(2026, 10, 12)
+    priced = t.product_for_pricing(pd.Timestamp(2026, 8, 3), _cal_env(90.0, datetime(2026, 8, 3)))
+    assert (priced.exercise_date, priced.settlement_date) == (EXTENDED, datetime(2026, 10, 12))
+
+    dates = pd.bdate_range(START, periods=220)
+    fresh = tracker(late_note(settlement_date=datetime(2026, 10, 9)))
+    calendar = fresh.resolve_calendar_schedule(dates, _cal_env())
+    late = calendar.placement(dates.get_loc(pd.Timestamp(LATE_CLOSE)))
+    assert late.final_due_day == dates.get_loc(pd.Timestamp(EXTENDED))
+    assert late.final_settlement_day == dates.get_loc(pd.Timestamp(2026, 10, 12))
+    assert calendar.terminal_due_day == late.final_due_day
+
+
+def test_the_tracker_without_any_settlement_calendar_still_refuses():
+    t = tracker(late_note(settlement_date=datetime(2026, 10, 9)))
+    with pytest.raises(ValidationError, match="calendar"):
+        run(t, {91: 90.0, _day(LATE_CLOSE): 70.0})
 
 
 def _carried(start):

@@ -213,8 +213,9 @@ class AutocallableLifecycleTracker:
         """The snapped contract every consumer builds from (spec 2026-10-08 section 4a)."""
         return self.product
 
-    def _contract_for_pricing(self) -> Any:
-        """The contract the pricing copy ages; a subclass may convert it first (KO-reset REBASED)."""
+    def _contract_for_pricing(self, pricing_env: Optional[PricingEnvironment] = None) -> Any:
+        """The contract the pricing copy ages; a subclass may convert it first (KO-reset REBASED, which reads the
+        environment's settlement calendar)."""
         product = deepcopy(self.product)
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
         setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
@@ -252,7 +253,7 @@ class AutocallableLifecycleTracker:
         Otherwise (a post-close valuation) the day's records have been
         applied and are gone.
         """
-        product = self._contract_for_pricing()
+        product = self._contract_for_pricing(pricing_env)
         origin = self.clock_origin
         # whole days, as ``_valuation_point`` and the record dates count them: a booked ``initial_date`` carrying a
         # time of day must not age the copy one day less than the close that books the record
