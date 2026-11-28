@@ -7,9 +7,9 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
-## [0.16.0] - unreleased
+## [0.16.0] - 2026-11-28
 
-Follow-up release built from the 0.11.0–0.15.0 open items. Sections are added as each part lands.
+Follow-up release built from the 0.11.0–0.15.0 open items.
 
 Notes:
 - This release edits trees fingerprinted by the intraday certificates: `COMMON_TREES`
@@ -711,6 +711,14 @@ schedule 2's last fixing. Notes whose exercise date is schedule 2's last observa
   past the exercise date, or extend the exercise date to the copy's end for this edge only.
 - REBASED `post_ki_offsets`: the knocked-in (`ki_settlement`) row is still keyed at schedule 2's last offset, though
   that note now settles at the exercise date.
+
+### Tests: cross-architecture pins
+
+- **`golden_compare.assert_pins_close`.** Frozen `float.hex()` pins (and digests of them) captured on ARM64
+  compare with `PINNED_MOVE_REL_TOL` (1e-11) / `GOLDEN_ABS_TOL` (1e-12) instead of bitwise, so x86_64 CI
+  passes. Same-machine invariants (clone vs fresh engine, two routes in one run) stay bitwise. The
+  pointwise event-map sha256 in `test_ko_reset_v1_projection.py` is replaced by per-array moments. Pinned
+  moves below 1e-11 (the FFT-length re-pins, at most 9.7e-14) are no longer resolved by those tests.
 
 ## [0.15.0] - 2026-11-25
 
