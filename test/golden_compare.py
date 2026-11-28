@@ -21,6 +21,7 @@ site. Do NOT route those comparisons through here; only frozen goldens
 (captured elsewhere) need the tolerance.
 """
 import math
+import re
 
 # ~44x headroom over the worst measured cross-arch drift (2.2e-11, iterative
 # barrier solves), yet tight enough to fail on a real numerical regression of
@@ -71,5 +72,38 @@ def assert_close(live, golden, *, rel_tol=GOLDEN_REL_TOL, abs_tol=GOLDEN_ABS_TOL
                  msg: str = "") -> None:
     """Assert ``live`` matches frozen ``golden`` within cross-arch tolerance."""
     assert close(live, golden, rel_tol=rel_tol, abs_tol=abs_tol), (
+        f"{msg}\nlive   = {live!r}\ngolden = {golden!r}"
+    )
+
+
+_HEX_FLOAT = re.compile(r"^-?(0x[0-9a-f]+(\.[0-9a-f]*)?p[-+]\d+|inf|nan)$")
+
+
+def _decode_hex(value):
+    """Turn ``float.hex()`` strings into floats, recursively; leave the rest."""
+    if isinstance(value, str) and _HEX_FLOAT.match(value):
+        return float.fromhex(value)
+    if isinstance(value, dict):
+        return {k: _decode_hex(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_decode_hex(v) for v in value]
+    return value
+
+
+def assert_pins_close(live, golden, *, rel_tol=PINNED_MOVE_REL_TOL,
+                      abs_tol=GOLDEN_ABS_TOL, msg: str = "") -> None:
+    """Assert a live value or digest matches a FROZEN pin across architectures.
+
+    For pins captured as ``float.hex()`` strings (or digests of them: nested
+    lists/tuples/dicts): hex floats on either side are decoded and compared
+    with ``PINNED_MOVE_REL_TOL``/``GOLDEN_ABS_TOL``; everything else (ints,
+    flags, labels) stays exact. Tuples and lists compare alike. Keep
+    same-machine invariants (clone vs fresh, two routes on one run) on exact
+    ``.hex() ==`` -- only the frozen literal crosses architectures.
+    """
+    a, b = _decode_hex(live), _decode_hex(golden)
+    if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+        return
+    assert close(a, b, rel_tol=rel_tol, abs_tol=abs_tol), (
         f"{msg}\nlive   = {live!r}\ngolden = {golden!r}"
     )

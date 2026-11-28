@@ -22,6 +22,7 @@ from datetime import datetime
 
 import numpy as np
 import pytest
+from golden_compare import assert_pins_close
 
 from test_asset.equity.engine_pde.test_same_instant_ko import (
     JUL3,
@@ -140,14 +141,14 @@ SNOWBALL_ROW_PINS = {
 
 
 def test_snowball_without_a_shared_instant_prices_bitwise():
-    assert v1().price(repro(drop_jul4=True), env()) == float.fromhex(SNOWBALL_PIN)
+    assert_pins_close(v1().price(repro(drop_jul4=True), env()), float.fromhex(SNOWBALL_PIN))
 
 
 @pytest.mark.parametrize("route", ROUTES)
 def test_snowball_without_a_shared_instant_reports_bitwise(route):
     stats = v1_route(route).calculate_event_stats(repro(drop_jul4=True), env())
-    assert stats.pv == float.fromhex(SNOWBALL_PIN)
-    assert [float(p).hex() for p in _rows(stats)] == SNOWBALL_ROW_PINS[route]
+    assert_pins_close(stats.pv, float.fromhex(SNOWBALL_PIN))
+    assert_pins_close([float(p).hex() for p in _rows(stats)], SNOWBALL_ROW_PINS[route])
 
 
 # --- AC5: the valuation instant ------------------------------------------------------------------------------------
@@ -420,16 +421,16 @@ PHOENIX_ROW_PINS = {
 
 
 def test_phoenix_without_a_shared_instant_prices_bitwise():
-    assert phx().price(phoenix_repro("single"), env()) == float.fromhex(PHOENIX_PIN)
+    assert_pins_close(phx().price(phoenix_repro("single"), env()), float.fromhex(PHOENIX_PIN))
 
 
 @pytest.mark.parametrize("route", ROUTES)
 def test_phoenix_without_a_shared_instant_reports_bitwise(route):
     stats = v1_route(route, PhoenixQuadEngine).calculate_event_stats(phoenix_repro("single"), env())
-    assert stats.pv == float.fromhex(PHOENIX_PIN)
+    assert_pins_close(stats.pv, float.fromhex(PHOENIX_PIN))
     ko, coupon = PHOENIX_ROW_PINS[route]
-    assert [float(p).hex() for p in _rows(stats)] == ko
-    assert [float(p).hex() for p in _coupon_rows(stats)] == coupon
+    assert_pins_close([float(p).hex() for p in _rows(stats)], ko)
+    assert_pins_close([float(p).hex() for p in _coupon_rows(stats)], coupon)
 
 
 @pytest.mark.parametrize("spot,deciding", [(105.0, 0), (101.0, 1)], ids=["first_band", "step_down_band"])
@@ -866,17 +867,17 @@ def _kor_pinned_products():
 @pytest.mark.parametrize("name", list(KOR_PINS))
 def test_ko_reset_without_a_shared_instant_prices_bitwise(name):
     product, e = _kor_pinned_products()[name]
-    assert kor().price(product, e) == float.fromhex(KOR_PINS[name])
+    assert_pins_close(kor().price(product, e), float.fromhex(KOR_PINS[name]))
 
 
 @pytest.mark.parametrize("route", ROUTES)
 def test_ko_reset_without_a_shared_instant_reports_bitwise(route):
     stats = kor_route(route).calculate_event_stats(ko_reset(), env())
     rows, maturity, ki_settlement = KOR_ROW_PINS[route]
-    assert stats.pv == float.fromhex(KOR_PINS["base"])
-    assert [float(p).hex() for p in _rows(stats)] == rows
-    assert float(stats.maturity.probability).hex() == maturity
-    assert float(stats.ki_settlement.probability).hex() == ki_settlement
+    assert_pins_close(stats.pv, float.fromhex(KOR_PINS["base"]))
+    assert_pins_close([float(p).hex() for p in _rows(stats)], rows)
+    assert_pins_close(float(stats.maturity.probability).hex(), maturity)
+    assert_pins_close(float(stats.ki_settlement.probability).hex(), ki_settlement)
 
 
 def test_ko_reset_rebased_stays_refused_on_v1():
@@ -1686,16 +1687,16 @@ def test_v2_without_a_shared_instant_prices_and_reports_bitwise(name):
     instant, the first step): price and statistics bitwise against the pins taken before T4."""
     cls, product, e = _v2_pinned()[name]
     pin = V2_PINS[name]
-    assert cls(QuadV2Params()).price(product, e).hex() == pin["price"]
+    assert_pins_close(cls(QuadV2Params()).price(product, e).hex(), pin["price"])
     stats = cls(QuadV2Params()).calculate_event_stats(product, e)
-    assert float(stats.pv).hex() == pin["pv"]
-    assert _hex(stats.observations.probability) == pin["ko"]
-    assert _hex(stats.observations.discounted_cash) == pin["ko_cash"]
-    assert _hex(None if stats.coupons is None else stats.coupons.probability) == pin["coupon"]
-    assert _hex(None if stats.coupons is None else stats.coupons.discounted_cash) == pin["coupon_cash"]
-    assert float(stats.maturity.probability).hex() == pin["maturity"]
-    assert float(stats.ki_settlement.probability).hex() == pin["ki_settlement"]
-    assert float(stats.knock_in.probability).hex() == pin["ki"]
+    assert_pins_close(float(stats.pv).hex(), pin["pv"])
+    assert_pins_close(_hex(stats.observations.probability), pin["ko"])
+    assert_pins_close(_hex(stats.observations.discounted_cash), pin["ko_cash"])
+    assert_pins_close(_hex(None if stats.coupons is None else stats.coupons.probability), pin["coupon"])
+    assert_pins_close(_hex(None if stats.coupons is None else stats.coupons.discounted_cash), pin["coupon_cash"])
+    assert_pins_close(float(stats.maturity.probability).hex(), pin["maturity"])
+    assert_pins_close(float(stats.ki_settlement.probability).hex(), pin["ki_settlement"])
+    assert_pins_close(float(stats.knock_in.probability).hex(), pin["ki"])
 
 
 def test_v2_without_a_shared_instant_folds_and_splits_bitwise():
@@ -1703,5 +1704,5 @@ def test_v2_without_a_shared_instant_folds_and_splits_bitwise():
 
     product, e = repro(drop_jul4=True), env()
     folded = v2().price_folded(product, e, _overlay(product, e, [1.0, 2.0, 3.0, 5.0, 6.0]))
-    assert folded.hex() == V2_FOLDED_PIN
-    assert {k: float(v).hex() for k, v in v2().price_components(product, e).items()} == V2_COMPONENT_PINS
+    assert_pins_close(folded.hex(), V2_FOLDED_PIN)
+    assert_pins_close({k: float(v).hex() for k, v in v2().price_components(product, e).items()}, V2_COMPONENT_PINS)

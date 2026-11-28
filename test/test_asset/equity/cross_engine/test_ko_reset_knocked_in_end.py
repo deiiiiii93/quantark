@@ -29,6 +29,7 @@ from datetime import datetime
 
 import numpy as np
 import pytest
+from golden_compare import assert_pins_close
 from scipy.stats import norm
 
 from test_asset.equity.engine_pde.test_same_instant_ko import HESTON, JUL3, env
@@ -512,7 +513,7 @@ def test_exercise_on_schedule_two_end_prices_bitwise(product, engine):
     make_product, make_env = _pinned(product)
     grid = PIN_ENGINES[engine][1]
     value = PIN_ENGINES[engine][0]().price(make_product(), make_env(grid=grid))
-    assert float(value).hex() == PRICE_PINS[(product, engine)]
+    assert_pins_close(float(value).hex(), PRICE_PINS[(product, engine)])
 
 
 @pytest.mark.parametrize("product,engine", sorted(STATS_PINS))
@@ -520,4 +521,4 @@ def test_exercise_on_schedule_two_end_reports_bitwise(product, engine):
     make_product, make_env = _pinned(product)
     grid = PIN_ENGINES[engine][1]
     stats = PIN_ENGINES[engine][0]().calculate_event_stats(make_product(), make_env(grid=grid))
-    assert stats_key(stats) == STATS_PINS[(product, engine)]
+    assert_pins_close(stats_key(stats), STATS_PINS[(product, engine)])

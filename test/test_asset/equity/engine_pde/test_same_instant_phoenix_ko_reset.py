@@ -26,6 +26,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
+from golden_compare import assert_pins_close
 
 from test_asset.equity.engine_pde.test_same_instant_ko import HESTON, JUL3, JUL4, _overlay, _p_breach, env
 from test_asset.equity.engine_quad.test_same_instant_ko_quad import (
@@ -447,8 +448,8 @@ PINNED = _pinned_cases()
 @pytest.mark.parametrize("name", list(PINNED))
 def test_products_without_a_shared_instant_price_and_report_bitwise(name):
     make, product, e = PINNED[name]
-    assert float(make().price(product, e)).hex() == PINS[name]["price"]
-    assert _stats_pins(make().calculate_event_stats(product, e)) == PINS[name]["stats"]
+    assert_pins_close(float(make().price(product, e)).hex(), PINS[name]["price"])
+    assert_pins_close(_stats_pins(make().calculate_event_stats(product, e)), PINS[name]["stats"])
 
 
 # === KO-reset (D14: schedule-1 knock-outs, the knock-in, schedule-2 knock-outs of one instant) =====================

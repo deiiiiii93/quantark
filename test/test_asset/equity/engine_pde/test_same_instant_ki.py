@@ -26,6 +26,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
+from golden_compare import assert_pins_close
 
 from test_asset.equity.engine_pde.test_same_instant_ko import HESTON, HESTON_GRID, JUL3, JUL4, REPRO_DATES, env
 from test_asset.equity.engine_pde.test_same_instant_ko import repro, snowball
@@ -447,5 +448,5 @@ PINNED = _pinned()
 @pytest.mark.parametrize("name", list(PINNED))
 def test_products_without_a_shared_knock_in_instant_price_and_report_bitwise(name):
     make, p, make_env = PINNED[name]
-    assert float(make().price(p(), make_env())).hex() == PINS[name]["price"]
-    assert _stats_pins(make().calculate_event_stats(p(), make_env())) == PINS[name]["stats"]
+    assert_pins_close(float(make().price(p(), make_env())).hex(), PINS[name]["price"])
+    assert_pins_close(_stats_pins(make().calculate_event_stats(p(), make_env())), PINS[name]["stats"])

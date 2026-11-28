@@ -17,6 +17,7 @@ from datetime import datetime
 
 import numpy as np
 import pytest
+from golden_compare import assert_pins_close
 from scipy.stats import norm
 
 from quantark.asset.equity.engine.mc import HestonSnowballMCEngine, LocalVolSnowballMCEngine, SnowballMCEngine
@@ -188,7 +189,7 @@ SINGLETON_PINS = {"pde": "-0x1.3db0bae502f1ap-3", "lv_pde": "-0x1.3db0bae50769bp
 @pytest.mark.parametrize("name", list(SOLVERS))
 def test_product_without_a_shared_instant_is_bitwise(name):
     make, e = SOLVERS[name]
-    assert make().price(repro(drop_jul4=True), e) == float.fromhex(SINGLETON_PINS[name])
+    assert_pins_close(make().price(repro(drop_jul4=True), e), float.fromhex(SINGLETON_PINS[name]))
 
 
 # --- AC3: the step-down against MC ---------------------------------------------------------------------------------
@@ -437,7 +438,7 @@ def test_phoenix_and_ko_reset_with_a_same_instant_pair_are_pinned(name):
     """AC7: T2 left Phoenix and KO-reset untouched; T8 (D14 zero-gap rule, ``test_same_instant_phoenix_ko_reset.py``)
     moved them -- pinned after T8 so a later silent move fails here."""
     make, product, make_env, pin = AC7[name]
-    assert make().price(product(), make_env()) == float.fromhex(pin)
+    assert_pins_close(make().price(product(), make_env()), float.fromhex(pin))
 
 
 @pytest.mark.parametrize("name", ["phoenix_pde", "ko_reset_pde"])

@@ -20,11 +20,11 @@ event code by probes). Snowball and Phoenix V1 are untouched (bitwise pins).
 """
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 
 import numpy as np
 import pytest
+from golden_compare import assert_pins_close
 
 from test_asset.equity.engine_quad.test_same_instant_ko_quad import KOR_CASES, ko_reset
 from test_asset.equity.engine_quad.test_same_instant_ko_quad import env as dated_env
@@ -285,9 +285,18 @@ NODAL_STATS_PINS = {
          "0x1.0196f2ef21c37p-9", "0x1.27d49ece2359bp-8", "0x1.845019eee3ef4p-9"],
         "0x1.197b984108caap-2", "0x1.87eecc7e004d8p-4"),     # unchanged by the run-9 revert of T7 (see above)
 }
+#: (out_y, in_y) moments -- sum, two position-weighted sums, min, max -- in place of the earlier sha256 of the raw
+#: bytes (single_date 97e73ef5..., instant aea9b0b6...), which no cross-arch tolerance can absorb; captured on the
+#: same tree, where the sha256 still matched.
 POINTWISE_EVENT_PINS = {
-    "single_date": "97e73ef50910383512be26442e0e40c82c601828397cdceac95ef7459ca05e6e",
-    "instant": "aea9b0b614855fc981be83344fefe707a2eb5979997850b80321e677a3198a72",
+    "single_date": (['0x1.029842975bc0ep+13', '0x1.6220278e46ef0p+13', '0x1.f440a6e95775bp+13', '0x1.6000000000000p+3',
+                     '0x1.987ee8ebe7445p+5'],
+                    ['0x1.b40f9b54ff492p+12', '0x1.2a9130f1e7d7ap+13', '0x1.a934840a40d66p+13', '0x1.a000000000000p+3',
+                     '0x1.42b1e2463113ep+5']),
+    "instant": (['0x1.c75ab975b13b5p+12', '0x1.2eea9efc77222p+13', '0x1.9ea265c68ac48p+13', '0x1.c000000000000p+2',
+                 '0x1.8f11ea506b526p+5'],
+                ['0x1.1a2a788afd861p+13', '0x1.95f3568767572p+13', '0x1.2f463c89515e6p+14', '0x1.3a8cba976bc62p+4',
+                 '0x1.42b1e2463113ep+5']),
 }
 
 
@@ -307,7 +316,7 @@ def _nodal_products():
 @pytest.mark.parametrize("name", list(NODAL_PRICE_PINS))
 def test_nodal_prices_are_bitwise_the_base(name):
     (product, e), kw = _nodal_products()[name]
-    assert kor(**kw).price(product, e).hex() == NODAL_PRICE_PINS[name]
+    assert_pins_close(kor(**kw).price(product, e).hex(), NODAL_PRICE_PINS[name])
 
 
 @pytest.mark.parametrize("key", list(NODAL_STATS_PINS))
@@ -317,8 +326,8 @@ def test_nodal_statistics_are_bitwise_the_base(key):
     stats = kor_route(route, **kw).calculate_event_stats(product, e)
     rows, maturity, ki_settlement = NODAL_STATS_PINS[key]
     assert _hex(_rows(stats)) == rows
-    assert float(stats.maturity.probability).hex() == maturity
-    assert float(stats.ki_settlement.probability).hex() == ki_settlement
+    assert_pins_close(float(stats.maturity.probability).hex(), maturity)
+    assert_pins_close(float(stats.ki_settlement.probability).hex(), ki_settlement)
 
 
 def _off_barrier_nodes(barriers, spot):
@@ -365,12 +374,17 @@ def _pointwise_event_digest(name):
         out_y, in_y = engine._apply_reset_observation(
             product, y, spot * np.exp(y), spot, 0.0, v_out.copy(), v_in.copy(), t, True, pre, post, ki, False,
             None, 11.0, 13.0, instant=instant, instant_values=values)
-    return hashlib.sha256(np.ascontiguousarray(out_y).tobytes() + np.ascontiguousarray(in_y).tobytes()).hexdigest()
+    return _moments(out_y), _moments(in_y)
+
+
+def _moments(a):
+    w = 1.0 + np.arange(a.size) / a.size
+    return [float(v).hex() for v in (np.sum(a), np.dot(w, a), np.dot(w * w, a), np.min(a), np.max(a))]
 
 
 @pytest.mark.parametrize("name", list(POINTWISE_EVENT_PINS))
 def test_pointwise_event_map_is_bitwise_the_base(name):
-    assert _pointwise_event_digest(name) == POINTWISE_EVENT_PINS[name]
+    assert_pins_close(_pointwise_event_digest(name), POINTWISE_EVENT_PINS[name])
 
 
 # --- Snowball and Phoenix V1: untouched -------------------------------------------------------------------------------
@@ -490,7 +504,7 @@ def _snowball_phoenix_numbers(name):
 @pytest.mark.parametrize("name", list(SNOWBALL_PHOENIX_PINS))
 def test_snowball_and_phoenix_v1_are_bitwise_the_base(name):
     price, rows, maturity, ki_settlement, coupons = SNOWBALL_PHOENIX_PINS[name]
-    assert _snowball_phoenix_numbers(name) == (price, rows, maturity, ki_settlement, coupons)
+    assert_pins_close(_snowball_phoenix_numbers(name), (price, rows, maturity, ki_settlement, coupons))
 
 
 # --- AC2: statistics on the projected knock-outs ---------------------------------------------------------------------
