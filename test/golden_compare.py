@@ -35,6 +35,13 @@ GOLDEN_ABS_TOL = 1e-12
 # ~800x over the measured QUAD lattice drift (1.2e-14, x86_64 vs ARM64) and
 # still 36x below the smallest pinned move.
 PINNED_MOVE_REL_TOL = 1e-11
+# Absolute floor for frozen BUMP greeks (rho, dividend rho, delta, gamma) pinned
+# next to a PINNED_MOVE_REL_TOL price: the finite-difference divides the ~1e-14
+# price drift by the bump, so greek drift is absolute, not relative. Measured
+# 2026-11-28 (x86_64 CI vs ARM64, test_v1_frozen_sizing): worst 5.4e-11 absolute
+# (a smile rho, 3.5e-10 relative), dividend rho to 1.1e-10 relative. ~18x headroom;
+# on a ~100 price it still holds the price to ~1e-11 relative.
+PINNED_GREEK_ABS_TOL = 1e-9
 
 
 def close(live, golden, *, rel_tol=GOLDEN_REL_TOL, abs_tol=GOLDEN_ABS_TOL) -> bool:

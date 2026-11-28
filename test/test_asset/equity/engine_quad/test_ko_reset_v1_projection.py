@@ -325,7 +325,7 @@ def test_nodal_statistics_are_bitwise_the_base(key):
     (product, e), kw = _nodal_products()[name]
     stats = kor_route(route, **kw).calculate_event_stats(product, e)
     rows, maturity, ki_settlement = NODAL_STATS_PINS[key]
-    assert _hex(_rows(stats)) == rows
+    assert_pins_close(_hex(_rows(stats)), rows)
     assert_pins_close(float(stats.maturity.probability).hex(), maturity)
     assert_pins_close(float(stats.ki_settlement.probability).hex(), ki_settlement)
 

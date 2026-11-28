@@ -13,7 +13,7 @@ import math
 from datetime import datetime, timedelta
 
 import pytest
-from golden_compare import assert_pins_close
+from golden_compare import PINNED_GREEK_ABS_TOL, assert_pins_close
 
 from quantark.asset.equity.engine.quad import (
     KOResetSnowballQuadEngine,
@@ -214,7 +214,7 @@ class TestBaseIsUnchanged:
     def test_spot_and_carry_greeks_are_bitwise(self, name):
         cls, params, make, market, pins = SPOT_INDEPENDENT[name]
         greeks = calc().calculate(make(), market(), cls(params), greeks=list(pins))
-        assert_pins_close(hexes(greeks), pins)
+        assert_pins_close(hexes(greeks), pins, abs_tol=PINNED_GREEK_ABS_TOL)
 
     def test_the_cell_stretch_is_frozen_with_the_cell(self):
         cls, params, make, market, _ = SPOT_INDEPENDENT["snowball_cell_stretch"]
@@ -240,7 +240,7 @@ class TestBaseIsUnchanged:
         greeks = calc().calculate(product, pricing_env, SnowballQuadEngine(QuadParams()),
                                   greeks=["price", "delta", "gamma", "rho"])
         assert_pins_close(greeks["price"].hex(), "0x1.8bee41fe00012p+6")
-        assert_pins_close(greeks["rho"].hex(), "-0x1.383027dcce000p-3")
+        assert_pins_close(greeks["rho"].hex(), "-0x1.383027dcce000p-3", abs_tol=PINNED_GREEK_ABS_TOL)
         # 31f46955: delta 0x1.f5b470606e800p-3 (0.24497306627546322), gamma -0x1.43733f89a2000p-6
         assert greeks["delta"] == pytest.approx(0.24497306627546322, rel=1e-3)
         assert greeks["delta"].hex() != "0x1.f5b470606e800p-3"
