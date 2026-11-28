@@ -5,7 +5,9 @@ names: a schedule-1 knock-out ends the path's day (R3); a knock-in is tested onl
 and switches the path to schedule 2 from that close, inclusive (R1), consuming schedule-2 records that fell due
 on an earlier close; a path not knocked in at schedule 1's end matures there on V0; a knocked-in path observes its
 schedule 2 (its own under REBASED, placed by its knock-in day) and, not knocked out, matures on V1 at the product's
-exercise date (owner ruling 2026-11-27, run 9: a live put to the exercise date, paid at the product terminal).
+exercise date (owner ruling 2026-11-27, run 9: a live put to the exercise date, paid at the product terminal) -- a
+REBASED path knocked in on a close later than its record at its copy's extended exercise when schedule 2 ends past
+the booked one (owner ruling 2026-11-28).
 """
 from __future__ import annotations
 
@@ -133,7 +135,8 @@ class KOResetVectorLifecycle(VectorLifecycle):
                                      schedule.pre_settlement_day, schedule.pre_settlement_delay)
 
     def _final_maturity(self, p, schedule, d, spot, payoff_fn) -> List[LifecycleRecord]:
-        """Knocked in: V1 at the exercise date (the placement's ``final_due_day``, one day for every knock-in day)."""
+        """Knocked in: V1 at the exercise date (the placement's ``final_due_day``: one day for every knock-in day,
+        except a REBASED late-close knock-in whose copy extends its exercise, owner ruling 2026-11-28)."""
         records: List[LifecycleRecord] = []
         for group, placement in self._groups(p, schedule, self.alive[p] & self.knocked_in[p]):
             if placement.final_due_day != d:

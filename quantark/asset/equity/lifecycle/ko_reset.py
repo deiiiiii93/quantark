@@ -14,7 +14,9 @@ The contract's rules, as the desk stated them and every engine applies them:
 
 A knocked-in REBASED contract is the ABSOLUTE contract ``with_absolute_schedule_2`` builds at the knock-in
 time (keeping the exercise date), so every engine prices an ordinary knocked-in contract and the tracker books from
-that same contract.
+that same contract. A knock-in close later than its record (a record due on a non-trading day) can place schedule 2
+past the exercise date; that copy's exercise date (numeric: maturity) extends to schedule 2's last observation and
+its settlement follows (owner ruling 2026-11-28), and every terminal read here follows the copy.
 """
 from __future__ import annotations
 
@@ -64,8 +66,9 @@ class KOResetCalendarSchedule(CalendarSchedule):
     """A KO-reset's observations on a run calendar (``KOResetLifecycleTracker.resolve_calendar_schedule``).
 
     The inherited ``ko_*`` fields are schedule 1 and the ``ki_*`` fields the knock-in; ``terminal_*`` is the
-    latest terminal the calendar may have to hold (the knocked-in maturity, at the exercise date for every knock-in
-    day), which is what the run's data-end check reads. ``pre_*`` is schedule 1's maturity (V0 on ``pre_tenor``).
+    latest terminal the calendar may have to hold (the knocked-in maturity at the exercise date, which a REBASED
+    late-close knock-in extends; the latest knock-in day's placement ends last), which is what the run's data-end
+    check reads. ``pre_*`` is schedule 1's maturity (V0 on ``pre_tenor``).
     Schedule 2 is ``absolute`` for an ABSOLUTE contract, or ``place(knock_in_day)`` for a REBASED one.
     """
 
@@ -277,7 +280,9 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         """V1's terminal timing (R5): the product terminal of the contract in force -- determined at its exercise date
         (numeric: its maturity) and paid on the explicit settlement date when booked, else by the settlement
         convention -- the timing every engine prices the knocked-in put with (``resolve_terminal_timing``). A REBASED
-        contract's ABSOLUTE copy keeps the original exercise date and settlement date (``with_absolute_schedule_2``)."""
+        contract's ABSOLUTE copy keeps the original exercise date and settlement date, unless a late knock-in close
+        places schedule 2 past them: then they extend with it (``with_absolute_schedule_2``, owner ruling
+        2026-11-28)."""
         contract = self.contract()
         return resolve_terminal_timing(contract, self._schedule_resolution_env(contract, env))
 
@@ -554,7 +559,7 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
     pre_delay = float(pre_timing.payment_time) - float(pre_timing.determination_time)
 
     # the latest terminal the calendar may have to hold: the knocked-in maturity (the exercise, R5) of the last
-    # knock-in day
+    # knock-in day (a late-close extension is monotone in the knock-in day, so it still ends last)
     if rebased:
         knock_in_days = [int(d) for d in base.ki_due_day if d >= 0 and (pre_due < 0 or d <= pre_due)]
         latest = place(max(knock_in_days)) if knock_in_days else None

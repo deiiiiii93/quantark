@@ -10,7 +10,8 @@ settlement delay). The tracker follows the engines:
 - ``terminal_date`` / ``matured_before_run`` read that terminal: a carried knock-in retires only past the exercise;
 - the run calendar (``resolve_calendar_schedule``) and the simulated paths place V1 there;
 - a REBASED contract's ABSOLUTE copy (``with_absolute_schedule_2``) keeps the original exercise date and settlement
-  date; a copy whose schedule 2 would end after the exercise (a knock-in on a close later than its record) is refused.
+  date; a copy whose schedule 2 would end after the exercise (a knock-in on a close later than its record) extends
+  its exercise to schedule 2's last observation (owner ruling 2026-11-28; ``test_late_close_extends_exercise.py``).
 """
 import warnings
 from datetime import datetime
@@ -28,7 +29,6 @@ from quantark.asset.equity.product.option.observation_schedule import Observatio
 from quantark.asset.equity.product.option.snowball_config import AccrualConfig, BarrierConfig, PayoffConfig
 from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
 from quantark.util.enum.option_enums import ObservationType, PostKOScheduleMode as M
-from quantark.util.exceptions import ValidationError
 
 from .conftest import START, env, schedule
 from .test_dated_rebased_schedule import GENERATED, KI_DATES, LATEST_END, dated_rebased
@@ -236,14 +236,18 @@ def test_a_numeric_rebased_copy_keeps_the_settlement_convention():
     assert cash.payment_time == pytest.approx(549 * D, abs=1e-12)
 
 
-def test_a_rebased_copy_whose_schedule_two_would_pass_the_exercise_is_refused():
+def test_a_rebased_copy_whose_schedule_two_would_pass_the_exercise_extends_the_exercise():
     """A knock-in close later than its record (a record due on a non-trading day fires on the next close) places
-    schedule 2 from that close: knocked in on day 184 against the day-182 record, schedule 2 would end on day 549,
-    after the exercise (547). The contract does not say what such a note is (owner ruling pending): refused."""
+    schedule 2 from that close: knocked in on day 184 against the day-182 record, schedule 2 ends on day 549, after
+    the exercise (547). The copy's maturity moves to schedule 2's last observation (owner ruling 2026-11-28, "extend
+    exercise date"; run 9 refused it)."""
     product = note(M.REBASED, exercise=547, post=(91, 365))
-    with pytest.raises(ValidationError, match="after the exercise"):
-        product.with_absolute_schedule_2(184 * D, anchor=knock_in_anchor_for(
-            product.barrier_config.ki_observation_schedule.records[1], 1))
+    copy = product.with_absolute_schedule_2(184 * D, anchor=knock_in_anchor_for(
+        product.barrier_config.ki_observation_schedule.records[1], 1))
+    last = copy.post_barrier_config.ko_observation_schedule.records[-1].observation_time
+    assert last == pytest.approx(549 * D, abs=1e-15)
+    assert copy.maturity == last
+    assert product.maturity == pytest.approx(547 * D, abs=1e-15)
 
 
 # --- the run calendar and the simulated paths ------------------------------------------------------------------------

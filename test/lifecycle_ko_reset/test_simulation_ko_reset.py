@@ -145,8 +145,8 @@ def test_a_gap_close_knock_in_accrues_from_the_record_that_fired():
     import pandas as pd
     from .conftest import env
 
-    # exercise on day 13: schedule 2 hung from the day-6 close ends on 6 + 7 (the booked latest end is 5 + 7, and a
-    # knocked-in copy whose schedule 2 would end after the exercise is refused, run 9)
+    # exercise on day 13: schedule 2 hung from the day-6 close ends on 6 + 7 (the booked latest end is 5 + 7; run 9
+    # refused a copy ending after the exercise, run 10 extends it -- test_late_close_extends_exercise.py)
     product = short_ko_reset(M.REBASED, pre=(2, 9), ki=(4, 5), post=(4, 7), exercise=13)
     path = _gap_close_path()
     cfg = ensemble_config(products=_book(product), engine_config=mc_engine_config())
