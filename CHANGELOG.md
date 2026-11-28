@@ -712,9 +712,14 @@ Owner ruling 2026-11-28, "extend exercise date". It replaces run 9's tracker ref
   its time of day. The copy is a valid ABSOLUTE note (O1, D35). It reads the put on the spot at the extended
   exercise, and its knocked-in tenor runs to it.
 - **Settlement.** By the settlement convention, the payment follows the new exercise by itself. An explicit
-  `settlement_date` keeps its business-day lag from the exercise, counted on the contract's settlement calendar
-  (`settlement_convention.calendar`). Refused (`ValidationError`, `TODO(owner)`) when the contract names no such
-  calendar, or when the booked date is no whole business-day lag on it.
+  `settlement_date` keeps its business-day lag from the exercise. The lag is counted on the effective settlement
+  calendar (`effective_settlement_calendar`): the convention's calendar, else the pricing environment's. The tracker
+  passes its environment's calendar (`with_absolute_schedule_2(..., settlement_calendar=)`,
+  `KOResetLifecycleTracker.contract(env)`). Refused (`ValidationError`, `TODO(owner)`) when neither calendar exists,
+  or when the booked date is no whole business-day lag on it.
+- **Maturity date.** A booked `maturity_date` on the exercise date (as when a `maturity_date` booking supplies the
+  exercise) moves with it. A later one is kept while it still covers the new exercise. The contract tenor is derived
+  again from the copy, so `tenor_end` MATURITY reads the moved date.
 - **Scope.** Single-note tracking, replay and the simulated-path backtest follow the copy: the note stays alive to
   the extended exercise, books V1 there and pays at that terminal; `matured_before_run` retires it only after it. The
   simulated-path calendar no longer refuses up front. A path knocked in on the late close settles at the extended
@@ -722,8 +727,9 @@ Owner ruling 2026-11-28, "extend exercise date". It replaces run 9's tracker ref
 - **Unchanged.** Copies whose schedule 2 ends on or before the exercise keep the original exercise, settlement date
   and terminals. The O1 refusal at construction, the pricing engines (they place REBASED schedule 2 from the record
   fixing) and Snowball, Phoenix and DCN are unchanged.
-- **Still refused** (`TODO(owner)`): a dated copy whose booked `maturity_date` would precede the extended exercise,
-  and a schedule 2 that ends later on the exercise day itself (a knock-in date carrying a time of day).
+- **Still refused** (`TODO(owner)`): a dated copy whose booked `maturity_date` is not on the exercise date and would
+  precede the extended exercise, and a schedule 2 that ends later on the exercise day itself (a knock-in date carrying
+  a time of day).
 
 ### Tests: cross-architecture pins
 
