@@ -670,10 +670,6 @@ schedule 2's last fixing. Notes whose exercise date is schedule 2's last observa
     rounding left it short (`snapping._keep_exercise_last`). Whole-day contracts are unchanged.
   - Census: no banked, certified, golden or cash-leg baseline contract breaks the rule. The violating test contracts
     were rebuilt. The KO-reset example demo dropped its one schedule-2 date after its exercise date (2030-01-21).
-- **The tracker refuses a REBASED copy whose schedule 2 would end after the exercise date** (`ValidationError`,
-  `TODO(owner)`). The tracker hangs a REBASED schedule 2 from the knock-in close, and a knock-in record due on a
-  non-trading day fires on the next close, so schedule 2 can end past the exercise date. The construction check above
-  covers only the booked records.
 
 #### Notes
 
@@ -703,14 +699,31 @@ schedule 2's last fixing. Notes whose exercise date is schedule 2's last observa
 
 #### Open items
 
-- The tracker's REBASED refusal above. A numeric REBASED note whose maturity equals its latest schedule-2 end (as
-  `create_ko_reset_snowball` builds it) can be refused when the last knock-in record falls on a non-trading day.
-  Single-note tracking and replay refuse only when the note actually knocks in on that late close. The simulated-path
-  backtest resolves its calendar up front, so it refuses before any path runs, even if no path knocks in there.
-  Owner alternatives: hang REBASED schedule 2 from the record's fixing instead of the close, drop schedule-2 records
-  past the exercise date, or extend the exercise date to the copy's end for this edge only.
 - REBASED `post_ki_offsets`: the knocked-in (`ki_settlement`) row is still keyed at schedule 2's last offset, though
   that note now settles at the exercise date.
+
+### Late-close REBASED knock-in extends the exercise
+
+Owner ruling 2026-11-28, "extend exercise date". It replaces run 9's tracker refusal (`TODO(owner)`).
+
+- **Behaviour.** The lifecycle tracker hangs a REBASED schedule 2 from the knock-in close. A knock-in record due on a
+  non-trading day fires on the next close, so schedule 2 can end after the exercise date. `with_absolute_schedule_2`
+  now extends that copy's exercise date (numeric: `maturity`) to schedule 2's last observation. A dated exercise keeps
+  its time of day. The copy is a valid ABSOLUTE note (O1, D35). It reads the put on the spot at the extended
+  exercise, and its knocked-in tenor runs to it.
+- **Settlement.** By the settlement convention, the payment follows the new exercise by itself. An explicit
+  `settlement_date` keeps its business-day lag from the exercise, counted on the contract's settlement calendar
+  (`settlement_convention.calendar`). Refused (`ValidationError`, `TODO(owner)`) when the contract names no such
+  calendar, or when the booked date is no whole business-day lag on it.
+- **Scope.** Single-note tracking, replay and the simulated-path backtest follow the copy: the note stays alive to
+  the extended exercise, books V1 there and pays at that terminal; `matured_before_run` retires it only after it. The
+  simulated-path calendar no longer refuses up front. A path knocked in on the late close settles at the extended
+  terminal, other paths at the original one, and the calendar terminal is the latest placement.
+- **Unchanged.** Copies whose schedule 2 ends on or before the exercise keep the original exercise, settlement date
+  and terminals. The O1 refusal at construction, the pricing engines (they place REBASED schedule 2 from the record
+  fixing) and Snowball, Phoenix and DCN are unchanged.
+- **Still refused** (`TODO(owner)`): a dated copy whose booked `maturity_date` would precede the extended exercise,
+  and a schedule 2 that ends later on the exercise day itself (a knock-in date carrying a time of day).
 
 ### Tests: cross-architecture pins
 
