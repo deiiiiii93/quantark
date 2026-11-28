@@ -741,6 +741,10 @@ Owner ruling 2026-11-28, "extend exercise date". It replaces run 9's tracker ref
   passes. Same-machine invariants (clone vs fresh engine, two routes in one run) stay bitwise. The
   pointwise event-map sha256 in `test_ko_reset_v1_projection.py` is replaced by per-array moments. Pinned
   moves below 1e-11 (the FFT-length re-pins, at most 9.7e-14) are no longer resolved by those tests.
+- **`golden_compare.PINNED_GREEK_ABS_TOL` (1e-9).** Frozen bump greeks (rho, dividend rho) divide the
+  ~1e-14 price drift by the bump, so their cross-arch drift is absolute: measured up to 5.4e-11 on x86_64
+  CI in `test_v1_frozen_sizing.py`. Those pins add the absolute floor; their prices stay at ~1e-11
+  relative.
 
 ## [0.15.0] - 2026-11-25
 
